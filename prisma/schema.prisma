@@ -59,44 +59,41 @@ model RefreshToken {
 }
 
 model Organization {
-  id               String               @id @default(cuid())
-  name             String
-  slug             String               @unique
-  logo             String?
-  website          String?
-  industry         String?
-  timezone         String               @default("UTC")
-  ownerId          String
-  planType         PlanType             @default(FREE_DEMO)
-  
-  // ✅ Feature Flags (Admin Override)
-  featureSimpleBulkUpload  Boolean  @default(false)
-  featureCsvUpload         Boolean  @default(false)
-  featureOverrideByAdmin   Boolean  @default(false)
-
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  activityLogs     ActivityLog[]
-  apiKeys          ApiKey[]
-  automations      Automation[]
-  campaigns        Campaign[]
-  chatbots         Chatbot[]
-  contacts         Contact[]
-  contactGroups    ContactGroup[]
-  conversations    Conversation[]
-  metaConnection   MetaConnection?
-  notifications    Notification[]
-  oauthStates      OAuthState[]
-  owner            User                 @relation("OrganizationOwner", fields: [ownerId], references: [id])
-  members          OrganizationMember[]
-  subscription     Subscription?
-  templates        Template[]
-  webhooks         Webhook[]
-  webhookLogs      WebhookLog[]
-  whatsappAccounts WhatsAppAccount[]
-  payments         Payment[]
-  pipelines        Pipeline[]
-  leads            Lead[]
+  id                      String               @id @default(cuid())
+  name                    String
+  slug                    String               @unique
+  logo                    String?
+  website                 String?
+  industry                String?
+  timezone                String               @default("UTC")
+  ownerId                 String
+  planType                PlanType             @default(FREE_DEMO)
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  featureCsvUpload        Boolean              @default(false)
+  featureOverrideByAdmin  Boolean              @default(false)
+  featureSimpleBulkUpload Boolean              @default(false)
+  activityLogs            ActivityLog[]
+  apiKeys                 ApiKey[]
+  automations             Automation[]
+  campaigns               Campaign[]
+  chatbots                Chatbot[]
+  contacts                Contact[]
+  contactGroups           ContactGroup[]
+  conversations           Conversation[]
+  leads                   Lead[]
+  metaConnection          MetaConnection?
+  notifications           Notification[]
+  oauthStates             OAuthState[]
+  owner                   User                 @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  members                 OrganizationMember[]
+  payments                Payment[]
+  pipelines               Pipeline[]
+  subscription            Subscription?
+  templates               Template[]
+  webhooks                Webhook[]
+  webhookLogs             WebhookLog[]
+  whatsappAccounts        WhatsAppAccount[]
 
   @@index([slug])
   @@index([ownerId])
@@ -121,15 +118,13 @@ model OrganizationMember {
 }
 
 model Plan {
-  id           String   @id @default(cuid())
-  name         String
-  type         PlanType @unique
-  slug         String   @unique
-  description  String?
-  monthlyPrice Decimal  @db.Decimal(10, 2)
-  yearlyPrice  Decimal  @db.Decimal(10, 2)
-
-  // Limits
+  id                   String         @id @default(cuid())
+  name                 String
+  type                 PlanType       @unique
+  slug                 String         @unique
+  description          String?
+  monthlyPrice         Decimal        @db.Decimal(10, 2)
+  yearlyPrice          Decimal        @db.Decimal(10, 2)
   maxContacts          Int
   maxMessages          Int
   maxTeamMembers       Int
@@ -141,16 +136,13 @@ model Plan {
   maxCampaignsPerMonth Int
   maxAutomations       Int
   maxApiCalls          Int
-
-  // ✅ NEW FIELDS
-  validityDays  Int     @default(30)
-  isRecommended Boolean @default(false)
-
-  features      Json           @default("[]")
-  isActive      Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  subscriptions Subscription[]
+  validityDays         Int            @default(30)
+  isRecommended        Boolean        @default(false)
+  features             Json           @default("[]")
+  isActive             Boolean        @default(true)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  subscriptions        Subscription[]
 
   @@index([slug])
   @@index([isActive])
@@ -173,9 +165,9 @@ model Subscription {
   cancelledAt        DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
+  payments           Payment[]
   organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan               Plan               @relation(fields: [planId], references: [id])
-  payments           Payment[]
 
   @@index([organizationId])
   @@index([status])
@@ -194,10 +186,6 @@ model WhatsAppAccount {
   tokenExpiresAt         DateTime?
   webhookSecret          String?
   status                 WhatsAppAccountStatus @default(PENDING)
-  
-  // ✅ ADD THIS FIELD - Connection Type
-  connectionType         String                @default("CLOUD_API")  // "CLOUD_API" or "WHATSAPP_BUSINESS_APP"
-  
   codeVerificationStatus String?
   nameStatus             String?
   verifiedName           String?
@@ -207,9 +195,10 @@ model WhatsAppAccount {
   lastLimitReset         DateTime              @default(now())
   businessProfile        Json?
   isDefault              Boolean               @default(false)
-  isActive               Boolean               @default(true)
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
+  isActive               Boolean               @default(true)
+  connectionType         String                @default("CLOUD_API")
   campaigns              Campaign[]
   messages               Message[]
   messageQueue           MessageQueue[]
@@ -307,10 +296,11 @@ model Contact {
   campaignContacts       CampaignContact[]
   organization           Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   groupMemberships       ContactGroupMember[]
-  conversations          Conversation[]
-  messageQueue           MessageQueue[]
-  leads                  Lead[]
   notes                  ContactNote[]
+  conversations          Conversation[]
+  leads                  Lead[]
+  messageQueue           MessageQueue[]
+  automationSequences    AutomationSequence[]
 
   @@unique([organizationId, phone])
   @@index([organizationId])
@@ -319,7 +309,6 @@ model Contact {
   @@index([tags])
   @@index([lastMessageAt])
   @@index([createdAt])
-  // ✅ CRITICAL INDEXES
   @@index([organizationId, phone])
   @@index([email])
 }
@@ -364,7 +353,6 @@ model Template {
   category          TemplateCategory @default(MARKETING)
   headerType        String?
   headerContent     String?
-  headerMediaId     String?
   bodyText          String
   footerText        String?
   buttons           Json             @default("[]")
@@ -374,6 +362,7 @@ model Template {
   qualityScore      String?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+  headerMediaId     String?
   campaigns         Campaign[]
   messageQueue      MessageQueue[]
   organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -517,7 +506,6 @@ model Conversation {
   @@index([assignedTo])
   @@index([isArchived])
   @@index([phoneNumberId])
-  // ✅ CRITICAL INDEXES
   @@index([organizationId, lastMessageAt(sort: Desc)])
   @@index([organizationId, isArchived, lastMessageAt(sort: Desc)])
   @@index([organizationId, isPinned, lastMessageAt(sort: Desc)])
@@ -531,12 +519,10 @@ model Message {
   wamId             String?          @unique
   direction         MessageDirection
   type              MessageType      @default(TEXT)
-  content           String?          @db.Text
-  mediaUrl          String?          @db.Text
+  content           String?
+  mediaUrl          String?
   mediaType         String?
   mediaMimeType     String?
-  mediaId           String? // WhatsApp media ID for re-fetching
-  fileName          String? // For documents
   templateId        String?
   templateName      String?
   templateParams    Json?
@@ -550,9 +536,11 @@ model Message {
   metadata          Json?
   retryCount        Int              @default(0)
   statusUpdatedAt   DateTime?
-  timestamp         DateTime         @default(now())
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+  fileName          String?
+  mediaId           String?
+  timestamp         DateTime         @default(now())
   whatsappMessageId String?          @unique
   conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   whatsappAccount   WhatsAppAccount? @relation(fields: [whatsappAccountId], references: [id])
@@ -565,7 +553,6 @@ model Message {
   @@index([direction])
   @@index([status])
   @@index([createdAt])
-  // ✅ CRITICAL INDEXES
   @@index([conversationId, createdAt(sort: Desc)])
 }
 
@@ -606,10 +593,31 @@ model Automation {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sequences      AutomationSequence[]
 
   @@index([organizationId])
   @@index([trigger])
   @@index([isActive])
+}
+
+model AutomationSequence {
+  id             String   @id @default(cuid())
+  automationId   String
+  contactId      String
+  currentStep    Int      @default(0)
+  status         String   @default("ACTIVE") // ACTIVE, WAITING, COMPLETED
+  lastStepAt     DateTime @default(now())
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  automation     Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  contact        Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, contactId])
+  @@index([automationId])
+  @@index([contactId])
+  @@index([status])
 }
 
 model Webhook {
@@ -729,6 +737,164 @@ model AdminUser {
   @@index([isActive])
 }
 
+model Payment {
+  id                String        @id @default(cuid())
+  organizationId    String
+  subscriptionId    String?
+  razorpayOrderId   String?       @unique
+  razorpayPaymentId String?       @unique
+  razorpaySignature String?
+  amount            Int
+  currency          String        @default("INR")
+  status            PaymentStatus @default(PENDING)
+  planId            String?
+  planName          String?
+  billingCycle      String?
+  description       String?
+  receipt           String?
+  notes             Json?
+  paidAt            DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([razorpayOrderId])
+  @@index([razorpayPaymentId])
+  @@index([createdAt])
+}
+
+model Lead {
+  id                String         @id @default(cuid())
+  organizationId    String
+  contactId         String?
+  title             String
+  value             Decimal?       @db.Decimal(12, 2)
+  currency          String         @default("INR")
+  pipelineId        String?
+  stageId           String?
+  status            LeadStatus     @default(NEW)
+  priority          LeadPriority   @default(MEDIUM)
+  source            String?
+  assignedToId      String?
+  expectedCloseDate DateTime?
+  actualCloseDate   DateTime?
+  lastActivityAt    DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  contact           Contact?       @relation(fields: [contactId], references: [id])
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipeline          Pipeline?      @relation(fields: [pipelineId], references: [id])
+  stage             PipelineStage? @relation(fields: [stageId], references: [id])
+  activities        LeadActivity[]
+  notes             LeadNote[]
+  tasks             LeadTask[]
+
+  @@index([organizationId])
+  @@index([contactId])
+  @@index([status])
+  @@index([pipelineId, stageId])
+  @@index([assignedToId])
+}
+
+model Pipeline {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  isDefault      Boolean         @default(false)
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  leads          Lead[]
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stages         PipelineStage[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model PipelineStage {
+  id          String   @id @default(cuid())
+  pipelineId  String
+  name        String
+  color       String   @default("#6B7280")
+  order       Int      @default(0)
+  probability Int      @default(0)
+  isWon       Boolean  @default(false)
+  isLost      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  leads       Lead[]
+  pipeline    Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@index([pipelineId])
+  @@index([order])
+}
+
+model LeadActivity {
+  id          String       @id @default(cuid())
+  leadId      String
+  userId      String?
+  type        ActivityType
+  title       String
+  description String?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([createdAt])
+}
+
+model LeadNote {
+  id        String   @id @default(cuid())
+  leadId    String
+  userId    String?
+  content   String
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+}
+
+model LeadTask {
+  id          String       @id @default(cuid())
+  leadId      String
+  userId      String?
+  title       String
+  description String?
+  dueDate     DateTime?
+  isCompleted Boolean      @default(false)
+  completedAt DateTime?
+  priority    LeadPriority @default(MEDIUM)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([dueDate])
+  @@index([isCompleted])
+}
+
+model ContactNote {
+  id        String   @id @default(cuid())
+  contactId String
+  userId    String?
+  content   String
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -833,11 +999,11 @@ enum MessageType {
 
 enum MessageStatus {
   PENDING
-  QUEUED
   SENT
   DELIVERED
   READ
   FAILED
+  QUEUED
 }
 
 enum ChatbotStatus {
@@ -852,6 +1018,7 @@ enum AutomationTrigger {
   WEBHOOK
   SCHEDULE
   INACTIVITY
+  UNKNOWN_MESSAGE
 }
 
 enum WebhookStatus {
@@ -874,212 +1041,12 @@ enum ActivityAction {
   RECEIVE
 }
 
-model Payment {
-  id               String        @id @default(cuid())
-  organizationId   String
-  subscriptionId   String?
-  
-  // Razorpay details
-  razorpayOrderId  String?       @unique
-  razorpayPaymentId String?      @unique
-  razorpaySignature String?
-  
-  // Amount in paise (smallest unit)
-  amount           Int
-  currency         String        @default("INR")
-  
-  // Status
-  status           PaymentStatus @default(PENDING)
-  
-  // Plan info at time of payment
-  planId           String?
-  planName         String?
-  billingCycle     String?       // monthly, quarterly, annual
-  
-  // Metadata
-  description      String?
-  receipt          String?
-  notes            Json?
-  
-  // Timestamps
-  paidAt           DateTime?
-  failedAt         DateTime?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  
-  // Relations
-  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subscription     Subscription? @relation(fields: [subscriptionId], references: [id])
-  
-  @@index([organizationId])
-  @@index([status])
-  @@index([razorpayOrderId])
-  @@index([razorpayPaymentId])
-  @@index([createdAt])
-}
-
 enum PaymentStatus {
   PENDING
   SUCCESS
   FAILED
   REFUNDED
 }
-
-// ============================================
-// CRM MODELS
-// ============================================
-
-model Lead {
-  id             String         @id @default(cuid())
-  organizationId String
-  contactId      String?
-
-  // Lead Info
-  title          String
-  value          Decimal?       @db.Decimal(12, 2)
-  currency       String         @default("INR")
-
-  // Pipeline
-  pipelineId     String?
-  stageId        String?
-
-  // Status
-  status         LeadStatus     @default(NEW)
-  priority       LeadPriority   @default(MEDIUM)
-  source         String?
-
-  // Assignment
-  assignedToId   String?
-
-  // Dates
-  expectedCloseDate DateTime?
-  actualCloseDate   DateTime?
-  lastActivityAt    DateTime?
-
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-
-  // Relations
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  contact        Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  pipeline       Pipeline?      @relation(fields: [pipelineId], references: [id])
-  stage          PipelineStage? @relation(fields: [stageId], references: [id])
-  activities     LeadActivity[]
-  notes          LeadNote[]
-  tasks          LeadTask[]
-
-  @@index([organizationId])
-  @@index([contactId])
-  @@index([status])
-  @@index([pipelineId, stageId])
-  @@index([assignedToId])
-}
-
-model Pipeline {
-  id             String          @id @default(cuid())
-  organizationId String
-  name           String
-  description    String?
-  isDefault      Boolean         @default(false)
-  isActive       Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  stages         PipelineStage[]
-  leads          Lead[]
-
-  @@unique([organizationId, name])
-  @@index([organizationId])
-}
-
-model PipelineStage {
-  id          String     @id @default(cuid())
-  pipelineId  String
-  name        String
-  color       String     @default("#6B7280")
-  order       Int        @default(0)
-  probability Int        @default(0) // Win probability %
-  isWon       Boolean    @default(false)
-  isLost      Boolean    @default(false)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  pipeline    Pipeline   @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
-  leads       Lead[]
-
-  @@index([pipelineId])
-  @@index([order])
-}
-
-model LeadActivity {
-  id          String       @id @default(cuid())
-  leadId      String
-  userId      String?
-  type        ActivityType
-  title       String
-  description String?      @db.Text
-  metadata    Json?
-  createdAt   DateTime     @default(now())
-
-  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
-
-  @@index([leadId])
-  @@index([createdAt])
-}
-
-model LeadNote {
-  id        String   @id @default(cuid())
-  leadId    String
-  userId    String?
-  content   String   @db.Text
-  isPinned  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-
-  @@index([leadId])
-}
-
-model LeadTask {
-  id          String       @id @default(cuid())
-  leadId      String
-  userId      String?
-  title       String
-  description String?
-  dueDate     DateTime?
-  isCompleted Boolean      @default(false)
-  completedAt DateTime?
-  priority    LeadPriority @default(MEDIUM)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-
-  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
-
-  @@index([leadId])
-  @@index([dueDate])
-  @@index([isCompleted])
-}
-
-// Contact Notes (for existing contacts)
-model ContactNote {
-  id        String   @id @default(cuid())
-  contactId String
-  userId    String?
-  content   String   @db.Text
-  isPinned  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
-
-  @@index([contactId])
-}
-
-// ============================================
-// CRM ENUMS
-// ============================================
 
 enum LeadStatus {
   NEW

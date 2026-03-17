@@ -430,6 +430,44 @@ export class WebhookService {
 
       console.log(`✅ Inbound message saved and conversation updated: ${updatedConversation.id}`);
 
+      // ✅ TRIGGER: Unknown Message Automation
+      try {
+        const contactIsNew = !await prisma.contact.findFirst({
+          where: {
+            organizationId,
+            phone: phone10,
+            createdAt: {
+              lt: new Date(Date.now() - 60000), // Older than 1 minute
+            },
+          },
+        });
+
+        if (contactIsNew) {
+          await automationEngine.triggerUnknownMessage({
+            organizationId,
+            contactId: contact.id,
+            phone: contact.phone,
+            message: content,
+            conversationId: updatedConversation.id,
+          });
+        }
+      } catch (e) {
+        console.error('Unknown message automation error:', e);
+      }
+
+      // ✅ DETECT BUTTON CLICKS
+      if (msgType === 'INTERACTIVE') {
+        const buttonId = message?.interactive?.button_reply?.id;
+        if (buttonId) {
+          automationEngine.handleButtonClick({
+            organizationId,
+            contactId: contact.id,
+            buttonId,
+            conversationId: updatedConversation.id,
+          }).catch(e => console.error('Button click error:', e));
+        }
+      }
+
       // ✅ Clear inbox cache
       const { inboxService } = await import('../inbox/inbox.service');
       await inboxService.clearCache(organizationId);
