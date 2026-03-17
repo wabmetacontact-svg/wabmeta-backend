@@ -378,6 +378,200 @@ class AutomationEngine {
   }
 
   // ==========================================
+  // ✅ TRIGGER: WEBHOOK
+  // ==========================================
+  async triggerWebhook(
+    organizationId: string,
+    automationId: string,
+    webhookData: any
+  ): Promise<void> {
+    console.log(`🤖 [AUTOMATION] Triggering WEBHOOK for automation: ${automationId}`);
+
+    try {
+      const automation = await automationService.getById(organizationId, automationId);
+
+      if (!automation.isActive || automation.trigger !== 'WEBHOOK') {
+        console.log('🤖 Automation not active or not webhook type');
+        return;
+      }
+
+      const context: TriggerContext = {
+        organizationId,
+        metadata: webhookData,
+        phone: webhookData.phone,
+        contactId: webhookData.contactId,
+      };
+
+      await prisma.automationSequence.upsert({
+        where: { 
+          automationId_contactId: {
+              automationId: automation.id,
+              contactId: context.contactId!
+          }
+        },
+        update: {
+          currentStep: 0,
+          status: 'ACTIVE'
+        },
+        create: {
+          automationId: automation.id,
+          contactId: context.contactId!,
+          currentStep: 0,
+          status: 'ACTIVE',
+        },
+      });
+
+      await this.executeSequence(automation.id, automation.actions as any, context);
+    } catch (error) {
+      console.error('🤖 WEBHOOK automation error:', error);
+    }
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: SCHEDULE (Called by cron job)
+  // ==========================================
+  async triggerScheduled(): Promise<void> {
+    try {
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const currentDay = now.getDay(); // 0 = Sunday
+
+      const automations = await prisma.automation.findMany({
+        where: {
+          trigger: 'SCHEDULE',
+          isActive: true,
+        },
+      });
+
+      if (automations.length === 0) return;
+
+      console.log(`🤖 [AUTOMATION] Found ${automations.length} scheduled automations to check`);
+
+      for (const automation of automations) {
+        const config = automation.triggerConfig as any;
+        const scheduleTime = config?.time || '09:00';
+        const days = config?.days || 'daily';
+
+        if (scheduleTime !== currentTime) continue;
+
+        const isWeekday = currentDay >= 1 && currentDay <= 5;
+        const isWeekend = currentDay === 0 || currentDay === 6;
+
+        if (days === 'weekdays' && !isWeekday) continue;
+        if (days === 'weekends' && !isWeekend) continue;
+
+        console.log(`🤖 Running scheduled automation: ${automation.name}`);
+
+        const contacts = await prisma.contact.findMany({
+          where: {
+            organizationId: automation.organizationId,
+            status: 'ACTIVE',
+          },
+          take: 1000,
+        });
+
+        for (const contact of contacts) {
+          const context: TriggerContext = {
+            organizationId: automation.organizationId,
+            contactId: contact.id,
+            phone: contact.phone,
+          };
+
+          await prisma.automationSequence.upsert({
+            where: { 
+              automationId_contactId: {
+                  automationId: automation.id,
+                  contactId: contact.id
+              }
+            },
+            update: {
+              currentStep: 0,
+              status: 'ACTIVE'
+            },
+            create: {
+              automationId: automation.id,
+              contactId: contact.id,
+              currentStep: 0,
+              status: 'ACTIVE',
+            },
+          });
+
+          await this.executeSequence(automation.id, automation.actions as any, context);
+        }
+      }
+    } catch (error) {
+      console.error('🤖 SCHEDULE automation error:', error);
+    }
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: INACTIVITY (Called by cron job)
+  // ==========================================
+  async triggerInactivity(): Promise<void> {
+    console.log(`🤖 [AUTOMATION] Checking INACTIVITY automations`);
+
+    try {
+      const automations = await prisma.automation.findMany({
+        where: {
+          trigger: 'INACTIVITY',
+          isActive: true,
+        },
+      });
+
+      for (const automation of automations) {
+        const config = automation.triggerConfig as any;
+        const inactiveHours = config?.hours || 24;
+        const cutoffTime = new Date(Date.now() - inactiveHours * 60 * 60 * 1000);
+
+        const inactiveContacts = await prisma.contact.findMany({
+          where: {
+            organizationId: automation.organizationId,
+            status: 'ACTIVE',
+            lastMessageAt: {
+              lt: cutoffTime,
+              not: null,
+            },
+          },
+          take: 100,
+        });
+
+        console.log(`🤖 Found ${inactiveContacts.length} inactive contacts for: ${automation.name}`);
+
+        for (const contact of inactiveContacts) {
+          const context: TriggerContext = {
+            organizationId: automation.organizationId,
+            contactId: contact.id,
+            phone: contact.phone,
+          };
+
+          await prisma.automationSequence.upsert({
+            where: { 
+              automationId_contactId: {
+                  automationId: automation.id,
+                  contactId: contact.id
+              }
+            },
+            update: {
+              currentStep: 0,
+              status: 'ACTIVE'
+            },
+            create: {
+              automationId: automation.id,
+              contactId: contact.id,
+              currentStep: 0,
+              status: 'ACTIVE',
+            },
+          });
+
+          await this.executeSequence(automation.id, automation.actions as any, context);
+        }
+      }
+    } catch (error) {
+      console.error('🤖 INACTIVITY automation error:', error);
+    }
+  }
+
+  // ==========================================
   // EXISTING TRIGGERS
   // ==========================================
   async triggerNewContact(context: TriggerContext): Promise<void> {
