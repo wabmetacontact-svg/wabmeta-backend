@@ -294,7 +294,7 @@ export class CampaignsController {
       const organizationId = req.user!.organizationId;
       if (!organizationId) throw new AppError('Organization required', 400);
 
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId || req.params.id;
       const { page, limit, status, search } = req.query;
 
       const result = await campaignsService.getCampaignContacts(
@@ -683,7 +683,7 @@ export class CampaignsController {
       const organizationId = req.user!.organizationId;
       if (!organizationId) throw new AppError('Organization required', 400);
 
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId || req.params.id;
       const { contactIds } = req.body;
 
       const result = await campaignsService.retryFailed(
@@ -706,7 +706,7 @@ export class CampaignsController {
       const organizationId = req.user!.organizationId;
       if (!organizationId) throw new AppError('Organization required', 400);
 
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId || req.params.id;
 
       const result = await campaignsService.resumePending(organizationId, String(campaignId));
 
@@ -724,7 +724,7 @@ export class CampaignsController {
       const organizationId = req.user!.organizationId;
       if (!organizationId) throw new AppError('Organization required', 400);
 
-      const { campaignId } = req.params;
+      const campaignId = req.params.campaignId || req.params.id;
 
       const result = await campaignsService.getDetailedStats(organizationId, String(campaignId));
 
