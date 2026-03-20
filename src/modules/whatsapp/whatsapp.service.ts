@@ -956,17 +956,31 @@ class WhatsAppService {
           error.message
         );
 
-        const errorMessage =
-          error.response?.data?.error?.message ||
-          error.response?.data?.message ||
-          error.message;
+        const errorData = error.response?.data?.error || {};
+        const errorCode = errorData.code;
+        const errorMessage = errorData.message || error.message;
+        
+        // Human-readable mapping for common Meta errors
+        let failureReason = errorMessage;
+        
+        if (errorCode === 131030 || errorMessage.includes('not a WhatsApp user')) {
+          failureReason = 'Phone number is not registered on WhatsApp';
+        } else if (errorCode === 131048 || errorCode === 131021 || errorMessage.includes('rate limit')) {
+          failureReason = 'Meta messaging rate limit reached';
+        } else if (errorCode === 131056 || errorCode === 131051 || errorMessage.includes('restricted') || errorMessage.includes('banned')) {
+          failureReason = 'Phone number or account restricted by Meta';
+        } else if (errorCode === 132000 || errorMessage.includes('template')) {
+          failureReason = 'Template was rejected or is not approved by Meta';
+        } else if (errorMessage.includes('expired') || errorMessage.includes('24h')) {
+          failureReason = '24-hour window closed (No user reply)';
+        }
 
         await this.updateContactStatus(
           campaignId,
           recipient.contactId,
           MessageStatus.FAILED,
           undefined,
-          errorMessage
+          failureReason
         );
 
         results.failed++;
