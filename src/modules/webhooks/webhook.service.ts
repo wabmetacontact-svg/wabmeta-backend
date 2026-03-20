@@ -464,7 +464,7 @@ export class WebhookService {
             contactId: contact.id,
             buttonId,
             conversationId: updatedConversation.id,
-          }).catch(e => console.error('Button click error:', e));
+          }).catch((e: any) => console.error('Button click error:', e));
         }
       }
 

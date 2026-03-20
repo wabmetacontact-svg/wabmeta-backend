@@ -201,6 +201,80 @@ class AutomationEngine {
   }
 
   // ==========================================
+  // ✅ TRIGGER: Webhook
+  // ==========================================
+  async triggerWebhook(
+    organizationId: string,
+    automationId: string,
+    context: TriggerContext
+  ): Promise<void> {
+    console.log(`🤖 Triggering webhook automation: ${automationId}`);
+    try {
+      const automation = await automationService.getById(organizationId, automationId);
+
+      if (!automation.isActive || automation.trigger !== 'WEBHOOK') {
+        console.log('🤖 Automation not active or not webhook type');
+        return;
+      }
+
+      await this.executeActions(automation.id, automation.actions as any, context);
+    } catch (error) {
+      console.error('🤖 Webhook automation error:', error);
+    }
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: Scheduled
+  // ==========================================
+  async triggerScheduled(): Promise<void> {
+    // This typically finds all active SCHEDULED automations across all organizations
+    try {
+      const automations = await automationService.getActiveByTrigger(undefined as any, 'SCHEDULE_TIME' as any);
+      
+      for (const automation of automations) {
+        console.log(`⏰ Processing scheduled automation: ${automation.id}`);
+        // Logic to find eligible contacts for this scheduled automation...
+      }
+    } catch (error) {
+      console.error('🤖 Scheduled automation trigger error:', error);
+    }
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: Inactivity
+  // ==========================================
+  async triggerInactivity(): Promise<void> {
+    // This finds contacts inactive for specified duration
+    try {
+      const automations = await automationService.getActiveByTrigger(undefined as any, 'INACTIVITY');
+      
+      for (const automation of automations) {
+        console.log(`💤 Checking inactivity automation: ${automation.id}`);
+        // Logic to scan contacts for inactivity period...
+      }
+    } catch (error) {
+      console.error('🤖 Inactivity automation trigger error:', error);
+    }
+  }
+
+  // ==========================================
+  // ✅ COMPATIBILITY: Handle Button Click
+  // ==========================================
+  async handleButtonClick(context: {
+    organizationId: string;
+    contactId: string;
+    buttonId: string;
+    conversationId: string;
+  }): Promise<void> {
+    return this.handleUserResponse({
+      organizationId: context.organizationId,
+      contactId: context.contactId,
+      response: context.buttonId,
+      conversationId: context.conversationId,
+    });
+  }
+
+  // ==========================================
   // ✅ EXECUTE SEQUENCE (Multi-step with wait)
   // ==========================================
   private async executeSequence(
