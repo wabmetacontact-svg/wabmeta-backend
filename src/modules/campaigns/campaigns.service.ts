@@ -939,6 +939,14 @@ export class CampaignsService {
               if (me.code === 131030) failureReason = 'Recipient phone number is not registered with WhatsApp.';
               if (me.code === 131026) failureReason = 'Message undeliverable - User may have blocked or the number is invalid.';
               if (me.code === 132000) failureReason = 'Template mismatch or invalid parameters.';
+              
+              // ✅ Optimized Error Mappings
+              if (me.code === 131048 || me.code === 131021) {
+                failureReason = 'Meta API Rate Limit Reached';
+              }
+              if (me.code === 131056 || me.code === 131051) {
+                failureReason = 'Phone Number Banned or Restricted by Meta';
+              }
             }
 
             console.error(`❌ Failed to send to ${phone}:`, failureReason);
