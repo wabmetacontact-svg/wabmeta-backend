@@ -279,31 +279,34 @@ export class DashboardService {
       const messagesOverview = Object.values(messagesByDate).sort(
         (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
       );
-
       const contactsGrowth = Object.values(contactsByDate).sort(
         (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
       );
 
-      // Calculate delivery performance
-      const totalSent = messages.filter((m) => m.direction === 'OUTBOUND').length;
-      const totalDelivered = messages.filter(
-        (m) => m.direction === 'OUTBOUND' && ['DELIVERED', 'READ'].includes(m.status)
+      // Calculate delivery performance - Optimized for unique counts
+      // Sent: Anything successfully handled by Meta (Sent, Delivered, Read)
+      const totalSentActual = messages.filter(
+        (m) => m.direction === 'OUTBOUND' && ['SENT', 'DELIVERED', 'READ'].includes(m.status)
       ).length;
+
+      const totalDeliveredOnly = messages.filter(
+        (m) => m.direction === 'OUTBOUND' && m.status === 'DELIVERED'
+      ).length;
+
       const totalRead = messages.filter(
         (m) => m.direction === 'OUTBOUND' && m.status === 'READ'
       ).length;
+
       const totalFailed = messages.filter(
         (m) => m.direction === 'OUTBOUND' && m.status === 'FAILED'
       ).length;
-      const totalPending = messages.filter(
-        (m) => m.direction === 'OUTBOUND' && ['PENDING', 'SENT'].includes(m.status)
-      ).length;
 
+      // Current chart shows Outcome breakdown (Summed unique categories)
+      // Total Unique = (Delivered Only) + Read + Failed
       const deliveryPerformance = [
-        { name: 'Delivered', value: totalDelivered, color: '#22c55e' },
+        { name: 'Delivered', value: totalDeliveredOnly, color: '#22c55e' },
         { name: 'Read', value: totalRead, color: '#3b82f6' },
         { name: 'Failed', value: totalFailed, color: '#ef4444' },
-        { name: 'Pending', value: totalPending, color: '#f59e0b' },
       ];
 
       // Recent campaigns
@@ -359,12 +362,12 @@ export class DashboardService {
           unreadCount: conv.unreadCount,
         })),
         summary: {
-          totalSent,
-          totalDelivered,
+          totalSent: totalSentActual,
+          totalDelivered: totalDeliveredOnly + totalRead,
           totalRead,
           totalFailed,
-          deliveryRate: totalSent > 0 ? Math.round((totalDelivered / totalSent) * 100) : 0,
-          readRate: totalDelivered > 0 ? Math.round((totalRead / totalDelivered) * 100) : 0,
+          deliveryRate: totalSentActual > 0 ? Math.round(((totalDeliveredOnly + totalRead) / totalSentActual) * 100) : 0,
+          readRate: (totalDeliveredOnly + totalRead) > 0 ? Math.round((totalRead / (totalDeliveredOnly + totalRead)) * 100) : 0,
         },
       };
     } catch (error) {
