@@ -17,6 +17,8 @@ interface CreateAutomationInput {
     triggerConfig?: any;
     actions: AutomationAction[];
     isActive?: boolean;
+    targetGroupIds?: string[];
+    excludeExisting?: boolean;
 }
 
 interface UpdateAutomationInput {
@@ -26,6 +28,8 @@ interface UpdateAutomationInput {
     triggerConfig?: any;
     actions?: AutomationAction[];
     isActive?: boolean;
+    targetGroupIds?: string[];
+    excludeExisting?: boolean;
 }
 
 export class AutomationService {
@@ -82,6 +86,8 @@ export class AutomationService {
                 triggerConfig: input.triggerConfig || {},
                 actions: input.actions as any,
                 isActive: input.isActive || false,
+                targetGroupIds: input.targetGroupIds || [],
+                excludeExisting: input.excludeExisting ?? true,
             },
         });
 
@@ -115,6 +121,8 @@ export class AutomationService {
                 triggerConfig: input.triggerConfig !== undefined ? input.triggerConfig : undefined,
                 actions: input.actions !== undefined ? (input.actions as any) : undefined,
                 isActive: input.isActive,
+                targetGroupIds: input.targetGroupIds,
+                excludeExisting: input.excludeExisting,
             },
         });
 
@@ -188,10 +196,12 @@ export class AutomationService {
             },
         });
 
-        return automations.map((a) => ({
+        return automations.map((a: any) => ({
             ...a,
             actions: a.actions as unknown as AutomationAction[],
             triggerConfig: a.triggerConfig as any,
+            targetGroupIds: a.targetGroupIds || [],
+            excludeExisting: a.excludeExisting ?? true,
         }));
     }
 

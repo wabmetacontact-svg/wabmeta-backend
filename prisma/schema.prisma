@@ -423,7 +423,7 @@ model CampaignContact {
   deliveredAt   DateTime?
   readAt        DateTime?
   failedAt      DateTime?
-  failureReason String?
+  failureReason String?       @db.Text  // ✅ Changed to Text for longer error messages
   retryCount    Int           @default(0)
   nextRetryAt   DateTime?
   createdAt     DateTime      @default(now())
@@ -590,6 +590,11 @@ model Automation {
   isActive       Boolean           @default(false)
   executionCount Int               @default(0)
   lastExecutedAt DateTime?
+  
+  // ✅ NEW FIELDS (Safe - Have defaults, nullable, or empty arrays)
+  targetGroupIds String[]          @default([])      // ✅ Safe: Default empty array
+  excludeExisting Boolean          @default(true)     // ✅ Safe: Has default value
+  
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)

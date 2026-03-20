@@ -292,29 +292,23 @@ export class CampaignsController {
   async getContacts(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const organizationId = req.user!.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization required', 400);
 
-      const id = String(req.params.id);
-      if (!id) {
-        throw new AppError('Campaign ID is required', 400);
-      }
+      const { campaignId } = req.params;
+      const { page, limit, status, search } = req.query;
 
-      const query: CampaignContactsQueryInput = {
-        page: parseInt(req.query.page as string) || 1,
-        limit: parseInt(req.query.limit as string) || 50,
-        status: req.query.status as any,
-      };
+      const result = await campaignsService.getCampaignContacts(
+        organizationId,
+        String(campaignId),
+        {
+          page: Number(page) || 1,
+          limit: Number(limit) || 50,
+          status: status as string,
+          search: search as string,
+        }
+      );
 
-      const result = await campaignsService.getContacts(organizationId, id, query);
-
-      return res.json({
-        success: true,
-        message: 'Campaign contacts fetched successfully',
-        data: result.contacts,
-        meta: result.meta,
-      });
+      return sendSuccess(res, result, 'Campaign contacts fetched');
     } catch (error) {
       next(error);
     }
@@ -676,6 +670,65 @@ export class CampaignsController {
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename=campaign-recipients-${id}.csv`);
       return res.send(csvData);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // RETRY FAILED
+  // ==========================================
+  async retryFailed(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization required', 400);
+
+      const { campaignId } = req.params;
+      const { contactIds } = req.body;
+
+      const result = await campaignsService.retryFailed(
+        organizationId,
+        String(campaignId),
+        contactIds
+      );
+
+      return sendSuccess(res, result, 'Retry initiated');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // RESUME PENDING
+  // ==========================================
+  async resumePending(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization required', 400);
+
+      const { campaignId } = req.params;
+
+      const result = await campaignsService.resumePending(organizationId, String(campaignId));
+
+      return sendSuccess(res, result, 'Campaign resumed');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // GET DETAILED STATS
+  // ==========================================
+  async getDetailedStats(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization required', 400);
+
+      const { campaignId } = req.params;
+
+      const result = await campaignsService.getDetailedStats(organizationId, String(campaignId));
+
+      return sendSuccess(res, result, 'Stats fetched');
     } catch (error) {
       next(error);
     }

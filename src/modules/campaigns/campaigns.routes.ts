@@ -347,4 +347,12 @@ router.get('/queue/health', async (req, res) => {
   });
 });
 
+// ============================================
+// ✅ NEW: CAMPAIGN DETAILS & ACTIONS
+// ============================================
+router.get('/:campaignId/contacts', authenticate, campaignsController.getContacts.bind(campaignsController));
+router.get('/:campaignId/stats', authenticate, campaignsController.getDetailedStats.bind(campaignsController));
+router.post('/:campaignId/retry', authenticate, campaignsController.retryFailed.bind(campaignsController));
+router.post('/:campaignId/resume', authenticate, campaignsController.resumePending.bind(campaignsController));
+
 export default router;
