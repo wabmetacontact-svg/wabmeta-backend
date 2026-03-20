@@ -2337,8 +2337,8 @@ export class CampaignsService {
       totalContacts,
       pending,
       queued,
-      sent,
-      delivered,
+      sent: sent + delivered + read, // ✅ Cumulative SENT
+      delivered: delivered + read,   // ✅ Cumulative DELIVERED
       read,
       failed,
       failureReasons: failureReasons.map((fr) => ({
@@ -2348,11 +2348,11 @@ export class CampaignsService {
       successRate: totalContacts > 0 
         ? Math.round(((delivered + read) / totalContacts) * 100) 
         : 0,
-      deliveryRate: sent > 0 
-        ? Math.round(((delivered + read) / sent) * 100) 
+      deliveryRate: (sent + delivered + read) > 0 
+        ? Math.round(((delivered + read) / (sent + delivered + read)) * 100) 
         : 0,
-      readRate: delivered > 0 
-        ? Math.round((read / delivered) * 100) 
+      readRate: (delivered + read) > 0 
+        ? Math.round((read / (delivered + read)) * 100) 
         : 0,
     };
   }
