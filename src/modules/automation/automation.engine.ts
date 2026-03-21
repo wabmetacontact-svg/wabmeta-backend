@@ -229,7 +229,7 @@ class AutomationEngine {
   async triggerScheduled(): Promise<void> {
     // This typically finds all active SCHEDULED automations across all organizations
     try {
-      const automations = await automationService.getActiveByTrigger(undefined as any, 'SCHEDULE_TIME' as any);
+      const automations = await automationService.getActiveByTrigger(undefined as any, 'SCHEDULE');
       
       for (const automation of automations) {
         console.log(`⏰ Processing scheduled automation: ${automation.id}`);
