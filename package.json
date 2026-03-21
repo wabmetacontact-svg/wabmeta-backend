@@ -69,6 +69,7 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^25.2.3",
     "@types/node-cron": "^3.0.11",
+    "@types/papaparse": "^5.5.2",
     "@types/rate-limit-redis": "^1.7.4",
     "@types/uuid": "^10.0.0",
     "nodemon": "^3.1.7",

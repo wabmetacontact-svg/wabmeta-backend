@@ -74,17 +74,24 @@ const buildTemplateSendPayload = (args: {
   },
 });
 
-const buildParamsFromContact = (contact: any, varCount: number): string[] => {
+const buildParamsFromContact = (campaignContact: any, varCount: number): string[] => {
+  const cd = campaignContact?.customData || {};
+  const cnt = campaignContact?.contact || campaignContact?.Contact || campaignContact || {};
+
   const fallback = [
-    contact?.firstName || '',
-    contact?.lastName || '',
-    contact?.phone || '',
-    contact?.email || '',
+    cnt?.firstName || '',
+    cnt?.lastName || '',
+    cnt?.phone || '',
+    cnt?.email || '',
   ].filter(Boolean);
 
   const params: string[] = [];
   for (let i = 0; i < varCount; i++) {
-    params.push(fallback[i] || 'NA');
+    if (cd && cd[String(i + 1)]) {
+      params.push(String(cd[String(i + 1)]));
+    } else {
+      params.push(fallback[i] || 'NA');
+    }
   }
   return params;
 };
@@ -250,6 +257,7 @@ export class CampaignsService {
       phoneNumberId,
       contactGroupId,
       contactIds,
+      csvContacts,
       audienceFilter,
       scheduledAt,
     } = input as any;
@@ -261,6 +269,7 @@ export class CampaignsService {
       whatsappAccountId,
       phoneNumberId,
       contactIdsCount: contactIds?.length || 0,
+      csvContactsCount: csvContacts?.length || 0,
     });
 
     const template = await prisma.template.findFirst({
@@ -312,10 +321,29 @@ export class CampaignsService {
       }
     }
 
-    let targetContacts: { id: string }[] = [];
+    let targetContacts: { id: string; customData?: any }[] = [];
 
-    if (contactIds && contactIds.length > 0) {
-      targetContacts = await prisma.contact.findMany({
+    if (csvContacts && csvContacts.length > 0) {
+      const phones = csvContacts.map((c: any) => digitsOnly(c.phone)).filter(Boolean);
+      // Create missing ones
+      await prisma.contact.createMany({
+        data: phones.map((phone: string) => ({ organizationId, phone, status: 'ACTIVE' })),
+        skipDuplicates: true,
+      });
+      // Fetch all
+      const dbContacts = await prisma.contact.findMany({
+        where: { organizationId, phone: { in: phones } },
+      });
+      const contactMap = new Map(dbContacts.map((c) => [c.phone, c.id]));
+      for (const csvContact of csvContacts) {
+        const phone = digitsOnly(csvContact.phone);
+        const contactId = contactMap.get(phone);
+        if (contactId) {
+          targetContacts.push({ id: contactId, customData: csvContact.customData });
+        }
+      }
+    } else if (contactIds && contactIds.length > 0) {
+      const existing = await prisma.contact.findMany({
         where: {
           id: { in: contactIds },
           organizationId,
@@ -323,6 +351,7 @@ export class CampaignsService {
         },
         select: { id: true },
       });
+      targetContacts = existing.map((c) => ({ id: c.id }));
     } else if (contactGroupId) {
       const groupMembers = await prisma.contactGroupMember.findMany({
         where: {
@@ -360,10 +389,11 @@ export class CampaignsService {
         where.messageCount = audienceFilter.hasMessaged ? { gt: 0 } : { equals: 0 };
       }
 
-      targetContacts = await prisma.contact.findMany({
+      const existing = await prisma.contact.findMany({
         where,
         select: { id: true },
       });
+      targetContacts = existing.map((c) => ({ id: c.id }));
     }
 
     if (targetContacts.length === 0) {
@@ -396,6 +426,7 @@ export class CampaignsService {
         id: uuidv4(),
         campaignId: newCampaign.id,
         contactId: contact.id,
+        customData: toJsonValue(contact.customData) || {},
         status: 'PENDING' as MessageStatus,
         createdAt: new Date(),
         updatedAt: new Date(),

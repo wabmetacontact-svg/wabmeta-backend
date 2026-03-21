@@ -39,14 +39,18 @@ export const createCampaignSchema = z.object({
     // Audience - at least one must be provided
     contactGroupId: z.string().optional(),
     contactIds: z.array(z.string()).optional(),
+    csvContacts: z.array(z.object({
+      phone: z.string(),
+      customData: z.record(z.string(), z.any()).optional()
+    })).optional(),
     audienceFilter: audienceFilterSchema,
     // Scheduling
     scheduledAt: z.string().datetime().optional(),
     // Variable mapping
     variableMapping: variableMappingSchema,
   }).refine(
-    (data) => data.contactGroupId || (data.contactIds && data.contactIds.length > 0) || data.audienceFilter,
-    { message: 'At least one audience selection method is required (contactGroupId, contactIds, or audienceFilter)' }
+    (data) => data.contactGroupId || (data.contactIds && data.contactIds.length > 0) || data.audienceFilter || (data.csvContacts && data.csvContacts.length > 0),
+    { message: 'At least one audience selection method is required (contactGroupId, contactIds, audienceFilter, or csvContacts)' }
   ),
 });
 

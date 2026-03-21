@@ -419,6 +419,10 @@ model CampaignContact {
   contactId     String
   status        MessageStatus @default(PENDING)
   waMessageId   String?
+  
+  // ✅ ADD THIS FIELD - Store contact-specific data from CSV
+  customData    Json?         @default("{}")
+  
   sentAt        DateTime?
   deliveredAt   DateTime?
   readAt        DateTime?

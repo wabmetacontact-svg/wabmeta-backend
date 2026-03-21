@@ -19,6 +19,8 @@ export interface CreateCampaignInput {
   scheduledAt?: Date;
   // Template variables mapping
   variableMapping?: VariableMapping;
+  // CSV payload
+  csvContacts?: Array<{ phone: string; customData: Record<string, string> }>;
 }
 
 export interface UpdateCampaignInput {
