@@ -128,6 +128,12 @@ export class WebhookService {
 
       // Handle cases where phone_number_id is missing
       if (!phoneNumberId) {
+        // ✅ Handle Template Updates (WABA Level)
+        if (field === 'message_template_status_update') {
+          await this.handleTemplateUpdate(payload, value);
+          return { status: 'processed', reason: `Handled template update for event: ${value?.event}` };
+        }
+
         // If it's a field we don't process (like account_update), ignore it gracefully
         if (field !== 'messages' && field !== 'statuses') {
           console.log(`ℹ️ Ignoring webhook field: ${field} (No phone_number_id)`);
@@ -204,6 +210,39 @@ export class WebhookService {
     } catch (e: any) {
       console.error('❌ Webhook processing error:', e);
       return { status: 'error', error: e.message };
+    }
+  }
+
+  // -----------------------------
+  // Template webhook processing
+  // -----------------------------
+  private async handleTemplateUpdate(payload: any, value: any) {
+    try {
+      const wabaId = payload.entry[0].id;
+      const event = value.event;
+      const templateName = value.message_template_name;
+      
+      console.log(`🔄 Template update webhook received [${event}] for template: ${templateName} (WABA: ${wabaId})`);
+
+      // Find an account that has this WABA ID
+      const account = await prisma.whatsAppAccount.findFirst({
+        where: { wabaId },
+        select: { id: true, organizationId: true },
+      });
+
+      if (account) {
+        // Dynamically import metaService to avoid circular dependency issues
+        const { metaService } = await import('../meta/meta.service');
+        console.log(`📡 Triggering background template sync for Org: ${account.organizationId}`);
+        // Run without awaiting to free up the webhook response
+        metaService.syncTemplates(account.id, account.organizationId).catch(e => {
+          console.error('❌ Background template sync failed:', e);
+        });
+      } else {
+        console.log(`⚠️ No account found associated with WABA ID: ${wabaId}`);
+      }
+    } catch (e) {
+      console.error('❌ Template update handling error:', e);
     }
   }
 
