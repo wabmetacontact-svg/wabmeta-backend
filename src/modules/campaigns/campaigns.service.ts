@@ -258,6 +258,7 @@ export class CampaignsService {
       contactGroupId,
       contactIds,
       csvContacts,
+      variableMapping,
       audienceFilter,
       scheduledAt,
     } = input as any;
@@ -334,12 +335,13 @@ export class CampaignsService {
       const dbContacts = await prisma.contact.findMany({
         where: { organizationId, phone: { in: phones } },
       });
-      const contactMap = new Map(dbContacts.map((c) => [c.phone, c.id]));
+      const contactMap = new Map(dbContacts.map((c) => [c.phone, c]));
       for (const csvContact of csvContacts) {
         const phone = digitsOnly(csvContact.phone);
-        const contactId = contactMap.get(phone);
-        if (contactId) {
-          targetContacts.push({ id: contactId, customData: csvContact.customData });
+        const dbC = contactMap.get(phone);
+        if (dbC) {
+          // Merge customData and standard fields for mapping
+          targetContacts.push({ ...dbC, id: dbC.id, customData: csvContact.customData });
         }
       }
     } else if (contactIds && contactIds.length > 0) {
@@ -349,9 +351,8 @@ export class CampaignsService {
           organizationId,
           status: 'ACTIVE',
         },
-        select: { id: true },
       });
-      targetContacts = existing.map((c) => ({ id: c.id }));
+      targetContacts = existing.map((c) => ({ ...c, id: c.id }));
     } else if (contactGroupId) {
       const groupMembers = await prisma.contactGroupMember.findMany({
         where: {
@@ -361,9 +362,9 @@ export class CampaignsService {
             status: 'ACTIVE',
           },
         },
-        select: { contactId: true },
+        include: { contact: true },
       });
-      targetContacts = groupMembers.map((m) => ({ id: m.contactId }));
+      targetContacts = groupMembers.map((m) => ({ ...m.contact, id: m.contactId }));
     } else if (audienceFilter) {
       const where: Prisma.ContactWhereInput = {
         organizationId,
@@ -391,9 +392,8 @@ export class CampaignsService {
 
       const existing = await prisma.contact.findMany({
         where,
-        select: { id: true },
       });
-      targetContacts = existing.map((c) => ({ id: c.id }));
+      targetContacts = existing.map((c) => ({ ...c, id: c.id }));
     }
 
     if (targetContacts.length === 0) {
@@ -422,15 +422,52 @@ export class CampaignsService {
         } as any,
       });
 
-      const campaignContactsData = targetContacts.map((contact) => ({
-        id: uuidv4(),
-        campaignId: newCampaign.id,
-        contactId: contact.id,
-        customData: toJsonValue(contact.customData) || {},
-        status: 'PENDING' as MessageStatus,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }));
+      const campaignContactsData = targetContacts.map((contact) => {
+        const mappedData: Record<string, string> = {};
+        
+        if (variableMapping) {
+           Object.entries(variableMapping).forEach(([key, mappingDef]) => {
+              const def = mappingDef as { type: string, value: string };
+              if (def.type === 'static') {
+                 mappedData[key] = def.value;
+              } else if (def.type === 'field') {
+                 // Try customData first
+                 let val = contact.customData?.[def.value] || contact.customData?.[def.value.toLowerCase()];
+                 
+                 // Smart fallback for common CSV headers
+                 if (!val && contact.customData) {
+                    const keys = Object.keys(contact.customData);
+                    const defLower = def.value.toLowerCase().replace('_', ''); // e.g., firstname
+                    const match = keys.find(k => k.toLowerCase().replace(/[\s_]/g, '') === defLower);
+                    if (match) val = contact.customData[match];
+
+                    // Extra fallback for first_name -> name
+                    if (!val && def.value === 'first_name') {
+                       const nameMatch = keys.find(k => k.toLowerCase() === 'name');
+                       if (nameMatch) val = contact.customData[nameMatch];
+                    }
+                 }
+
+                 if (!val) {
+                    val = (contact as any)[def.value];
+                 }
+                 mappedData[key] = String(val || '');
+              }
+           });
+        } else {
+           Object.assign(mappedData, contact.customData || {});
+        }
+
+        return {
+          id: uuidv4(),
+          campaignId: newCampaign.id,
+          contactId: contact.id,
+          customData: Object.keys(mappedData).length > 0 ? mappedData : {},
+          status: 'PENDING' as MessageStatus,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+      });
 
       await tx.campaignContact.createMany({
         data: campaignContactsData,
@@ -857,7 +894,6 @@ export class CampaignsService {
 
           try {
             const cleanPhone = phone.replace(/[^0-9]/g, '');
-            const variables = (campaignContact as any).variables || {};
             const campaignMeta = (campaign as any).templateMetadata || {};
 
             // Build template components
@@ -884,27 +920,28 @@ export class CampaignsService {
                 }
               } else if (hType === 'TEXT' && template.headerContent?.includes('{{1}}')) {
                 // Header text variables (usually just 1)
+                const headerParam = buildParamsFromContact(campaignContact, 1)[0];
                 components.push({
                   type: 'header',
                   parameters: [
                     {
                       type: 'text',
-                      text: String(variables['header_var_1'] || variables['var_0'] || 'Hello'),
+                      text: String(headerParam || 'Hello'),
                     },
                   ],
                 });
               }
             }
 
-            // 2. Handle Body
             const bodyText = template.bodyText || '';
             const matches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
             if (matches.length > 0) {
+              const bodyParams = buildParamsFromContact(campaignContact, matches.length);
               components.push({
                 type: 'body',
-                parameters: matches.map((_: string, idx: number) => ({
+                parameters: bodyParams.map((val: string) => ({
                   type: 'text',
-                  text: String(variables[`var_${idx + 1}`] || variables[idx + 1] || 'N/A'),
+                  text: val,
                 })),
               });
             }
