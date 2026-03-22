@@ -905,7 +905,9 @@ export class CampaignsService {
               if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
                 // Get media from campaign metadata or use fallback from template
                 const mediaUrl = campaignMeta.header?.link || campaignMeta.headerUrl || template.headerContent;
-                if (mediaUrl) {
+                
+                // Only add if it looks like a valid URL/link
+                if (mediaUrl && (mediaUrl.startsWith('http') || mediaUrl.length > 15)) {
                   components.push({
                     type: 'header',
                     parameters: [
@@ -918,31 +920,53 @@ export class CampaignsService {
                     ],
                   });
                 }
-              } else if (hType === 'TEXT' && template.headerContent?.includes('{{1}}')) {
-                // Header text variables (usually just 1)
-                const headerParam = buildParamsFromContact(campaignContact, 1)[0];
-                components.push({
-                  type: 'header',
-                  parameters: [
-                    {
+              } else if (hType === 'TEXT') {
+                const headerMatches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
+                if (headerMatches.length > 0) {
+                  const headerParams = buildParamsFromContact(campaignContact, headerMatches.length);
+                  components.push({
+                    type: 'header',
+                    parameters: headerParams.map((val: string) => ({
                       type: 'text',
-                      text: String(headerParam || 'Hello'),
-                    },
-                  ],
-                });
+                      text: String(val || 'NA'),
+                    })),
+                  });
+                }
               }
             }
 
+            // 2. Handle Body
             const bodyText = template.bodyText || '';
-            const matches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
-            if (matches.length > 0) {
-              const bodyParams = buildParamsFromContact(campaignContact, matches.length);
+            const bodyMatches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
+            if (bodyMatches.length > 0) {
+              const bodyParams = buildParamsFromContact(campaignContact, bodyMatches.length);
               components.push({
                 type: 'body',
                 parameters: bodyParams.map((val: string) => ({
                   type: 'text',
-                  text: val,
+                  text: String(val || 'NA'),
                 })),
+              });
+            }
+
+            // 3. Handle Buttons (Dynamic URLs)
+            if (template.buttons && Array.isArray(template.buttons)) {
+              template.buttons.forEach((btn: any, btnIndex: number) => {
+                if (btn.type === 'URL' && (btn.url?.includes('{{1}}') || btn.example?.length > 0)) {
+                  // Button usually has only 1 variable
+                  const btnParam = buildParamsFromContact(campaignContact, 1)[0];
+                  components.push({
+                    type: 'button',
+                    sub_type: 'url',
+                    index: String(btnIndex),
+                    parameters: [
+                      {
+                        type: 'text',
+                        text: String(btnParam || 'NA'),
+                      },
+                    ],
+                  });
+                }
               });
             }
 

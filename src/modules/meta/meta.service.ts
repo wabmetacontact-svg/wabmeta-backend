@@ -1020,14 +1020,45 @@ export class MetaService {
       if (component.type === 'BODY' && component.text) {
         const matches = component.text.match(/\{\{(\d+)\}\}/g);
         if (matches) {
-          matches.forEach((match: string, index: number) => {
+          matches.forEach((match: string) => {
+            const index = parseInt(match.replace(/[^\d]/g, ''));
             variables.push({
-              index: index + 1,
-              type: 'text',
+              index,
+              type: 'body',
               placeholder: match,
             });
           });
         }
+      } else if (component.type === 'HEADER' && (component.text || component.format === 'TEXT')) {
+        const text = component.text || '';
+        const matches = text.match(/\{\{(\d+)\}\}/g);
+        if (matches) {
+          matches.forEach((match: string) => {
+            const index = parseInt(match.replace(/[^\d]/g, ''));
+            variables.push({
+              index,
+              type: 'header',
+              placeholder: match,
+            });
+          });
+        }
+      } else if (component.type === 'BUTTONS' && Array.isArray(component.buttons)) {
+        component.buttons.forEach((btn: any, btnIndex: number) => {
+          if (btn.type === 'URL' && btn.url) {
+            const matches = btn.url.match(/\{\{(\d+)\}\}/g);
+            if (matches) {
+              matches.forEach((match: string) => {
+                const varIndex = parseInt(match.replace(/[^\d]/g, ''));
+                variables.push({
+                  index: varIndex,
+                  type: 'button',
+                  buttonIndex: btnIndex,
+                  placeholder: match,
+                });
+              });
+            }
+          }
+        });
       }
     }
 
