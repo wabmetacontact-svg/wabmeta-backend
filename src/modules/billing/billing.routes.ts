@@ -8,7 +8,14 @@ import { billingSchema } from './billing.schema';
 
 const router = Router();
 
-// All routes require authentication
+// ============================================
+// PUBLIC ROUTES
+// ============================================
+
+// Get all available plans
+router.get('/plans', billingController.getPlans);
+
+// All other routes require authentication
 router.use(authenticate);
 
 // ============================================
@@ -18,9 +25,6 @@ router.use(authenticate);
 // Get current subscription/plan
 router.get('/subscription', billingController.getSubscription);
 router.get('/plan', billingController.getSubscription); // Alias
-
-// Get all available plans
-router.get('/plans', billingController.getPlans);
 
 // ============================================
 // USAGE

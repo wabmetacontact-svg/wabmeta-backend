@@ -1,7 +1,14 @@
 import { PrismaClient, PlanType } from '@prisma/client';
 
-const prisma = new PrismaClient();
+const databaseUrl = process.env.DATABASE_URL || process.env.DIRECT_URL;
 
+const prisma = new PrismaClient({
+    datasources: {
+        db: {
+            url: databaseUrl,
+        },
+    },
+});
 async function main() {
     console.log('🌱 Seeding new billing plans...');
 
@@ -197,10 +204,20 @@ async function main() {
     ];
 
     for (const plan of plans) {
+        // Strip out fields that don't exist in the current Prisma schema
+        const { 
+            discount, 
+            hasAdvancedAutomation, 
+            hasCampaignRetry, 
+            hasMobileApiAccess, 
+            supportLevel, 
+            ...validPlanData 
+        } = plan as any;
+
         await prisma.plan.upsert({
             where: { type: plan.type },
-            update: plan,
-            create: plan,
+            update: validPlanData,
+            create: validPlanData,
         });
         console.log(`✅ ${plan.name} created/updated`);
     }

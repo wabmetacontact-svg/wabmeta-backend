@@ -99,17 +99,31 @@ export class WebhookService {
     });
 
     if (!contact) {
-      contact = await prisma.contact.create({
-        data: {
-          organizationId,
-          phone: phone10,
-          countryCode: '+91',
-          firstName: 'Unknown',
-          status: 'ACTIVE',
-          source: 'WHATSAPP_INBOUND',
-        },
-      });
-      console.log(`👤 Created new contact from inbound: ${phone10}`);
+      try {
+        contact = await prisma.contact.create({
+          data: {
+            organizationId,
+            phone: phone10,
+            countryCode: '+91',
+            firstName: 'Unknown',
+            status: 'ACTIVE',
+            source: 'WHATSAPP_INBOUND',
+          },
+        });
+        console.log(`👤 Created new contact from inbound: ${phone10}`);
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          contact = await prisma.contact.findFirst({
+            where: {
+              organizationId,
+              OR: variants.map((p) => ({ phone: p })),
+            },
+          });
+          if (!contact) throw error;
+        } else {
+          throw error;
+        }
+      }
     }
 
     return contact;
@@ -275,18 +289,29 @@ export class WebhookService {
       });
 
       if (!conversation) {
-        conversation = await prisma.conversation.create({
-          data: {
-            organization: { connect: { id: organizationId } },
-            contact: { connect: { id: contact.id } },
-            isWindowOpen: true,
-            windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-            unreadCount: 0,
-            isRead: false,
-            lastMessageAt: messageTime,
-          },
-        });
-        console.log(`💬 Created new conversation: ${conversation.id}`);
+        try {
+          conversation = await prisma.conversation.create({
+            data: {
+              organization: { connect: { id: organizationId } },
+              contact: { connect: { id: contact.id } },
+              isWindowOpen: true,
+              windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              unreadCount: 0,
+              isRead: false,
+              lastMessageAt: messageTime,
+            },
+          });
+          console.log(`💬 Created new conversation: ${conversation.id}`);
+        } catch (error: any) {
+          if (error.code === 'P2002') {
+            conversation = await prisma.conversation.findFirst({
+              where: { organizationId, contactId: contact.id },
+            });
+            if (!conversation) throw error;
+          } else {
+            throw error;
+          }
+        }
       }
 
       let content = '';
