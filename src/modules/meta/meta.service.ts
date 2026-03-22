@@ -996,7 +996,17 @@ export class MetaService {
   private extractHeaderContent(components: any[]): string | null {
     if (!Array.isArray(components)) return null;
     const header = components.find((c) => c.type === 'HEADER');
-    return header?.text || header?.example?.header_text?.[0] || null;
+    if (!header) return null;
+
+    if (header.text) return header.text;
+    
+    // Media Header Example Extraction
+    if (header.example) {
+      const ex = header.example;
+      return ex.header_url?.[0] || ex.header_handle?.[0] || ex.header_text?.[0] || null;
+    }
+
+    return null;
   }
 
   private extractFooterText(components: any[]): string | null {

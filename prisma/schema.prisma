@@ -293,6 +293,7 @@ model Contact {
   source                 String?
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
+  automationSequences    AutomationSequence[]
   campaignContacts       CampaignContact[]
   organization           Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   groupMemberships       ContactGroupMember[]
@@ -300,7 +301,6 @@ model Contact {
   conversations          Conversation[]
   leads                  Lead[]
   messageQueue           MessageQueue[]
-  automationSequences    AutomationSequence[]
 
   @@unique([organizationId, phone])
   @@index([organizationId])
@@ -419,15 +419,12 @@ model CampaignContact {
   contactId     String
   status        MessageStatus @default(PENDING)
   waMessageId   String?
-  
-  // ✅ ADD THIS FIELD - Store contact-specific data from CSV
   customData    Json?         @default("{}")
-  
   sentAt        DateTime?
   deliveredAt   DateTime?
   readAt        DateTime?
   failedAt      DateTime?
-  failureReason String?       @db.Text  // ✅ Changed to Text for longer error messages
+  failureReason String?
   retryCount    Int           @default(0)
   nextRetryAt   DateTime?
   createdAt     DateTime      @default(now())
@@ -584,25 +581,22 @@ model Chatbot {
 }
 
 model Automation {
-  id             String            @id @default(cuid())
-  organizationId String
-  name           String
-  description    String?
-  trigger        AutomationTrigger
-  triggerConfig  Json              @default("{}")
-  actions        Json              @default("[]")
-  isActive       Boolean           @default(false)
-  executionCount Int               @default(0)
-  lastExecutedAt DateTime?
-  
-  // ✅ NEW FIELDS (Safe - Have defaults, nullable, or empty arrays)
-  targetGroupIds String[]          @default([])      // ✅ Safe: Default empty array
-  excludeExisting Boolean          @default(true)     // ✅ Safe: Has default value
-  
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sequences      AutomationSequence[]
+  id              String               @id @default(cuid())
+  organizationId  String
+  name            String
+  description     String?
+  trigger         AutomationTrigger
+  triggerConfig   Json                 @default("{}")
+  actions         Json                 @default("[]")
+  isActive        Boolean              @default(false)
+  executionCount  Int                  @default(0)
+  lastExecutedAt  DateTime?
+  targetGroupIds  String[]             @default([])
+  excludeExisting Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sequences       AutomationSequence[]
 
   @@index([organizationId])
   @@index([trigger])
@@ -610,18 +604,17 @@ model Automation {
 }
 
 model AutomationSequence {
-  id             String   @id @default(cuid())
-  automationId   String
-  contactId      String
-  currentStep    Int      @default(0)
-  status         String   @default("ACTIVE") // ACTIVE, WAITING, COMPLETED
-  lastStepAt     DateTime @default(now())
-  metadata       Json     @default("{}")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  automation     Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  contact        Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  id           String     @id @default(cuid())
+  automationId String
+  contactId    String
+  currentStep  Int        @default(0)
+  status       String     @default("ACTIVE")
+  lastStepAt   DateTime   @default(now())
+  metadata     Json       @default("{}")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  contact      Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@unique([automationId, contactId])
   @@index([automationId])

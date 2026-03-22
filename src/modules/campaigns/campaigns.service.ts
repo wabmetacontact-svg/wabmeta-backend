@@ -970,19 +970,26 @@ export class CampaignsService {
               });
             }
 
+            const payload = {
+              type: 'template',
+              template: {
+                name: template.name,
+                language: { code: toMetaLang(template.language) },
+                ...(components.length > 0 ? { components } : {}),
+              },
+            };
+
+            // ✅ Log first contact's payload for debugging
+            if (i === 0 && processedCount === 0) {
+              console.log('📤 Example Request Payload for campaign:', JSON.stringify(payload, null, 2));
+            }
+
             // ✅ DIRECT SEND
             const result = await metaApi.sendMessage(
               phoneNumberId,
               accessToken!,
               cleanPhone,
-              {
-                type: 'template',
-                template: {
-                  name: template.name,
-                  language: { code: template.language || 'en_US' },
-                  ...(components.length > 0 ? { components } : {}),
-                },
-              }
+              payload
             );
 
             const waMessageId = result.messageId;

@@ -1,0 +1,25 @@
+{
+  "campaignName": "kjhkj",
+  "templateName": "video_explains_explains_",
+  "headerType": "VIDEO",
+  "headerContent": null,
+  "bodyText": "Hello,\nHow to use wabmeta \nYour wabmeta account is currently pending. Please complete your account setup to continue.\n\nThank you.",
+  "buttons": [
+    {
+      "url": "https://wabmeta.com/",
+      "text": "Visit website",
+      "type": "URL"
+    },
+    {
+      "text": "Need WhatsApp api",
+      "type": "QUICK_REPLY"
+    },
+    {
+      "text": "please explain",
+      "type": "QUICK_REPLY"
+    }
+  ],
+  "variables": [],
+  "failedContactCustomData": {},
+  "failureReason": "(#132012) Parameter format does not match format in the created template (Code: 132012, Subcode: N/A)"
+}
