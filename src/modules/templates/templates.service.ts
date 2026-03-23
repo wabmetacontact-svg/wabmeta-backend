@@ -83,24 +83,23 @@ const toMetaLanguage = (lang?: string): string => {
   const l = String(lang || '').trim();
   if (!l) return 'en_US';
 
-  // Specific mapping for common codes
+  // If it's already a valid-looking Meta language code (e.g., 'en', 'en_US', 'hi'), use it directly
+  if (l.length >= 2 && l.length <= 6 && !l.includes(' ')) {
+    return l;
+  }
+
   const mapping: Record<string, string> = {
-    'en': 'en_US',
-    'en_us': 'en_US',
-    'hi': 'hi',
-    'hi_in': 'hi',
-    'es': 'es_ES',
-    'pt': 'pt_BR',
-    'fr': 'fr_FR',
-    'de': 'de_DE',
-    'it': 'it_IT',
+    'english': 'en_US',
+    'hindi': 'hi',
+    'spanish': 'es_ES',
+    'portuguese': 'pt_BR',
+    'french': 'fr_FR',
+    'german': 'de_DE',
+    'italian': 'it_IT',
   };
 
   const lower = l.toLowerCase();
   if (mapping[lower]) return mapping[lower];
-
-  if (l.includes('_')) return l;
-  if (l.length < 4) return 'en_US';
   return l;
 };
 
