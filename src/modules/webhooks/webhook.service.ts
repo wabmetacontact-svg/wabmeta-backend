@@ -727,7 +727,7 @@ export class WebhookService {
       });
 
       // ✅ Update CampaignContact if this is a campaign message
-      await this.updateCampaignContactStatus(waMessageId, newStatus, statusTime);
+      await this.updateCampaignContactStatus(waMessageId, newStatus, statusTime, updatedMessage.failureReason || undefined);
 
     } catch (e) {
       console.error('processStatusUpdate error:', e);
@@ -738,7 +738,8 @@ export class WebhookService {
   private async updateCampaignContactStatus(
     waMessageId: string,
     newStatus: MessageStatus,
-    statusTime: Date
+    statusTime: Date,
+    failureReason?: string
   ) {
     try {
       const campaignContact = await prisma.campaignContact.findFirst({
@@ -777,7 +778,7 @@ export class WebhookService {
           status: newStatus,
           ...(newStatus === 'DELIVERED' ? { deliveredAt: statusTime } : {}),
           ...(newStatus === 'READ' ? { readAt: statusTime } : {}),
-          ...(newStatus === 'FAILED' ? { failedAt: statusTime, failureReason: 'Delivery failed' } : {}),
+          ...(newStatus === 'FAILED' ? { failedAt: statusTime, failureReason: failureReason || 'Delivery failed' } : {}),
         },
       });
 
@@ -792,7 +793,8 @@ export class WebhookService {
             contactId: campaignContact.contactId,
             phone: contactPhone,
             status: newStatus,
-            messageId: waMessageId
+            messageId: waMessageId,
+            error: failureReason
           });
         }).catch(e => console.error('❌ Socket emission failed in webhook:', e));
       }
