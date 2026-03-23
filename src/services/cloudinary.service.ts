@@ -79,9 +79,9 @@ export class CloudinaryService {
                 transformation: [
                   { width: 800, height: 600, crop: 'limit' },
                   { quality: 'auto:good' },
-                  { fetch_format: 'auto' },
                 ],
                 secure: true,
+                format: result.format || 'jpg',
               });
             }
 

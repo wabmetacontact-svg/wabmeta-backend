@@ -33,7 +33,25 @@ const digitsOnly = (p: string): string => String(p || '').replace(/\D/g, '');
 
 const toMetaLang = (lang?: string): string => {
   const l = String(lang || '').trim();
-  return l || 'en_US';
+  if (!l) return 'en_US';
+
+  const mapping: Record<string, string> = {
+    'en': 'en_US',
+    'en_us': 'en_US',
+    'hi': 'hi',
+    'hi_in': 'hi',
+    'es': 'es_ES',
+    'pt': 'pt_BR',
+    'fr': 'fr_FR',
+    'de': 'de_DE',
+    'it': 'it_IT',
+  };
+
+  const lower = l.toLowerCase();
+  if (mapping[lower]) return mapping[lower];
+  if (l.includes('_')) return l;
+  if (l.length < 4) return 'en_US';
+  return l;
 };
 
 const toRecipient = (c: any): string | null => {
@@ -179,6 +197,8 @@ const toJsonValue = (value: any): Prisma.InputJsonValue | undefined => {
 // ============================================
 
 export class CampaignsService {
+  private processingCampaigns = new Set<string>();
+
   // ==========================================
   // FIND WHATSAPP ACCOUNT (ROBUST)
   // ==========================================
@@ -782,7 +802,16 @@ export class CampaignsService {
 
   // ✅ PROCESS CAMPAIGN CONTACTS - Optimized for high speed with concurrency
   private async processCampaignContacts(campaignId: string, organizationId: string): Promise<void> {
-    console.log(`📤 Processing contacts for campaign: ${campaignId}`);
+    // 🛠️ PREVENT CONCURRENT PROCESSING OF THE SAME CAMPAIGN
+    if (this.processingCampaigns.has(campaignId)) {
+      console.warn(`⏳ Campaign ${campaignId} is already being processed. Ignoring redundant process call.`);
+      return;
+    }
+
+    this.processingCampaigns.add(campaignId);
+
+    try {
+      console.log(`📤 Processing contacts for campaign: ${campaignId}`);
 
     const campaign = await prisma.campaign.findUnique({
       where: { id: campaignId },
@@ -829,10 +858,30 @@ export class CampaignsService {
     const CONCURRENCY = 15;
     const BATCH_SIZE = 500;
 
+    // ✅ RESET/SYNC COUNTERS BEFORE STARTING
+    const statusStats = await prisma.campaignContact.groupBy({
+      by: ['status'],
+      where: { campaignId },
+      _count: true,
+    });
+    
+    let dbSent = 0;
+    let dbFailed = 0;
+    statusStats.forEach((s) => {
+      if (s.status === 'SENT' || s.status === 'DELIVERED' || s.status === 'READ') dbSent += s._count;
+      if (s.status === 'FAILED') dbFailed += s._count;
+    });
+
     let processedCount = 0;
-    let sentCount = campaign.sentCount || 0;
-    let failedCount = campaign.failedCount || 0;
+    let sentCount = dbSent;
+    let failedCount = dbFailed;
     let hasMore = true;
+
+    // Update campaign counters in DB to match actual records (fix 200% bug)
+    await prisma.campaign.update({
+      where: { id: campaignId },
+      data: { sentCount, failedCount }
+    });
 
     while (hasMore) {
       // Check if campaign is still RUNNING
@@ -907,7 +956,7 @@ export class CampaignsService {
                 const mediaUrl = campaignMeta.header?.link || campaignMeta.headerUrl || template.headerContent;
                 
                 // Only add if it looks like a valid URL/link
-                if (mediaUrl && (mediaUrl.startsWith('http') || mediaUrl.length > 15)) {
+                if (mediaUrl) {
                   components.push({
                     type: 'header',
                     parameters: [
@@ -919,6 +968,9 @@ export class CampaignsService {
                       },
                     ],
                   });
+                } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
+                  // ✅ Mandatory header but no mediaUrl found - throw descriptive error
+                  throw new Error(`Media template requires a ${hType.toLowerCase()} header but no media URL was provided.`);
                 }
               } else if (hType === 'TEXT') {
                 const headerMatches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
@@ -1100,6 +1152,9 @@ export class CampaignsService {
 
       console.log(`🏁 Campaign ${campaignId} marked COMPLETED`);
     }
+    } finally {
+      this.processingCampaigns.delete(campaignId);
+    }
   }
 
   // Helper: update campaign sent/failed counters + emit progress socket
@@ -1117,7 +1172,8 @@ export class CampaignsService {
       });
 
       const processed = sent + failed;
-      const percentage = Math.round((processed / (updated.totalContacts || 1)) * 100);
+      const total = updated.totalContacts || 1;
+      const percentage = Math.min(100, Math.round((processed / total) * 100));
 
       campaignSocketService.emitCampaignProgress(organizationId, campaignId, {
         sent,
