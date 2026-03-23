@@ -28,15 +28,26 @@ const fileFilter = (req: any, file: any, cb: any) => {
   if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new AppError(`Invalid file type: ${file.mimetype}`, 400), false);
+    cb(new AppError(`Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, MP4, 3GPP, PDF`, 400), false);
   }
 };
 
+// ✅ Max 50MB to allow large videos (per-type checks done after upload)
 export const uploadMiddleware = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 16 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
 });
+
+// ✅ Per-type size limits
+const FILE_SIZE_LIMITS: Record<string, { max: number; label: string }> = {
+  'image/jpeg': { max: 50 * 1024 * 1024, label: '50MB' },
+  'image/png':  { max: 50 * 1024 * 1024, label: '50MB' },
+  'image/jpg':  { max: 50 * 1024 * 1024, label: '50MB' },
+  'video/mp4':  { max: 50 * 1024 * 1024, label: '50MB' },
+  'video/3gpp': { max: 50 * 1024 * 1024, label: '50MB' },
+  'application/pdf': { max: 50 * 1024 * 1024, label: '50MB' },
+};
 
 export const uploadTemplateMedia = async (
   req: any,
@@ -50,6 +61,16 @@ export const uploadTemplateMedia = async (
 
     if (!file) throw new AppError('No file uploaded', 400);
     if (!organizationId) throw new AppError('Organization required', 400);
+
+    // ✅ Per-type size validation
+    const sizeLimit = FILE_SIZE_LIMITS[file.mimetype];
+    if (sizeLimit && file.size > sizeLimit.max) {
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      throw new AppError(
+        `File too large (${fileSizeMB}MB). Maximum allowed for ${file.mimetype.split('/')[0]}: ${sizeLimit.label}`,
+        400
+      );
+    }
 
     console.log('📤 Upload request:', {
       filename: file.originalname,
