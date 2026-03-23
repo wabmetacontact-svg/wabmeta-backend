@@ -840,7 +840,8 @@ export class WebhookService {
         // ✅ Emit overall progress to campaign list/dashboard
         import('../campaigns/campaigns.socket').then(({ campaignSocketService }) => {
           const processed = updatedCampaign.sentCount + updatedCampaign.failedCount;
-          const percentage = Math.round((processed / (updatedCampaign.totalContacts || 1)) * 100);
+          const total = updatedCampaign.totalContacts || 1;
+          const percentage = Math.min(100, Math.round((processed / total) * 100));
           
           campaignSocketService.emitCampaignProgress(campaign.organizationId, campaign.id, {
             sent: updatedCampaign.sentCount,

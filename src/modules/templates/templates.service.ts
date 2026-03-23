@@ -852,6 +852,13 @@ export class TemplatesService {
         const footerComponent = mt.components?.find((c: any) => c.type === 'FOOTER');
         const buttonsComponent = mt.components?.find((c: any) => c.type === 'BUTTONS');
 
+          // Extract header content properly for media templates
+          let headerContent = headerComponent?.text || null;
+          if (!headerContent && headerComponent?.example) {
+            headerContent = headerComponent.example.header_handle?.[0] || 
+                            headerComponent.example.header_text?.[0] || null;
+          }
+
         const existing = await prisma.template.findFirst({
           where: {
             organizationId,
@@ -861,44 +868,49 @@ export class TemplatesService {
         });
 
         if (existing) {
-          // Update existing
-          const updateData: any = {
-            metaTemplateId: metaId,
-            status: mappedStatus,
-            rejectionReason,
-            category: (String(mt.category || 'UTILITY').toUpperCase()) as any,
-          };
+            // Update existing
+            const updateData: any = {
+              metaTemplateId: metaId,
+              status: mappedStatus,
+              rejectionReason,
+              category: (String(mt.category || 'UTILITY').toUpperCase()) as any,
+              headerType: headerComponent?.format || null,
+              headerContent: headerContent,
+              bodyText: bodyComponent?.text || existing.bodyText,
+              footerText: footerComponent?.text || existing.footerText,
+              buttons: toJsonValue(buttonsComponent?.buttons || []),
+            };
 
-          if (waData.wabaId) updateData.wabaId = waData.wabaId;
-          if (waData.account?.id) updateData.whatsappAccountId = waData.account.id;
+            if (waData.wabaId) updateData.wabaId = waData.wabaId;
+            if (waData.account?.id) updateData.whatsappAccountId = waData.account.id;
 
-          await prisma.template.update({
-            where: { id: existing.id },
-            data: updateData,
-          });
-        } else {
-          // Create new
-          const createData: any = {
-            organizationId,
-            name: metaName,
-            language: metaLang,
-            category: (String(mt.category || 'UTILITY').toUpperCase()) as any,
-            bodyText: bodyComponent?.text || 'Imported from Meta',
-            headerType: headerComponent?.format || null,
-            headerContent: headerComponent?.text || null,
-            footerText: footerComponent?.text || null,
-            status: mappedStatus,
-            metaTemplateId: metaId,
-            buttons: toJsonValue(buttonsComponent?.buttons || []),
-            variables: toJsonValue([]),
-            rejectionReason,
-          };
+            await prisma.template.update({
+              where: { id: existing.id },
+              data: updateData,
+            });
+          } else {
+            // Create new
+            const createData: any = {
+              organizationId,
+              name: metaName,
+              language: metaLang,
+              category: (String(mt.category || 'UTILITY').toUpperCase()) as any,
+              bodyText: bodyComponent?.text || 'Imported from Meta',
+              headerType: headerComponent?.format || null,
+              headerContent: headerContent,
+              footerText: footerComponent?.text || null,
+              status: mappedStatus,
+              metaTemplateId: metaId,
+              buttons: toJsonValue(buttonsComponent?.buttons || []),
+              variables: toJsonValue([]),
+              rejectionReason,
+            };
 
-          if (waData.wabaId) createData.wabaId = waData.wabaId;
-          if (waData.account?.id) createData.whatsappAccountId = waData.account.id;
+            if (waData.wabaId) createData.wabaId = waData.wabaId;
+            if (waData.account?.id) createData.whatsappAccountId = waData.account.id;
 
-          await prisma.template.create({ data: createData });
-        }
+            await prisma.template.create({ data: createData });
+          }
 
         synced++;
       } catch (err: any) {
