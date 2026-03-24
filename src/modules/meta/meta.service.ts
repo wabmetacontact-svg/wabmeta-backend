@@ -792,6 +792,7 @@ export class MetaService {
         name: true,
         language: true,
         metaTemplateId: true,
+        headerMediaId: true, // ✅ Must fetch to preserve during sync
       },
     });
 
@@ -816,7 +817,10 @@ export class MetaService {
 
         const existing = existingMap.get(key);
 
-        const templateData = {
+        // ✅ Extract header handle from Meta's example (for new templates)
+        const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
+
+        const baseTemplateData: any = {
           organizationId,
           whatsappAccountId: accountId,
           wabaId: account.wabaId,
@@ -835,13 +839,27 @@ export class MetaService {
         };
 
         if (existing) {
+          // ✅ CRITICAL: Preserve existing headerMediaId - Meta does NOT return it in sync
+          // Overwriting it with null causes 403 errors during campaign send
+          const updateData: any = { ...baseTemplateData };
+          if (existing.headerMediaId) {
+            // Keep existing mediaId if already set
+            delete updateData.headerMediaId;
+          } else if (extractedHeaderHandle) {
+            // Populate from Meta's example handle if available (rare)
+            updateData.headerMediaId = extractedHeaderHandle;
+          }
           await prisma.template.update({
             where: { id: existing.id },
-            data: templateData,
+            data: updateData,
           });
           updated++;
         } else {
-          await prisma.template.create({ data: templateData });
+          // New template: set headerMediaId from extracted handle if available
+          if (extractedHeaderHandle) {
+            baseTemplateData.headerMediaId = extractedHeaderHandle;
+          }
+          await prisma.template.create({ data: baseTemplateData });
           created++;
         }
       } catch (err: any) {
@@ -907,7 +925,9 @@ export class MetaService {
             } as any,
           });
 
-          const templateData = {
+          const extractedHandle = this.extractHeaderHandle(template.components);
+
+          const baseData: any = {
             organizationId: account.organizationId,
             whatsappAccountId: accountId,
             wabaId: wabaId,
@@ -926,12 +946,20 @@ export class MetaService {
           };
 
           if (existing) {
+            // ✅ CRITICAL: Do NOT overwrite headerMediaId during sync
+            const updateData: any = { ...baseData };
+            if (existing.headerMediaId) {
+              delete updateData.headerMediaId;
+            } else if (extractedHandle) {
+              updateData.headerMediaId = extractedHandle;
+            }
             await prisma.template.update({
               where: { id: existing.id },
-              data: templateData,
+              data: updateData,
             });
           } else {
-            await prisma.template.create({ data: templateData });
+            if (extractedHandle) baseData.headerMediaId = extractedHandle;
+            await prisma.template.create({ data: baseData });
           }
 
           synced++;
@@ -1006,6 +1034,20 @@ export class MetaService {
       return ex.header_url?.[0] || ex.header_handle?.[0] || ex.header_text?.[0] || null;
     }
 
+    return null;
+  }
+
+  // ✅ NEW: Extract header_handle from Meta's example (the actual Media ID)
+  private extractHeaderHandle(components: any[]): string | null {
+    if (!Array.isArray(components)) return null;
+    const header = components.find((c) => c.type === 'HEADER');
+    if (!header || !header.example) return null;
+
+    // Meta returns the handle in example.header_handle array
+    const handle = header.example?.header_handle?.[0];
+    if (handle && !handle.startsWith('http')) {
+      return handle; // It's a Meta media handle (not a URL)
+    }
     return null;
   }
 

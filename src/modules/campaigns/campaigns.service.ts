@@ -857,9 +857,10 @@ export class CampaignsService {
     const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
     const template = campaign.template;
 
-    // Concurrency settings: 15 messages in parallel
-    const CONCURRENCY = 15;
-    const BATCH_SIZE = 500;
+    // Concurrency settings: 50 messages in parallel for high-speed sending
+    const CONCURRENCY = 50;
+    const BATCH_SIZE = 1000;
+    const COUNTER_UPDATE_EVERY = 5; // Update DB counters every N chunks
 
     // ✅ RESET/SYNC COUNTERS BEFORE STARTING
     const statusStats = await prisma.campaignContact.groupBy({
@@ -918,10 +919,12 @@ export class CampaignsService {
         data: { status: 'QUEUED' as any },
       });
 
-      // Process in smaller concurrent chunks
+      // Process in concurrent chunks
+      let chunkIndex = 0;
       for (let i = 0; i < contacts.length; i += CONCURRENCY) {
-        // Occasionally re-check campaign status
-        if (i > 0 && i % (CONCURRENCY * 4) === 0) {
+        chunkIndex++;
+        // Re-check campaign status every 10 chunks (instead of every 4)
+        if (chunkIndex > 1 && chunkIndex % 10 === 0) {
           const isRunning = await prisma.campaign.findUnique({
             where: { id: campaignId },
             select: { status: true },
@@ -1060,11 +1063,11 @@ export class CampaignsService {
             const waMessageId = result.messageId;
             const now = new Date();
 
-            // Update campaign contact to SENT
-            await prisma.campaignContact.update({
+            // ✅ Fire-and-forget DB update (non-blocking)
+            prisma.campaignContact.update({
               where: { id: campaignContact.id },
               data: { status: 'SENT', waMessageId, sentAt: now },
-            });
+            }).catch(() => {});
 
             // Non-blocking background save for message/conversation
             this.saveCampaignMessage(
@@ -1083,13 +1086,15 @@ export class CampaignsService {
             sentCount++;
             processedCount++;
 
-            // Socket notification
-            campaignSocketService.emitContactStatus(organizationId, campaignId, {
-              contactId: campaignContact.contactId,
-              phone: cleanPhone,
-              status: 'SENT',
-              messageId: waMessageId,
-            });
+            // Socket notification (throttled - only emit every 5 sends to reduce overhead)
+            if (sentCount % 5 === 0) {
+              campaignSocketService.emitContactStatus(organizationId, campaignId, {
+                contactId: campaignContact.contactId,
+                phone: cleanPhone,
+                status: 'SENT',
+                messageId: waMessageId,
+              });
+            }
 
           } catch (error: any) {
             let failureReason = error.message || 'Unknown error';
@@ -1136,9 +1141,14 @@ export class CampaignsService {
           }
         }));
 
-        // Update campaign counters after each concurrent chunk
-        await this.updateCampaignCounters(campaignId, organizationId, sentCount, failedCount);
+        // ✅ Update DB counters every N chunks instead of every chunk (reduces DB writes)
+        if (chunkIndex % COUNTER_UPDATE_EVERY === 0) {
+          this.updateCampaignCounters(campaignId, organizationId, sentCount, failedCount).catch(() => {});
+        }
       }
+
+      // Always update counters at end of batch
+      await this.updateCampaignCounters(campaignId, organizationId, sentCount, failedCount);
     }
 
     console.log(`✅ Campaign ${campaignId} done: ${sentCount} sent, ${failedCount} failed`);
