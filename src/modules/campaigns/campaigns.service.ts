@@ -495,6 +495,8 @@ export class CampaignsService {
       });
 
       return newCampaign;
+    }, {
+      timeout: 60000, // ✅ 60s timeout for large audience createMany
     });
 
     console.log(`✅ Campaign created: ${campaign.id} with ${targetContacts.length} contacts`);
@@ -953,25 +955,35 @@ export class CampaignsService {
             if (template.headerType && template.headerType !== 'NONE') {
               const hType = template.headerType.toUpperCase();
               if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-                // Get media from campaign metadata or use fallback from template
-                const mediaUrl = campaignMeta.header?.link || campaignMeta.headerUrl || template.headerContent;
+                const hKey = hType.toLowerCase();
+                const mediaHandle: any = {};
                 
-                // Only add if it looks like a valid URL/link
-                if (mediaUrl) {
+                // Prioritize Meta Media ID (MOST RELIABLE - avoids 403 download errors)
+                if (template.headerMediaId) {
+                  mediaHandle.id = template.headerMediaId;
+                } 
+                // Fallback to override link from campaign metadata if present
+                else if (campaignMeta.header?.link || campaignMeta.headerUrl) {
+                  mediaHandle.link = campaignMeta.header?.link || campaignMeta.headerUrl;
+                }
+                // Finally, fallback to url from template content
+                else if (template.headerContent && (template.headerContent.startsWith('http') || template.headerContent.startsWith('https'))) {
+                  mediaHandle.link = template.headerContent;
+                }
+
+                if (mediaHandle.id || mediaHandle.link) {
                   components.push({
                     type: 'header',
                     parameters: [
                       {
-                        type: hType.toLowerCase(),
-                        [hType.toLowerCase()]: {
-                          link: mediaUrl,
-                        },
+                        type: hKey,
+                        [hKey]: mediaHandle,
                       },
                     ],
                   });
-                } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-                  // ✅ Mandatory header but no mediaUrl found - throw descriptive error
-                  throw new Error(`Media template requires a ${hType.toLowerCase()} header but no media URL was provided.`);
+                } else {
+                  // ✅ Mandatory header but no media found - throw descriptive error
+                  throw new Error(`Media template requires a ${hKey} header but no media ID or URL was provided.`);
                 }
               } else if (hType === 'TEXT') {
                 const headerMatches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
