@@ -22,6 +22,7 @@ router.get('/languages', templatesController.getLanguages);
 router.get('/check-connection', templatesController.checkConnection);
 router.post('/sync', templatesController.sync);
 router.post('/preview', templatesController.preview);
+router.post('/upload-to-meta', templatesController.uploadToMeta);
 
 // Specific template routes (MUST be AFTER other routes)
 router.get('/:id', templatesController.getById);

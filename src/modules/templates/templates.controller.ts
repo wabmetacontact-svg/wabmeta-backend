@@ -1,11 +1,12 @@
-// src/modules/templates/templates.controller.ts
-
+import axios from 'axios';
 import { Request, Response, NextFunction } from 'express';
 import { templatesService } from './templates.service';
 import { AppError } from '../../middleware/errorHandler';
 import { TemplateStatus, TemplateCategory } from '@prisma/client';
 import prisma from '../../config/database';
 import { metaService } from '../meta/meta.service';
+import { metaApi } from '../meta/meta.api';
+import { safeDecryptStrict } from '../../utils/encryption';
 
 // Extended Request interface
 interface AuthRequest extends Request {
@@ -542,6 +543,116 @@ class TemplatesController {
       });
     } catch (error: any) {
       console.error('❌ Error checking connection:', error.message);
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // UPLOAD TO META (Helper for Frontend)
+  // ==========================================
+  async uploadToMeta(req: Request, res: Response, next: NextFunction) {
+    try {
+      const organizationId = (req as AuthRequest).user?.organizationId;
+      if (!organizationId) {
+        throw new AppError('Organization context required', 400);
+      }
+
+      const { cloudinaryUrl, mimeType, filename, whatsappAccountId } = req.body;
+
+      if (!cloudinaryUrl) {
+        throw new AppError('cloudinaryUrl is required', 400);
+      }
+
+      console.log('📤 Backend helper: Uploading to Meta from', cloudinaryUrl);
+
+      // 1. Get WhatsApp account
+      let waAccount = null;
+      if (whatsappAccountId) {
+        waAccount = await prisma.whatsAppAccount.findFirst({
+          where: { id: whatsappAccountId, organizationId }
+        });
+      }
+
+      if (!waAccount) {
+        waAccount = await prisma.whatsAppAccount.findFirst({
+          where: { organizationId, status: 'CONNECTED' },
+          orderBy: { isDefault: 'desc' }
+        });
+      }
+
+      if (!waAccount) {
+        // Try MetaConnection (new structure)
+        const metaConn = await (prisma as any).metaConnection.findUnique({
+          where: { organizationId },
+          include: { phoneNumbers: { where: { isActive: true }, take: 1 } }
+        });
+
+        if (metaConn && metaConn.phoneNumbers?.length > 0) {
+          const phone = metaConn.phoneNumbers[0];
+          const token = safeDecryptStrict(metaConn.accessToken);
+          
+          if (!token) throw new AppError('Failed to decrypt MetaConnection token', 500);
+
+          // Download from URL
+          const response = await axios.get(cloudinaryUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000
+          });
+
+          const buffer = Buffer.from(response.data);
+          
+          // Upload to Meta
+          const result = await metaApi.uploadMedia(
+            phone.phoneNumberId,
+            token,
+            buffer,
+            mimeType || response.headers['content-type'] || 'image/jpeg',
+            filename || cloudinaryUrl.split('/').pop() || 'media',
+            metaConn.wabaId
+          );
+
+          return res.json({
+            success: true,
+            mediaId: result.id,
+            cloudinaryUrl
+          });
+        }
+
+        throw new AppError('No connected WhatsApp account found', 400);
+      }
+
+      // 2. Decrypt token
+      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
+      if (!accountWithToken) {
+        throw new AppError('Failed to decrypt WhatsApp token', 500);
+      }
+
+      // 3. Download from Cloudinary
+      const response = await axios.get(cloudinaryUrl, {
+        responseType: 'arraybuffer',
+        timeout: 30000
+      });
+
+      const buffer = Buffer.from(response.data);
+
+      // 4. Upload to Meta
+      const metaUpload = await metaApi.uploadMedia(
+        waAccount.phoneNumberId,
+        accountWithToken.accessToken,
+        buffer,
+        mimeType || response.headers['content-type'] || 'image/jpeg',
+        filename || cloudinaryUrl.split('/').pop() || 'media',
+        waAccount.wabaId
+      );
+
+      return res.json({
+        success: true,
+        mediaId: metaUpload.id,
+        cloudinaryUrl
+      });
+
+    } catch (error: any) {
+      console.error('❌ Upload to Meta endpoint failed:', error.message);
       next(error);
     }
   }
