@@ -656,6 +656,105 @@ class TemplatesController {
       next(error);
     }
   }
+
+  // ==========================================
+  // RE-UPLOAD MEDIA (Fix for old templates)
+  // ==========================================
+  async reuploadMedia(req: Request, res: Response, next: NextFunction) {
+    try {
+      const organizationId = (req as AuthRequest).user?.organizationId;
+      if (!organizationId) {
+        throw new AppError('Organization context required', 400);
+      }
+
+      const id = req.params.id as string;
+      if (!id) {
+        throw new AppError('Template ID is required', 400);
+      }
+
+      const template = await prisma.template.findFirst({
+        where: { id, organizationId }
+      });
+
+      if (!template) {
+        throw new AppError('Template not found', 404);
+      }
+
+      if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType?.toUpperCase() || '')) {
+        throw new AppError('Template has no media header', 400);
+      }
+
+      const cloudinaryUrl = template.headerContent;
+      if (!cloudinaryUrl?.startsWith('http')) {
+        throw new AppError('Invalid or missing media URL in template content', 400);
+      }
+
+      // 1. Get WhatsApp account
+      const waAccount = await prisma.whatsAppAccount.findFirst({
+        where: { 
+          organizationId,
+          status: 'CONNECTED'
+        },
+        orderBy: { isDefault: 'desc' }
+      });
+
+      if (!waAccount) {
+        throw new AppError('No connected WhatsApp account found', 400);
+      }
+
+      // 2. Decrypt token
+      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
+      if (!accountWithToken) {
+        throw new AppError('Failed to decrypt WhatsApp token', 500);
+      }
+
+      // 3. Download from Cloudinary
+      console.log('📥 Re-upload Fix: Downloading from Cloudinary:', cloudinaryUrl);
+      
+      const response = await axios.get(cloudinaryUrl, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)'
+        }
+      });
+
+      const buffer = Buffer.from(response.data);
+      const mimeType = response.headers['content-type'] || 'image/jpeg';
+      const filename = cloudinaryUrl.split('/').pop()?.split('?')[0] || 'media';
+
+      console.log('📤 Re-upload Fix: Uploading to Meta:', { size: buffer.length, mimeType });
+
+      // 4. Upload to Meta
+      const result = await metaApi.uploadMedia(
+        waAccount.phoneNumberId,
+        accountWithToken.accessToken,
+        buffer,
+        mimeType,
+        filename,
+        waAccount.wabaId
+      );
+
+      console.log('✅ Re-upload Fix successful, Meta Media ID:', result.id);
+
+      // 5. Update template in database
+      await prisma.template.update({
+        where: { id },
+        data: { headerMediaId: result.id }
+      });
+
+      return res.json({
+        success: true,
+        message: 'Media re-uploaded to Meta successfully',
+        metaMediaId: result.id,
+        cloudinaryUrl
+      });
+
+    } catch (error: any) {
+      console.error('❌ Re-upload failed:', error.message);
+      next(error);
+    }
+  }
 }
 
 export const templatesController = new TemplatesController();
