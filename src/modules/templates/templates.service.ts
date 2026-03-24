@@ -58,6 +58,60 @@ const formatTemplate = (template: any): TemplateResponse => ({
   whatsappAccountId: template.whatsappAccountId || null,
 });
 
+/**
+ * ✅ NEW: Helper to upload media to Meta during template creation
+ */
+const uploadMediaToMeta = async (
+  cloudinaryUrl: string,
+  headerType: string,
+  waData: { phoneNumberId: string; accessToken: string; wabaId: string }
+): Promise<string> => {
+  try {
+    console.log('📤 Uploading media to Meta:', { cloudinaryUrl, headerType });
+
+    // Download from Cloudinary
+    const response = await axios.get(cloudinaryUrl, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
+        'Accept': '*/*'
+      }
+    });
+
+    const buffer = Buffer.from(response.data);
+    const mimeType = response.headers['content-type'] || 
+      (headerType === 'IMAGE' ? 'image/jpeg' : 
+       headerType === 'VIDEO' ? 'video/mp4' : 
+       'application/pdf');
+
+    const filename = cloudinaryUrl.split('/').pop()?.split('?')[0] || 
+      `media.${mimeType.split('/')[1]}`;
+
+    console.log('📥 Downloaded:', { size: buffer.length, mimeType, filename });
+
+    // Upload to Meta
+    const result = await metaApi.uploadMedia(
+      waData.phoneNumberId,
+      waData.accessToken,
+      buffer,
+      mimeType,
+      filename,
+      waData.wabaId
+    );
+
+    console.log('✅ Meta upload successful:', result.id);
+    return result.id;
+
+  } catch (error: any) {
+    console.error('❌ Meta upload failed:', error.message);
+    throw new AppError(
+      `Failed to upload ${headerType.toLowerCase()} to WhatsApp: ${error.response?.data?.error?.message || error.message}`,
+      400
+    );
+  }
+};
+
 const extractVariables = (text: string): number[] => {
   const regex = /\{\{(\d+)\}\}/g;
   const variables: number[] = [];
@@ -579,50 +633,33 @@ export class TemplatesService {
     let waData: Awaited<ReturnType<typeof getWhatsAppAccountWithToken>> | null = null;
     let canSyncToMeta = false;
 
-    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))) {
+    // Check for WhatsApp account first
+    try {
+      waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
+      canSyncToMeta = true;
+    } catch (err) {
+      canSyncToMeta = false;
+    }
+
+    if (canSyncToMeta && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))) {
       const cloudinaryUrl = headerContent || headerMediaId;
       
       if (!cloudinaryUrl) {
         throw new AppError(`${headerType} template requires media`, 400);
       }
 
+      // If it's a URL, upload to Meta to get numeric ID
       if (cloudinaryUrl.startsWith('http')) {
-        try {
-          console.log('📤 Uploading media to Meta from URL:', cloudinaryUrl);
-          
-          // Get WhatsApp account
-          waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
-          canSyncToMeta = true;
-
-          // Download from Cloudinary/URL
-          const response = await axios.get(cloudinaryUrl, { 
-            responseType: 'arraybuffer',
-            timeout: 30000 
-          });
-          
-          const buffer = Buffer.from(response.data);
-          const mimeType = response.headers['content-type'] || 'image/jpeg';
-          const filename = cloudinaryUrl.split('/').pop() || 'media';
-          
-          console.log('📥 Downloaded media:', { size: buffer.length, mimeType });
-
-          // Upload to Meta
-          const metaUpload = await metaApi.uploadMedia(
-            waData.phoneNumberId,
-            waData.accessToken,
-            buffer,
-            mimeType,
-            filename,
-            waData.wabaId
-          );
-
-          metaMediaId = metaUpload.id;
-          console.log('✅ Uploaded to Meta, Media ID:', metaMediaId);
-
-        } catch (err: any) {
-          console.error('❌ Meta media upload failed:', err.message);
-          throw new AppError(`Failed to upload media to WhatsApp: ${err.message}`, 400);
-        }
+        metaMediaId = await uploadMediaToMeta(
+          cloudinaryUrl,
+          normalizeHeaderType(headerType)!,
+          waData!
+        );
+      } else if (cloudinaryUrl.startsWith('4:')) {
+         // This is a resumable handle, we should probably still upload it to get a permanent numeric ID 
+         // for reliable campaign sending later, but Meta allows handles for template creation.
+         // However, the user's manual fix showed that handles cause 131053 in campaigns.
+         console.warn('⚠️ Received resumable handle. Template creation may work, but campaigns might fail. Recommend re-uploading file directly.');
       }
     }
 

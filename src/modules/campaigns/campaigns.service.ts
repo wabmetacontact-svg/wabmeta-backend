@@ -958,44 +958,28 @@ export class CampaignsService {
             if (template.headerType && template.headerType !== 'NONE') {
               const hType = template.headerType.toUpperCase();
               if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-                const hKey = hType.toLowerCase();
-                const mediaHandle: any = {};
-                
-                // ✅ Validate headerMediaId is numeric (handles starting with '4:' are invalid for sending)
-                const isValidMediaId = template.headerMediaId && /^\d+$/.test(template.headerMediaId);
+                const metaMediaId = template.headerMediaId;
 
-                // Prioritize Meta Media ID (MOST RELIABLE - avoids 403 download errors)
-                if (isValidMediaId) {
-                  mediaHandle.id = template.headerMediaId;
-                } 
-                // Fallback to override link from campaign metadata if present
-                else if (campaignMeta.header?.link || campaignMeta.headerUrl) {
-                  mediaHandle.link = campaignMeta.header?.link || campaignMeta.headerUrl;
-                }
-                // Finally, fallback to url from template content
-                else if (template.headerContent && (template.headerContent.startsWith('http') || template.headerContent.startsWith('https'))) {
-                  mediaHandle.link = template.headerContent;
-                }
-                
-                // ✅ LOG WARNING if we have a handle but it's not numeric
-                if (template.headerMediaId && !isValidMediaId && !mediaHandle.link) {
-                   console.warn(`⚠️  Template ${template.name} has invalid non-numeric headerMediaId "${template.headerMediaId.substring(0, 15)}...". Bypassing.`);
+                // ✅ STRICT VALIDATION: Always use numeric Meta ID
+                if (!metaMediaId || !/^\d+$/.test(metaMediaId)) {
+                  throw new Error(
+                    `Template "${template.name}" is missing a valid numeric Meta media ID. Please re-upload or re-create the template.`
+                  );
                 }
 
-                if (mediaHandle.id || mediaHandle.link) {
-                  components.push({
-                    type: 'header',
-                    parameters: [
-                      {
-                        type: hKey,
-                        [hKey]: mediaHandle,
+                components.push({
+                  type: 'header',
+                  parameters: [
+                    {
+                      type: hType.toLowerCase(),
+                      [hType.toLowerCase()]: {
+                        id: metaMediaId
                       },
-                    ],
-                  });
-                } else {
-                  // ✅ Mandatory header but no media found - throw descriptive error
-                  throw new Error(`Media template requires a ${hKey} header but no media ID or URL was provided.`);
-                }
+                    },
+                  ],
+                });
+
+                console.log(`✅ Using Meta Media ID for ${hType}:`, metaMediaId);
               } else if (hType === 'TEXT') {
                 const headerMatches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
                 if (headerMatches.length > 0) {
