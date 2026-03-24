@@ -556,6 +556,25 @@ export class TemplatesService {
       throw new AppError(`Validation failed: ${validation.errors.join(', ')}`, 400);
     }
 
+    // ✅ ADDED: Fix 2: Template Media Validation
+    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(input.headerType))) {
+      const mediaHandle = input.headerMediaId || input.headerContent;
+      
+      if (!mediaHandle) {
+        throw new AppError(
+          `${input.headerType} template requires uploaded media. Please upload an image/video/document first.`,
+          400
+        );
+      }
+      
+      if (mediaHandle.startsWith('blob:') || mediaHandle.includes('localhost') || mediaHandle.includes('127.0.0.1')) {
+        throw new AppError(
+          'Local media URLs not supported. Please upload to Cloudinary or use Meta uploaded media.',
+          400
+        );
+      }
+    }
+
     // ✅ Try to get WhatsApp account (supports both table structures)
     let waData: Awaited<ReturnType<typeof getWhatsAppAccountWithToken>> | null = null;
     let canSyncToMeta = false;

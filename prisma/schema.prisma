@@ -411,6 +411,8 @@ model Campaign {
   @@index([scheduledAt])
   @@index([createdAt])
   @@index([createdById])
+  @@index([organizationId, status, createdAt])
+  @@index([whatsappAccountId, status])
 }
 
 model CampaignContact {
@@ -437,6 +439,8 @@ model CampaignContact {
   @@index([contactId])
   @@index([nextRetryAt])
   @@index([status])
+  @@index([campaignId, status])
+  @@index([waMessageId])
 }
 
 model MessageQueue {
@@ -554,6 +558,7 @@ model Message {
   @@index([direction])
   @@index([status])
   @@index([createdAt])
+  @@index([conversationId, createdAt], map: "Message_conversationId_createdAt_asc_idx")
   @@index([conversationId, createdAt(sort: Desc)])
 }
 

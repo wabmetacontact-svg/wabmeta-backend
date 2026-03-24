@@ -1150,7 +1150,7 @@ export class CampaignsService {
         }));
 
         // ✅ Update DB counters every N chunks instead of every chunk (reduces DB writes)
-        if (chunkIndex % COUNTER_UPDATE_EVERY === 0) {
+        if (chunkIndex % COUNTER_UPDATE_EVERY === 0 && i + CONCURRENCY < contacts.length) {
           this.updateCampaignCounters(campaignId, organizationId, sentCount, failedCount).catch(() => {});
         }
       }
