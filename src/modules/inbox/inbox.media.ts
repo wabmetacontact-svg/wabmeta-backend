@@ -1,7 +1,7 @@
-// src/modules/inbox/inbox.media.ts
-
 import axios from 'axios';
 import prisma from '../../config/database';
+import { safeDecryptStrict } from '../../utils/encryption';
+import { config } from '../../config';
 
 export class InboxMediaService {
 
@@ -11,9 +11,10 @@ export class InboxMediaService {
 
     async getMediaUrl(mediaId: string, accessToken: string): Promise<string | null> {
         try {
+            const version = config.meta?.graphApiVersion || 'v21.0';
             // Step 1: Get media URL from WhatsApp
             const response = await axios.get(
-                `https://graph.facebook.com/v18.0/${mediaId}`,
+                `https://graph.facebook.com/${version}/${mediaId}`,
                 {
                     headers: {
                         Authorization: `Bearer ${accessToken}`,
@@ -87,7 +88,7 @@ export class InboxMediaService {
             const account = await prisma.whatsAppAccount.findFirst({
                 where: {
                     organizationId,
-                    isActive: true,
+                    status: 'CONNECTED' as any,
                 },
             });
 
@@ -96,8 +97,12 @@ export class InboxMediaService {
                 return null;
             }
 
-            // Decrypt access token if encrypted
-            let accessToken = account.accessToken;
+            // Decrypt access token
+            const accessToken = safeDecryptStrict(account.accessToken);
+            if (!accessToken) {
+                console.error('Failed to decrypt access token');
+                return null;
+            }
 
             // Get media URL
             const mediaUrl = await this.getMediaUrl(mediaId, accessToken);
@@ -124,15 +129,34 @@ export class InboxMediaService {
         mediaId: string;
     }> {
         try {
-            // Get WhatsApp account
+            console.log(`🔍 Processing media ${mediaId} for org ${organizationId}`);
+            
+            let accessToken: string | null = null;
+
+            // 1. Try legacy WhatsAppAccount table first
             const account = await prisma.whatsAppAccount.findFirst({
                 where: {
                     organizationId,
-                    isActive: true, // Note: WhatsAppAccount model uses WhatsAppAccountStatus enum, but user providedisActive: true. I should check if isActive exists.
+                    isActive: true,
                 },
             });
 
-            if (!account || !account.accessToken) {
+            if (account?.accessToken) {
+                accessToken = safeDecryptStrict(account.accessToken);
+            }
+
+            // 2. Fallback to newer MetaConnection table if not found or no token
+            if (!accessToken) {
+                const connection = await prisma.metaConnection.findFirst({
+                    where: { organizationId },
+                });
+                if (connection?.accessToken) {
+                    accessToken = safeDecryptStrict(connection.accessToken);
+                }
+            }
+
+            if (!accessToken) {
+                console.error('❌ No decrypted access token found for media processing');
                 return {
                     url: null,
                     base64: null,
@@ -140,8 +164,6 @@ export class InboxMediaService {
                     mediaId,
                 };
             }
-
-            const accessToken = account.accessToken;
 
             // Get direct URL
             const url = await this.getMediaUrl(mediaId, accessToken);
