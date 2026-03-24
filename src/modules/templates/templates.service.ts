@@ -1,5 +1,4 @@
-// 📁 src/modules/templates/templates.service.ts - FINAL COMPLETE VERSION
-
+import axios from 'axios';
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { TemplateStatus, Prisma } from '@prisma/client';
@@ -16,6 +15,7 @@ import {
 } from './templates.types';
 import { whatsappApi } from '../whatsapp/whatsapp.api';
 import { metaService } from '../meta/meta.service';
+import { metaApi } from '../meta/meta.api';
 import { safeDecryptStrict } from '../../utils/encryption';
 
 // ============================================
@@ -170,34 +170,33 @@ const buildMetaTemplatePayload = (t: {
     }
     // MEDIA Headers (IMAGE, VIDEO, DOCUMENT)
     else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-      const mediaHandle = t.headerMediaId || t.headerContent;
+      // ✅ CRITICAL: Use numeric headerMediaId (Meta ID) for submission
+      const metaMediaId = t.headerMediaId;
 
-      if (!mediaHandle) {
+      if (!metaMediaId) {
         throw new AppError(
-          `${headerType} header requires uploaded media.`,
+          `${headerType} template requires a valid Meta media ID.`,
           400
         );
       }
 
-      if (mediaHandle.startsWith('blob:') || mediaHandle.includes('localhost')) {
-        throw new AppError('Local URLs not supported.', 400);
+      // ✅ Validate it's a proper Meta numeric ID
+      if (!/^\d+$/.test(metaMediaId)) {
+        throw new AppError(
+          `Invalid Meta media ID: ${metaMediaId}. Expected numeric ID.`,
+          400
+        );
       }
 
-      // ✅ Handle both formats (Meta handle vs Cloudinary URL)
       const headerComp: any = {
         type: 'HEADER',
         format: headerType,
         example: {
-          header_handle: [mediaHandle]
+          header_handle: [metaMediaId]
         }
       };
 
-      console.log(`✅ ${headerType} header:`, {
-        isMetaHandle: !mediaHandle.startsWith('http'),
-        isUrl: mediaHandle.startsWith('http'),
-        preview: mediaHandle.substring(0, 60),
-      });
-
+      console.log(`✅ ${headerType} header added with Meta ID:`, metaMediaId);
       components.push(headerComp);
     }
   }
@@ -575,33 +574,66 @@ export class TemplatesService {
       }
     }
 
-    // ✅ Try to get WhatsApp account (supports both table structures)
+    // ✅ NEW: If media template, upload to Meta first to get numeric ID
+    let metaMediaId: string | null = headerMediaId || null;
     let waData: Awaited<ReturnType<typeof getWhatsAppAccountWithToken>> | null = null;
     let canSyncToMeta = false;
 
-    try {
-      waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
-      canSyncToMeta = true;
-      console.log('✅ WhatsApp account found, will sync to Meta');
+    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))) {
+      const cloudinaryUrl = headerContent || headerMediaId;
+      
+      if (!cloudinaryUrl) {
+        throw new AppError(`${headerType} template requires media`, 400);
+      }
 
-      console.log('📱 Template will be created in WABA:', {
-        wabaId: waData.wabaId,
-        accountId: waData.account.id,
-        phone: waData.account.phoneNumber,
-      });
+      if (cloudinaryUrl.startsWith('http')) {
+        try {
+          console.log('📤 Uploading media to Meta from URL:', cloudinaryUrl);
+          
+          // Get WhatsApp account
+          waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
+          canSyncToMeta = true;
 
-      // ✅ VALIDATE: If media header, check if media is from same WABA
-      if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType?.toUpperCase() || '')) {
-        if (input.headerMediaId) {
-          console.log('🔍 Validating media belongs to same WABA:', {
-            mediaId: input.headerMediaId,
-            targetWabaId: waData.wabaId,
+          // Download from Cloudinary/URL
+          const response = await axios.get(cloudinaryUrl, { 
+            responseType: 'arraybuffer',
+            timeout: 30000 
           });
+          
+          const buffer = Buffer.from(response.data);
+          const mimeType = response.headers['content-type'] || 'image/jpeg';
+          const filename = cloudinaryUrl.split('/').pop() || 'media';
+          
+          console.log('📥 Downloaded media:', { size: buffer.length, mimeType });
+
+          // Upload to Meta
+          const metaUpload = await metaApi.uploadMedia(
+            waData.phoneNumberId,
+            waData.accessToken,
+            buffer,
+            mimeType,
+            filename,
+            waData.wabaId
+          );
+
+          metaMediaId = metaUpload.id;
+          console.log('✅ Uploaded to Meta, Media ID:', metaMediaId);
+
+        } catch (err: any) {
+          console.error('❌ Meta media upload failed:', err.message);
+          throw new AppError(`Failed to upload media to WhatsApp: ${err.message}`, 400);
         }
       }
-    } catch (err) {
-      console.warn('⚠️ No WhatsApp account found, creating local-only template');
-      canSyncToMeta = false;
+    }
+
+    // Try to get account for non-media templates if not already fetched
+    if (!waData) {
+      try {
+        waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
+        canSyncToMeta = true;
+      } catch (err) {
+        canSyncToMeta = false;
+      }
     }
 
     // Check for duplicates
@@ -632,7 +664,7 @@ export class TemplatesService {
       category,
       headerType: headerType || null,
       headerContent: headerContent || null,
-      headerMediaId: headerMediaId || null,
+      headerMediaId: metaMediaId,
       bodyText,
       footerText: footerText || null,
       buttons: toJsonValue(buttons || []),
@@ -668,7 +700,7 @@ export class TemplatesService {
           category,
           headerType: headerType || null,
           headerContent: headerContent || null,
-          headerMediaId: input.headerMediaId || null,  // ✅ ADD THIS
+          headerMediaId: metaMediaId, 
           bodyText,
           footerText: footerText || null,
           buttons: (buttons || []) as any,
