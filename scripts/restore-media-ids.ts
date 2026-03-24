@@ -68,17 +68,17 @@ async function main() {
       const headerComp = (match.components || []).find((c: any) => c.type === 'HEADER');
       const handle = headerComp?.example?.header_handle?.[0];
 
-      if (handle && !handle.startsWith('http')) {
+      if (handle && /^\d+$/.test(handle)) {
         await prisma.template.update({
           where: { id: template.id },
           data: { headerMediaId: handle } as any,
         });
-        console.log(`  ✅ Restored headerMediaId: ${handle.substring(0, 30)}...\n`);
+        console.log(`  ✅ Restored numeric headerMediaId: ${handle}\n`);
         restored++;
       } else {
-        console.log(`  ⚠️  Meta did not return a handle for this template`);
-        console.log(`      handle_url from example: ${headerComp?.example?.header_url?.[0] || 'none'}`);
-        console.log(`      You must RE-UPLOAD media for this template.\n`);
+        console.log(`  ⚠️  Meta did not return a valid numeric ID (it returned a handle instead).`);
+        console.log(`      Handle: ${handle?.substring(0, 30)}...`);
+        console.log(`      You must MANUALLY UPLOAD media for this template in Dashboard → Templates.\n`);
         failed++;
       }
 

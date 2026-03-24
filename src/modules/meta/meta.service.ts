@@ -1045,9 +1045,16 @@ export class MetaService {
 
     // Meta returns the handle in example.header_handle array
     const handle = header.example?.header_handle?.[0];
-    if (handle && !handle.startsWith('http')) {
-      return handle; // It's a Meta media handle (not a URL)
+    
+    // ✅ CRITICAL: Handles starting with '4:' are NOT valid Media IDs for the messages endpoint.
+    // They are only for template creation examples.
+    // Media IDs must be numeric.
+    if (handle && /^\d+$/.test(handle)) {
+      return handle; 
     }
+    
+    // If it starts with '4:', it's a resumable upload handle, NOT a Media ID.
+    // Sending this in the 'id' field of a message will fail with Error 100.
     return null;
   }
 

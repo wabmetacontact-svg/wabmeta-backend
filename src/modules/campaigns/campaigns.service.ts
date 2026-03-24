@@ -961,8 +961,11 @@ export class CampaignsService {
                 const hKey = hType.toLowerCase();
                 const mediaHandle: any = {};
                 
+                // ✅ Validate headerMediaId is numeric (handles starting with '4:' are invalid for sending)
+                const isValidMediaId = template.headerMediaId && /^\d+$/.test(template.headerMediaId);
+
                 // Prioritize Meta Media ID (MOST RELIABLE - avoids 403 download errors)
-                if (template.headerMediaId) {
+                if (isValidMediaId) {
                   mediaHandle.id = template.headerMediaId;
                 } 
                 // Fallback to override link from campaign metadata if present
@@ -972,6 +975,11 @@ export class CampaignsService {
                 // Finally, fallback to url from template content
                 else if (template.headerContent && (template.headerContent.startsWith('http') || template.headerContent.startsWith('https'))) {
                   mediaHandle.link = template.headerContent;
+                }
+                
+                // ✅ LOG WARNING if we have a handle but it's not numeric
+                if (template.headerMediaId && !isValidMediaId && !mediaHandle.link) {
+                   console.warn(`⚠️  Template ${template.name} has invalid non-numeric headerMediaId "${template.headerMediaId.substring(0, 15)}...". Bypassing.`);
                 }
 
                 if (mediaHandle.id || mediaHandle.link) {
