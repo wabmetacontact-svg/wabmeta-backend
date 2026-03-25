@@ -9,6 +9,25 @@ let io: SocketServer | null = null;
  */
 export const initializeCampaignSocket = (socketServer: SocketServer) => {
     io = socketServer;
+    
+    io.on('connection', (socket) => {
+        socket.on('campaign:join', (campaignId: string) => {
+            console.log(`🔌 [SOCKET] Client joining campaign room: ${campaignId}`);
+            socket.join(`campaign:${campaignId}`);
+        });
+
+        socket.on('campaign:leave', (campaignId: string) => {
+            console.log(`🔌 [SOCKET] Client leaving campaign room: ${campaignId}`);
+            socket.leave(`campaign:${campaignId}`);
+        });
+
+        socket.on('org:join', (organizationId: string) => {
+            console.log(`🔌 [SOCKET] Client joining organization room: ${organizationId}`);
+            socket.join(`org:${organizationId}`);
+            socket.join(`org:${organizationId}:campaigns`);
+        });
+    });
+
     console.log('✅ Campaign Socket Service initialized');
 };
 

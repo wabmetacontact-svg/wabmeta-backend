@@ -106,6 +106,18 @@ async function bootstrap() {
     console.log('✅ Cron jobs started');
 
     // ============================================
+    // Step 7.1: Initialize Campaign Recovery
+    // ============================================
+    try {
+      const { campaignRecoveryService } = await import('./modules/campaigns/campaigns.recovery.service');
+      console.log('🔄 Initializing campaign recovery service...');
+      await campaignRecoveryService.initialize();
+      console.log('✅ Campaign recovery service initialized');
+    } catch (error) {
+      console.warn('⚠️  Campaign recovery initialization failed:', error);
+    }
+
+    // ============================================
     // Step 8: Initialize Redis (NEW)
     // ============================================
     try {
