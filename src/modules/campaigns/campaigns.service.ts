@@ -2301,7 +2301,7 @@ export class CampaignsService {
     });
 
     if (!campaign) {
-      throw new Error('Campaign not found');
+      throw new AppError('Campaign not found', 404);
     }
 
     const where: any = { campaignId };
@@ -2332,6 +2332,7 @@ export class CampaignsService {
               lastName: true,
               email: true,
               avatar: true,
+              whatsappProfileName: true,
             },
           },
         },
@@ -2347,7 +2348,10 @@ export class CampaignsService {
       id: cc.id,
       contactId: cc.contactId,
       phone: cc.contact.phone,
-      name: [cc.contact.firstName, cc.contact.lastName].filter(Boolean).join(' ') || cc.contact.phone,
+      name:
+        cc.contact.whatsappProfileName ||
+        [cc.contact.firstName, cc.contact.lastName].filter(Boolean).join(' ') ||
+        cc.contact.phone,
       avatar: cc.contact.avatar,
       status: cc.status,
       waMessageId: cc.waMessageId,
@@ -2368,14 +2372,7 @@ export class CampaignsService {
         total,
         totalPages: Math.ceil(total / limit),
       },
-      stats: {
-        total,
-        pending: await prisma.campaignContact.count({ where: { ...where, status: 'PENDING' } }),
-        sent: await prisma.campaignContact.count({ where: { ...where, status: 'SENT' } }),
-        delivered: await prisma.campaignContact.count({ where: { ...where, status: 'DELIVERED' } }),
-        read: await prisma.campaignContact.count({ where: { ...where, status: 'READ' } }),
-        failed: await prisma.campaignContact.count({ where: { ...where, status: 'FAILED' } }),
-      },
+      // Stats removed to improve performance - frontend uses dedicated /stats endpoint
     };
   }
 
@@ -2389,7 +2386,7 @@ export class CampaignsService {
     });
 
     if (!campaign) {
-      throw new Error('Campaign not found');
+      throw new AppError('Campaign not found', 404);
     }
 
     // Get failed contacts
@@ -2441,7 +2438,7 @@ export class CampaignsService {
     });
 
     if (!campaign) {
-      throw new Error('Campaign not found');
+      throw new AppError('Campaign not found', 404);
     }
 
     const pendingCount = await prisma.campaignContact.count({
@@ -2476,7 +2473,7 @@ export class CampaignsService {
     });
 
     if (!campaign) {
-      throw new Error('Campaign not found');
+      throw new AppError('Campaign not found', 404);
     }
 
     const [
