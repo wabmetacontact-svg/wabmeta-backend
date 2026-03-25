@@ -857,10 +857,10 @@ export class CampaignsService {
     const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
     const template = campaign.template;
 
-    // Concurrency settings: 50 messages in parallel for high-speed sending
-    const CONCURRENCY = 50;
+    // Concurrency settings: Balanced for speed and reliability
+    const CONCURRENCY = 20; // Reduced from 50 to prevent Meta/DB throttling
     const BATCH_SIZE = 1000;
-    const COUNTER_UPDATE_EVERY = 5; // Update DB counters every N chunks
+    const COUNTER_UPDATE_EVERY = 1; // Update DB counters Every chunk for REAL-TIME feedback
 
     // ✅ RESET/SYNC COUNTERS BEFORE STARTING
     const statusStats = await prisma.campaignContact.groupBy({
@@ -875,6 +875,19 @@ export class CampaignsService {
       if (s.status === 'SENT' || s.status === 'DELIVERED' || s.status === 'READ') dbSent += s._count;
       if (s.status === 'FAILED') dbFailed += s._count;
     });
+
+    // ✅ FIX: Reset any 'QUEUED' contacts back to 'PENDING' to avoid them being skipped
+    const queuedCount = await prisma.campaignContact.count({
+      where: { campaignId, status: 'QUEUED' as any }
+    });
+    
+    if (queuedCount > 0) {
+      console.log(`🔄 Resetting ${queuedCount} QUEUED contacts to PENDING for campaign ${campaignId}`);
+      await prisma.campaignContact.updateMany({
+        where: { campaignId, status: 'QUEUED' as any },
+        data: { status: 'PENDING' }
+      });
+    }
 
     let processedCount = 0;
     let sentCount = dbSent;
@@ -923,8 +936,8 @@ export class CampaignsService {
       let chunkIndex = 0;
       for (let i = 0; i < contacts.length; i += CONCURRENCY) {
         chunkIndex++;
-        // Re-check campaign status every 10 chunks (instead of every 4)
-        if (chunkIndex > 1 && chunkIndex % 10 === 0) {
+        // Re-check campaign status EVERY chunk for better responsiveness
+        if (chunkIndex > 0) {
           const isRunning = await prisma.campaign.findUnique({
             where: { id: campaignId },
             select: { status: true },
@@ -1055,11 +1068,11 @@ export class CampaignsService {
             const waMessageId = result.messageId;
             const now = new Date();
 
-            // ✅ Fire-and-forget DB update (non-blocking)
-            prisma.campaignContact.update({
+            // ✅ Await DB update to ensure status is recorded correctly
+            await prisma.campaignContact.update({
               where: { id: campaignContact.id },
               data: { status: 'SENT', waMessageId, sentAt: now },
-            }).catch(() => {});
+            });
 
             // Non-blocking background save for message/conversation
             this.saveCampaignMessage(
@@ -1133,9 +1146,14 @@ export class CampaignsService {
           }
         }));
 
-        // ✅ Update DB counters every N chunks instead of every chunk (reduces DB writes)
-        if (chunkIndex % COUNTER_UPDATE_EVERY === 0 && i + CONCURRENCY < contacts.length) {
-          this.updateCampaignCounters(campaignId, organizationId, sentCount, failedCount).catch(() => {});
+        // ✅ Update DB counters every chunk - This fixes the "no real-time update" issue
+        if (chunkIndex % COUNTER_UPDATE_EVERY === 0) {
+          await this.updateCampaignCounters(campaignId, organizationId, sentCount, failedCount);
+        }
+
+        // ✅ Small 100ms delay between chunks to prevent bursts and allow DB to breathe
+        if (i + CONCURRENCY < contacts.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
 
