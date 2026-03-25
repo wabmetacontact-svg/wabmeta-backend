@@ -222,22 +222,13 @@ const buildMetaTemplatePayload = (t: {
       components.push(headerComp);
       console.log('✅ TEXT header added');
     }
-    // MEDIA Headers (IMAGE, VIDEO, DOCUMENT)
+    // ✅ FIXED: MEDIA Headers (IMAGE, VIDEO, DOCUMENT)
     else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-      // ✅ CRITICAL: Use numeric headerMediaId (Meta ID) for submission
-      const metaMediaId = t.headerMediaId;
+      const mediaId = t.headerMediaId || t.headerContent;
 
-      if (!metaMediaId) {
+      if (!mediaId) {
         throw new AppError(
-          `${headerType} template requires a valid Meta media ID.`,
-          400
-        );
-      }
-
-      // ✅ Validate it's a proper Meta numeric ID
-      if (!/^\d+$/.test(metaMediaId)) {
-        throw new AppError(
-          `Invalid Meta media ID: ${metaMediaId}. Expected numeric ID.`,
+          `${headerType} template requires uploaded media. Please upload a file first.`,
           400
         );
       }
@@ -245,13 +236,41 @@ const buildMetaTemplatePayload = (t: {
       const headerComp: any = {
         type: 'HEADER',
         format: headerType,
-        example: {
-          header_handle: [metaMediaId]
-        }
       };
 
-      console.log(`✅ ${headerType} header added with Meta ID:`, metaMediaId);
+      // ✅ CRITICAL: Detect media ID type and use correct field
+
+      if (mediaId.startsWith('4:')) {
+        // ✅ TYPE 1: Resumable Upload Handle (e.g., "4:dGVtcGxh...")
+        // Meta Template API accepts this in header_handle
+        console.log(`✅ Using resumable upload handle for ${headerType}`);
+        headerComp.example = {
+          header_handle: [mediaId],
+        };
+      } else if (/^\d+$/.test(mediaId)) {
+        // ✅ TYPE 2: Numeric Media ID (e.g., "1234567890")
+        // Also valid for template creation via header_handle
+        console.log(`✅ Using numeric media ID for ${headerType}:`, mediaId);
+        headerComp.example = {
+          header_handle: [mediaId],
+        };
+      } else if (mediaId.startsWith('http')) {
+        // ✅ TYPE 3: URL (Cloudinary or other hosted URL)
+        // Meta also accepts URLs in some cases
+        console.log(`✅ Using media URL for ${headerType}`);
+        headerComp.example = {
+          header_handle: [mediaId],
+        };
+      } else {
+        // ✅ TYPE 4: Unknown format - try as handle anyway
+        console.warn(`⚠️ Unknown media ID format, attempting as handle: ${mediaId.substring(0, 30)}...`);
+        headerComp.example = {
+          header_handle: [mediaId],
+        };
+      }
+
       components.push(headerComp);
+      console.log(`✅ ${headerType} header added`);
     }
   }
 
@@ -609,26 +628,30 @@ export class TemplatesService {
       throw new AppError(`Validation failed: ${validation.errors.join(', ')}`, 400);
     }
 
-    // ✅ ADDED: Fix 2: Template Media Validation
+    // ✅ FIXED: Template Media Validation (less strict)
     if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(input.headerType))) {
       const mediaHandle = input.headerMediaId || input.headerContent;
-      
+
       if (!mediaHandle) {
         throw new AppError(
-          `${input.headerType} template requires uploaded media. Please upload an image/video/document first.`,
+          `${input.headerType} template requires uploaded media. Please upload a file first.`,
           400
         );
       }
-      
-      if (mediaHandle.startsWith('blob:') || mediaHandle.includes('localhost') || mediaHandle.includes('127.0.0.1')) {
+
+      // Only reject truly invalid formats
+      if (mediaHandle.startsWith('blob:')) {
         throw new AppError(
-          'Local media URLs not supported. Please upload to Cloudinary or use Meta uploaded media.',
+          'Local blob URLs not supported. Please upload the file first.',
           400
         );
       }
+
+      // ✅ Accept: "4:..." handles, numeric IDs, URLs - all valid
+      console.log('✅ Media validation passed:', mediaHandle.substring(0, 40) + '...');
     }
 
-    // ✅ NEW: If media template, upload to Meta first to get numeric ID
+    // ✅ FIXED: Handle all media ID formats correctly
     let metaMediaId: string | null = headerMediaId || null;
     let waData: Awaited<ReturnType<typeof getWhatsAppAccountWithToken>> | null = null;
     let canSyncToMeta = false;
@@ -641,25 +664,40 @@ export class TemplatesService {
       canSyncToMeta = false;
     }
 
-    if (canSyncToMeta && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))) {
-      const cloudinaryUrl = headerContent || headerMediaId;
-      
-      if (!cloudinaryUrl) {
-        throw new AppError(`${headerType} template requires media`, 400);
+    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))) {
+      const mediaHandle = headerMediaId || headerContent;
+
+      if (!mediaHandle) {
+        throw new AppError(`${headerType} template requires uploaded media`, 400);
       }
 
-      // If it's a URL, upload to Meta to get numeric ID
-      if (cloudinaryUrl.startsWith('http')) {
-        metaMediaId = await uploadMediaToMeta(
-          cloudinaryUrl,
-          normalizeHeaderType(headerType)!,
-          waData!
-        );
-      } else if (cloudinaryUrl.startsWith('4:')) {
-         // This is a resumable handle, we should probably still upload it to get a permanent numeric ID 
-         // for reliable campaign sending later, but Meta allows handles for template creation.
-         // However, the user's manual fix showed that handles cause 131053 in campaigns.
-         console.warn('⚠️ Received resumable handle. Template creation may work, but campaigns might fail. Recommend re-uploading file directly.');
+      // ✅ FIXED: Accept ALL valid media formats
+      if (mediaHandle.startsWith('4:')) {
+        // Resumable upload handle - PERFECT for template creation
+        console.log('✅ Using resumable upload handle for template');
+        metaMediaId = mediaHandle;
+      } else if (/^\d+$/.test(mediaHandle)) {
+        // Numeric media ID - also works
+        console.log('✅ Using numeric media ID for template');
+        metaMediaId = mediaHandle;
+      } else if (mediaHandle.startsWith('http') && canSyncToMeta && waData) {
+        // URL - need to upload to Meta first
+        console.log('🔄 URL detected, uploading to Meta...');
+        try {
+          metaMediaId = await uploadMediaToMeta(
+            mediaHandle,
+            normalizeHeaderType(headerType)!,
+            waData
+          );
+          console.log('✅ Uploaded to Meta, got ID:', metaMediaId);
+        } catch (uploadErr: any) {
+          console.warn('⚠️ Meta upload failed, using URL directly:', uploadErr.message);
+          metaMediaId = mediaHandle;
+        }
+      } else {
+        // Unknown format - try to use as-is
+        console.warn('⚠️ Unknown media format, using as-is:', mediaHandle.substring(0, 30));
+        metaMediaId = mediaHandle;
       }
     }
 

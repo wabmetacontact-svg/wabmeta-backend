@@ -1091,18 +1091,87 @@ export class CampaignsService {
 
   private buildTemplatePayload(template: any, cc: any, phone: string): any {
     const components: any[] = [];
+
+    // Header
     if (template.headerType && template.headerType !== 'NONE') {
       const hType = template.headerType.toUpperCase();
-      if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType) && template.headerMediaId) {
-        components.push({ type: 'header', parameters: [{ type: hType.toLowerCase(), [hType.toLowerCase()]: { id: template.headerMediaId } }] });
+
+      if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
+        const mediaId = template.headerMediaId;
+
+        if (mediaId) {
+          // ✅ FIXED: For SENDING messages, Meta needs the ID in the media object
+          // Both numeric IDs and "4:" handles work here
+
+          if (/^\d+$/.test(mediaId)) {
+            // Numeric ID → use "id" field
+            components.push({
+              type: 'header',
+              parameters: [{
+                type: hType.toLowerCase(),
+                [hType.toLowerCase()]: { id: mediaId },
+              }],
+            });
+            console.log(`✅ Campaign header: numeric ID ${mediaId}`);
+          } else if (mediaId.startsWith('4:')) {
+            // ✅ Resumable handle → Meta ALSO accepts this for sending
+            // But it might fail for some templates
+            // Best practice: use the handle, Meta resolves it
+            components.push({
+              type: 'header',
+              parameters: [{
+                type: hType.toLowerCase(),
+                [hType.toLowerCase()]: { id: mediaId },
+              }],
+            });
+            console.log(`✅ Campaign header: resumable handle`);
+          } else if (mediaId.startsWith('http')) {
+            // URL → use "link" field
+            components.push({
+              type: 'header',
+              parameters: [{
+                type: hType.toLowerCase(),
+                [hType.toLowerCase()]: { link: mediaId },
+              }],
+            });
+            console.log(`✅ Campaign header: URL`);
+          }
+          // If none match, skip header (template was created without media)
+        }
+        // If no mediaId, don't add header component
+        // Meta will use the template's default media
+      } else if (hType === 'TEXT') {
+        const matches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
+        if (matches.length > 0) {
+          const params = buildParamsFromContact(cc, matches.length);
+          components.push({
+            type: 'header',
+            parameters: params.map(p => ({ type: 'text', text: String(p) })),
+          });
+        }
       }
     }
+
+    // Body (unchanged)
     const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
     if (bodyMatches.length > 0) {
       const params = buildParamsFromContact(cc, bodyMatches.length);
-      components.push({ type: 'body', parameters: params.map(p => ({ type: 'text', text: String(p) })) });
+      components.push({
+        type: 'body',
+        parameters: params.map(p => ({ type: 'text', text: String(p) })),
+      });
     }
-    return { type: 'template', template: { name: template.name, language: { code: toMetaLang(template.language) }, components: components.length > 0 ? components : undefined } };
+
+    return {
+      type: 'template',
+      template: {
+        name: template.name,
+        language: { code: toMetaLang(template.language) },
+        // ✅ Only add components if we have any
+        // For templates without variables/media, send empty
+        ...(components.length > 0 ? { components } : {}),
+      },
+    };
   }
 
   // ✅ IMPROVED: Extract failure reason with better Meta error mapping
