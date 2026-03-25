@@ -103,8 +103,35 @@ const toJsonValue = (value: any): Prisma.InputJsonValue | undefined => {
 export class CampaignsService {
   private processingCampaigns = new Set<string>();
 
-  // ✅ FIXED: Robust account finder with detailed logging
-  // ✅ NEW: Sync counters from ACTUAL database records (never double-count)
+
+  // ✅ LIGHT: Only count, don't update campaign record every time
+  private async getQuickCounts(campaignId: string): Promise<{
+    total: number;
+    sent: number;
+    delivered: number;
+    read: number;
+    failed: number;
+    pending: number;
+  }> {
+    const counts = await prisma.campaignContact.groupBy({
+      by: ['status'],
+      where: { campaignId },
+      _count: true,
+    });
+
+    const get = (s: string) => counts.find(c => c.status === s)?._count || 0;
+
+    return {
+      total: counts.reduce((sum, c) => sum + c._count, 0),
+      sent: get('SENT'),
+      delivered: get('DELIVERED'),
+      read: get('READ'),
+      failed: get('FAILED'),
+      pending: get('PENDING') + get('QUEUED'),
+    };
+  }
+
+  // ✅ HEAVY: Full sync - only called at start, end, and on retry
   private async syncCampaignCounters(campaignId: string): Promise<{
     totalContacts: number;
     sentCount: number;
@@ -113,36 +140,27 @@ export class CampaignsService {
     failedCount: number;
     pendingCount: number;
   }> {
-    const counts = await prisma.campaignContact.groupBy({
-      by: ['status'],
-      where: { campaignId },
-      _count: true,
-    });
+    const counts = await this.getQuickCounts(campaignId);
 
-    const get = (status: string) => counts.find(c => c.status === status)?._count || 0;
-
-    const result = {
-      totalContacts: counts.reduce((sum, c) => sum + c._count, 0),
-      sentCount: get('SENT'),
-      deliveredCount: get('DELIVERED'),
-      readCount: get('READ'),
-      failedCount: get('FAILED'),
-      pendingCount: get('PENDING') + get('QUEUED'),
-    };
-
-    // ✅ Update campaign record with ACTUAL counts (no increment!)
     await prisma.campaign.update({
       where: { id: campaignId },
       data: {
-        totalContacts: result.totalContacts,
-        sentCount: result.sentCount + result.deliveredCount + result.readCount, // cumulative sent
-        deliveredCount: result.deliveredCount + result.readCount, // cumulative delivered
-        readCount: result.readCount,
-        failedCount: result.failedCount,
+        totalContacts: counts.total,
+        sentCount: counts.sent + counts.delivered + counts.read,
+        deliveredCount: counts.delivered + counts.read,
+        readCount: counts.read,
+        failedCount: counts.failed,
       },
     });
 
-    return result;
+    return {
+      totalContacts: counts.total,
+      sentCount: counts.sent,
+      deliveredCount: counts.delivered,
+      readCount: counts.read,
+      failedCount: counts.failed,
+      pendingCount: counts.pending,
+    };
   }
 
   private async findWhatsAppAccount(organizationId: string, whatsappAccountId?: string, phoneNumberId?: string): Promise<any> {
@@ -635,6 +653,7 @@ export class CampaignsService {
     };
   }
 
+  // ✅ HIGH PERFORMANCE: Process campaign contacts
   private async processCampaignContacts(
     campaignId: string,
     organizationId: string
@@ -662,7 +681,7 @@ export class CampaignsService {
         data: { status: 'PENDING' },
       });
 
-      // Sync counters at start
+      // ✅ Sync counters ONLY at start
       await this.syncCampaignCounters(campaignId);
 
       const accessToken = this.getDecryptedToken(campaign.whatsappAccount.accessToken);
@@ -673,22 +692,26 @@ export class CampaignsService {
       const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
       const template = campaign.template;
 
-      // ✅ SMART SENDING CONFIG
-      const BATCH_SIZE = 500;
-      const CONCURRENCY = 25;                   // ✅ Increased from 10
-      const DELAY_BETWEEN_CHUNKS_MS = 50;       // ✅ Reduced from 200ms
-      const SYNC_EVERY_N_MESSAGES = 50;         // ✅ Sync DB every 50, not every 10
-      const RATE_LIMIT_PAUSE_MS = 3000;         // ✅ Pause on rate limit
-      const MAX_CONSECUTIVE_FAILURES = 20;      // ✅ Stop if too many consecutive failures
+      // ============================================
+      // ✅ SPEED CONFIG - TUNED FOR MAXIMUM THROUGHPUT
+      // ============================================
+      const BATCH_SIZE = 1000;              // Fetch more contacts per batch
+      const CONCURRENCY = 30;               // Send 30 parallel requests
+      const FLUSH_EVERY = 100;              // DB write every 100 messages
+      const EMIT_PROGRESS_EVERY = 50;       // Socket update every 50 messages
+      const DELAY_BETWEEN_CHUNKS_MS = 30;   // Very small delay
+      const MAX_CONSECUTIVE_FAILURES = 30;
+      const RATE_LIMIT_PAUSE_MS = 3000;
 
       let hasMore = true;
       let totalProcessed = 0;
       let consecutiveFailures = 0;
       let rateLimitHits = 0;
 
-      // ✅ Track results in memory (batch write to DB)
-      let batchSent: { id: string; waMessageId: string }[] = [];
-      let batchFailed: { id: string; reason: string }[] = [];
+      // ✅ In-memory batch buffers
+      let batchSent: { id: string; waMessageId: string; contactId: string; phone: string }[] = [];
+      let batchFailed: { id: string; reason: string; contactId: string; phone: string }[] = [];
+      let lastProgressEmit = 0;
 
       while (hasMore) {
         // Check campaign status
@@ -711,12 +734,14 @@ export class CampaignsService {
           break;
         }
 
-        console.log(`📦 Processing ${contacts.length} contacts (concurrency: ${CONCURRENCY})`);
+        console.log(`📦 Processing ${contacts.length} contacts`);
 
-        // Process in concurrent chunks
+        // ============================================
+        // ✅ FAST PROCESSING LOOP
+        // ============================================
         for (let i = 0; i < contacts.length; i += CONCURRENCY) {
-          // Check status periodically
-          if (i > 0 && i % (CONCURRENCY * 10) === 0) {
+          // Check status every 300 messages
+          if (totalProcessed > 0 && totalProcessed % 300 === 0) {
             const check = await prisma.campaign.findUnique({
               where: { id: campaignId },
               select: { status: true },
@@ -724,173 +749,138 @@ export class CampaignsService {
             if (check?.status !== 'RUNNING') break;
           }
 
-          // ✅ SMART: If too many consecutive failures, pause and check quality
+          // ✅ Auto-pause on high failure rate
           if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            console.warn(`⚠️ ${consecutiveFailures} consecutive failures! Pausing 10s...`);
-            
-            // Emit warning to frontend
+            console.warn(`⚠️ ${consecutiveFailures} consecutive failures`);
             campaignSocketService.emitCampaignError(organizationId, campaignId, {
-              message: `High failure rate detected (${consecutiveFailures} consecutive). Auto-pausing for quality check.`,
+              message: `High failure rate (${consecutiveFailures} consecutive). Auto-pausing 10s.`,
               code: 'HIGH_FAILURE_RATE',
             });
-
-            await new Promise(r => setTimeout(r, 10000)); // 10s pause
-            consecutiveFailures = 0; // Reset counter
+            await new Promise(r => setTimeout(r, 10000));
+            consecutiveFailures = 0;
           }
 
           const chunk = contacts.slice(i, i + CONCURRENCY);
 
-          // ✅ Process chunk concurrently
+          // ✅ SEND ALL IN PARALLEL
           const results = await Promise.allSettled(
             chunk.map(async (cc) => {
               const phone = cc.contact?.phone;
               if (!phone) {
-                return { 
-                  type: 'failed' as const, 
-                  id: cc.id, 
-                  contactId: cc.contactId,
-                  phone: '',
-                  reason: 'No phone number' 
-                };
+                return { type: 'failed' as const, id: cc.id, contactId: cc.contactId, phone: '', reason: 'No phone number', metaCode: 0 };
               }
 
               const cleanPhone = digitsOnly(phone);
               if (!cleanPhone || cleanPhone.length < 10) {
-                return { 
-                  type: 'failed' as const, 
-                  id: cc.id, 
-                  contactId: cc.contactId,
-                  phone: cleanPhone,
-                  reason: 'Invalid phone number' 
-                };
+                return { type: 'failed' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, reason: 'Invalid phone number', metaCode: 0 };
               }
 
               try {
                 const payload = this.buildTemplatePayload(template, cc, cleanPhone);
-
-                const result = await metaApi.sendMessage(
-                  phoneNumberId,
-                  accessToken,
-                  cleanPhone,
-                  payload
-                );
-
-                return {
-                  type: 'sent' as const,
-                  id: cc.id,
-                  contactId: cc.contactId,
-                  phone: cleanPhone,
-                  waMessageId: result.messageId,
-                };
+                const result = await metaApi.sendMessage(phoneNumberId, accessToken, cleanPhone, payload);
+                return { type: 'sent' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, waMessageId: result.messageId, metaCode: 0 };
               } catch (err: any) {
                 const reason = this.extractFailureReason(err);
-                const metaCode = err.response?.data?.error?.code;
-
-                return {
-                  type: 'failed' as const,
-                  id: cc.id,
-                  contactId: cc.contactId,
-                  phone: cleanPhone,
-                  reason,
-                  metaCode,
-                };
+                const metaCode = err.response?.data?.error?.code || 0;
+                return { type: 'failed' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, reason, metaCode };
               }
             })
           );
 
-          // ✅ Process results
-          let chunkSent = 0;
+          // ✅ COLLECT RESULTS (no DB writes here!)
           let chunkFailed = 0;
 
           for (const result of results) {
             if (result.status === 'rejected') continue;
-
             const data = result.value;
 
             if (data.type === 'sent') {
-              batchSent.push({ id: data.id, waMessageId: data.waMessageId });
-              consecutiveFailures = 0; // Reset on success
-              chunkSent++;
-
-              // Emit individual status
-              campaignSocketService.emitContactStatus(organizationId, campaignId, {
-                contactId: data.contactId,
-                phone: data.phone,
-                status: 'SENT',
-                messageId: data.waMessageId,
-              });
-
+              batchSent.push({ id: data.id, waMessageId: data.waMessageId, contactId: data.contactId, phone: data.phone });
+              consecutiveFailures = 0;
             } else {
-              batchFailed.push({ id: data.id, reason: data.reason });
+              batchFailed.push({ id: data.id, reason: data.reason, contactId: data.contactId, phone: data.phone });
               chunkFailed++;
 
-              // ✅ SMART: Handle rate limits
-              if (data.metaCode === 131048 || data.metaCode === 131021 ||
-                  data.reason.includes('Rate limit') || data.reason.includes('rate limit')) {
+              // Handle rate limits
+              if (data.metaCode === 131048 || data.metaCode === 131021) {
                 rateLimitHits++;
-                console.warn(`⚠️ Rate limit hit #${rateLimitHits}! Pausing ${RATE_LIMIT_PAUSE_MS}ms`);
                 await new Promise(r => setTimeout(r, RATE_LIMIT_PAUSE_MS));
               }
 
-              // ✅ SMART: Track consecutive failures for ecosystem errors
               if (data.reason.includes('ecosystem') || data.reason.includes('undeliverable')) {
                 consecutiveFailures++;
               } else {
                 consecutiveFailures = 0;
               }
-
-              campaignSocketService.emitContactStatus(organizationId, campaignId, {
-                contactId: data.contactId,
-                phone: data.phone,
-                status: 'FAILED',
-                error: data.reason.substring(0, 200),
-              });
             }
           }
 
-          totalProcessed += chunkSent + chunkFailed;
+          totalProcessed += chunk.length;
 
-          // ✅ BATCH DB WRITE: Write to DB every N messages (not every single one!)
-          if (batchSent.length + batchFailed.length >= SYNC_EVERY_N_MESSAGES || 
-              i + CONCURRENCY >= contacts.length) {
-            await this.flushBatchResults(campaignId, batchSent, batchFailed);
+          // ✅ FLUSH TO DB every N messages
+          const batchTotal = batchSent.length + batchFailed.length;
+          if (batchTotal >= FLUSH_EVERY || i + CONCURRENCY >= contacts.length) {
+            await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
+
+            // ✅ Save messages to inbox (fire-and-forget, NON-blocking)
+            const sentCopy = [...batchSent];
+            setImmediate(() => {
+              sentCopy.forEach(s => {
+                this.saveCampaignMessage(
+                  organizationId, campaignId, s.contactId,
+                  campaign.whatsappAccountId, s.waMessageId,
+                  template.name, template.language, [], template.id, campaign.name
+                ).catch(() => {});
+              });
+            });
+
             batchSent = [];
             batchFailed = [];
+          }
 
-            // Sync counters and emit progress
-            const counters = await this.syncCampaignCounters(campaignId);
-            const processed = counters.sentCount + counters.deliveredCount + 
-                             counters.readCount + counters.failedCount;
+          // ✅ EMIT PROGRESS (lightweight, no DB query)
+          if (totalProcessed - lastProgressEmit >= EMIT_PROGRESS_EVERY) {
+            lastProgressEmit = totalProcessed;
+
+            // ✅ LIGHT: Quick count from DB (no campaign update)
+            const counts = await this.getQuickCounts(campaignId);
+            const processed = counts.sent + counts.delivered + counts.read + counts.failed;
 
             campaignSocketService.emitCampaignProgress(organizationId, campaignId, {
-              sent: counters.sentCount + counters.deliveredCount + counters.readCount,
-              failed: counters.failedCount,
-              delivered: counters.deliveredCount + counters.readCount,
-              read: counters.readCount,
-              total: counters.totalContacts,
-              percentage: Math.min(100, Math.round((processed / Math.max(counters.totalContacts, 1)) * 100)),
+              sent: counts.sent + counts.delivered + counts.read,
+              failed: counts.failed,
+              delivered: counts.delivered + counts.read,
+              read: counts.read,
+              total: counts.total,
+              percentage: Math.min(100, Math.round((processed / Math.max(counts.total, 1)) * 100)),
               status: 'RUNNING',
             });
           }
 
-          // ✅ SMART DELAY: Adaptive delay based on failure rate
-          if (chunkFailed > chunkSent && chunkFailed > 3) {
-            // High failure rate → slow down
-            await new Promise(r => setTimeout(r, 500));
-          } else if (rateLimitHits > 0) {
-            await new Promise(r => setTimeout(r, 200));
+          // ✅ ADAPTIVE DELAY
+          if (chunkFailed > chunk.length / 2) {
+            await new Promise(r => setTimeout(r, 500)); // Slow down on failures
           } else {
             await new Promise(r => setTimeout(r, DELAY_BETWEEN_CHUNKS_MS));
           }
         }
       }
 
-      // ✅ Flush remaining batch
+      // ✅ Flush remaining
       if (batchSent.length > 0 || batchFailed.length > 0) {
-        await this.flushBatchResults(campaignId, batchSent, batchFailed);
+        await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
+
+        // Save remaining to inbox
+        batchSent.forEach(s => {
+          this.saveCampaignMessage(
+            organizationId, campaignId, s.contactId,
+            campaign.whatsappAccountId, s.waMessageId,
+            template.name, template.language, [], template.id, campaign.name
+          ).catch(() => {});
+        });
       }
 
-      // ✅ Final sync and completion
+      // ✅ Final sync (HEAVY sync only at END)
       const finalCounters = await this.syncCampaignCounters(campaignId);
 
       if (finalCounters.pendingCount === 0) {
@@ -907,22 +897,17 @@ export class CampaignsService {
           totalRecipients: finalCounters.totalContacts,
         });
 
-        console.log(`🏁 Campaign ${campaignId} COMPLETED (Rate limit hits: ${rateLimitHits})`);
+        console.log(`🏁 Campaign ${campaignId} COMPLETED`);
       }
 
     } catch (error: any) {
       console.error(`❌ Campaign ${campaignId} error:`, error);
-
       await this.syncCampaignCounters(campaignId).catch(() => {});
-
       await prisma.campaign.update({
         where: { id: campaignId },
         data: { status: 'FAILED', completedAt: new Date() },
       });
-
-      campaignSocketService.emitCampaignError(organizationId, campaignId, {
-        message: error.message,
-      });
+      campaignSocketService.emitCampaignError(organizationId, campaignId, { message: error.message });
     } finally {
       this.processingCampaigns.delete(campaignId);
     }
@@ -931,73 +916,173 @@ export class CampaignsService {
   // ✅ NEW: Batch write results to DB (much faster than individual updates)
   private async flushBatchResults(
     campaignId: string,
-    sentItems: { id: string; waMessageId: string }[],
-    failedItems: { id: string; reason: string }[]
+    organizationId: string,
+    sentItems: { id: string; waMessageId: string; contactId: string; phone: string }[],
+    failedItems: { id: string; reason: string; contactId: string; phone: string }[]
   ): Promise<void> {
     const now = new Date();
 
-    // ✅ Batch update SENT contacts
-    if (sentItems.length > 0) {
-      // Use transaction for atomicity
-      await prisma.$transaction(
-        sentItems.map(item =>
-          prisma.campaignContact.update({
-            where: { id: item.id },
-            data: {
-              status: 'SENT',
-              waMessageId: item.waMessageId,
-              sentAt: now,
-            },
-          })
-        )
-      );
-    }
+    try {
+      // ✅ SENT contacts - batch update by IDs
+      if (sentItems.length > 0) {
+        const sentIds = sentItems.map(s => s.id);
 
-    // ✅ Batch update FAILED contacts
-    if (failedItems.length > 0) {
-      await prisma.$transaction(
-        failedItems.map(item =>
-          prisma.campaignContact.update({
-            where: { id: item.id },
-            data: {
-              status: 'FAILED',
-              failureReason: item.reason.substring(0, 500),
-              failedAt: now,
-            },
-          })
-        )
-      );
-    }
+        // Bulk status update (1 query instead of N!)
+        await prisma.campaignContact.updateMany({
+          where: { id: { in: sentIds } },
+          data: { status: 'SENT', sentAt: now },
+        });
 
-    console.log(`💾 Flushed: ${sentItems.length} sent, ${failedItems.length} failed`);
+        // Individual waMessageId updates (needed for unique tracking)
+        await Promise.allSettled(
+          sentItems.map(item =>
+            prisma.campaignContact.update({
+              where: { id: item.id },
+              data: { waMessageId: item.waMessageId },
+            })
+          )
+        );
+
+        // Emit socket status for each sent
+        sentItems.forEach(item => {
+          campaignSocketService.emitContactStatus(organizationId, campaignId, {
+            contactId: item.contactId,
+            phone: item.phone,
+            status: 'SENT',
+            messageId: item.waMessageId,
+          });
+        });
+      }
+
+      // ✅ FAILED contacts - group by reason for efficiency
+      if (failedItems.length > 0) {
+        // Group by reason
+        const reasonGroups = new Map<string, string[]>();
+        for (const item of failedItems) {
+          const reason = item.reason.substring(0, 500);
+          if (!reasonGroups.has(reason)) reasonGroups.set(reason, []);
+          reasonGroups.get(reason)!.push(item.id);
+        }
+
+        // One updateMany per reason group
+        await Promise.allSettled(
+          Array.from(reasonGroups.entries()).map(([reason, ids]) =>
+            prisma.campaignContact.updateMany({
+              where: { id: { in: ids } },
+              data: {
+                status: 'FAILED',
+                failureReason: reason,
+                failedAt: now,
+              },
+            })
+          )
+        );
+
+        // Emit socket status for each failed
+        failedItems.forEach(item => {
+          campaignSocketService.emitContactStatus(organizationId, campaignId, {
+            contactId: item.contactId,
+            phone: item.phone,
+            status: 'FAILED',
+            error: item.reason.substring(0, 200),
+          });
+        });
+      }
+    } catch (err) {
+      console.error('⚠️ flushBatchResults error:', err);
+    }
   }
- 
-  // ✅ FIXED: markContactFailed - NO increment on campaign
-  private async markContactFailed(
-    ccId: string,
+
+
+  // ✅ FIX: saveCampaignMessage - use upsert to prevent duplicate waMessageId error
+  private async saveCampaignMessage(
+    orgId: string,
     campaignId: string,
-    organizationId: string,
     contactId: string,
-    phone: string,
-    reason: string
+    accId: string,
+    waMessageId: string,
+    tplName: string,
+    tplLang: string,
+    params: any[],
+    tplId?: string,
+    campName?: string
   ): Promise<void> {
-    await prisma.campaignContact.update({
-      where: { id: ccId },
-      data: {
-        status: 'FAILED',
-        failureReason: reason.substring(0, 500),
-        failedAt: new Date(),
-      },
-    });
+    try {
+      // ✅ FIX: Check if message already exists (prevents P2002 unique constraint error)
+      const existingMessage = await prisma.message.findFirst({
+        where: {
+          OR: [
+            { waMessageId: waMessageId },
+            { wamId: waMessageId },
+            { whatsappMessageId: waMessageId },
+          ],
+        },
+      });
 
-    // ✅ NO increment here! syncCampaignCounters handles it
+      if (existingMessage) {
+        // Message already saved (by webhook or previous attempt)
+        return;
+      }
 
-    campaignSocketService.emitContactStatus(organizationId, campaignId, {
-      contactId,
-      phone: digitsOnly(phone),
-      status: 'FAILED',
-      error: reason.substring(0, 200),
-    });
+      // Get or create conversation
+      let conversation = await prisma.conversation.findFirst({
+        where: { organizationId: orgId, contactId },
+      });
+
+      const now = new Date();
+
+      if (!conversation) {
+        conversation = await prisma.conversation.create({
+          data: {
+            organization: { connect: { id: orgId } },
+            contact: { connect: { id: contactId } },
+            lastMessageAt: now,
+            lastMessagePreview: `Template: ${tplName}`,
+            isWindowOpen: true,
+            unreadCount: 0,
+            isRead: true,
+          },
+        });
+      } else {
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            lastMessageAt: now,
+            lastMessagePreview: `Template: ${tplName}`,
+          },
+        });
+      }
+
+      // ✅ Create message with error handling for duplicates
+      await prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: 'OUTBOUND',
+          type: 'TEMPLATE',
+          status: 'SENT',
+          waMessageId: waMessageId,
+          wamId: waMessageId,
+          whatsappAccountId: accId,
+          templateId: tplId,
+          content: `Campaign: ${campName}\nTemplate: ${tplName}`,
+          metadata: { campaignId, campaignName: campName, templateName: tplName } as any,
+          sentAt: now,
+        },
+      }).catch((err: any) => {
+        // ✅ Silently ignore duplicate key errors
+        if (err.code === 'P2002') {
+          // Already exists - no action needed
+          return;
+        }
+        throw err;
+      });
+
+    } catch (e: any) {
+      // ✅ Don't log P2002 errors (they're expected duplicates)
+      if (e.code !== 'P2002') {
+        console.error('⚠️ Save campaign message error:', e.message);
+      }
+    }
   }
 
   private async getCampaignStats(campaignId: string) {
@@ -1076,22 +1161,6 @@ export class CampaignsService {
   private getDecryptedToken(rawToken: string | null): string | null {
     if (!rawToken) return null;
     return rawToken.startsWith('EAA') ? rawToken : safeDecrypt(rawToken);
-  }
-
-  private async saveCampaignMessage(orgId: string, campaignId: string, contactId: string, accId: string, waId: string, tplName: string, tplLang: string, params: any[], tplId?: string, campName?: string): Promise<void> {
-    try {
-      const conversation = await inboxService.getOrCreateConversation(orgId, contactId);
-      await prisma.message.create({
-        data: {
-          conversationId: conversation.id, direction: 'OUTBOUND' as any, type: 'TEMPLATE', status: 'SENT',
-          waMessageId: waId, wamId: waId, whatsappAccountId: accId, templateId: tplId,
-          content: `Campaign: ${campName}\nTemplate: ${tplName}`,
-          metadata: { campaignId, campaignName: campName, templateName: tplName, params } as any,
-          sentAt: new Date(),
-        }
-      });
-      await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date(), lastMessagePreview: `Template: ${tplName}` } });
-    } catch (e) { console.error('Save message error:', e); }
   }
 
   async getStats(organizationId: string): Promise<any> {
