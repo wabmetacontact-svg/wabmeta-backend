@@ -1092,54 +1092,34 @@ export class CampaignsService {
   private buildTemplatePayload(template: any, cc: any, phone: string): any {
     const components: any[] = [];
 
-    // Header
+    // ============================================
+    // HEADER - ✅ CRITICAL FIX
+    // ============================================
     if (template.headerType && template.headerType !== 'NONE') {
       const hType = template.headerType.toUpperCase();
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
+        // ✅ CRITICAL: For APPROVED templates, Meta already has the media!
+        // We ONLY need to send header component if:
+        // 1. Template has dynamic header variables (rare for media)
+        // 2. We have a valid NUMERIC media ID (not a "4:" handle)
+        
         const mediaId = template.headerMediaId;
 
-        if (mediaId) {
-          // ✅ FIXED: For SENDING messages, Meta needs the ID in the media object
-          // Both numeric IDs and "4:" handles work here
-
-          if (/^\d+$/.test(mediaId)) {
-            // Numeric ID → use "id" field
-            components.push({
-              type: 'header',
-              parameters: [{
-                type: hType.toLowerCase(),
-                [hType.toLowerCase()]: { id: mediaId },
-              }],
-            });
-            console.log(`✅ Campaign header: numeric ID ${mediaId}`);
-          } else if (mediaId.startsWith('4:')) {
-            // ✅ Resumable handle → Meta ALSO accepts this for sending
-            // But it might fail for some templates
-            // Best practice: use the handle, Meta resolves it
-            components.push({
-              type: 'header',
-              parameters: [{
-                type: hType.toLowerCase(),
-                [hType.toLowerCase()]: { id: mediaId },
-              }],
-            });
-            console.log(`✅ Campaign header: resumable handle`);
-          } else if (mediaId.startsWith('http')) {
-            // URL → use "link" field
-            components.push({
-              type: 'header',
-              parameters: [{
-                type: hType.toLowerCase(),
-                [hType.toLowerCase()]: { link: mediaId },
-              }],
-            });
-            console.log(`✅ Campaign header: URL`);
-          }
-          // If none match, skip header (template was created without media)
+        if (mediaId && /^\d+$/.test(mediaId)) {
+          // ✅ Numeric ID → Safe to send
+          components.push({
+            type: 'header',
+            parameters: [{
+              type: hType.toLowerCase(),
+              [hType.toLowerCase()]: { id: mediaId },
+            }],
+          });
         }
-        // If no mediaId, don't add header component
-        // Meta will use the template's default media
+        // ✅ If mediaId starts with "4:" or is a URL → DON'T send header!
+        // Meta already embedded the media during template approval.
+        // Sending an invalid ID causes Error 100.
+        
       } else if (hType === 'TEXT') {
         const matches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
         if (matches.length > 0) {
@@ -1152,7 +1132,9 @@ export class CampaignsService {
       }
     }
 
-    // Body (unchanged)
+    // ============================================
+    // BODY (unchanged)
+    // ============================================
     const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
     if (bodyMatches.length > 0) {
       const params = buildParamsFromContact(cc, bodyMatches.length);
@@ -1167,8 +1149,6 @@ export class CampaignsService {
       template: {
         name: template.name,
         language: { code: toMetaLang(template.language) },
-        // ✅ Only add components if we have any
-        // For templates without variables/media, send empty
         ...(components.length > 0 ? { components } : {}),
       },
     };
