@@ -75,39 +75,54 @@ class CampaignSocketService {
      * Emit campaign progress updates
      */
     emitCampaignProgress(
-        organizationId: string,
-        campaignId: string,
-        data: {
-            sent: number;
-            failed: number;
-            delivered?: number;
-            read?: number;
-            total: number;
-            percentage: number;
-            status: string;
-        }
-    ) {
-        if (!io) {
-            console.warn('⚠️ Socket.IO not initialized - cannot emit campaign:progress');
-            return;
-        }
-
-        const payload = {
-            campaignId,
-            organizationId,
-            ...data,
-            timestamp: new Date().toISOString(),
-        };
-
-        io.to(`org:${organizationId}`).emit('campaign:progress', payload);
-        io.to(`campaign:${campaignId}`).emit('campaign:progress', payload);
-        io.to(`org:${organizationId}:campaigns`).emit('campaign:progress', payload);
-
-        // Only log every 10% to reduce noise
-        if (data.percentage % 10 === 0) {
-            console.log(`📊 [SOCKET] campaign:progress → ${data.percentage}% (${data.sent}/${data.total})`);
-        }
+    organizationId: string,
+    campaignId: string,
+    data: {
+      sent: number;
+      failed: number;
+      delivered?: number;
+      read?: number;
+      total: number;
+      percentage: number;
+      status: string;
     }
+  ) {
+    if (!io) {
+        console.warn('⚠️ Socket.IO not initialized - cannot emit campaign:progress');
+        return;
+    }
+
+    const total = Math.max(data.total, 1);
+    
+    // ✅ CRITICAL: Cap all values to never exceed total
+    const sent = Math.min(data.sent, total);
+    const failed = Math.min(data.failed, total - sent);
+    const delivered = Math.min(data.delivered || 0, sent);
+    const read = Math.min(data.read || 0, delivered);
+    const percentage = Math.min(100, Math.round(((sent + failed) / total) * 100));
+
+    const payload = {
+      campaignId,
+      organizationId,
+      sent,
+      failed,
+      delivered,
+      read,
+      total,
+      percentage,
+      status: data.status,
+      timestamp: new Date().toISOString(),
+    };
+
+    io.to(`org:${organizationId}`).emit('campaign:progress', payload);
+    io.to(`campaign:${campaignId}`).emit('campaign:progress', payload);
+    io.to(`org:${organizationId}:campaigns`).emit('campaign:progress', payload);
+
+    // Only log every 10% to reduce noise
+    if (percentage % 10 === 0) {
+      console.log(`📊 [SOCKET] campaign:progress → ${percentage}% (${sent}+${failed}/${total})`);
+    }
+  }
 
     /**
      * Emit individual contact status update

@@ -341,8 +341,7 @@ export class CampaignsController {
       const result = await campaignsService.retry(
         organizationId,
         id,
-        retryFailed,
-        retryPending
+        { retryFailed, retryPending }
       );
 
       return sendSuccess(res, result, result.message);
