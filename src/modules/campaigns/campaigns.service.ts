@@ -338,16 +338,101 @@ export class CampaignsService {
     return { ...formatCampaign(campaign), timeline: [] }; 
   }
 
-  async getCampaignContacts(organizationId: string, campaignId: string, options: any): Promise<any> {
+  async getCampaignContacts(
+    organizationId: string,
+    campaignId: string,
+    options: { page?: number; limit?: number; status?: string; search?: string }
+  ) {
     const { page = 1, limit = 50, status, search } = options;
+    const skip = (page - 1) * limit;
+
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: campaignId, organizationId },
+    });
+    if (!campaign) throw new AppError('Campaign not found', 404);
+
     const where: any = { campaignId };
-    if (status && status !== 'all') where.status = status;
-    if (search) where.contact = { phone: { contains: search, mode: 'insensitive' } };
+
+    // ✅ Filter by status (if not 'all')
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    // ✅ Search by phone or name
+    if (search) {
+      where.contact = {
+        OR: [
+          { phone: { contains: search, mode: 'insensitive' } },
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+        ],
+      };
+    }
+
     const [contacts, total] = await Promise.all([
-      prisma.campaignContact.findMany({ where, include: { contact: true }, skip: (page - 1) * limit, take: limit, orderBy: { updatedAt: 'desc' } }),
-      prisma.campaignContact.count({ where })
+      prisma.campaignContact.findMany({
+        where,
+        include: {
+          contact: {
+            select: {
+              id: true,
+              phone: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              whatsappProfileName: true,
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.campaignContact.count({ where }),
     ]);
-    return { recipients: contacts.map(formatCampaignContact), contacts: contacts.map(formatCampaignContact), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+
+    // ✅ Format with clean phone and proper name
+    const formatted = contacts.map((cc) => {
+      const c = cc.contact;
+      const phone = (c.phone || '').replace(/^\+/, ''); // Remove "+" prefix
+
+      // ✅ Build name: whatsappProfile > firstName lastName > phone
+      let name = '';
+      if (c.whatsappProfileName && c.whatsappProfileName !== 'Unknown') {
+        name = c.whatsappProfileName;
+      } else {
+        const parts = [c.firstName, c.lastName].filter(Boolean).join(' ');
+        name = parts || phone;
+      }
+
+      return {
+        id: cc.id,
+        contactId: cc.contactId,
+        phone,
+        name,
+        fullName: name,
+        status: cc.status,
+        waMessageId: cc.waMessageId,
+        sentAt: cc.sentAt,
+        deliveredAt: cc.deliveredAt,
+        readAt: cc.readAt,
+        failedAt: cc.failedAt,
+        failureReason: cc.failureReason,
+        retryCount: cc.retryCount || 0,
+        updatedAt: cc.updatedAt,
+      };
+    });
+
+    return {
+      contacts: formatted,
+      recipients: formatted,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async getAllRecipients(organizationId: string, campaignId: string, options: any): Promise<any> {
@@ -398,19 +483,47 @@ export class CampaignsService {
   }
 
   async getDetailedStats(organizationId: string, campaignId: string): Promise<any> {
-    const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: campaignId, organizationId },
+    });
+
     if (!campaign) throw new AppError('Campaign not found', 404);
-    const failureReasons = await prisma.campaignContact.groupBy({ by: ['failureReason'], where: { campaignId, status: 'FAILED' }, _count: true });
-    return { 
-      ...formatCampaign(campaign), 
-      pending: (campaign.totalContacts || 0) - (campaign.sentCount || 0) - (campaign.failedCount || 0),
-      queued: 0,
-      sent: campaign.sentCount || 0,
-      delivered: campaign.deliveredCount || 0,
-      read: campaign.readCount || 0,
-      failed: campaign.failedCount || 0,
-      failureReasons: failureReasons.map(fr => ({ reason: fr.failureReason || 'Unknown', count: fr._count })),
-      successRate: 0, deliveryRate: 0, readRate: 0 
+
+    // ✅ Count all statuses from actual campaign contacts
+    const [pending, queued, sent, delivered, read, failed, googleFailureReasons] = await Promise.all([
+      prisma.campaignContact.count({ where: { campaignId, status: 'PENDING' } }),
+      prisma.campaignContact.count({ where: { campaignId, status: 'QUEUED' as any } }),
+      prisma.campaignContact.count({ where: { campaignId, status: 'SENT' } }),
+      prisma.campaignContact.count({ where: { campaignId, status: 'DELIVERED' } }),
+      prisma.campaignContact.count({ where: { campaignId, status: 'READ' } }),
+      prisma.campaignContact.count({ where: { campaignId, status: 'FAILED' } }),
+      prisma.campaignContact.groupBy({
+        by: ['failureReason'],
+        where: { campaignId, status: 'FAILED', failureReason: { not: null } },
+        _count: true,
+      }),
+    ]);
+
+    // ✅ Use actual total from DB, not campaign.totalContacts
+    const totalContacts = pending + queued + sent + delivered + read + failed;
+    const successCount = delivered + read;
+    const processedCount = sent + delivered + read + failed;
+
+    return {
+      totalContacts,
+      pending,
+      queued,
+      sent,
+      delivered,
+      read,
+      failed,
+      failureReasons: googleFailureReasons.map((fr) => ({
+        reason: fr.failureReason || 'Unknown',
+        count: fr._count,
+      })),
+      successRate: totalContacts > 0 ? Math.round((successCount / totalContacts) * 100) : 0,
+      deliveryRate: processedCount > 0 ? Math.round((successCount / processedCount) * 100) : 0,
+      readRate: (delivered + read) > 0 ? Math.round((read / (delivered + read)) * 100) : 0,
     };
   }
 
