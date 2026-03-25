@@ -334,9 +334,32 @@ export class CampaignsService {
   }
 
   async start(organizationId: string, campaignId: string): Promise<any> {
-    const campaign = await prisma.campaign.findFirst({ where: { id: campaignId, organizationId } });
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: campaignId, organizationId },
+      include: { template: true, whatsappAccount: true },
+    });
+
     if (!campaign) throw new AppError('Campaign not found', 404);
     if (campaign.status === 'RUNNING') throw new AppError('Already running', 400);
+
+    // ✅ NEW: Check template status before starting
+    if (campaign.template) {
+      const tpl = campaign.template as any;
+      
+      if (tpl.status === 'REJECTED') {
+        throw new AppError(
+          `Template "${tpl.name}" is REJECTED by Meta. Please create a new template.`,
+          400
+        );
+      }
+      
+      if (tpl.status !== 'APPROVED') {
+        throw new AppError(
+          `Template "${tpl.name}" is not approved yet (status: ${tpl.status}). Wait for Meta approval.`,
+          400
+        );
+      }
+    }
 
     const updated = await prisma.campaign.update({
       where: { id: campaignId },
@@ -1092,22 +1115,14 @@ export class CampaignsService {
   private buildTemplatePayload(template: any, cc: any, phone: string): any {
     const components: any[] = [];
 
-    // ============================================
-    // HEADER - ✅ CRITICAL FIX
-    // ============================================
     if (template.headerType && template.headerType !== 'NONE') {
       const hType = template.headerType.toUpperCase();
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-        // ✅ CRITICAL: For APPROVED templates, Meta already has the media!
-        // We ONLY need to send header component if:
-        // 1. Template has dynamic header variables (rare for media)
-        // 2. We have a valid NUMERIC media ID (not a "4:" handle)
-        
         const mediaId = template.headerMediaId;
 
         if (mediaId && /^\d+$/.test(mediaId)) {
-          // ✅ Numeric ID → Safe to send
+          // ✅ Has valid numeric Meta media ID → send it
           components.push({
             type: 'header',
             parameters: [{
@@ -1116,10 +1131,10 @@ export class CampaignsService {
             }],
           });
         }
-        // ✅ If mediaId starts with "4:" or is a URL → DON'T send header!
-        // Meta already embedded the media during template approval.
-        // Sending an invalid ID causes Error 100.
-        
+        // ✅ NO mediaId or non-numeric → DON'T add header component
+        // For approved templates, Meta uses the registered media automatically
+        // This is the correct behavior per Meta docs
+
       } else if (hType === 'TEXT') {
         const matches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
         if (matches.length > 0) {
@@ -1132,9 +1147,7 @@ export class CampaignsService {
       }
     }
 
-    // ============================================
-    // BODY (unchanged)
-    // ============================================
+    // Body
     const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
     if (bodyMatches.length > 0) {
       const params = buildParamsFromContact(cc, bodyMatches.length);
@@ -1160,51 +1173,25 @@ export class CampaignsService {
     if (!me) return error.message || 'Unknown error';
 
     const code = me.code;
-    const subcode = me.error_subcode;
 
-    // ✅ Comprehensive Meta error mapping
     const errorMap: Record<number, string> = {
-      // Phone/Contact errors
-      131030: 'Phone number not registered on WhatsApp',
+      100: 'Invalid parameter - Template format mismatch or media ID invalid',
+      131030: 'Phone not on WhatsApp',
       131026: 'Message undeliverable',
-      131047: 'Re-engagement message required (24h window expired)',
-      
-      // Rate limiting
-      131048: 'Meta API rate limit reached - sending too fast',
-      131021: 'Meta API rate limit reached',
-      131056: 'Phone number rate limited by Meta',
-      
-      // Template errors  
+      131048: 'Rate limit reached',
+      131021: 'Rate limit reached',
+      131056: 'Number restricted by Meta',
       132000: 'Template parameters mismatch',
       132001: 'Template not found or not approved',
       132005: 'Template hydration failed',
-      132007: 'Template format error',
-      132012: 'Template paused due to low quality',
-      132015: 'Template paused - too many blocks',
-      
-      // Account errors
-      131051: 'Business account restricted by Meta',
-      131031: 'Account not registered',
-      131009: 'API parameter error',
-      131042: 'Business eligibility error',
-      
-      // Ecosystem/Quality errors
-      131049: 'This message was not delivered to maintain healthy ecosystem engagement.',
-      131053: 'Media upload error',
-      
-      // Generic
-      100: 'Invalid parameter in API request',
-      190: 'Access token expired - reconnect WhatsApp',
-      368: 'Account temporarily restricted for policy violation',
+      132007: 'Template format character policy violated',
+      132012: 'Template PAUSED by Meta - Quality too low. Create a new template.',
+      132015: 'Template PAUSED - Too many messages blocked by users',
+      190: 'Access token expired - Reconnect WhatsApp',
     };
 
     if (errorMap[code]) return errorMap[code];
-
-    // Subcode mapping
-    if (subcode === 2494010) return 'Message not delivered - ecosystem engagement protection';
-    if (subcode === 2494049) return 'Recipient not eligible for this message type';
-
-    return `${me.message || 'Meta API error'} (Code: ${code}${subcode ? `, Sub: ${subcode}` : ''})`;
+    return `${me.message || 'Meta API error'} (Code: ${code})`;
   }
 
   private getDecryptedToken(rawToken: string | null): string | null {
