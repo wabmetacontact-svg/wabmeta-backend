@@ -395,7 +395,10 @@ const getWhatsAppAccountWithToken = async (
           where: {
             organizationId,
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [
+            { status: 'asc' }, // CONNECTED is 'C', DISCONNECTED is 'D', PENDING is 'P'. Sort by status might be tricky.
+            { createdAt: 'desc' },
+          ],
         });
 
         console.log(`   Last resort lookup:`, waAccount ? `✅ Found (status: ${waAccount.status})` : '❌ Not found');

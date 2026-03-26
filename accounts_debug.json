@@ -1,0 +1,28 @@
+[
+  {
+    "id": "cmn72p6mb00pv40027rmbw6pt",
+    "organizationId": "cmn726e5w00jg400246zsstg5",
+    "phoneNumberId": "1103048789548041",
+    "wabaId": "1583810732847631",
+    "phoneNumber": "+91 92960 61440",
+    "displayName": "Gandhi brother",
+    "qualityRating": "UNKNOWN",
+    "accessToken": "d45a5a64ddedaec52845ddd1c34e28d9:8a972cb13384036a82575e46d6b44739:c9b44ac081318502900627d7a8e621940410a6dd6521ad376923fcf891dd9aaf320c59f37f5dbf04eba6528af7c666e9936664b570d094d6a3a8818cdfa0f727ffe76ea72feaed49ab16a3daf8acf8115ef5083a1cc6a8fb39ff55e47c3438389b4ae3a61c970e39e6b6a6d1bd4a0d5c11f0aa21b47901226ccc3d1578e30942b63149e582c5ca40aad02fe9f15316adfe48919988ea9da873e983c2fe0069fc03fca42cec830609b8c3ae6c6607ed7c4d841d1c8abb2c4d20c95fbcecff2cb793f35f1cf005b831763392a528dcd09fa433de0d721404f017fd5f1a563d2e281edfe0b7ed7574dfa80a0acd56272ac46dc40af6a6d45caa5aad3ad140cb574589cf29798cc06198556d94431d112438b06d9987075f1044493979224b6b3e0a945f4e880c0887a654310b70b86c7ec83d18a92857c20a93e0009cc45d5d820b26",
+    "tokenExpiresAt": null,
+    "webhookSecret": null,
+    "status": "DISCONNECTED",
+    "codeVerificationStatus": null,
+    "nameStatus": null,
+    "verifiedName": "Gandhi brother",
+    "messagingLimit": null,
+    "dailyMessageLimit": 1000,
+    "dailyMessagesUsed": 0,
+    "lastLimitReset": "2026-03-26T06:10:01.283Z",
+    "businessProfile": null,
+    "isDefault": true,
+    "createdAt": "2026-03-26T06:10:01.283Z",
+    "updatedAt": "2026-03-26T13:56:37.338Z",
+    "isActive": true,
+    "connectionType": "CLOUD_API"
+  }
+]

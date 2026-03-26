@@ -334,6 +334,7 @@ export class MetaController {
             savedAccount = await prisma.whatsAppAccount.update({
               where: { id: existingAccount.id },
               data: {
+                organizationId, // ✅ CLAIM ownership (in case it moved orgs)
                 status: 'CONNECTED',
                 phoneNumber: primaryPhone.display_phone_number,
                 displayName: primaryPhone.verified_name || primaryPhone.display_phone_number,
