@@ -990,7 +990,7 @@ export class TemplatesService {
 
         const existing = await prisma.template.findFirst({
           where: {
-            organizationId,
+            whatsappAccountId: waData.account?.id || waData.account?.id, // Use ID from waData
             name: metaName,
             language: metaLang,
           },
@@ -999,6 +999,7 @@ export class TemplatesService {
         if (existing) {
             // Update existing
             const updateData: any = {
+              organizationId, // ✅ CLAIM ownership (move with account)
               metaTemplateId: metaId,
               status: mappedStatus,
               rejectionReason,
