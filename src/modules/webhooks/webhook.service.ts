@@ -16,6 +16,9 @@ export class WebhookService {
   // -----------------------------
   // Helpers
   // -----------------------------
+  private accountCache = new Map<string, { data: any; expiresAt: number }>();
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
   private extractValue(payload: any) {
     return payload?.entry?.[0]?.changes?.[0]?.value;
   }
@@ -158,31 +161,45 @@ export class WebhookService {
         return { status: 'error', reason: 'No phone_number_id for field: ' + field };
       }
 
-      let account: any = await prisma.whatsAppAccount.findFirst({
-        where: { phoneNumberId },
-      });
+      // ✅ Caching to prevent database pool exhaustion
+      let account: any = null;
+      const cached = this.accountCache.get(phoneNumberId);
+      if (cached && cached.expiresAt > Date.now()) {
+        account = cached.data;
+      } else {
+        account = await prisma.whatsAppAccount.findFirst({
+          where: { phoneNumberId },
+        });
 
-      // ✅ Fallback: Try newer PhoneNumber table if legacy whatsAppAccount not found
-      if (!account) {
-        console.log(`🔍 phoneNumberId ${phoneNumberId} not found in legacy WhatsAppAccount, checking PhoneNumber table...`);
-        try {
-          const phoneRecord = await (prisma as any).phoneNumber.findFirst({
-            where: { phoneNumberId },
-            include: { metaConnection: true }
-          });
+        // ✅ Fallback: Try newer PhoneNumber table if legacy whatsAppAccount not found
+        if (!account) {
+          console.log(`🔍 phoneNumberId ${phoneNumberId} not found in legacy WhatsAppAccount, checking PhoneNumber table...`);
+          try {
+            const phoneRecord = await (prisma as any).phoneNumber.findFirst({
+              where: { phoneNumberId },
+              include: { metaConnection: true }
+            });
 
-          if (phoneRecord) {
-            console.log(`✅ Found account via PhoneNumber table fallback for ID: ${phoneNumberId}`);
-            account = {
-              id: phoneRecord.id, // Using PhoneNumber ID as account ID
-              organizationId: phoneRecord.metaConnection.organizationId,
-              phoneNumberId: phoneRecord.phoneNumberId,
-              phoneNumber: phoneRecord.phoneNumber,
-              wabaId: phoneRecord.metaConnection.wabaId
-            };
+            if (phoneRecord) {
+              console.log(`✅ Found account via PhoneNumber table fallback for ID: ${phoneNumberId}`);
+              account = {
+                id: phoneRecord.id, // Using PhoneNumber ID as account ID
+                organizationId: phoneRecord.metaConnection.organizationId,
+                phoneNumberId: phoneRecord.phoneNumberId,
+                phoneNumber: phoneRecord.phoneNumber,
+                wabaId: phoneRecord.metaConnection.wabaId
+              };
+            }
+          } catch (phoneErr) {
+            console.error('Error checking PhoneNumber fallback:', phoneErr);
           }
-        } catch (phoneErr) {
-          console.error('Error checking PhoneNumber fallback:', phoneErr);
+        }
+
+        if (account) {
+          this.accountCache.set(phoneNumberId, { 
+            data: account, 
+            expiresAt: Date.now() + this.CACHE_TTL 
+          });
         }
       }
 

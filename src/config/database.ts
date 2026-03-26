@@ -16,10 +16,10 @@ const createPrismaClient = () => {
       dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'pgbouncer=true';
     }
     if (!dbUrl.includes('connection_limit=')) {
-      dbUrl += '&connection_limit=10';
+      dbUrl += '&connection_limit=20';
     }
     if (!dbUrl.includes('pool_timeout=')) {
-      dbUrl += '&pool_timeout=30';
+      dbUrl += '&pool_timeout=60';
     }
     prismaOptions.datasources = { db: { url: dbUrl } };
     console.log('🔧 Auto-configured database pooler');

@@ -845,16 +845,20 @@ export class CampaignsService {
           if (batchTotal >= FLUSH_EVERY || i + CONCURRENCY >= contacts.length) {
             await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
 
-            // ✅ Save messages to inbox (fire-and-forget, NON-blocking)
+            // ✅ SAVE TO INBOX (sequential background tasks to avoid pool exhaustion)
             const sentCopy = [...batchSent];
-            setImmediate(() => {
-              sentCopy.forEach(s => {
-                this.saveCampaignMessage(
-                  organizationId, campaignId, s.contactId,
-                  campaign.whatsappAccountId, s.waMessageId,
-                  template.name, template.language, [], template.id, campaign.name
-                ).catch(() => {});
-              });
+            setImmediate(async () => {
+              for (const s of sentCopy) {
+                try {
+                  await this.saveCampaignMessage(
+                    organizationId, campaignId, s.contactId,
+                    campaign.whatsappAccountId, s.waMessageId,
+                    template.name, template.language, [], template.id, campaign.name
+                  );
+                } catch (err) {
+                  // Silent catch for background task
+                }
+              }
             });
 
             batchSent = [];
@@ -894,13 +898,15 @@ export class CampaignsService {
         await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
 
         // Save remaining to inbox
-        batchSent.forEach(s => {
+        for (const s of batchSent) {
           this.saveCampaignMessage(
             organizationId, campaignId, s.contactId,
             campaign.whatsappAccountId, s.waMessageId,
             template.name, template.language, [], template.id, campaign.name
           ).catch(() => {});
-        });
+          // Note: Here we don't strictly need await as it's the very end, but let's be safe
+          await new Promise(r => setTimeout(r, 10)); 
+        }
       }
 
       // ✅ Final sync (HEAVY sync only at END)
