@@ -257,7 +257,7 @@ export class CampaignsService {
         }))
       });
       return newCampaign;
-    });
+    }, { timeout: 30000 });
 
     campaignSocketService.emitCampaignUpdate(organizationId, campaign.id, { 
        status: campaign.status, message: 'Campaign created successfully', totalContacts: targetContacts.length 
@@ -329,7 +329,7 @@ export class CampaignsService {
         }))
       });
       return newCampaign;
-    });
+    }, { timeout: 30000 });
     return formatCampaign(duplicated);
   }
 
