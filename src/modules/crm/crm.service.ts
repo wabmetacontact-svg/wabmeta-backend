@@ -452,6 +452,63 @@ export class CRMService {
             leadsByStage,
         };
     }
+
+    // ==========================================
+    // CRM ONBOARDING
+    // ==========================================
+
+    async syncFromContacts(organizationId: string, userId: string) {
+        // 1. Get default pipeline and stage
+        let pipeline = await prisma.pipeline.findFirst({
+            where: { organizationId, isDefault: true },
+            include: { stages: { orderBy: { order: 'asc' }, take: 1 } },
+        });
+
+        if (!pipeline) {
+            pipeline = await this.createDefaultPipeline(organizationId);
+        }
+
+        const stageId = pipeline.stages[0]?.id;
+        if (!stageId) throw new AppError('No pipeline stage found', 400);
+
+        // 2. Find contacts not already leads
+        const contacts = await prisma.contact.findMany({
+            where: {
+                organizationId,
+                leads: { none: {} },
+            },
+            take: 50, // Onboard first 50 contacts
+            orderBy: { lastMessageAt: 'desc' },
+        });
+
+        if (contacts.length === 0) {
+            return { message: 'No new contacts to sync', synced: 0 };
+        }
+
+        // 3. Create leads
+        const leadData = contacts.map(c => ({
+            organizationId,
+            contactId: c.id,
+            title: `${c.firstName || 'Contact'} - ${c.phone}`,
+            pipelineId: pipeline!.id,
+            stageId,
+            status: 'NEW' as LeadStatus,
+            priority: 'MEDIUM' as LeadPriority,
+            source: c.source || 'sync',
+        }));
+
+        // Note: Using create as separate calls to ensure activities are created
+        const results = await Promise.allSettled(
+            leadData.map(data => this.createLead(organizationId, userId, data))
+        );
+
+        const successfulCount = results.filter(r => r.status === 'fulfilled').length;
+
+        return {
+            message: `Successfully synced ${successfulCount} contacts to CRM`,
+            synced: successfulCount,
+        };
+    }
 }
 
 export const crmService = new CRMService();

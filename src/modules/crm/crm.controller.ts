@@ -128,6 +128,15 @@ export class CRMController {
             return sendSuccess(res, stats, 'Stats fetched');
         } catch (e) { next(e); }
     }
+
+    async syncFromContacts(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId = req.user!.organizationId!;
+            const userId = req.user!.id;
+            const result = await crmService.syncFromContacts(orgId, userId);
+            return sendSuccess(res, result, result.message);
+        } catch (e) { next(e); }
+    }
 }
 
 export const crmController = new CRMController();

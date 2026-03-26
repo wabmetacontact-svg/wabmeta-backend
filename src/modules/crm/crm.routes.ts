@@ -10,6 +10,7 @@ router.use(authenticate);
 
 // Stats
 router.get('/stats', crmController.getStats.bind(crmController));
+router.post('/sync-from-contacts', crmController.syncFromContacts.bind(crmController));
 
 // Pipelines
 router.get('/pipelines', crmController.getPipelines.bind(crmController));
