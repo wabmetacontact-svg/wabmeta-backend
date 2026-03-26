@@ -266,7 +266,7 @@ function startCronJobs() {
         console.error('❌ Error in scheduled campaigns cron:', error);
       }
     },
-    60 * 1000 // Every 1 minute
+    30 * 1000 // Every 30 seconds (Improved precision from 60s)
   );
 
   console.log('✅ All cron jobs started (including scheduled campaigns)');

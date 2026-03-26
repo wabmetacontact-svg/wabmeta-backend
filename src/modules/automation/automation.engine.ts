@@ -227,13 +227,50 @@ class AutomationEngine {
   // ✅ TRIGGER: Scheduled
   // ==========================================
   async triggerScheduled(): Promise<void> {
-    // This typically finds all active SCHEDULED automations across all organizations
     try {
+      // Find active SCHEDULE automations
       const automations = await automationService.getActiveByTrigger(undefined as any, 'SCHEDULE');
       
       for (const automation of automations) {
-        console.log(`⏰ Processing scheduled automation: ${automation.id}`);
-        // Logic to find eligible contacts for this scheduled automation...
+        console.log(`⏰ Processing scheduled automation: ${automation.name} (${automation.id})`);
+        
+        // SCHEDULED automations usually target a specific group or all contacts
+        const targetGroupIds = (automation.targetGroupIds as string[]) || [];
+        
+        let contacts: any[] = [];
+        if (targetGroupIds.length > 0) {
+          contacts = await prisma.contact.findMany({
+            where: {
+              organizationId: automation.organizationId,
+              status: 'ACTIVE',
+              groupMemberships: {
+                some: { groupId: { in: targetGroupIds } }
+              }
+            }
+          });
+        } else if (!automation.excludeExisting) {
+          contacts = await prisma.contact.findMany({
+            where: { organizationId: automation.organizationId, status: 'ACTIVE' }
+          });
+        }
+
+        console.log(`🤖 Found ${contacts.length} candidate contacts for schedule`);
+
+        // Trigger sequence for each contact
+        for (const contact of contacts) {
+          // Check if already completed this automation to prevent loops
+          const existing = await prisma.automationSequence.findFirst({
+            where: { automationId: automation.id, contactId: contact.id }
+          });
+
+          if (!existing || existing.status === 'COMPLETED') {
+            this.executeSequence(automation.id, automation.actions as any, {
+              organizationId: automation.organizationId,
+              contactId: contact.id,
+              phone: contact.phone
+            }).catch(err => console.error(`❌ Schedule execution failed for ${contact.id}:`, err));
+          }
+        }
       }
     } catch (error) {
       console.error('🤖 Scheduled automation trigger error:', error);
@@ -244,13 +281,40 @@ class AutomationEngine {
   // ✅ TRIGGER: Inactivity
   // ==========================================
   async triggerInactivity(): Promise<void> {
-    // This finds contacts inactive for specified duration
     try {
       const automations = await automationService.getActiveByTrigger(undefined as any, 'INACTIVITY');
       
       for (const automation of automations) {
-        console.log(`💤 Checking inactivity automation: ${automation.id}`);
-        // Logic to scan contacts for inactivity period...
+        const config = automation.triggerConfig as any;
+        const hours = config?.hours || 24;
+        const inactiveSince = new Date(Date.now() - (hours * 60 * 60 * 1000));
+
+        console.log(`💤 Checking inactivity (${hours}h) for automation: ${automation.name}`);
+
+        const contacts = await prisma.contact.findMany({
+          where: {
+            organizationId: automation.organizationId,
+            status: 'ACTIVE',
+            lastMessageAt: { lt: inactiveSince },
+            // Ensure they haven't already received this inactivity message recently
+            automationSequences: {
+              none: {
+                automationId: automation.id,
+                lastStepAt: { gt: inactiveSince }
+              }
+            }
+          }
+        });
+
+        console.log(`🤖 Found ${contacts.length} inactive contacts`);
+
+        for (const contact of contacts) {
+          this.executeSequence(automation.id, automation.actions as any, {
+            organizationId: automation.organizationId,
+            contactId: contact.id,
+            phone: contact.phone
+          }).catch(err => console.error(`❌ Inactivity execution failed for ${contact.id}:`, err));
+        }
       }
     } catch (error) {
       console.error('🤖 Inactivity automation trigger error:', error);

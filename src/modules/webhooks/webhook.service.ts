@@ -228,13 +228,14 @@ export class WebhookService {
         }
       }
 
-      // ✅ Process status updates
+      // ✅ Process status updates (Sequential to avoid pool exhaustion)
       const statuses = value?.statuses || [];
-      // Use Promise.all with small groups to avoid blocking everything
       for (const st of statuses) {
-        this.processStatusUpdate(st, account.organizationId, account.id).catch(e =>
-          console.error('Status update background error:', e)
-        );
+        try {
+          await this.processStatusUpdate(st, account.organizationId, account.id);
+        } catch (e) {
+          console.error('Status update sequential error:', e);
+        }
       }
 
       return { status: 'processed' };
@@ -908,19 +909,27 @@ export class WebhookService {
 
       let organizationId: string | null = null;
       if (phoneNumberId) {
-        const account = await prisma.whatsAppAccount.findFirst({
-          where: { phoneNumberId },
-          select: { organizationId: true },
-        });
-        organizationId = account?.organizationId || null;
-
-        // Fallback to newer PhoneNumber structure
-        if (!organizationId) {
-          const phoneRecord = await (prisma as any).phoneNumber.findFirst({
+        // ✅ Use cache in logWebhook too
+        const cached = this.accountCache.get(phoneNumberId);
+        if (cached && cached.expiresAt > Date.now()) {
+          organizationId = cached.data.organizationId;
+        } else {
+          const account = await prisma.whatsAppAccount.findFirst({
             where: { phoneNumberId },
-            include: { metaConnection: true }
+            select: { organizationId: true },
           });
-          organizationId = phoneRecord?.metaConnection?.organizationId || null;
+          organizationId = account?.organizationId || null;
+
+          // Fallback to newer PhoneNumber structure
+          if (!organizationId) {
+            try {
+              const phoneRecord = await (prisma as any).phoneNumber.findFirst({
+                where: { phoneNumberId },
+                include: { metaConnection: true }
+              });
+              organizationId = phoneRecord?.metaConnection?.organizationId || null;
+            } catch (e) {}
+          }
         }
       }
 

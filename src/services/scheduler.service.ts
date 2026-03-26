@@ -6,9 +6,9 @@ import { automationEngine } from '../modules/automation/automation.engine';
 export function initializeScheduler() {
   console.log('⏰ Initializing automation scheduler...');
 
-  // ✅ OPTIMIZED: Run scheduled automations every 5 minutes (was every 1 minute)
-  // This reduces Redis/DB load significantly while still being accurate enough
-  cron.schedule('*/5 * * * *', async () => {
+  // ✅ RESTORED: Run scheduled automations every 1 minute (was every 5 minutes)
+  // This ensures automations trigger on time as expected by users
+  cron.schedule('* * * * *', async () => {
     try {
       await automationEngine.triggerScheduled();
     } catch (error) {
@@ -16,9 +16,9 @@ export function initializeScheduler() {
     }
   });
 
-  // ✅ OPTIMIZED: Check for inactive contacts every 4 hours (was every 1 hour)
-  // Inactivity is measured in hours/days, so checking every 4h is sufficient
-  cron.schedule('0 */4 * * *', async () => {
+  // ✅ OPTIMIZED: Check for inactive contacts every 1 hour (was every 4 hours)
+  // This provides much better responsiveness for inactivity-based automations
+  cron.schedule('0 * * * *', async () => {
     try {
       await automationEngine.triggerInactivity();
     } catch (error) {
