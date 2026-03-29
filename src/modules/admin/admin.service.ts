@@ -5,6 +5,7 @@ import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { hashPassword } from '../../utils/password';
 
 // ============================================
 // TYPES
@@ -377,6 +378,7 @@ export class AdminService {
           emailVerified: true,
           createdAt: true,
           lastLoginAt: true,
+          password: true,
           memberships: {
             select: {
               role: true,
@@ -447,12 +449,34 @@ export class AdminService {
 
     return {
       ...user,
-      password: undefined,
       organizations: user.memberships?.map((m) => ({
         ...m.organization,
         role: m.role,
       })),
     };
+  }
+
+  async updateUserPassword(id: string, data: any) {
+    const user = await prisma.user.findUnique({ where: { id } });
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    const hashedPassword = await hashPassword(data.password);
+
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        password: hashedPassword,
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    return updatedUser;
   }
 
   async updateUser(id: string, data: any) {

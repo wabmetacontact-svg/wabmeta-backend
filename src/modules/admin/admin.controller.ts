@@ -274,6 +274,26 @@ export class AdminController {
     }
   }
 
+  async updateUserPassword(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const id = getParamId(req.params.id);
+      const { password } = req.body;
+
+      if (!id) {
+        throw new AppError('User ID is required', 400);
+      }
+
+      if (!password) {
+        throw new AppError('Password is required', 400);
+      }
+
+      const user = await adminService.updateUserPassword(id, { password });
+      return sendSuccess(res, user, 'User password updated successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async deleteUser(req: AdminRequest, res: Response, next: NextFunction) {
     try {
       const id = getParamId(req.params.id);

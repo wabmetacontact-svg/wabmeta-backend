@@ -94,6 +94,15 @@ export const updateUserStatusSchema = z.object({
   }),
 });
 
+export const updateUserPasswordSchema = z.object({
+  params: z.object({
+    id: z.string().min(1, 'User ID is required'),
+  }),
+  body: z.object({
+    password: z.string().min(4, 'Password must be at least 4 characters'),
+  }),
+});
+
 export const deleteUserSchema = idParamSchema;
 
 // ============================================
@@ -232,6 +241,7 @@ export type UpdateAdminSchema = z.infer<typeof updateAdminSchema>;
 export type GetUsersSchema = z.infer<typeof getUsersSchema>;
 export type UpdateUserSchema = z.infer<typeof updateUserSchema>;
 export type UpdateUserStatusSchema = z.infer<typeof updateUserStatusSchema>;
+export type UpdateUserPasswordSchema = z.infer<typeof updateUserPasswordSchema>;
 export type GetOrganizationsSchema = z.infer<typeof getOrganizationsSchema>;
 export type UpdateOrganizationSchema = z.infer<typeof updateOrganizationSchema>;
 export type UpdateSubscriptionSchema = z.infer<typeof updateSubscriptionSchema>;

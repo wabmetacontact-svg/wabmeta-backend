@@ -12,6 +12,7 @@ import {
   getUserByIdSchema,
   updateUserSchema,
   updateUserStatusSchema,
+  updateUserPasswordSchema,
   deleteUserSchema,
   getOrganizationsSchema,
   getOrganizationByIdSchema,
@@ -107,6 +108,17 @@ router.patch(
   '/users/:id/status',
   validate(updateUserStatusSchema),
   adminController.updateUserStatus.bind(adminController)
+);
+
+/**
+ * @route   PATCH /api/v1/admin/users/:id/password
+ * @desc    Update user password
+ * @access  Admin
+ */
+router.patch(
+  '/users/:id/password',
+  validate(updateUserPasswordSchema),
+  adminController.updateUserPassword.bind(adminController)
 );
 
 /**
