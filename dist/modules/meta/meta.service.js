@@ -30,7 +30,7 @@ class MetaService {
     // OAUTH & CONFIGURATION
     // ============================================
     getOAuthUrl(state) {
-        const version = config_1.config.meta.graphApiVersion || 'v21.0';
+        const version = config_1.config.meta.graphApiVersion || 'v22.0';
         const baseUrl = `https://www.facebook.com/${version}/dialog/oauth`;
         const params = new URLSearchParams({
             client_id: config_1.config.meta.appId,
@@ -55,7 +55,7 @@ class MetaService {
         return {
             appId: config_1.config.meta.appId,
             configId: config_1.config.meta.configId,
-            version: config_1.config.meta.graphApiVersion || 'v21.0',
+            version: config_1.config.meta.graphApiVersion || 'v22.0',
             redirectUri: config_1.config.meta.redirectUri,
             features: ['WHATSAPP_EMBEDDED_SIGNUP'],
         };
@@ -70,7 +70,7 @@ class MetaService {
             appId: config_1.config.meta.appId ? `${config_1.config.meta.appId.substring(0, 8)}...` : null,
             hasConfigId: !!config_1.config.meta.configId,
             hasRedirectUri: !!config_1.config.meta.redirectUri,
-            apiVersion: config_1.config.meta.graphApiVersion || 'v21.0',
+            apiVersion: config_1.config.meta.graphApiVersion || 'v22.0',
         };
     }
     // ============================================

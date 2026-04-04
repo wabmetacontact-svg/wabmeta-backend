@@ -8,7 +8,7 @@ exports.whatsappApi = void 0;
 const axios_1 = __importDefault(require("axios"));
 const crypto_1 = __importDefault(require("crypto"));
 const config_1 = require("../../config");
-const META_API_VERSION = config_1.config.meta.graphApiVersion || 'v21.0';
+const META_API_VERSION = config_1.config.meta.graphApiVersion || 'v22.0';
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 // ============================================
 // WHATSAPP API CLASS
