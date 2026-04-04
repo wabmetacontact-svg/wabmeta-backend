@@ -1,6 +1,7 @@
 // src/services/meta.upload.service.ts
 
 import axios from 'axios';
+import { config } from '../config';
 
 export class MetaUploadService {
   /**
@@ -19,7 +20,7 @@ export class MetaUploadService {
 
       // ✅ Use APP ID, not WABA ID
       const sessionResponse = await axios.post(
-        `https://graph.facebook.com/v21.0/app/uploads`,
+        `https://graph.facebook.com/${config.meta.graphApiVersion}/app/uploads`,
         null,
         {
           params: {
@@ -38,7 +39,7 @@ export class MetaUploadService {
       console.log('📤 Step 2: Uploading file...');
 
       const uploadResponse = await axios.post(
-        `https://graph.facebook.com/v21.0/${sessionId}`,
+        `https://graph.facebook.com/${config.meta.graphApiVersion}/${sessionId}`,
         file,
         {
           headers: {
@@ -95,7 +96,7 @@ export class MetaUploadService {
       });
 
       const response = await axios.post(
-        `https://graph.facebook.com/v21.0/${phoneNumberId}/media`,
+        `https://graph.facebook.com/${config.meta.graphApiVersion}/${phoneNumberId}/media`,
         formData,
         {
           headers: {

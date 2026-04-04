@@ -64,7 +64,7 @@ export const config = {
     webhookVerifyToken: getEnv('META_VERIFY_TOKEN', getEnv('WEBHOOK_VERIFY_TOKEN', 'webhook-token')),
     configId: getEnv('META_CONFIG_ID'),
     redirectUri: getEnv('META_REDIRECT_URI', 'https://wabmeta.com/meta/callback'),
-    graphApiVersion: getEnv('META_GRAPH_API_VERSION', 'v21.0'),
+    graphApiVersion: getEnv('META_GRAPH_API_VERSION', 'v22.0'),
   },
 
   // Google OAuth
