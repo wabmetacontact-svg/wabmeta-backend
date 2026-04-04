@@ -59,7 +59,7 @@ export class MetaService {
   // ============================================
 
   getOAuthUrl(state: string): string {
-    const version = config.meta.graphApiVersion || 'v21.0';
+    const version = config.meta.graphApiVersion || 'v22.0';
     const baseUrl = `https://www.facebook.com/${version}/dialog/oauth`;
 
     const params = new URLSearchParams({
@@ -89,7 +89,7 @@ export class MetaService {
     return {
       appId: config.meta.appId,
       configId: config.meta.configId,
-      version: config.meta.graphApiVersion || 'v21.0',
+      version: config.meta.graphApiVersion || 'v22.0',
       redirectUri: config.meta.redirectUri,
       features: ['WHATSAPP_EMBEDDED_SIGNUP'],
     };
@@ -108,7 +108,7 @@ export class MetaService {
       appId: config.meta.appId ? `${config.meta.appId.substring(0, 8)}...` : null,
       hasConfigId: !!config.meta.configId,
       hasRedirectUri: !!config.meta.redirectUri,
-      apiVersion: config.meta.graphApiVersion || 'v21.0',
+      apiVersion: config.meta.graphApiVersion || 'v22.0',
     };
   }
 

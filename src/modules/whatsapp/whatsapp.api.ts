@@ -4,7 +4,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
 import { config } from '../../config';
 
-const META_API_VERSION = config.meta.graphApiVersion || 'v21.0';
+const META_API_VERSION = config.meta.graphApiVersion || 'v22.0';
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
 // ============================================
@@ -537,7 +537,7 @@ class WhatsAppAPI {
   /**
    * Create message template with specific API version
    */
-  async createMessageTemplateByVersion(wabaId: string, accessToken: string, payload: any, version: string = 'v21.0'): Promise<any> {
+  async createMessageTemplateByVersion(wabaId: string, accessToken: string, payload: any, version: string = 'v22.0'): Promise<any> {
     try {
       const response = await this.clientUnversioned.post(`/${version}/${wabaId}/message_templates`, payload, {
         params: {

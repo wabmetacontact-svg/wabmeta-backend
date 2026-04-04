@@ -16,7 +16,7 @@ class MetaApiClient {
   private graphVersion: string;
 
   constructor() {
-    this.graphVersion = config.meta.graphApiVersion || 'v21.0';
+    this.graphVersion = config.meta.graphApiVersion || 'v22.0';
 
     this.client = axios.create({
       baseURL: `https://graph.facebook.com/${this.graphVersion}`,

@@ -11,7 +11,7 @@ export class InboxMediaService {
 
     async getMediaUrl(mediaId: string, accessToken: string): Promise<string | null> {
         try {
-            const version = config.meta?.graphApiVersion || 'v21.0';
+            const version = config.meta?.graphApiVersion || 'v22.0';
             // Step 1: Get media URL from WhatsApp
             const response = await axios.get(
                 `https://graph.facebook.com/${version}/${mediaId}`,
