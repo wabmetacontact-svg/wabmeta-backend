@@ -510,11 +510,12 @@ export class InboxController {
         return res.status(400).json({ error: 'Media ID is required' });
       }
 
-      // If still no organizationId, we'll try to find any active WhatsApp account
-      // but it's better to explicitly have it.
       const searchOrgId = organizationId;
 
-      // Get WhatsApp account with access token
+      let accessToken: string | null = null;
+      let accountId: string | null = null;
+
+      // Try WhatsAppAccount first
       const account = await prisma.whatsAppAccount.findFirst({
         where: searchOrgId ? {
           organizationId: searchOrgId,
@@ -523,19 +524,46 @@ export class InboxController {
           isActive: true
         },
         select: {
+          id: true,
           accessToken: true,
         },
       });
 
-      if (!account?.accessToken) {
-        return res.status(404).json({ error: 'No active WhatsApp account' });
+      if (account?.accessToken) {
+        const { safeDecryptStrict } = await import('../../utils/encryption');
+        try {
+            accessToken = safeDecryptStrict(account.accessToken);
+            accountId = account.id;
+        } catch (e) {
+            console.error('Failed to decrypt WhatsAppAccount token in getMedia', e);
+        }
       }
 
-      const accessToken = account.accessToken;
+      // Fallback to MetaConnection
+      if (!accessToken) {
+          const mConnection = await prisma.metaConnection.findFirst({
+              where: searchOrgId ? { organizationId: searchOrgId } : undefined
+          });
+          if (mConnection?.accessToken) {
+              const { safeDecryptStrict } = await import('../../utils/encryption');
+              try {
+                  accessToken = safeDecryptStrict(mConnection.accessToken);
+              } catch (e) {
+                  console.error('Failed to decrypt MetaConnection token in getMedia', e);
+              }
+          }
+      }
+
+      if (!accessToken) {
+        return res.status(404).json({ error: 'No active WhatsApp account or access token found' });
+      }
+
+      const { config } = await import('../../config');
+      const version = config.meta?.graphApiVersion || 'v22.0';
 
       // Step 1: Get media URL from WhatsApp
       const mediaInfoResponse = await axios.get(
-        `https://graph.facebook.com/v18.0/${mediaId}`,
+        `https://graph.facebook.com/${version}/${mediaId}`,
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -571,7 +599,8 @@ export class InboxController {
       console.error('Error proxying media:', error.response?.data || error.message);
 
       // Return placeholder for failed images
-      if (req.headers.accept?.includes('image')) {
+      const acceptQuery = req.query.accept as string | undefined;
+      if (req.headers.accept?.includes('image') || acceptQuery?.includes('image')) {
         res.setHeader('Content-Type', 'image/svg+xml');
         res.send(`
           <svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
