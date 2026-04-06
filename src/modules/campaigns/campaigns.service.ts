@@ -1127,19 +1127,34 @@ export class CampaignsService {
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
         const mediaId = template.headerMediaId;
 
-        if (mediaId && /^\d+$/.test(mediaId)) {
-          // ✅ Has valid numeric Meta media ID → send it
-          components.push({
-            type: 'header',
-            parameters: [{
-              type: hType.toLowerCase(),
-              [hType.toLowerCase()]: { id: mediaId },
-            }],
-          });
+        if (mediaId) {
+          if (/^\d+$/.test(mediaId)) {
+            // ✅ Has valid numeric Meta media ID → send as id
+            components.push({
+              type: 'header',
+              parameters: [{
+                type: hType.toLowerCase(),
+                [hType.toLowerCase()]: { id: mediaId },
+              }],
+            });
+          } else {
+            // ✅ Is a URL link → send as link
+            let link = mediaId;
+            if (link.startsWith('/')) {
+               link = `https://wabmeta.com${link}`; // Ensure absolute URL for frontend uploads
+            }
+            components.push({
+              type: 'header',
+              parameters: [{
+                type: hType.toLowerCase(),
+                [hType.toLowerCase()]: { link: link },
+              }],
+            });
+          }
         }
-        // ✅ NO mediaId or non-numeric → DON'T add header component
-        // For approved templates, Meta uses the registered media automatically
-        // This is the correct behavior per Meta docs
+        // ✅ NO mediaId → DON'T add header component
+        // For approved templates, Meta occasionally uses the registered media automatically
+        // Though explicitly providing link/id is always safer.
 
       } else if (hType === 'TEXT') {
         const matches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
@@ -1191,7 +1206,7 @@ export class CampaignsService {
       132001: 'Template not found or not approved',
       132005: 'Template hydration failed',
       132007: 'Template format character policy violated',
-      132012: 'Template PAUSED by Meta - Quality too low. Create a new template.',
+      132012: 'Template format mismatch (Media/link invalid or variables missing)',
       132015: 'Template PAUSED - Too many messages blocked by users',
       190: 'Access token expired - Reconnect WhatsApp',
     };
