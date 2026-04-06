@@ -504,10 +504,11 @@ export class InboxController {
   async getMedia(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const organizationId = req.user?.organizationId || (req.query.organizationId as string) || (req.query.orgId as string);
-      const mediaId = req.params.mediaId || (req.query.url as string);
+      const mediaId = req.params.mediaId;
+      let mediaUrl = req.query.url as string;
 
-      if (!mediaId) {
-        return res.status(400).json({ error: 'Media ID is required' });
+      if (!mediaId && !mediaUrl) {
+        return res.status(400).json({ error: 'Media ID or URL is required' });
       }
 
       const searchOrgId = organizationId;
@@ -561,17 +562,20 @@ export class InboxController {
       const { config } = await import('../../config');
       const version = config.meta?.graphApiVersion || 'v22.0';
 
-      // Step 1: Get media URL from WhatsApp
-      const mediaInfoResponse = await axios.get(
-        `https://graph.facebook.com/${version}/${mediaId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-      const mediaUrl = mediaInfoResponse.data?.url;
+      // Step 1: Get media URL from WhatsApp if we only have an ID
+      if (mediaId && !mediaUrl) {
+        const mediaInfoResponse = await axios.get(
+          `https://graph.facebook.com/${version}/${mediaId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
+        mediaUrl = mediaInfoResponse.data?.url;
+      } else if (mediaId && typeof mediaId === 'string' && mediaId.startsWith('http')) {
+        mediaUrl = mediaId;
+      }
 
       if (!mediaUrl) {
         return res.status(404).json({ error: 'Media not found' });

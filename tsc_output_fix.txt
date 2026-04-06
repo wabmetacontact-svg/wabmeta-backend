@@ -1,0 +1,4 @@
+src/modules/inbox/inbox.controller.ts(576,37): error TS2339: Property 'startsWith' does not exist on type 'string | string[]'.
+  Property 'startsWith' does not exist on type 'string[]'.
+src/modules/inbox/inbox.controller.ts(577,9): error TS2322: Type 'string | string[]' is not assignable to type 'string'.
+  Type 'string[]' is not assignable to type 'string'.
