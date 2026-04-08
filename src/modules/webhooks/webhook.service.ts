@@ -74,6 +74,7 @@ export class WebhookService {
     const type = String(message?.type || 'text').toLowerCase();
 
     if (type === 'text') return { content: message?.text?.body || '', mediaUrl: null };
+    // ✅ Store mediaId as mediaUrl — proxy fetches fresh URL on demand (CDN URLs expire in ~5min)
     if (type === 'image') return { content: message?.image?.caption || '[Image]', mediaUrl: message?.image?.id || null };
     if (type === 'video') return { content: message?.video?.caption || '[Video]', mediaUrl: message?.video?.id || null };
     if (type === 'document') return { content: message?.document?.filename || '[Document]', mediaUrl: message?.document?.id || null };
@@ -350,15 +351,8 @@ export class WebhookService {
           mediaMimeType = message.image?.mime_type || 'image/jpeg';
           content = message.image?.caption || '[Image]';
           mediaType = 'image';
-
-          if (mediaId) {
-            const mediaResult = await inboxMediaService.processIncomingMedia(
-              mediaId!,
-              mediaMimeType!,
-              organizationId
-            );
-            mediaUrl = mediaResult.url;
-          }
+          // ✅ Store the permanent mediaId as mediaUrl — proxy fetches fresh CDN URL on demand
+          if (mediaId) mediaUrl = mediaId;
           break;
 
         case 'video':
@@ -366,15 +360,8 @@ export class WebhookService {
           mediaMimeType = message.video?.mime_type || 'video/mp4';
           content = message.video?.caption || '[Video]';
           mediaType = 'video';
-
-          if (mediaId) {
-            const mediaResult = await inboxMediaService.processIncomingMedia(
-              mediaId!,
-              mediaMimeType!,
-              organizationId
-            );
-            mediaUrl = mediaResult.url;
-          }
+          // ✅ Store permanent mediaId
+          if (mediaId) mediaUrl = mediaId;
           break;
 
         case 'audio':
@@ -382,15 +369,8 @@ export class WebhookService {
           mediaMimeType = message.audio?.mime_type || 'audio/ogg';
           content = '[Audio]';
           mediaType = 'audio';
-
-          if (mediaId) {
-            const mediaResult = await inboxMediaService.processIncomingMedia(
-              mediaId!,
-              mediaMimeType!,
-              organizationId
-            );
-            mediaUrl = mediaResult.url;
-          }
+          // ✅ Store permanent mediaId
+          if (mediaId) mediaUrl = mediaId;
           break;
 
         case 'document':
@@ -399,15 +379,8 @@ export class WebhookService {
           fileName = message.document?.filename || 'document';
           content = message.document?.caption || `[Document: ${fileName}]`;
           mediaType = 'document';
-
-          if (mediaId) {
-            const mediaResult = await inboxMediaService.processIncomingMedia(
-              mediaId!,
-              mediaMimeType!,
-              organizationId
-            );
-            mediaUrl = mediaResult.url;
-          }
+          // ✅ Store permanent mediaId
+          if (mediaId) mediaUrl = mediaId;
           break;
 
         case 'sticker':
@@ -415,15 +388,8 @@ export class WebhookService {
           mediaMimeType = message.sticker?.mime_type || 'image/webp';
           content = '[Sticker]';
           mediaType = 'sticker';
-
-          if (mediaId) {
-            const mediaResult = await inboxMediaService.processIncomingMedia(
-              mediaId!,
-              mediaMimeType!,
-              organizationId
-            );
-            mediaUrl = mediaResult.url;
-          }
+          // ✅ Store permanent mediaId
+          if (mediaId) mediaUrl = mediaId;
           break;
 
         case 'location':

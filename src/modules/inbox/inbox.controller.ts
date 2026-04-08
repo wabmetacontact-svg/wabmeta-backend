@@ -562,27 +562,37 @@ export class InboxController {
       const { config } = await import('../../config');
       const version = config.meta?.graphApiVersion || 'v22.0';
 
-      // Step 1: Get media URL from WhatsApp if we only have an ID
-      if (mediaId && !mediaUrl) {
+      // Determine the actual download URL to stream
+      // Priority: explicit ?url= param > mediaId param > mediaUrl stored in DB (which may be a numeric ID)
+      let downloadUrl: string | null = null;
+
+      if (mediaUrl && mediaUrl.startsWith('http')) {
+        // Already a full URL — use directly
+        downloadUrl = mediaUrl;
+      } else {
+        // We have a media ID (either from :mediaId param or from DB as ?url=numericId)
+        // Always fetch a fresh signed URL from Meta — stored CDN URLs expire in ~5 minutes
+        const idToFetch = (typeof mediaId === 'string' && !mediaId.startsWith('http')) ? mediaId : mediaUrl;
+        if (!idToFetch) {
+          return res.status(400).json({ error: 'No valid media ID or URL provided' });
+        }
+
+        console.log(`🔄 Fetching fresh media URL from Meta for ID: ${idToFetch}`);
         const mediaInfoResponse = await axios.get(
-          `https://graph.facebook.com/${version}/${mediaId}`,
+          `https://graph.facebook.com/${version}/${idToFetch}`,
           {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
+            headers: { Authorization: `Bearer ${accessToken}` },
           }
         );
-        mediaUrl = mediaInfoResponse.data?.url;
-      } else if (mediaId && typeof mediaId === 'string' && mediaId.startsWith('http')) {
-        mediaUrl = mediaId;
+        downloadUrl = mediaInfoResponse.data?.url;
       }
 
-      if (!mediaUrl) {
-        return res.status(404).json({ error: 'Media not found' });
+      if (!downloadUrl) {
+        return res.status(404).json({ error: 'Media not found or expired' });
       }
 
-      // Step 2: Download media from WhatsApp
-      const mediaResponse = await axios.get(mediaUrl, {
+      // Download and stream media to client
+      const mediaResponse = await axios.get(downloadUrl, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
