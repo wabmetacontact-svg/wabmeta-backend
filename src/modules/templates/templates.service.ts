@@ -625,6 +625,13 @@ export class TemplatesService {
       headerMediaId,
     } = input;
 
+    // ✅ For IMAGE/VIDEO/DOCUMENT templates, store the permanent local URL in headerContent
+    // This is used as fallback link: in campaigns when the Meta upload handle expires
+    const headerLocalUrl = (input as any).headerLocalUrl as string | undefined;
+    const mediaHeaderContent = ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))
+      ? (headerLocalUrl || headerContent || null)
+      : (headerContent || null);
+
     // Validate template
     const validation = this.validateTemplate(input);
     if (!validation.valid) {
@@ -741,7 +748,7 @@ export class TemplatesService {
       language,
       category,
       headerType: headerType || null,
-      headerContent: headerContent || null,
+      headerContent: mediaHeaderContent,  // ✅ Permanent URL for media templates
       headerMediaId: metaMediaId,
       bodyText,
       footerText: footerText || null,

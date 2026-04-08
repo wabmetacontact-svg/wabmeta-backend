@@ -1126,43 +1126,51 @@ export class CampaignsService {
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
         const mediaId = template.headerMediaId;
+        // headerContent stores the permanent local/Cloudinary URL (saved during upload)
+        const permanentUrl = template.headerContent;
 
-        if (mediaId) {
-          if (/^\d+$/.test(mediaId)) {
-            // ✅ Valid permanent numeric Meta media ID → send as id (most reliable)
-            console.log(`✅ [Campaign] Using numeric media ID for ${hType}: ${mediaId}`);
-            components.push({
-              type: 'header',
-              parameters: [{
-                type: hType.toLowerCase(),
-                [hType.toLowerCase()]: { id: mediaId },
-              }],
-            });
-          } else if (mediaId.startsWith('4:') || (!mediaId.startsWith('http') && !mediaId.startsWith('/'))) {
-            // ⚠️ Resumable upload handles (4:...) expire very quickly. 
-            // DO NOT pass to campaign sends — Meta will reject with Error 100.
-            // Omit header component; Meta uses approved sample media automatically.
-            console.warn(`⚠️ [Campaign] Skipping expired/temporary upload handle for ${hType}. Meta will use approved sample.`);
-          } else if (mediaId.startsWith('http') || mediaId.startsWith('/')) {
-            // ✅ Hosted URL (Cloudinary etc.) → send as link
-            let link = mediaId;
-            if (link.startsWith('/')) {
-              link = `https://wabmeta.com${link}`;
-            }
-            console.log(`✅ [Campaign] Using URL link for ${hType}: ${link.substring(0, 60)}`);
-            components.push({
-              type: 'header',
-              parameters: [{
-                type: hType.toLowerCase(),
-                [hType.toLowerCase()]: { link: link },
-              }],
-            });
-          } else {
-            console.warn(`⚠️ [Campaign] Unknown media format for ${hType}, skipping header component.`);
-          }
+        if (mediaId && /^\d+$/.test(mediaId)) {
+          // ✅ Valid permanent numeric Meta media ID → send as id: (best option)
+          console.log(`✅ [Campaign] Using numeric media ID for ${hType}: ${mediaId}`);
+          components.push({
+            type: 'header',
+            parameters: [{
+              type: hType.toLowerCase(),
+              [hType.toLowerCase()]: { id: mediaId },
+            }],
+          });
+        } else if (permanentUrl && permanentUrl.startsWith('http')) {
+          // ✅ Permanent URL stored in headerContent (local file or Cloudinary) → send as link:
+          console.log(`✅ [Campaign] Using permanent URL for ${hType}: ${permanentUrl.substring(0, 60)}`);
+          components.push({
+            type: 'header',
+            parameters: [{
+              type: hType.toLowerCase(),
+              [hType.toLowerCase()]: { link: permanentUrl },
+            }],
+          });
+        } else if (mediaId && mediaId.startsWith('http')) {
+          // ✅ headerMediaId itself is a URL (Cloudinary fallback stored as handle)
+          console.log(`✅ [Campaign] Using URL from headerMediaId for ${hType}`);
+          components.push({
+            type: 'header',
+            parameters: [{
+              type: hType.toLowerCase(),
+              [hType.toLowerCase()]: { link: mediaId },
+            }],
+          });
         } else {
-          // No mediaId at all — Meta approved template uses registered media automatically
-          console.log(`ℹ️ [Campaign] No headerMediaId for ${hType} template "${template.name}" — Meta uses approved sample.`);
+          // ⚠️ Expired handle (4:...) with no permanent URL fallback
+          // Template was created before this fix — user must re-upload the image via edit template
+          console.error(
+            `❌ [Campaign] No valid media reference for ${hType} template "${template.name}". ` +
+            `headerMediaId="${(mediaId || '').substring(0, 20)}", headerContent="${permanentUrl || 'null'}". ` +
+            `Please edit the template and re-upload the image.`
+          );
+          throw new Error(
+            `Image template "${template.name}" has an expired media handle. ` +
+            `Please edit the template, re-upload the image, and save again.`
+          );
         }
 
       } else if (hType === 'TEXT') {

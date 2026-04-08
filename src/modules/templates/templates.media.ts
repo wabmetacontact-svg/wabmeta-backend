@@ -1,7 +1,8 @@
-// src/modules/templates/templates.media.ts
-
+import axios from 'axios';
 import { Response, NextFunction } from 'express';
 import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { AppError } from '../../middleware/errorHandler';
 import { metaUploadService } from '../../services/meta.upload.service';
 import { metaService } from '../meta/meta.service';
@@ -106,6 +107,22 @@ export const uploadTemplateMedia = async (
 
     let mediaHandle = '';
     let cloudinaryUrl = '';
+    let localUrl = '';
+
+    // ✅ Always save the file to disk for permanent access (needed for campaigns)
+    const templatesUploadDir = path.join(process.cwd(), 'uploads', 'templates');
+    if (!fs.existsSync(templatesUploadDir)) {
+      fs.mkdirSync(templatesUploadDir, { recursive: true });
+    }
+    const safeFilename = `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const localFilePath = path.join(templatesUploadDir, safeFilename);
+    fs.writeFileSync(localFilePath, file.buffer);
+    console.log('💾 File saved to disk:', localFilePath);
+
+    // Construct public URL (served by express.static)
+    const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || 'https://api.wabmeta.com';
+    localUrl = `${backendUrl}/uploads/templates/${safeFilename}`;
+    console.log('🌐 Local media URL:', localUrl);
 
     // ✅ Method 1: Try Resumable Upload (app-level)
     try {
@@ -154,12 +171,12 @@ export const uploadTemplateMedia = async (
           
           mediaHandle = result.secureUrl;
           cloudinaryUrl = result.secureUrl;
+          localUrl = result.secureUrl; // Use Cloudinary URL as permanent URL
           console.log('✅ Cloudinary upload success!');
         } else {
-          throw new AppError(
-            'All upload methods failed. Please try again later.',
-            500
-          );
+          // No external upload succeeded but local file is saved — use localUrl as handle
+          console.warn('⚠️ All cloud upload methods failed. Using local file URL.');
+          mediaHandle = localUrl;
         }
       }
     }
@@ -168,6 +185,7 @@ export const uploadTemplateMedia = async (
       handle: mediaHandle.substring(0, 60) + '...',
       isUrl: mediaHandle.startsWith('http'),
       source: cloudinaryUrl ? 'cloudinary' : 'meta',
+      localUrl: localUrl.substring(0, 60),
     });
 
     return res.json({
@@ -175,12 +193,13 @@ export const uploadTemplateMedia = async (
       message: 'Media uploaded successfully',
       data: {
         mediaId: mediaHandle,
-        handle: mediaHandle,  // ✅ Added handle
-        url: cloudinaryUrl || '',
+        handle: mediaHandle,
+        url: cloudinaryUrl || localUrl,     // ✅ Always return a permanent URL
+        localUrl: localUrl,                  // ✅ Permanent local URL for campaign sends
         filename: file.originalname,
         mimeType: file.mimetype,
         size: file.size,
-        wabaId: account.wabaId, // ✅ Added wabaId
+        wabaId: account.wabaId,
       },
     });
   } catch (error: any) {
