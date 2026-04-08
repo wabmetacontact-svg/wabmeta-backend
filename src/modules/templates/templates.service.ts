@@ -224,13 +224,18 @@ const buildMetaTemplatePayload = (t: {
     }
     // ✅ FIXED: MEDIA Headers (IMAGE, VIDEO, DOCUMENT)
     else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-      const mediaId = t.headerMediaId || t.headerContent;
+      let mediaId = t.headerMediaId || t.headerContent;
 
       if (!mediaId) {
         throw new AppError(
           `${headerType} template requires uploaded media. Please upload a file first.`,
           400
         );
+      }
+
+      // ✅ Clean up smuggled URLs if present
+      if (mediaId.includes(':::')) {
+        mediaId = mediaId.split(':::')[0];
       }
 
       const headerComp: any = {
@@ -638,7 +643,7 @@ export class TemplatesService {
 
     const headerLocalUrl = (input as any).headerLocalUrl as string | undefined;
     const mediaHeaderContent = ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))
-      ? (headerLocalUrl || headerContent || extractedUrl || null)
+      ? (extractedUrl || headerLocalUrl || headerContent || null)
       : (headerContent || null);
 
     // Validate template
@@ -1005,13 +1010,19 @@ export class TemplatesService {
                             headerComponent.example.header_text?.[0] || null;
           }
 
-        const existing = await prisma.template.findFirst({
+         const existing = await prisma.template.findFirst({
           where: {
             whatsappAccountId: waData.account?.id || waData.account?.id, // Use ID from waData
             name: metaName,
             language: metaLang,
           },
         });
+
+        // ✅ CRITICAL BUG FIX: Don't let Meta's expiring scontent CDN wipe out our permanent Cloudinary URL
+        let finalHeaderContent = headerContent;
+        if (existing && existing.headerContent && headerContent?.includes('scontent.whatsapp')) {
+          finalHeaderContent = existing.headerContent;
+        }
 
         if (existing) {
             // Update existing
@@ -1022,7 +1033,7 @@ export class TemplatesService {
               rejectionReason,
               category: (String(mt.category || 'UTILITY').toUpperCase()) as any,
               headerType: headerComponent?.format || null,
-              headerContent: headerContent,
+              headerContent: finalHeaderContent,
               bodyText: bodyComponent?.text || existing.bodyText,
               footerText: footerComponent?.text || existing.footerText,
               buttons: toJsonValue(buttonsComponent?.buttons || []),
@@ -1044,7 +1055,7 @@ export class TemplatesService {
               category: (String(mt.category || 'UTILITY').toUpperCase()) as any,
               bodyText: bodyComponent?.text || 'Imported from Meta',
               headerType: headerComponent?.format || null,
-              headerContent: headerContent,
+              headerContent: finalHeaderContent,
               footerText: footerComponent?.text || null,
               status: mappedStatus,
               metaTemplateId: metaId,

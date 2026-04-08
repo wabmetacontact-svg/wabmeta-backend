@@ -1139,7 +1139,7 @@ export class CampaignsService {
               [hType.toLowerCase()]: { id: mediaId },
             }],
           });
-        } else if (permanentUrl && permanentUrl.startsWith('http')) {
+        } else if (permanentUrl && permanentUrl.startsWith('http') && !permanentUrl.includes('scontent.whatsapp')) {
           // ✅ Permanent URL stored in headerContent (local file or Cloudinary) → send as link:
           console.log(`✅ [Campaign] Using permanent URL for ${hType}: ${permanentUrl.substring(0, 60)}`);
           components.push({

@@ -4,9 +4,9 @@ const prisma = new PrismaClient();
 
 async function main() {
   const templates = await prisma.template.findMany({
-    take: 5,
+    take: 10,
     orderBy: { createdAt: 'desc' },
-    select: { name: true, headerContent: true, headerMediaId: true }
+    select: { id: true, name: true, headerType: true, headerContent: true, headerMediaId: true, status: true, createdAt: true }
   });
   console.log(JSON.stringify(templates, null, 2));
 }
