@@ -1129,7 +1129,8 @@ export class CampaignsService {
 
         if (mediaId) {
           if (/^\d+$/.test(mediaId)) {
-            // ✅ Has valid numeric Meta media ID → send as id
+            // ✅ Valid permanent numeric Meta media ID → send as id (most reliable)
+            console.log(`✅ [Campaign] Using numeric media ID for ${hType}: ${mediaId}`);
             components.push({
               type: 'header',
               parameters: [{
@@ -1137,12 +1138,18 @@ export class CampaignsService {
                 [hType.toLowerCase()]: { id: mediaId },
               }],
             });
-          } else {
-            // ✅ Is a URL link → send as link
+          } else if (mediaId.startsWith('4:') || (!mediaId.startsWith('http') && !mediaId.startsWith('/'))) {
+            // ⚠️ Resumable upload handles (4:...) expire very quickly. 
+            // DO NOT pass to campaign sends — Meta will reject with Error 100.
+            // Omit header component; Meta uses approved sample media automatically.
+            console.warn(`⚠️ [Campaign] Skipping expired/temporary upload handle for ${hType}. Meta will use approved sample.`);
+          } else if (mediaId.startsWith('http') || mediaId.startsWith('/')) {
+            // ✅ Hosted URL (Cloudinary etc.) → send as link
             let link = mediaId;
             if (link.startsWith('/')) {
-               link = `https://wabmeta.com${link}`; // Ensure absolute URL for frontend uploads
+              link = `https://wabmeta.com${link}`;
             }
+            console.log(`✅ [Campaign] Using URL link for ${hType}: ${link.substring(0, 60)}`);
             components.push({
               type: 'header',
               parameters: [{
@@ -1150,11 +1157,13 @@ export class CampaignsService {
                 [hType.toLowerCase()]: { link: link },
               }],
             });
+          } else {
+            console.warn(`⚠️ [Campaign] Unknown media format for ${hType}, skipping header component.`);
           }
+        } else {
+          // No mediaId at all — Meta approved template uses registered media automatically
+          console.log(`ℹ️ [Campaign] No headerMediaId for ${hType} template "${template.name}" — Meta uses approved sample.`);
         }
-        // ✅ NO mediaId → DON'T add header component
-        // For approved templates, Meta occasionally uses the registered media automatically
-        // Though explicitly providing link/id is always safer.
 
       } else if (hType === 'TEXT') {
         const matches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
