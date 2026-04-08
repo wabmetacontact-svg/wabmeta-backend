@@ -342,22 +342,39 @@ export class CampaignsService {
     if (!campaign) throw new AppError('Campaign not found', 404);
     if (campaign.status === 'RUNNING') throw new AppError('Already running', 400);
 
-    // ✅ NEW: Check template status before starting
+    // ✅ EXISTING: Template approval check
     if (campaign.template) {
       const tpl = campaign.template as any;
-      
       if (tpl.status === 'REJECTED') {
-        throw new AppError(
-          `Template "${tpl.name}" is REJECTED by Meta. Please create a new template.`,
-          400
-        );
+        throw new AppError(`Template "${tpl.name}" is REJECTED by Meta.`, 400);
       }
-      
       if (tpl.status !== 'APPROVED') {
-        throw new AppError(
-          `Template "${tpl.name}" is not approved yet (status: ${tpl.status}). Wait for Meta approval.`,
-          400
-        );
+        throw new AppError(`Template "${tpl.name}" is not approved (status: ${tpl.status}).`, 400);
+      }
+
+      // ✅ NEW: Media handle check (prevent campaign start with expired media)
+      const headerType = (tpl.headerType || '').toUpperCase();
+      if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+        const mediaId = tpl.headerMediaId;
+        const permanentUrl = tpl.headerContent;
+
+        const hasNumericId = mediaId && /^\d+$/.test(mediaId);
+        const hasPermanentUrl =
+          permanentUrl &&
+          permanentUrl.startsWith('http') &&
+          !permanentUrl.includes('scontent.whatsapp');
+        const hasUrlInMediaId =
+          mediaId &&
+          mediaId.startsWith('http') &&
+          !mediaId.includes('scontent.whatsapp');
+
+        if (!hasNumericId && !hasPermanentUrl && !hasUrlInMediaId) {
+          throw new AppError(
+            `Template "${tpl.name}" has an expired media handle. ` +
+            `Please edit the template, re-upload the ${headerType.toLowerCase()}, and save again.`,
+            400
+          );
+        }
       }
     }
 
@@ -1126,12 +1143,11 @@ export class CampaignsService {
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
         const mediaId = template.headerMediaId;
-        // headerContent stores the permanent local/Cloudinary URL (saved during upload)
         const permanentUrl = template.headerContent;
 
+        // ✅ PRIORITY 1: Numeric Meta media ID (permanent)
         if (mediaId && /^\d+$/.test(mediaId)) {
-          // ✅ Valid permanent numeric Meta media ID → send as id: (best option)
-          console.log(`✅ [Campaign] Using numeric media ID for ${hType}: ${mediaId}`);
+          console.log(`✅ Using numeric media ID: ${mediaId}`);
           components.push({
             type: 'header',
             parameters: [{
@@ -1139,9 +1155,14 @@ export class CampaignsService {
               [hType.toLowerCase()]: { id: mediaId },
             }],
           });
-        } else if (permanentUrl && permanentUrl.startsWith('http') && !permanentUrl.includes('scontent.whatsapp')) {
-          // ✅ Permanent URL stored in headerContent (local file or Cloudinary) → send as link:
-          console.log(`✅ [Campaign] Using permanent URL for ${hType}: ${permanentUrl.substring(0, 60)}`);
+        }
+        // ✅ PRIORITY 2: Cloudinary/permanent URL in headerContent
+        else if (
+          permanentUrl &&
+          permanentUrl.startsWith('http') &&
+          !permanentUrl.includes('scontent.whatsapp')
+        ) {
+          console.log(`✅ Using permanent URL: ${permanentUrl.substring(0, 60)}`);
           components.push({
             type: 'header',
             parameters: [{
@@ -1149,9 +1170,10 @@ export class CampaignsService {
               [hType.toLowerCase()]: { link: permanentUrl },
             }],
           });
-        } else if (mediaId && mediaId.startsWith('http')) {
-          // ✅ headerMediaId itself is a URL (Cloudinary fallback stored as handle)
-          console.log(`✅ [Campaign] Using URL from headerMediaId for ${hType}`);
+        }
+        // ✅ PRIORITY 3: URL stored in headerMediaId itself
+        else if (mediaId && mediaId.startsWith('http') && !mediaId.includes('scontent.whatsapp')) {
+          console.log(`✅ Using URL from headerMediaId`);
           components.push({
             type: 'header',
             parameters: [{
@@ -1159,39 +1181,42 @@ export class CampaignsService {
               [hType.toLowerCase()]: { link: mediaId },
             }],
           });
-        } else {
-          // ⚠️ Expired handle (4:...) with no permanent URL fallback
-          // Template was created before this fix — user must re-upload the image via edit template
-          console.error(
-            `❌ [Campaign] No valid media reference for ${hType} template "${template.name}". ` +
-            `headerMediaId="${(mediaId || '').substring(0, 20)}", headerContent="${permanentUrl || 'null'}". ` +
-            `Please edit the template and re-upload the image.`
-          );
-          throw new Error(
-            `Image template "${template.name}" has an expired media handle. ` +
-            `Please edit the template, re-upload the image, and save again.`
-          );
         }
-
-      } else if (hType === 'TEXT') {
+        // ❌ PRIORITY 4: Nothing valid found
+        else {
+          // ✅ NEW: Instead of throwing, return HELPFUL error with template name
+          const errorMsg =
+            `Image template "${template.name}" has an expired media handle. ` +
+            `Please edit the template, re-upload the image, and save again.`;
+          
+          console.error(`❌ [Campaign] ${errorMsg}`, {
+            headerMediaId: (mediaId || '').substring(0, 30),
+            headerContent: permanentUrl || 'null',
+          });
+          
+          throw new Error(errorMsg);
+        }
+      }
+      // TEXT header (unchanged)
+      else if (hType === 'TEXT') {
         const matches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
         if (matches.length > 0) {
           const params = buildParamsFromContact(cc, matches.length);
           components.push({
             type: 'header',
-            parameters: params.map(p => ({ type: 'text', text: String(p) })),
+            parameters: params.map((p: string) => ({ type: 'text', text: String(p) })),
           });
         }
       }
     }
 
-    // Body
+    // Body (unchanged)
     const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
     if (bodyMatches.length > 0) {
       const params = buildParamsFromContact(cc, bodyMatches.length);
       components.push({
         type: 'body',
-        parameters: params.map(p => ({ type: 'text', text: String(p) })),
+        parameters: params.map((p: string) => ({ type: 'text', text: String(p) })),
       });
     }
 
