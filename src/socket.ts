@@ -18,9 +18,16 @@ let webhookListenersAttached = false; // ✅ Flag to prevent duplicate listeners
 export const initializeSocket = (server: HttpServer) => {
   console.log('🔌 Starting Socket.IO...');
 
+  const allowedOrigins = [
+    'https://wabmeta.com',
+    'https://www.wabmeta.com',
+    'http://localhost:5173',
+    'http://localhost:3000',
+  ];
+
   io = new Server(server, {
     cors: {
-      origin: [...config.frontend.corsOrigins],
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true,
       allowedHeaders: [
@@ -33,6 +40,7 @@ export const initializeSocket = (server: HttpServer) => {
         'Origin',
       ],
     },
+    // ✅ Polling fallback
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
 

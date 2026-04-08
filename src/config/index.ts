@@ -32,7 +32,6 @@ export const config = {
   frontend: {
     url: getEnv('FRONTEND_URL', 'http://localhost:5173'),
     corsOrigins: [
-      getEnv('FRONTEND_URL', 'http://localhost:5173'),
       'https://wabmeta.com',
       'https://www.wabmeta.com',
       'http://localhost:3000',

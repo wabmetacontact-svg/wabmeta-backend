@@ -67,31 +67,26 @@ app.use(
 // ============================================
 // CORS CONFIGURATION
 // ============================================
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
-  : [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://wabmeta.com',
-    'https://www.wabmeta.com',
-  ];
+const allowedOrigins = [
+  'https://wabmeta.com',
+  'https://www.wabmeta.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
 
 console.log('🔒 CORS Allowed Origins:', allowedOrigins);
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (mobile apps, curl, Postman, Meta webhooks)
-      if (!origin) {
-        return callback(null, true);
-      }
+    origin: (origin, callback) => {
+      // ✅ No origin (mobile apps, postman, Meta webhooks)
+      if (!origin) return callback(null, true);
 
-      // Check if origin is in allowed list
-      if (allowedOrigins.indexOf(origin) !== -1) {
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         console.warn(`⚠️ CORS blocked origin: ${origin}`);
-        callback(new Error('Not allowed by CORS'));
+        callback(new Error(`CORS blocked: ${origin}`));
       }
     },
     credentials: true,
@@ -163,6 +158,15 @@ app.get('/', (req: Request, res: Response) => {
     message: 'WabMeta API Server',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
+  });
+});
+
+// ✅ Health check - sabse upar hona chahiye
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
   });
 });
 
