@@ -109,42 +109,63 @@ export const uploadTemplateMedia = async (
     let cloudinaryUrl = '';
     let localUrl = '';
 
-    // ✅ Always save the file to disk for permanent access (needed for campaigns)
-    const templatesUploadDir = path.join(process.cwd(), 'uploads', 'templates');
-    if (!fs.existsSync(templatesUploadDir)) {
-      fs.mkdirSync(templatesUploadDir, { recursive: true });
+    // ✅ Step 1: ALWAYS upload to Cloudinary in parallel (gives permanent public URL for campaign sends)
+    // Meta upload handles (4:...) expire in minutes — Cloudinary URLs are permanent
+    if (cloudinaryService?.isConfigured()) {
+      try {
+        console.log('☁️ Uploading to Cloudinary (permanent URL for campaigns)...');
+        const result = await cloudinaryService.uploadTemplateMedia(
+          file.buffer,
+          file.originalname,
+          file.mimetype,
+          organizationId
+        );
+        cloudinaryUrl = result.secureUrl;
+        localUrl = cloudinaryUrl;
+        console.log('✅ Cloudinary upload success! URL:', cloudinaryUrl.substring(0, 60));
+      } catch (cloudErr: any) {
+        console.warn('⚠️ Cloudinary upload failed (will use local file):', cloudErr.message);
+      }
     }
-    const safeFilename = `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-    const localFilePath = path.join(templatesUploadDir, safeFilename);
-    fs.writeFileSync(localFilePath, file.buffer);
-    console.log('💾 File saved to disk:', localFilePath);
 
-    // Construct public URL (served by express.static)
-    const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || 'https://api.wabmeta.com';
-    localUrl = `${backendUrl}/uploads/templates/${safeFilename}`;
-    console.log('🌐 Local media URL:', localUrl);
+    // ✅ Step 2: Also save to local disk as fallback (in case Cloudinary fails)
+    if (!localUrl) {
+      try {
+        const templatesUploadDir = path.join(process.cwd(), 'uploads', 'templates');
+        if (!fs.existsSync(templatesUploadDir)) {
+          fs.mkdirSync(templatesUploadDir, { recursive: true });
+        }
+        const safeFilename = `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const localFilePath = path.join(templatesUploadDir, safeFilename);
+        fs.writeFileSync(localFilePath, file.buffer);
+        const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || '';
+        if (backendUrl) {
+          localUrl = `${backendUrl}/uploads/templates/${safeFilename}`;
+          console.log('💾 Fallback local file URL:', localUrl);
+        }
+      } catch (diskErr: any) {
+        console.warn('⚠️ Disk save failed:', diskErr.message);
+      }
+    }
 
-    // ✅ Method 1: Try Resumable Upload (app-level)
+    // ✅ Step 3: Upload to Meta (for template creation approval — handle is temporary)
     try {
-      console.log('☁️ Trying Resumable Upload API...');
-      
+      console.log('☁️ Uploading to Meta (for template approval)...');
       const result = await metaUploadService.uploadMediaForTemplate(
-        'app',  // Use 'app' endpoint
+        'app',
         accountWithToken.accessToken,
         file.buffer,
         file.mimetype,
         file.originalname
       );
-      
       mediaHandle = result.handle;
-      console.log('✅ Resumable upload success!');
+      console.log('✅ Meta resumable upload success!');
     } catch (resumableError: any) {
-      console.warn('⚠️ Resumable upload failed:', resumableError.message);
+      console.warn('⚠️ Meta resumable upload failed:', resumableError.message);
       
-      // ✅ Method 2: Try Simple Upload (phone number)
+      // Fallback: Simple Upload 
       try {
-        console.log('☁️ Falling back to Simple Upload...');
-        
+        console.log('☁️ Falling back to Meta Simple Upload...');
         const result = await metaUploadService.uploadMediaSimple(
           account.phoneNumberId,
           accountWithToken.accessToken,
@@ -152,50 +173,36 @@ export const uploadTemplateMedia = async (
           file.mimetype,
           file.originalname
         );
-        
         mediaHandle = result.id;
-        console.log('✅ Simple upload success!');
+        console.log('✅ Meta simple upload success!');
       } catch (simpleError: any) {
-        console.warn('⚠️ Simple upload failed:', simpleError.message);
-        
-        // ✅ Method 3: Fallback to Cloudinary
-        if (cloudinaryService?.isConfigured()) {
-          console.log('☁️ Falling back to Cloudinary...');
-          
-          const result = await cloudinaryService.uploadTemplateMedia(
-            file.buffer,
-            file.originalname,
-            file.mimetype,
-            organizationId
-          );
-          
-          mediaHandle = result.secureUrl;
-          cloudinaryUrl = result.secureUrl;
-          localUrl = result.secureUrl; // Use Cloudinary URL as permanent URL
-          console.log('✅ Cloudinary upload success!');
-        } else {
-          // No external upload succeeded but local file is saved — use localUrl as handle
-          console.warn('⚠️ All cloud upload methods failed. Using local file URL.');
+        console.warn('⚠️ Meta simple upload also failed:', simpleError.message);
+        // If both Meta uploads fail but we have Cloudinary URL, use it as handle too
+        if (localUrl) {
           mediaHandle = localUrl;
+          console.log('⚠️ Using Cloudinary URL as Meta handle fallback');
+        } else {
+          throw new AppError('All upload methods failed. Please try again later.', 500);
         }
       }
     }
 
-    console.log('✅ Final media handle:', {
-      handle: mediaHandle.substring(0, 60) + '...',
-      isUrl: mediaHandle.startsWith('http'),
-      source: cloudinaryUrl ? 'cloudinary' : 'meta',
-      localUrl: localUrl.substring(0, 60),
+    console.log('✅ Upload complete:', {
+      metaHandle: mediaHandle.substring(0, 40) + '...',
+      cloudinaryUrl: cloudinaryUrl ? cloudinaryUrl.substring(0, 60) : 'none',
+      localUrl: localUrl ? localUrl.substring(0, 60) : 'none',
+      hasPermUrl: !!localUrl,
     });
 
     return res.json({
       success: true,
       message: 'Media uploaded successfully',
       data: {
-        mediaId: mediaHandle,
-        handle: mediaHandle,
-        url: cloudinaryUrl || localUrl,     // ✅ Always return a permanent URL
-        localUrl: localUrl,                  // ✅ Permanent local URL for campaign sends
+        // Sneak the permanent URL through the frontend back to us using a delimited string
+        mediaId: `${mediaHandle}:::${cloudinaryUrl || localUrl || ''}`,
+        handle: `${mediaHandle}:::${cloudinaryUrl || localUrl || ''}`,
+        url: cloudinaryUrl || localUrl || '',
+        localUrl: localUrl,
         filename: file.originalname,
         mimeType: file.mimetype,
         size: file.size,
@@ -203,7 +210,7 @@ export const uploadTemplateMedia = async (
       },
     });
   } catch (error: any) {
-    console.error('❌ All upload methods failed:', error.message);
+    console.error('❌ Upload failed:', error.message);
     next(error instanceof AppError ? error : new AppError(error.message, 500));
   }
 };

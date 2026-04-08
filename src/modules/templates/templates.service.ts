@@ -625,11 +625,20 @@ export class TemplatesService {
       headerMediaId,
     } = input;
 
-    // ✅ For IMAGE/VIDEO/DOCUMENT templates, store the permanent local URL in headerContent
-    // This is used as fallback link: in campaigns when the Meta upload handle expires
+    // ✅ For IMAGE/VIDEO/DOCUMENT templates, extract the sneaked permanent local URL from headerMediaId
+    let rawMediaId = input.headerMediaId || '';
+    let extractedUrl = '';
+    
+    if (rawMediaId.includes(':::')) {
+      const parts = rawMediaId.split(':::');
+      rawMediaId = parts[0];
+      extractedUrl = parts[1];
+      input.headerMediaId = rawMediaId; // Clean it up for the rest of the function
+    }
+
     const headerLocalUrl = (input as any).headerLocalUrl as string | undefined;
     const mediaHeaderContent = ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))
-      ? (headerLocalUrl || headerContent || null)
+      ? (headerLocalUrl || headerContent || extractedUrl || null)
       : (headerContent || null);
 
     // Validate template
@@ -662,7 +671,7 @@ export class TemplatesService {
     }
 
     // ✅ FIXED: Handle all media ID formats correctly
-    let metaMediaId: string | null = headerMediaId || null;
+    let metaMediaId: string | null = rawMediaId || null;
     let waData: Awaited<ReturnType<typeof getWhatsAppAccountWithToken>> | null = null;
     let canSyncToMeta = false;
 
