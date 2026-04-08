@@ -684,7 +684,8 @@ export class TemplatesService {
     }
 
     if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))) {
-      const mediaHandle = headerMediaId || headerContent;
+      // Use rawMediaId which has the `:::` permanent URL suffix already stripped!
+      const mediaHandle = rawMediaId || headerContent;
 
       if (!mediaHandle) {
         throw new AppError(`${headerType} template requires uploaded media`, 400);
