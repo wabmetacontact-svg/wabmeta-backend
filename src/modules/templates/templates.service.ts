@@ -610,6 +610,39 @@ export class TemplatesService {
   }
 
   /**
+   * ✅ NEW: Helper to extract smuggled URL from mediaId
+   */
+  private extractSmuggledMedia(mediaId: string | undefined | null, existingContent: string | undefined | null): { mediaId: string | null, content: string | null } {
+    const isScontent = (url: string | null | undefined) => !!url && url.includes('scontent.whatsapp');
+    
+    if (!mediaId) {
+      return { 
+        mediaId: null, 
+        content: isScontent(existingContent) ? null : (existingContent || null) 
+      };
+    }
+    
+    if (mediaId.includes(':::')) {
+      const parts = mediaId.split(':::');
+      const smuggledUrl = parts[1];
+      const realId = parts[0] || null;
+      
+      // Prioritize smuggled URL, then fallback to existing only if not scontent
+      let content = smuggledUrl || null;
+      if (!content && existingContent && !isScontent(existingContent)) {
+        content = existingContent;
+      }
+      
+      return { mediaId: realId, content };
+    }
+    
+    return { 
+      mediaId, 
+      content: isScontent(existingContent) ? null : (existingContent || null) 
+    };
+  }
+
+  /**
    * Create new template
    */
   async create(
@@ -631,19 +664,12 @@ export class TemplatesService {
     } = input;
 
     // ✅ For IMAGE/VIDEO/DOCUMENT templates, extract the sneaked permanent local URL from headerMediaId
-    let rawMediaId = input.headerMediaId || '';
-    let extractedUrl = '';
-    
-    if (rawMediaId.includes(':::')) {
-      const parts = rawMediaId.split(':::');
-      rawMediaId = parts[0];
-      extractedUrl = parts[1];
-      input.headerMediaId = rawMediaId; // Clean it up for the rest of the function
-    }
+    const { mediaId: rawMediaId, content: extractedUrl } = this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
+    input.headerMediaId = rawMediaId || undefined;
 
     const headerLocalUrl = (input as any).headerLocalUrl as string | undefined;
     const mediaHeaderContent = ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))
-      ? (extractedUrl || headerLocalUrl || headerContent || null)
+      ? (extractedUrl || headerLocalUrl || null)
       : (headerContent || null);
 
     // Validate template
@@ -1019,9 +1045,17 @@ export class TemplatesService {
         });
 
         // ✅ CRITICAL BUG FIX: Don't let Meta's expiring scontent CDN wipe out our permanent Cloudinary URL
-        let finalHeaderContent = headerContent;
-        if (existing && existing.headerContent && headerContent?.includes('scontent.whatsapp')) {
-          finalHeaderContent = existing.headerContent;
+        // NEVER save scontent URLs as permanent headerContent.
+        const isScontent = (url: string | null | undefined) => !!url && url.includes('scontent.whatsapp');
+        
+        let finalHeaderContent = isScontent(headerContent) ? null : headerContent;
+        
+        // If we have an existing record with a good URL, ALWAYS keep it
+        if (existing && existing.headerContent && !isScontent(existing.headerContent)) {
+          // If the incoming content is bad or missing, preserve the good one we have
+          if (!finalHeaderContent) {
+            finalHeaderContent = existing.headerContent;
+          }
         }
 
         if (existing) {
@@ -1152,13 +1186,16 @@ export class TemplatesService {
       }
     }
 
+    // ✅ Extract and prioritize smuggled URL on update too!
+    const { mediaId: rawMediaId, content: extractedUrl } = this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
+
     const updateData: Prisma.TemplateUpdateInput | any = {
       name: input.name,
       language: input.language,
       category: input.category,
       headerType: input.headerType,
-      headerContent: input.headerContent,
-      headerMediaId: input.headerMediaId,
+      headerContent: extractedUrl, // Use the extracted permanent URL!
+      headerMediaId: rawMediaId,   // Use the clean Meta handle
       bodyText: input.bodyText,
       footerText: input.footerText,
     };
