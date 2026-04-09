@@ -352,23 +352,25 @@ export class CampaignsService {
         throw new AppError(`Template "${tpl.name}" is not approved (status: ${tpl.status}).`, 400);
       }
 
-      // ✅ NEW: Media handle check (prevent campaign start with expired media)
+      // ✅ Media handle check (prevent campaign start with expired/missing media)
       const headerType = (tpl.headerType || '').toUpperCase();
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
         const mediaId = tpl.headerMediaId;
         const permanentUrl = tpl.headerContent;
 
-        const hasNumericId = mediaId && /^\d+$/.test(mediaId);
+        // Valid media sources:
+        const hasNumericId = mediaId && /^\d+$/.test(mediaId);                          // e.g. "1234567890"
+        const hasResumableHandle = mediaId && mediaId.startsWith('4:');                   // e.g. "4:dGVtcGxh..."
         const hasPermanentUrl =
           permanentUrl &&
           permanentUrl.startsWith('http') &&
-          !permanentUrl.includes('scontent.whatsapp');
+          !permanentUrl.includes('scontent.whatsapp');                                    // Cloudinary URL
         const hasUrlInMediaId =
           mediaId &&
           mediaId.startsWith('http') &&
-          !mediaId.includes('scontent.whatsapp');
+          !mediaId.includes('scontent.whatsapp');                                         // HTTP URL in mediaId
 
-        if (!hasNumericId && !hasPermanentUrl && !hasUrlInMediaId) {
+        if (!hasNumericId && !hasResumableHandle && !hasPermanentUrl && !hasUrlInMediaId) {
           throw new AppError(
             `Template "${tpl.name}" has an expired media handle. ` +
             `Please edit the template, re-upload the ${headerType.toLowerCase()}, and save again.`,
@@ -1148,6 +1150,17 @@ export class CampaignsService {
         // ✅ PRIORITY 1: Numeric Meta media ID (permanent)
         if (mediaId && /^\d+$/.test(mediaId)) {
           console.log(`✅ Using numeric media ID: ${mediaId}`);
+          components.push({
+            type: 'header',
+            parameters: [{
+              type: hType.toLowerCase(),
+              [hType.toLowerCase()]: { id: mediaId },
+            }],
+          });
+        }
+        // ✅ PRIORITY 1b: Resumable upload handle (e.g. "4:dGVtcGxh...")
+        else if (mediaId && mediaId.startsWith('4:')) {
+          console.log(`✅ Using resumable upload handle: ${mediaId.substring(0, 30)}...`);
           components.push({
             type: 'header',
             parameters: [{
