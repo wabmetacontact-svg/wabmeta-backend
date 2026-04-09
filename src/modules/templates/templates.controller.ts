@@ -754,8 +754,124 @@ class TemplatesController {
       console.error('❌ Re-upload failed:', error.message);
       next(error);
     }
+    // ==========================================
+  // FIX MEDIA — Direct file upload to fix broken templates
+  // Works even when headerContent (Cloudinary URL) is null/missing
+  // POST /:id/fix-media (multipart/form-data with 'file' field)
+  // ==========================================
+  async fixMedia(req: any, res: Response, next: NextFunction) {
+    try {
+      const organizationId = (req as AuthRequest).user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const id = req.params.id as string;
+      if (!id) throw new AppError('Template ID is required', 400);
+
+      const file = req.file;
+      if (!file) throw new AppError('No file uploaded. Send file in "file" field (multipart/form-data)', 400);
+
+      // 1. Find template
+      const template = await prisma.template.findFirst({ where: { id, organizationId } });
+      if (!template) throw new AppError('Template not found', 404);
+
+      if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType?.toUpperCase() || '')) {
+        throw new AppError('Template does not have a media header', 400);
+      }
+
+      console.log('🔧 Fix-media: Starting for template:', template.name, {
+        mimetype: file.mimetype,
+        size: file.size,
+        currentHeaderContent: template.headerContent ? template.headerContent.substring(0, 40) : 'NULL',
+        currentHeaderMediaId: template.headerMediaId ? template.headerMediaId.substring(0, 30) : 'NULL',
+      });
+
+      // 2. Get WhatsApp account
+      let waAccount = await prisma.whatsAppAccount.findFirst({
+        where: { organizationId, status: 'CONNECTED' },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      });
+
+      if (!waAccount) throw new AppError('No connected WhatsApp account found', 400);
+
+      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
+      if (!accountWithToken?.accessToken) throw new AppError('Failed to decrypt WhatsApp token', 500);
+
+      let cloudinaryUrl = template.headerContent || '';
+      let metaNumericId = '';
+
+      // 3. Upload to Cloudinary (permanent URL)
+      let cloudinaryService: any = null;
+      try {
+        const mod = require('../../services/cloudinary.service');
+        cloudinaryService = mod.cloudinaryService;
+      } catch (e) {}
+
+      if (cloudinaryService?.isConfigured()) {
+        try {
+          console.log('☁️ Fix-media: Uploading to Cloudinary...');
+          const result = await cloudinaryService.uploadTemplateMedia(
+            file.buffer,
+            file.originalname,
+            file.mimetype,
+            organizationId
+          );
+          cloudinaryUrl = result.secureUrl;
+          console.log('✅ Fix-media: Cloudinary success:', cloudinaryUrl.substring(0, 60));
+        } catch (cloudErr: any) {
+          console.warn('⚠️ Fix-media: Cloudinary failed:', cloudErr.message);
+        }
+      }
+
+      // 4. Upload to Meta (get numeric media ID)
+      try {
+        console.log('☁️ Fix-media: Uploading to Meta...');
+        const result = await metaApi.uploadMedia(
+          waAccount.phoneNumberId,
+          accountWithToken.accessToken,
+          file.buffer,
+          file.mimetype,
+          file.originalname,
+          waAccount.wabaId
+        );
+        metaNumericId = result.id;
+        console.log('✅ Fix-media: Meta upload success, numeric ID:', metaNumericId);
+      } catch (metaErr: any) {
+        console.error('❌ Fix-media: Meta upload failed:', metaErr.message);
+        throw new AppError(`Failed to upload to Meta: ${metaErr.message}`, 500);
+      }
+
+      // 5. Save both to DB
+      const updateData: any = {
+        headerMediaId: metaNumericId,
+      };
+      if (cloudinaryUrl) {
+        updateData.headerContent = cloudinaryUrl;
+      }
+
+      await prisma.template.update({
+        where: { id },
+        data: updateData,
+      });
+
+      console.log('✅ Fix-media: Template updated:', { id, metaNumericId, cloudinaryUrl: cloudinaryUrl ? 'set' : 'unchanged' });
+
+      return res.json({
+        success: true,
+        message: 'Media fixed successfully. Template can now be used in campaigns.',
+        data: {
+          templateId: id,
+          metaMediaId: metaNumericId,
+          cloudinaryUrl: cloudinaryUrl || null,
+          headerType: template.headerType,
+        },
+      });
+
+    } catch (error: any) {
+      console.error('❌ Fix-media failed:', error.message);
+      next(error instanceof AppError ? error : new AppError(error.message, 500));
+    }
   }
 }
 
 export const templatesController = new TemplatesController();
-export default templatesController;
+export default templatesController;

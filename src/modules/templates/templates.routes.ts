@@ -31,5 +31,6 @@ router.delete('/:id', templatesController.delete);
 router.post('/:id/submit', templatesController.submit);
 router.post('/:id/duplicate', templatesController.duplicate);
 router.post('/:id/reupload-media', templatesController.reuploadMedia);
+router.post('/:id/fix-media', uploadMiddleware.single('file'), templatesController.fixMedia);
 
 export default router;
