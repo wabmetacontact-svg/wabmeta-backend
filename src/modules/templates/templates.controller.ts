@@ -754,12 +754,15 @@ class TemplatesController {
       console.error('❌ Re-upload failed:', error.message);
       next(error);
     }
-    // ==========================================
+  }
+
+  // ==========================================
   // FIX MEDIA — Direct file upload to fix broken templates
   // Works even when headerContent (Cloudinary URL) is null/missing
   // POST /:id/fix-media (multipart/form-data with 'file' field)
   // ==========================================
   async fixMedia(req: any, res: Response, next: NextFunction) {
+
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
       if (!organizationId) throw new AppError('Organization context required', 400);
