@@ -1161,7 +1161,11 @@ export class TemplatesService {
   async update(
     organizationId: string,
     templateId: string,
-    input: UpdateTemplateInput
+    input: UpdateTemplateInput & { 
+      headerMediaId?: string; 
+      headerContent?: string;
+      whatsappAccountId?: string;
+    }
   ): Promise<TemplateResponse> {
     const existing = await prisma.template.findFirst({
       where: { id: templateId, organizationId },
@@ -1171,37 +1175,77 @@ export class TemplatesService {
       throw new AppError('Template not found', 404);
     }
 
-    if (existing.status === 'APPROVED' && existing.metaTemplateId) {
-      throw new AppError(
-        'Cannot modify approved templates. Create a new template instead.',
-        400
-      );
+    // ✅ FIXED: Approved template mein sirf media update allow karo
+    const isApproved = existing.status === 'APPROVED' && existing.metaTemplateId;
+    
+    if (isApproved) {
+      // ✅ Check: Kya sirf media update ho raha hai?
+      const isMediaOnlyUpdate = 
+        (input.headerMediaId || input.headerContent) &&
+        !input.name &&
+        !input.bodyText &&
+        !input.language &&
+        !input.category;
+
+      if (!isMediaOnlyUpdate) {
+        throw new AppError(
+          'Cannot modify approved templates content. ' +
+          'You can only re-upload media for expired handles.',
+          400
+        );
+      }
+
+      // ✅ ALLOW: Sirf headerMediaId aur headerContent update karo
+      console.log('🔄 Updating media for approved template:', templateId);
+
+      const { mediaId: rawMediaId, content: extractedUrl } = 
+        this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
+
+      const updated = await prisma.template.update({
+        where: { id: templateId },
+        data: {
+          headerMediaId: rawMediaId || existing.headerMediaId,
+          headerContent: extractedUrl || existing.headerContent,
+          // ✅ Status APPROVED rahega - sirf media update hua
+        },
+      });
+
+      console.log('✅ Media updated for approved template:', templateId);
+      return formatTemplate(updated);
     }
 
+    // ✅ Non-approved templates: Full update allow karo
     let finalVariables = input.variables;
     if (input.bodyText) {
       const extracted = extractVariables(input.bodyText);
       if (!finalVariables || finalVariables.length === 0) {
-        finalVariables = extracted.map((index) => ({ index, type: 'text' as const }));
+        finalVariables = extracted.map((index) => ({ 
+          index, 
+          type: 'text' as const 
+        }));
       }
     }
 
-    // ✅ Extract and prioritize smuggled URL on update too!
-    const { mediaId: rawMediaId, content: extractedUrl } = this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
+    const { mediaId: rawMediaId, content: extractedUrl } = 
+      this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
 
-    const updateData: Prisma.TemplateUpdateInput | any = {
+    const updateData: any = {
       name: input.name,
       language: input.language,
       category: input.category,
       headerType: input.headerType,
-      headerContent: extractedUrl, // Use the extracted permanent URL!
-      headerMediaId: rawMediaId,   // Use the clean Meta handle
+      headerContent: extractedUrl,
+      headerMediaId: rawMediaId,
       bodyText: input.bodyText,
       footerText: input.footerText,
     };
 
-    if (input.buttons !== undefined) updateData.buttons = toJsonValue(input.buttons);
-    if (finalVariables !== undefined) updateData.variables = toJsonValue(finalVariables);
+    if (input.buttons !== undefined) {
+      updateData.buttons = toJsonValue(input.buttons);
+    }
+    if (finalVariables !== undefined) {
+      updateData.variables = toJsonValue(finalVariables);
+    }
 
     if (input.bodyText || input.headerContent) {
       updateData.status = 'PENDING';
@@ -1212,8 +1256,7 @@ export class TemplatesService {
       data: updateData,
     });
 
-    console.log(`✅ Template updated: ${templateId}`);
-
+    console.log('✅ Template updated:', templateId);
     return formatTemplate(updated);
   }
 
