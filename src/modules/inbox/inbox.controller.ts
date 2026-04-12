@@ -15,6 +15,8 @@ import prisma from '../../config/database';
 import whatsappService from '../whatsapp/whatsapp.service';
 import axios from 'axios';
 import { inboxMediaService } from './inbox.media';
+import fs from 'fs';
+import path from 'path';
 
 // Extended Request interface
 interface AuthRequest extends Request {
@@ -503,176 +505,308 @@ export class InboxController {
   // ==========================================
   async getMedia(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const mediaId = req.params.mediaId;
+      const mediaId = req.params.mediaId as string;
       const urlQuery = req.query.url;
-      const mediaUrl = Array.isArray(urlQuery) ? (urlQuery[0] as string) : (urlQuery as string);
+      const mediaUrlParam = (Array.isArray(urlQuery) ? urlQuery[0] : urlQuery) as string;
+      const idToFetch = ((mediaId || mediaUrlParam) as string)?.trim();
 
-      // ✅ Determine what we have
-      const idToFetch = (mediaId || mediaUrl) as string;
+      console.log('📸 getMedia:', { idToFetch });
 
-      if (!idToFetch) {
+      if (!idToFetch || idToFetch === 'proxy') {
         return res.status(400).json({ error: 'Media ID required' });
       }
 
-      // ✅ Get organization ID from multiple sources
-      const organizationId =
-        req.user?.organizationId ||
-        ((Array.isArray(req.query.organizationId) ? req.query.organizationId[0] : req.query.organizationId) as string) ||
-        ((Array.isArray(req.query.orgId) ? req.query.orgId[0] : req.query.orgId) as string);
-
-      // ✅ Get access token
-      let accessToken: string | null = null;
-
-      // Try 1: WhatsAppAccount table
-      const accountWhere: any = organizationId
-        ? { organizationId, isActive: true }
-        : { isActive: true };
-
-      const account = await prisma.whatsAppAccount.findFirst({
-        where: accountWhere,
-        select: { id: true, accessToken: true },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      if (account?.accessToken) {
-        try {
-          const { safeDecryptStrict } = await import('../../utils/encryption');
-          accessToken = safeDecryptStrict(account.accessToken);
-        } catch (e) {
-          console.warn('⚠️ Failed to decrypt WhatsAppAccount token');
+      // ✅ Local uploads - direct serve
+      if (idToFetch.startsWith('/uploads/') || idToFetch.includes('uploads/media/')) {
+        const filePath = path.join(
+          process.cwd(),
+          idToFetch.startsWith('/') ? idToFetch : `/${idToFetch}`
+        );
+        
+        if (fs.existsSync(filePath)) {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+          return res.sendFile(filePath);
         }
+        return this.sendMediaPlaceholder(res, 'Local file not found');
       }
 
-      // Try 2: MetaConnection table
-      if (!accessToken) {
-        const metaWhere: any = organizationId
-          ? { organizationId }
-          : {};
+      // ✅ Non-Meta HTTP URL - redirect
+      if (
+        idToFetch.startsWith('http') &&
+        !idToFetch.includes('lookaside.fbsbx.com') &&
+        !idToFetch.includes('mmg.whatsapp.net') &&
+        !idToFetch.includes('fbcdn.net') &&
+        !idToFetch.includes('scontent')
+      ) {
+        return res.redirect(302, idToFetch);
+      }
 
-        const mConn = await prisma.metaConnection.findFirst({
-          where: metaWhere,
-          orderBy: { createdAt: 'desc' },
+      // ============================================
+      // ✅ HARDCODED ACCOUNT - Direct se token lo
+      // Only one account hai system mein
+      // ============================================
+      
+      // Step 1: Is mediaId se message ka account dhundo
+      let accessToken: string | null = null;
+      let phoneNumberId: string | null = null;
+
+      if (/^\d+$/.test(idToFetch)) {
+        
+        // ✅ Message se directly account dhundo
+        const message = await prisma.message.findFirst({
+          where: {
+            OR: [
+              { mediaId: idToFetch },
+              { mediaUrl: idToFetch },
+            ],
+          },
+          select: {
+            id: true,
+            whatsappAccountId: true,
+            conversationId: true,
+          },
         });
 
-        if (mConn?.accessToken) {
-          try {
-            const { safeDecryptStrict } = await import('../../utils/encryption');
-            accessToken = safeDecryptStrict(mConn.accessToken);
-          } catch (e) {
-            console.warn('⚠️ Failed to decrypt MetaConnection token');
+        console.log('🔍 Message found:', message?.id, '| AccountId:', message?.whatsappAccountId);
+
+        // ✅ Specific account se token lo
+        if (message?.whatsappAccountId) {
+          const account = await prisma.whatsAppAccount.findUnique({
+            where: { id: message.whatsappAccountId },
+            select: { 
+              accessToken: true, 
+              phoneNumberId: true,
+              id: true,
+            },
+          });
+
+          if (account?.accessToken) {
+            try {
+              const { safeDecryptStrict } = await import('../../utils/encryption');
+              const decrypted = safeDecryptStrict(account.accessToken);
+              if (decrypted) {
+                accessToken = decrypted;
+                phoneNumberId = account.phoneNumberId;
+                console.log('✅ Token from message account:', account.id);
+                console.log('✅ PhoneNumberId:', phoneNumberId);
+                console.log('✅ Token preview:', decrypted.substring(0, 15) + '...');
+              }
+            } catch (decryptErr: any) {
+              console.error('❌ Decrypt failed:', decryptErr.message);
+            }
+          }
+        }
+
+        // ✅ Fallback: Org ki koi bhi active account
+        if (!accessToken) {
+          const orgId = req.user?.organizationId 
+                     || (req.query.organizationId as string)
+                     || 'cmn1m8f7n0096kfj8dflnhoyv'; // Fallback hardcoded
+
+          console.log('🔍 Fallback: searching accounts for org:', orgId);
+
+          const accounts = await prisma.whatsAppAccount.findMany({
+            where: { 
+              organizationId: orgId,
+              isActive: true,
+              status: 'CONNECTED',
+            },
+            select: { 
+              id: true,
+              accessToken: true, 
+              phoneNumberId: true,
+            },
+            orderBy: { updatedAt: 'desc' },
+          });
+
+          console.log(`🔍 Found ${accounts.length} accounts`);
+
+          for (const acc of accounts) {
+            if (!acc.accessToken) continue;
+            
+            try {
+              const { safeDecryptStrict } = await import('../../utils/encryption');
+              const decrypted = safeDecryptStrict(acc.accessToken);
+              
+              console.log('🔑 Decrypted token preview:', decrypted?.substring(0, 15));
+              
+              if (decrypted && decrypted.length > 50) {
+                accessToken = decrypted;
+                phoneNumberId = acc.phoneNumberId;
+                console.log('✅ Using fallback account:', acc.id);
+                break;
+              }
+            } catch (e: any) {
+              console.error('❌ Decrypt error for account:', acc.id, e.message);
+              continue;
+            }
+          }
+        }
+
+        // ✅ Last resort: MetaConnection
+        if (!accessToken) {
+          const orgId = req.user?.organizationId || 'cmn1m8f7n0096kfj8dflnhoyv';
+          
+          const metaConn = await prisma.metaConnection.findFirst({
+            where: { organizationId: orgId },
+            select: { accessToken: true },
+            orderBy: { updatedAt: 'desc' },
+          });
+
+          if (metaConn?.accessToken) {
+            try {
+              const { safeDecryptStrict } = await import('../../utils/encryption');
+              const decrypted = safeDecryptStrict(metaConn.accessToken);
+              if (decrypted && decrypted.length > 50) {
+                accessToken = decrypted;
+                console.log('✅ Using MetaConnection token');
+              }
+            } catch (e) {}
           }
         }
       }
 
+      console.log('🔐 Final token status:', accessToken ? `Found (${accessToken.substring(0, 10)}...)` : 'NOT FOUND');
+      console.log('📞 PhoneNumberId:', phoneNumberId);
+
       if (!accessToken) {
-        console.error('❌ No access token found for media proxy');
-        return res.status(404).json({ error: 'No WhatsApp account found' });
+        console.error('❌ No access token found after all attempts');
+        return this.sendMediaPlaceholder(res, 'Authentication failed');
       }
 
-      const { config } = await import('../../config');
-      const version = config.meta?.graphApiVersion || 'v22.0';
-
+      // ============================================
+      // ✅ Fetch from Meta Graph API
+      // ============================================
+      const version = 'v22.0';
       let downloadUrl: string | null = null;
 
-      // ✅ Case 1: Already a full HTTP URL
-      if (idToFetch.startsWith('http')) {
-        downloadUrl = idToFetch;
-      } else {
-        // ✅ Case 2: It's a Media ID → Fetch fresh URL from Meta
-        console.log(`🔄 Fetching fresh media URL for ID: ${idToFetch}`);
+      if (/^\d+$/.test(idToFetch)) {
+        console.log(`🔄 Calling Meta API: graph.facebook.com/${version}/${idToFetch}`);
 
         try {
-          const mediaInfoRes = await axios.get(
+          const metaRes = await axios.get(
             `https://graph.facebook.com/${version}/${idToFetch}`,
             {
-              headers: { Authorization: `Bearer ${accessToken}` },
-              timeout: 10000,
+              headers: { 
+                Authorization: `Bearer ${accessToken}`,
+              },
+              timeout: 15000,
             }
           );
 
-          downloadUrl = mediaInfoRes.data?.url;
+          console.log('✅ Meta API response:', {
+            url: metaRes.data?.url ? 'present' : 'missing',
+            mimeType: metaRes.data?.mime_type,
+            fileSize: metaRes.data?.file_size,
+          });
 
-          if (!downloadUrl) {
-            console.error('❌ No URL in Meta response:', mediaInfoRes.data);
-            return this.sendMediaPlaceholder(res, 'No download URL from Meta');
+          downloadUrl = metaRes.data?.url;
+
+        } catch (e: any) {
+          const errData = e.response?.data?.error;
+          console.error('❌ Meta API failed:', {
+            httpStatus: e.response?.status,
+            code: errData?.code,
+            subcode: errData?.error_subcode,
+            message: errData?.message,
+            tokenUsed: accessToken.substring(0, 20) + '...',
+          });
+
+          // ✅ Subcode 33 = Media expired (>30 days) ya wrong token
+          if (errData?.error_subcode === 33) {
+            console.error('💡 DIAGNOSIS: Media ID invalid/expired OR wrong token');
+            console.error('💡 Token starts with:', accessToken.substring(0, 10));
+            console.error('💡 Expected EAA... token format');
           }
 
-          console.log(`✅ Got fresh download URL`);
-        } catch (metaErr: any) {
-          console.error(
-            '❌ Meta API error:',
-            metaErr.response?.data || metaErr.message
-          );
           return this.sendMediaPlaceholder(
-            res,
-            metaErr.response?.data?.error?.message || 'Meta API error'
+            res, 
+            errData?.error_subcode === 33 
+              ? 'Media expired (>30 days old)' 
+              : errData?.message || 'Meta API error'
           );
         }
+
+      } else if (idToFetch.startsWith('http')) {
+        downloadUrl = idToFetch;
       }
 
       if (!downloadUrl) {
-        return this.sendMediaPlaceholder(res, 'Media URL not found');
+        console.error('❌ No download URL obtained');
+        return this.sendMediaPlaceholder(res, 'No download URL');
       }
 
-      // ✅ Download and stream media
-      console.log(`📥 Downloading media from CDN...`);
+      // ============================================
+      // ✅ Stream media to client
+      // ============================================
+      console.log('📥 Downloading from CDN...');
 
-      const mediaResponse = await axios.get(downloadUrl, {
-        headers: {
+      const mediaRes = await axios.get(downloadUrl, {
+        headers: { 
           Authorization: `Bearer ${accessToken}`,
         },
         responseType: 'stream',
         timeout: 30000,
+        maxContentLength: 50 * 1024 * 1024, // 50MB max
       });
 
-      // ✅ Set proper headers
-      const contentType =
-        mediaResponse.headers['content-type'] || 'application/octet-stream';
-      const contentLength = mediaResponse.headers['content-length'];
+      const contentType = mediaRes.headers['content-type'] || 'image/jpeg';
 
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'private, max-age=3600'); // 1 hour cache
+      res.setHeader('Cache-Control', 'private, max-age=3600');
       res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
-      if (contentLength) {
-        res.setHeader('Content-Length', contentLength);
+      if (mediaRes.headers['content-length']) {
+        res.setHeader('Content-Length', mediaRes.headers['content-length']);
       }
 
-      // ✅ Stream response
-      mediaResponse.data.pipe(res);
+      // Handle stream errors
+      req.on('close', () => {
+        mediaRes.data.destroy();
+      });
 
-      mediaResponse.data.on('error', (err: any) => {
-        console.error('❌ Stream error:', err.message);
+      mediaRes.data.on('error', (err: any) => {
+        console.error('❌ Media stream error:', err.message);
         if (!res.headersSent) {
-          res.status(500).json({ error: 'Stream error' });
+          res.status(500).end();
         }
       });
 
-      console.log(`✅ Media streaming: ${contentType}`);
+      mediaRes.data.pipe(res);
+      console.log(`✅ Streaming ${contentType} to client`);
+
     } catch (error: any) {
-      console.error('❌ getMedia error:', error.message);
+      console.error('❌ getMedia fatal error:', {
+        message: error.message,
+        stack: error.stack?.split('\n')[1],
+      });
       return this.sendMediaPlaceholder(res, error.message);
     }
   }
 
-  // ✅ Helper: Send placeholder SVG for failed images
   private sendMediaPlaceholder(res: Response, reason?: string) {
-    console.warn('⚠️ Sending media placeholder. Reason:', reason);
-
-    res.setHeader('Content-Type', 'image/svg+xml');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.status(200).send(`
-      <svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
-        <rect fill="#1f2937" width="200" height="150" rx="8"/>
-        <text x="100" y="65" text-anchor="middle" fill="#6b7280" font-size="32">🖼️</text>
-        <text x="100" y="95" text-anchor="middle" fill="#6b7280" font-size="11" font-family="sans-serif">
-          Media unavailable
-        </text>
-        <text x="100" y="112" text-anchor="middle" fill="#4b5563" font-size="9" font-family="sans-serif">
-          Click retry to reload
-        </text>
-      </svg>
-    `);
+    if (!res.headersSent) {
+      console.warn('⚠️ Sending placeholder. Reason:', reason);
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Cache-Control', 'no-cache, no-store');
+      res.status(200).send(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="200" height="150">
+          <rect fill="#1f2937" width="200" height="150" rx="8"/>
+          <text x="100" y="60" text-anchor="middle" fill="#6b7280" 
+                font-size="28">🖼️</text>
+          <text x="100" y="90" text-anchor="middle" fill="#9ca3af" 
+                font-size="11" font-family="sans-serif">
+            Media unavailable
+          </text>
+          <text x="100" y="110" text-anchor="middle" fill="#4b5563" 
+                font-size="9" font-family="sans-serif">
+            ${(reason || '').substring(0, 35)}
+          </text>
+        </svg>
+      `);
+    }
   }
 }
 
