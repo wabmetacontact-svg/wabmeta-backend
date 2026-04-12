@@ -215,90 +215,66 @@ class WhatsAppController {
 
   /**
    * ✅ FIXED: Send Text Message
-   * Accepts multiple field name formats for flexibility
    */
   async sendText(req: Request, res: Response, next: NextFunction) {
     try {
-      // ✅ Support multiple field name formats from frontend
-      const accountId = req.body.accountId || req.body.whatsappAccountId;
-      const to = req.body.to || req.body.recipient || req.body.phone;
-      const text = req.body.text || req.body.message || req.body.content;
-      const conversationId = req.body.conversationId;
+      const organizationId = (req.user as any)?.organizationId;
+      const { 
+        whatsappAccountId,
+        accountId, // support both
+        to, 
+        recipient, // support both
+        phone, // support both
+        message,
+        text, // support both
+        content, // support both
+        tempId,        // ✅ Frontend se aata hai
+        localId,
+        conversationId 
+      } = req.body;
 
-      // Log incoming request for debugging
-      console.log('📤 Send Text Request:', {
-        accountId: accountId ? `${accountId.substring(0, 8)}...` : null,
-        to: to ? `${to.substring(0, 6)}***` : null,
-        textLength: text?.length || 0,
-        hasConversationId: !!conversationId,
-        rawBody: {
-          hasAccountId: !!req.body.accountId,
-          hasWhatsappAccountId: !!req.body.whatsappAccountId,
-          hasTo: !!req.body.to,
-          hasRecipient: !!req.body.recipient,
-          hasText: !!req.body.text,
-          hasMessage: !!req.body.message,
-        }
-      });
+      const finalAccountId = whatsappAccountId || accountId;
+      const finalTo = to || recipient || phone;
+      const finalMessage = message || text || content;
+      const finalTempId = tempId || localId;
 
-      // Validate accountId
-      if (!accountId) {
-        console.error('❌ Missing accountId. Received body keys:', Object.keys(req.body));
-        return errorResponse(
-          res,
-          'Account ID is required. Send as "accountId" or "whatsappAccountId"',
-          400
-        );
+      if (!finalAccountId || !finalTo || !finalMessage) {
+        return errorResponse(res, 'whatsappAccountId, to, and message are required', 400);
       }
 
-      // Validate recipient
-      if (!to) {
-        console.error('❌ Missing recipient. Received body keys:', Object.keys(req.body));
-        return errorResponse(
-          res,
-          'Recipient phone number is required. Send as "to", "recipient", or "phone"',
-          400
-        );
-      }
-
-      // Validate text
-      if (!text || (typeof text === 'string' && text.trim().length === 0)) {
-        console.error('❌ Missing text. Received body keys:', Object.keys(req.body));
-        return errorResponse(
-          res,
-          'Message text is required. Send as "text", "message", or "content"',
-          400
-        );
-      }
-
-      // Clean the text
-      const cleanText = typeof text === 'string' ? text.trim() : String(text);
-
-      // Send message via service
-      const result = await whatsappService.sendTextMessage(
-        accountId,
-        to,
-        cleanText,
+      const result = await whatsappService.sendMessage({
+        accountId: finalAccountId,
+        to: finalTo,
+        type: 'text',
+        content: { text: { body: finalMessage } },
         conversationId,
-        req.user?.organizationId,
-        req.body.tempId || req.body.localId,
-        req.body.clientMsgId || req.body.client_msg_id
-      );
-
-      console.log('✅ Text message sent successfully:', {
-        messageId: result?.messageId || 'N/A',
+        organizationId,
+        tempId: finalTempId,    // ✅ Pass tempId
       });
+
+      // ✅ Serialize response
+      const msg = result.message as any;
+      const now = new Date().toISOString();
 
       return successResponse(res, {
-        data: result,
-        message: 'Message sent successfully',
+        data: {
+          ...msg,
+          // ✅ Guarantee timestamps as strings
+          createdAt: msg?.createdAt instanceof Date 
+            ? msg.createdAt.toISOString() 
+            : msg?.createdAt || now,
+          sentAt: msg?.sentAt instanceof Date 
+            ? msg.sentAt.toISOString() 
+            : msg?.sentAt || now,
+          timestamp: msg?.timestamp instanceof Date 
+            ? msg.timestamp.toISOString() 
+            : msg?.timestamp || msg?.createdAt || now,
+        },
+        message: 'Message sent'
       });
-    } catch (error: any) {
-      console.error('❌ Send text error:', {
-        message: error.message,
-        stack: error.stack?.split('\n').slice(0, 3),
-      });
-      return errorResponse(res, error.message || 'Failed to send message', 400);
+
+    } catch (error) {
+      next(error);
     }
   }
 
