@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import path from 'path';
+import fs from 'fs';
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { logger } from './utils/logger';
@@ -147,7 +148,23 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ============================================
 // STATIC FILES
 // ============================================
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+const uploadsDir = path.join(process.cwd(), 'uploads');
+
+// Create if not exists
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('📁 Created uploads directory:', uploadsDir);
+}
+
+console.log('📁 Uploads dir:', uploadsDir);
+console.log('📁 Uploads exists:', fs.existsSync(uploadsDir));
+
+// ✅ Serve with CORS
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(uploadsDir));
 
 // ============================================
 // HEALTH CHECK ROUTES
