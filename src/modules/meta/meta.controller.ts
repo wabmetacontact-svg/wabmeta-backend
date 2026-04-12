@@ -489,25 +489,49 @@ export class MetaController {
       try {
         console.log('📊 Step 6: Completing Meta onboarding...');
 
-        // 1. Subscribe App to WABA Webhooks
+        // ✅ 1. Subscribe to ALL required webhooks
         await metaApi.subscribeToWebhooks(wabaId, access_token).catch(err =>
-          console.error('   ⚠️ Webhook subscription failed:', err.message)
+          console.error('⚠️ Webhook subscription failed:', err.message)
         );
 
-        // 2. Register Phone Numbers (Mandatory for API messaging)
-        for (const phone of phoneNumbers) {
-          console.log(`   Registering phone: ${phone.display_phone_number}`);
-          await metaApi.registerPhoneNumber(phone.id, access_token).catch(err => {
-            const metaErr = err.response?.data?.error;
-            if (metaErr?.code === 100 && metaErr?.message?.includes('SMB')) {
-              console.warn(`   ℹ️ Phone ${phone.id} is an SMB account. Registration skipped (not required).`);
-            } else {
-              console.error(`   ⚠️ Registration failed for ${phone.id}:`, err.message);
+        // ✅ 2. Subscribe to WBA Onboarding specific webhooks
+        try {
+          await axios.post(
+            `https://graph.facebook.com/${config.meta.graphApiVersion}/${wabaId}/subscribed_apps`,
+            {
+              subscribed_fields: [
+                'messages',
+                'message_template_status_update',
+                'history',              // ✅ NEW: Past messages
+                'smb_app_state_sync',   // ✅ NEW: Business customer contacts
+                'smb_message_echoes',   // ✅ NEW: New messages from WBA app
+              ]
+            },
+            {
+              params: { access_token }
             }
-          });
+          );
+          console.log('✅ All webhooks subscribed including WBA onboarding fields');
+        } catch (webhookErr: any) {
+          console.error('⚠️ Extended webhook subscription failed:', 
+                        webhookErr.response?.data || webhookErr.message);
         }
+
+        // ✅ 3. Register Phone Numbers
+        for (const phone of phoneNumbers) {
+          await metaApi.registerPhoneNumber(phone.id, access_token)
+            .catch(err => console.warn(`⚠️ Registration skipped:`, err.message));
+        }
+
+        // ✅ 4. Sync message history (WBA Onboarding - within 24 hours!)
+        if (savedAccount) {
+          console.log('🔄 Initiating message history sync...');
+          syncMessageHistory(wabaId, access_token, organizationId, savedAccount.id)
+            .catch(err => console.error('⚠️ History sync failed:', err.message));
+        }
+
       } catch (onboardingErr: any) {
-        console.error('   ⚠️ Post-connection steps partially failed:', onboardingErr.message);
+        console.error('⚠️ Post-connection steps failed:', onboardingErr.message);
       }
 
       // Delete used state
@@ -1100,6 +1124,41 @@ export class MetaController {
     } catch (error) {
       next(error);
     }
+  }
+}
+
+// ✅ Message History Sync (WBA Onboarding requirement)
+async function syncMessageHistory(
+  wabaId: string,
+  accessToken: string,
+  organizationId: string,
+  accountId: string
+): Promise<void> {
+  try {
+    console.log('📜 Starting message history sync for WABA:', wabaId);
+
+    // Step 1: Request history sync
+    const syncResponse = await axios.post(
+      `https://graph.facebook.com/${config.meta.graphApiVersion}/${wabaId}/sync_history`,
+      {},
+      { params: { access_token: accessToken } }
+    );
+
+    console.log('✅ History sync initiated:', syncResponse.data);
+
+    // Step 2: Update DB - mark sync as in progress
+    await prisma.whatsAppAccount.update({
+      where: { id: accountId },
+      data: {
+        // Store sync status in metadata or a field
+        lastSyncedAt: new Date(),
+      } as any,
+    });
+
+  } catch (err: any) {
+    // History sync failure is non-critical
+    console.warn('⚠️ History sync failed (non-critical):', 
+                  err.response?.data?.error?.message || err.message);
   }
 }
 

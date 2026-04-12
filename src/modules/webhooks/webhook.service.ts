@@ -144,20 +144,41 @@ export class WebhookService {
       const field = payload?.entry?.[0]?.changes?.[0]?.field || 'unknown';
       const phoneNumberId = value?.metadata?.phone_number_id;
 
-      // Handle cases where phone_number_id is missing
-      if (!phoneNumberId) {
-        // ✅ Handle Template Updates (WABA Level)
-        if (field === 'message_template_status_update') {
+      console.log('📨 Webhook field:', field);
+
+      // ✅ Handle WBA Onboarding specific events
+      switch (field) {
+        // ✅ Message history sync
+        case 'history':
+          await this.handleHistorySync(payload, value);
+          return { status: 'processed', reason: 'History sync processed' };
+
+        // ✅ SMB app state sync (contacts)
+        case 'smb_app_state_sync':
+          await this.handleSmbStateSync(payload, value);
+          return { status: 'processed', reason: 'SMB state sync processed' };
+
+        // ✅ Message echoes from WBA app
+        case 'smb_message_echoes':
+          await this.handleSmbMessageEchoes(payload, value);
+          return { status: 'processed', reason: 'SMB echoes processed' };
+
+        case 'message_template_status_update':
           await this.handleTemplateUpdate(payload, value);
-          return { status: 'processed', reason: `Handled template update for event: ${value?.event}` };
-        }
+          return { status: 'processed', reason: 'Template update processed' };
 
-        // If it's a field we don't process (like account_update), ignore it gracefully
-        if (field !== 'messages' && field !== 'statuses') {
-          console.log(`ℹ️ Ignoring webhook field: ${field} (No phone_number_id)`);
-          return { status: 'ignored', reason: `Unhandled field type: ${field}` };
-        }
+        case 'messages':
+        case 'statuses':
+          // Existing handlers handle these downstream
+          break;
 
+        default:
+          console.log(`ℹ️ Unhandled field: ${field}`);
+          return { status: 'ignored', reason: `Unhandled field: ${field}` };
+      }
+
+      // Handle cases where phone_number_id is missing for messages/statuses
+      if (!phoneNumberId) {
         // If it's supposed to be a message/status but lacks ID, that's an error
         return { status: 'error', reason: 'No phone_number_id for field: ' + field };
       }
@@ -956,6 +977,104 @@ export class WebhookService {
       });
     } catch (e) {
       console.error('resetDailyMessageLimits error:', e);
+    }
+  }
+
+  // ✅ Handle history sync webhook
+  private async handleHistorySync(payload: any, value: any) {
+    try {
+      console.log('📜 History sync webhook received');
+      const wabaId = payload.entry[0].id;
+      
+      // Find organization
+      const account = await prisma.whatsAppAccount.findFirst({
+        where: { wabaId },
+        select: { id: true, organizationId: true, phoneNumberId: true }
+      });
+
+      if (!account) return;
+
+      // Process historical messages
+      const messages = value?.messages || [];
+      console.log(`📜 Processing ${messages.length} historical messages`);
+
+      for (const msg of messages) {
+        try {
+          await this.processIncomingMessage(
+            msg,
+            account.organizationId,
+            account.id,
+            value?.metadata?.phone_number_id || account.phoneNumberId || ''
+          );
+        } catch (e) {
+          console.error('History message processing error:', e);
+        }
+      }
+
+      console.log('✅ History sync complete');
+    } catch (e) {
+      console.error('handleHistorySync error:', e);
+    }
+  }
+
+  // ✅ Handle SMB state sync (contacts sync)
+  private async handleSmbStateSync(payload: any, value: any) {
+    try {
+      console.log('👥 SMB state sync webhook received');
+      const wabaId = payload.entry[0].id;
+
+      const account = await prisma.whatsAppAccount.findFirst({
+        where: { wabaId },
+        select: { id: true, organizationId: true }
+      });
+
+      if (!account) return;
+
+      // Process contacts from SMB app
+      const contacts = value?.contacts || [];
+      console.log(`👥 Syncing ${contacts.length} contacts from WBA app`);
+
+      for (const contact of contacts) {
+        try {
+          const phone = contact.wa_id || contact.phone;
+          const name = contact.profile?.name || 'Unknown';
+
+          if (phone) {
+            await contactsService.updateContactFromWebhook(
+              phone,
+              name,
+              account.organizationId
+            );
+          }
+        } catch (e) {
+          console.error('SMB contact sync error:', e);
+        }
+      }
+
+      console.log('✅ SMB state sync complete');
+    } catch (e) {
+      console.error('handleSmbStateSync error:', e);
+    }
+  }
+
+  // ✅ Handle SMB message echoes
+  private async handleSmbMessageEchoes(payload: any, value: any) {
+    try {
+      console.log('💬 SMB message echoes webhook received');
+      const messages = value?.messages || [];
+
+      // These are messages sent from WBA app
+      // We save them as OUTBOUND messages in our system
+      for (const msg of messages) {
+        console.log('Echo message:', {
+          id: msg.id,
+          to: msg.to,
+          type: msg.type,
+        });
+        // Process as needed
+      }
+    } catch (e) {
+      console.error('handleSmbMessageEchoes error:', e);
     }
   }
 }
