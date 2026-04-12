@@ -24,6 +24,7 @@ interface SendMessageOptions {
   organizationId?: string;
   tempId?: string;
   clientMsgId?: string;
+  mediaUrl?: string;  // ✅ ADD THIS
 }
 
 interface SendTemplateOptions {
@@ -715,18 +716,21 @@ class WhatsAppService {
 
       console.log(`   Message Content: ${messageContent.substring(0, 50)}...`);
 
-      // Extract media URL based on type
-      let mediaUrlForDB = null;
-      if (type === 'image' && content?.image?.link) {
-        mediaUrlForDB = content.image.link;
-      } else if (type === 'video' && content?.video?.link) {
-        mediaUrlForDB = content.video.link;
-      } else if (type === 'document' && content?.document?.link) {
-        mediaUrlForDB = content.document.link;
-      } else if (type === 'audio' && content?.audio?.link) {
-        mediaUrlForDB = content.audio.link;
-      } else if (type === 'sticker' && content?.sticker?.link) {
-        mediaUrlForDB = content.sticker.link;
+      // ✅ Extract mediaUrl properly
+      let mediaUrlForDB: string | null = null;
+      const mediaTypesList = ['image', 'video', 'audio', 'document', 'sticker'];
+
+      if (mediaTypesList.includes(type)) {
+        // Try all possible locations
+        mediaUrlForDB = 
+          content?.[type]?.link ||      // { image: { link: '...' } }
+          content?.[type]?.url ||       // { image: { url: '...' } }
+          content?.link ||              // { link: '...' }
+          content?.url ||               // { url: '...' }
+          options.mediaUrl ||           // Direct mediaUrl option
+          null;
+
+        console.log(`💾 Media URL for ${type}:`, mediaUrlForDB);
       }
 
       // Get or create conversation
@@ -748,7 +752,7 @@ class WhatsAppService {
           direction: MessageDirection.OUTBOUND,
           type: this.mapMessageType(type),
           content: messageContent,
-          mediaUrl: mediaUrlForDB,
+          mediaUrl: mediaUrlForDB,  // ✅ Properly set
           status: MessageStatus.SENT,
           timestamp: new Date(),
           sentAt: new Date(),

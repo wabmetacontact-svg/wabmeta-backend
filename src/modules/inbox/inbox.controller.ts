@@ -461,39 +461,58 @@ export class InboxController {
       if (!organizationId) throw new AppError('Organization context required', 400);
 
       const { id } = req.params as { id: string };
-      const { mediaType, mediaUrl, caption } = req.body as {
-        mediaType: 'image' | 'video' | 'audio' | 'document';
-        mediaUrl: string;
-        caption?: string;
-      };
+      const { mediaType, mediaUrl, caption } = req.body;
 
-      if (!mediaType || !mediaUrl) throw new AppError('mediaType and mediaUrl are required', 400);
+      console.log('📸 sendMediaMessage:', { mediaType, mediaUrl, id });
 
-      // Validate conversation
-      const conversation = await inboxService.getConversationById(organizationId, id);
-
-      // Use default WA account
-      const account = await whatsappService.getDefaultAccount(organizationId);
-      if (!account?.id) {
-        throw new AppError('No WhatsApp account connected. Please connect WhatsApp first.', 400);
+      if (!mediaType || !mediaUrl) {
+        throw new AppError('mediaType and mediaUrl are required', 400);
       }
 
-      const result = await whatsappService.sendMediaMessage(
-        account.id,
-        conversation.contact.phone,
-        mediaType,
-        mediaUrl,
-        caption,
-        id,
-        organizationId,
-        req.body.tempId || req.body.localId || req.body.local_id || req.body._id,
-        req.body.clientMsgId || req.body.client_msg_id || req.body.clientMsgId
-      );
+      const conversation = await inboxService.getConversationById(organizationId, id);
+      const account = await whatsappService.getDefaultAccount(organizationId);
+      
+      if (!account?.id) {
+        throw new AppError('No WhatsApp account connected', 400);
+      }
 
-      // ✅ Clear Inbox Cache
+      // ✅ whatsappService.sendMessage directly call karo
+      // sendMediaMessage wrapper use mat karo
+      const result = await whatsappService.sendMessage({
+        accountId: account.id,
+        to: conversation.contact.phone,
+        type: mediaType as any,
+        content: {
+          [mediaType]: {
+            link: mediaUrl,
+            ...(caption ? { caption } : {}),
+          },
+        },
+        conversationId: id,
+        organizationId,
+        tempId: (req.body.tempId || req.body.localId || req.body.local_id || req.body._id) as string,
+        clientMsgId: (req.body.clientMsgId || req.body.client_msg_id || req.body.clientMsgId) as string,
+        mediaUrl: mediaUrl as string,
+      });
+
       await inboxService.clearCache(organizationId);
 
-      return sendSuccess(res, result, 'Media message sent successfully', 201);
+      // ✅ Serialize response
+      const msg = result.message as any;
+      const now = new Date().toISOString();
+
+      const serialized = {
+        ...msg,
+        createdAt: msg?.createdAt instanceof Date 
+          ? msg.createdAt.toISOString() : msg?.createdAt || now,
+        timestamp: msg?.timestamp instanceof Date 
+          ? msg.timestamp.toISOString() : msg?.timestamp || now,
+        sentAt: msg?.sentAt instanceof Date 
+          ? msg.sentAt.toISOString() : msg?.sentAt || now,
+      };
+
+      return sendSuccess(res, { message: serialized }, 'Media sent', 201);
+
     } catch (error) {
       next(error);
     }
