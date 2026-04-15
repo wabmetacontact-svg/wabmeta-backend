@@ -370,10 +370,16 @@ export class CampaignsService {
           mediaId.startsWith('http') &&
           !mediaId.includes('scontent.whatsapp');                             // HTTP URL in mediaId
 
-        if (!hasNumericId && !hasPermanentUrl && !hasUrlInMediaId) {
+        const hasAnyValidMedia =
+          hasNumericId ||     // Numeric ID
+          hasPermanentUrl ||  // Cloudinary URL
+          hasUrlInMediaId;    // URL in mediaId
+
+        if (!hasAnyValidMedia) {
           throw new AppError(
-            `Template "${tpl.name}" has an expired or invalid media handle. ` +
-            `Please edit the template, re-upload the ${headerType.toLowerCase()}, and save again.`,
+            `Template "${tpl.name}" ka media missing hai. ` +
+            `Edit karo aur ${(tpl.headerType || 'media').toLowerCase()} ` +
+            `dobara upload karo.`,
             400
           );
         }
@@ -818,7 +824,14 @@ export class CampaignsService {
               }
 
               try {
-                const payload = this.buildTemplatePayload(template, cc, cleanPhone);
+                const payload = await this.buildTemplatePayload(
+                  template,
+                  cc,
+                  cleanPhone,
+                  phoneNumberId,
+                  accessToken,
+                  campaign.whatsappAccount.wabaId
+                );
                 const result = await metaApi.sendMessage(phoneNumberId, accessToken, cleanPhone, payload);
                 return { type: 'sent' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, waMessageId: result.messageId, metaCode: 0 };
               } catch (err: any) {
@@ -1137,66 +1150,138 @@ export class CampaignsService {
     return (await prisma.campaign.findUnique({ where: { id: campaignId }, select: { sentCount: true, failedCount: true, deliveredCount: true, readCount: true, totalContacts: true } })) || { sentCount: 0, failedCount: 0, deliveredCount: 0, readCount: 0, totalContacts: 0 };
   }
 
-  private buildTemplatePayload(template: any, cc: any, phone: string): any {
+  private async resolveMediaId(
+    template: any,
+    phoneNumberId: string,
+    accessToken: string,
+    wabaId: string
+  ): Promise<string> {
+    const hType = template.headerType.toUpperCase();
+    const mediaId = template.headerMediaId;
+    const permanentUrl = template.headerContent;
+
+    // ✅ PRIORITY 1: Numeric ID - best, permanent, use directly
+    if (mediaId && /^\d+$/.test(mediaId)) {
+      console.log(`✅ Using numeric media ID: ${mediaId}`);
+      return mediaId;
+    }
+
+    // ✅ PRIORITY 2: Cloudinary URL se fresh upload karo
+    // Numeric ID milega jo campaign send kare
+    if (
+      permanentUrl &&
+      permanentUrl.startsWith('http') &&
+      !permanentUrl.includes('scontent.whatsapp')
+    ) {
+      console.log(`🔄 Re-uploading from Cloudinary for fresh numeric ID...`);
+      try {
+        const axios = require('axios');
+        const response = await axios.default.get(permanentUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)' },
+        });
+
+        const buffer = Buffer.from(response.data);
+        const mimeType =
+          response.headers['content-type'] ||
+          (hType === 'IMAGE'
+            ? 'image/jpeg'
+            : hType === 'VIDEO'
+            ? 'video/mp4'
+            : 'application/pdf');
+        const filename =
+          permanentUrl.split('/').pop()?.split('?')[0] || 'media';
+
+        const result = await metaApi.uploadMedia(
+          phoneNumberId,
+          accessToken,
+          buffer,
+          mimeType,
+          filename,
+          wabaId
+        );
+
+        console.log(`✅ Fresh numeric ID obtained: ${result.id}`);
+
+        // ✅ DB update - future campaigns ke liye cache karo
+        // Background mein save karo, campaign wait na kare
+        prisma.template
+          .update({
+            where: { id: template.id },
+            data: { headerMediaId: result.id },
+          })
+          .catch((e: any) =>
+            console.warn('⚠️ Could not cache numeric ID:', e.message)
+          );
+
+        return result.id;
+      } catch (uploadErr: any) {
+        console.error(
+          '❌ Cloudinary re-upload failed:',
+          uploadErr.message
+        );
+        // Fall through to URL fallback
+      }
+    }
+
+    // ✅ PRIORITY 3: URL directly mediaId mein stored hai
+    if (
+      mediaId &&
+      mediaId.startsWith('http') &&
+      !mediaId.includes('scontent.whatsapp')
+    ) {
+      console.log(`✅ Using URL from headerMediaId directly`);
+      return mediaId; // Meta link field mein jayega
+    }
+
+    // ❌ Kuch bhi valid nahi mila
+    throw new Error(
+      `Template "${template.name}" ka media invalid ya expired hai. ` +
+      `Please edit karo aur ${hType.toLowerCase()} re-upload karo.`
+    );
+  }
+
+  private async buildTemplatePayload(
+    template: any,
+    cc: any,
+    phone: string,
+    phoneNumberId: string,
+    accessToken: string,
+    wabaId: string
+  ): Promise<any> {
     const components: any[] = [];
 
     if (template.headerType && template.headerType !== 'NONE') {
       const hType = template.headerType.toUpperCase();
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-        const mediaId = template.headerMediaId;
-        const permanentUrl = template.headerContent;
+        // ✅ resolveMediaId() handle karega
+        const resolvedId = await this.resolveMediaId(
+          template,
+          phoneNumberId,
+          accessToken,
+          wabaId
+        );
 
-        // ✅ PRIORITY 1: Numeric Meta media ID (permanent, integer)
-        if (mediaId && /^\d+$/.test(mediaId)) {
-          console.log(`✅ Using numeric media ID: ${mediaId}`);
+        // Numeric ID check
+        if (/^\d+$/.test(resolvedId)) {
           components.push({
             type: 'header',
             parameters: [{
               type: hType.toLowerCase(),
-              [hType.toLowerCase()]: { id: mediaId },
+              [hType.toLowerCase()]: { id: resolvedId },
             }],
           });
-        }
-        // ✅ PRIORITY 2: Cloudinary/permanent URL in headerContent
-        else if (
-          permanentUrl &&
-          permanentUrl.startsWith('http') &&
-          !permanentUrl.includes('scontent.whatsapp')
-        ) {
-          console.log(`✅ Using permanent URL from headerContent: ${permanentUrl.substring(0, 60)}`);
+        } else {
+          // URL (link field)
           components.push({
             type: 'header',
             parameters: [{
               type: hType.toLowerCase(),
-              [hType.toLowerCase()]: { link: permanentUrl },
+              [hType.toLowerCase()]: { link: resolvedId },
             }],
           });
-        }
-        // ✅ PRIORITY 3: URL stored in headerMediaId itself
-        else if (mediaId && mediaId.startsWith('http') && !mediaId.includes('scontent.whatsapp')) {
-          console.log(`✅ Using URL from headerMediaId`);
-          components.push({
-            type: 'header',
-            parameters: [{
-              type: hType.toLowerCase(),
-              [hType.toLowerCase()]: { link: mediaId },
-            }],
-          });
-        }
-        // ❌ PRIORITY 4: Nothing valid found
-        else {
-          // ✅ NEW: Instead of throwing, return HELPFUL error with template name
-          const errorMsg =
-            `Image template "${template.name}" has an expired media handle. ` +
-            `Please edit the template, re-upload the image, and save again.`;
-          
-          console.error(`❌ [Campaign] ${errorMsg}`, {
-            headerMediaId: (mediaId || '').substring(0, 30),
-            headerContent: permanentUrl || 'null',
-          });
-          
-          throw new Error(errorMsg);
         }
       }
       // TEXT header (unchanged)

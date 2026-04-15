@@ -6,9 +6,9 @@ import fs from 'fs';
 import { AppError } from '../../middleware/errorHandler';
 import { metaUploadService } from '../../services/meta.upload.service';
 import { metaService } from '../meta/meta.service';
+import { metaApi } from '../meta/meta.api';
 import prisma from '../../config/database';
 
-// Try Cloudinary if available
 let cloudinaryService: any = null;
 try {
   const mod = require('../../services/cloudinary.service');
@@ -25,30 +25,24 @@ const fileFilter = (req: any, file: any, cb: any) => {
     'video/mp4', 'video/3gpp',
     'application/pdf',
   ];
-
   if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new AppError(`Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, MP4, 3GPP, PDF`, 400), false);
+    cb(
+      new AppError(
+        `Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, MP4, 3GPP, PDF`,
+        400
+      ),
+      false
+    );
   }
 };
 
-// ✅ Max 50MB to allow large videos (per-type checks done after upload)
 export const uploadMiddleware = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
-
-// ✅ Per-type size limits
-const FILE_SIZE_LIMITS: Record<string, { max: number; label: string }> = {
-  'image/jpeg': { max: 50 * 1024 * 1024, label: '50MB' },
-  'image/png':  { max: 50 * 1024 * 1024, label: '50MB' },
-  'image/jpg':  { max: 50 * 1024 * 1024, label: '50MB' },
-  'video/mp4':  { max: 50 * 1024 * 1024, label: '50MB' },
-  'video/3gpp': { max: 50 * 1024 * 1024, label: '50MB' },
-  'application/pdf': { max: 50 * 1024 * 1024, label: '50MB' },
-};
 
 export const uploadTemplateMedia = async (
   req: any,
@@ -63,23 +57,15 @@ export const uploadTemplateMedia = async (
     if (!file) throw new AppError('No file uploaded', 400);
     if (!organizationId) throw new AppError('Organization required', 400);
 
-    // ✅ Per-type size validation
-    const sizeLimit = FILE_SIZE_LIMITS[file.mimetype];
-    if (sizeLimit && file.size > sizeLimit.max) {
-      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
-      throw new AppError(
-        `File too large (${fileSizeMB}MB). Maximum allowed for ${file.mimetype.split('/')[0]}: ${sizeLimit.label}`,
-        400
-      );
-    }
-
-    console.log('📤 Upload request:', {
+    console.log('📤 Template media upload started:', {
       filename: file.originalname,
       size: `${(file.size / 1024).toFixed(2)} KB`,
       mime: file.mimetype,
     });
 
-    // Get WhatsApp account
+    // ============================================
+    // STEP 1: Get WhatsApp Account
+    // ============================================
     let account = null;
 
     if (whatsappAccountId) {
@@ -95,25 +81,23 @@ export const uploadTemplateMedia = async (
       });
     }
 
-    if (!account) {
-      throw new AppError('No connected WhatsApp account', 400);
-    }
+    if (!account) throw new AppError('No connected WhatsApp account', 400);
 
-    // Get token
     const accountWithToken = await metaService.getAccountWithToken(account.id);
     if (!accountWithToken?.accessToken) {
-      throw new AppError('Failed to get credentials', 500);
+      throw new AppError('Failed to get WhatsApp credentials', 500);
     }
 
-    let mediaHandle = '';
+    // ============================================
+    // STEP 2: Upload to Cloudinary (PERMANENT URL)
+    // Ye kabhi expire nahi hota - campaign send ke
+    // liye hamesh available rahega
+    // ============================================
     let cloudinaryUrl = '';
-    let localUrl = '';
 
-    // ✅ Step 1: ALWAYS upload to Cloudinary in parallel (gives permanent public URL for campaign sends)
-    // Meta upload handles (4:...) expire in minutes — Cloudinary URLs are permanent
     if (cloudinaryService?.isConfigured()) {
       try {
-        console.log('☁️ Uploading to Cloudinary (permanent URL for campaigns)...');
+        console.log('☁️ Uploading to Cloudinary (permanent storage)...');
         const result = await cloudinaryService.uploadTemplateMedia(
           file.buffer,
           file.originalname,
@@ -121,36 +105,64 @@ export const uploadTemplateMedia = async (
           organizationId
         );
         cloudinaryUrl = result.secureUrl;
-        localUrl = cloudinaryUrl;
-        console.log('✅ Cloudinary upload success! URL:', cloudinaryUrl.substring(0, 60));
+        console.log('✅ Cloudinary upload success:', cloudinaryUrl.substring(0, 70));
       } catch (cloudErr: any) {
-        console.warn('⚠️ Cloudinary upload failed (will use local file):', cloudErr.message);
+        console.warn('⚠️ Cloudinary upload failed:', cloudErr.message);
       }
     }
 
-    // ✅ Step 2: Also save to local disk as fallback (in case Cloudinary fails)
-    if (!localUrl) {
+    // Fallback: Local disk storage
+    if (!cloudinaryUrl) {
       try {
-        const templatesUploadDir = path.join(process.cwd(), 'uploads', 'templates');
-        if (!fs.existsSync(templatesUploadDir)) {
-          fs.mkdirSync(templatesUploadDir, { recursive: true });
+        const uploadDir = path.join(process.cwd(), 'uploads', 'templates');
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
         }
         const safeFilename = `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-        const localFilePath = path.join(templatesUploadDir, safeFilename);
+        const localFilePath = path.join(uploadDir, safeFilename);
         fs.writeFileSync(localFilePath, file.buffer);
         const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || '';
         if (backendUrl) {
-          localUrl = `${backendUrl}/uploads/templates/${safeFilename}`;
-          console.log('💾 Fallback local file URL:', localUrl);
+          cloudinaryUrl = `${backendUrl}/uploads/templates/${safeFilename}`;
+          console.log('💾 Local fallback URL saved:', cloudinaryUrl);
         }
       } catch (diskErr: any) {
         console.warn('⚠️ Disk save failed:', diskErr.message);
       }
     }
 
-    // ✅ Step 3: Upload to Meta (for template creation approval — handle is temporary)
+    // ============================================
+    // STEP 3: Upload to Meta - Get NUMERIC ID
+    // Numeric ID = permanent for message sending
+    // Ye campaigns me directly use hoga
+    // ============================================
+    let metaNumericId = '';
+
     try {
-      console.log('☁️ Uploading to Meta (for template approval)...');
+      console.log('📱 Uploading to Meta (simple upload - numeric ID)...');
+      const result = await metaApi.uploadMedia(
+        account.phoneNumberId,
+        accountWithToken.accessToken,
+        file.buffer,
+        file.mimetype,
+        file.originalname,
+        account.wabaId
+      );
+      metaNumericId = result.id;
+      console.log('✅ Meta numeric ID obtained:', metaNumericId);
+    } catch (simpleErr: any) {
+      console.warn('⚠️ Meta simple upload failed:', simpleErr.message);
+    }
+
+    // ============================================
+    // STEP 4: Upload to Meta - Get RESUMABLE HANDLE
+    // Handle = template creation/approval ke liye
+    // Ye temporary hai - campaign send me use NAHI hoga
+    // ============================================
+    let metaHandle = '';
+
+    try {
+      console.log('📱 Uploading to Meta (resumable - approval handle)...');
       const result = await metaUploadService.uploadMediaForTemplate(
         'app',
         accountWithToken.accessToken,
@@ -158,59 +170,73 @@ export const uploadTemplateMedia = async (
         file.mimetype,
         file.originalname
       );
-      mediaHandle = result.handle;
-      console.log('✅ Meta resumable upload success!');
-    } catch (resumableError: any) {
-      console.warn('⚠️ Meta resumable upload failed:', resumableError.message);
-      
-      // Fallback: Simple Upload 
-      try {
-        console.log('☁️ Falling back to Meta Simple Upload...');
-        const result = await metaUploadService.uploadMediaSimple(
-          account.phoneNumberId,
-          accountWithToken.accessToken,
-          file.buffer,
-          file.mimetype,
-          file.originalname
-        );
-        mediaHandle = result.id;
-        console.log('✅ Meta simple upload success!');
-      } catch (simpleError: any) {
-        console.warn('⚠️ Meta simple upload also failed:', simpleError.message);
-        // If both Meta uploads fail but we have Cloudinary URL, use it as handle too
-        if (localUrl) {
-          mediaHandle = localUrl;
-          console.log('⚠️ Using Cloudinary URL as Meta handle fallback');
-        } else {
-          throw new AppError('All upload methods failed. Please try again later.', 500);
-        }
-      }
+      metaHandle = result.handle;
+      console.log('✅ Meta handle obtained:', metaHandle.substring(0, 30) + '...');
+    } catch (resumableErr: any) {
+      console.warn('⚠️ Meta resumable upload failed:', resumableErr.message);
+      // Fallback: numeric ID as handle too
+      if (metaNumericId) metaHandle = metaNumericId;
     }
 
-    console.log('✅ Upload complete:', {
-      metaHandle: mediaHandle.substring(0, 40) + '...',
-      cloudinaryUrl: cloudinaryUrl ? cloudinaryUrl.substring(0, 60) : 'none',
-      localUrl: localUrl ? localUrl.substring(0, 60) : 'none',
-      hasPermUrl: !!localUrl,
+    // Agar kuch bhi nahi mila toh error
+    if (!metaHandle && !metaNumericId && !cloudinaryUrl) {
+      throw new AppError(
+        'All upload methods failed. Please check your WhatsApp connection and try again.',
+        500
+      );
+    }
+
+    // ============================================
+    // STEP 5: ✅ KEY FIX - Clean response
+    // NO MORE ":::" SMUGGLING
+    // Sab fields alag alag bhejo frontend ko
+    // ============================================
+    const responseData = {
+      // Template creation ke liye (Meta approval)
+      // Handle preferred, numeric ID as fallback
+      mediaHandle: metaHandle || metaNumericId || '',
+
+      // ✅ Campaign sending ke liye - PERMANENT
+      // Numeric ID directly use hoga - kabhi expire nahi
+      metaNumericId: metaNumericId || null,
+
+      // ✅ DB storage ke liye - PERMANENT URL
+      // Campaign me fresh upload ke liye use hoga
+      cloudinaryUrl: cloudinaryUrl || null,
+      permanentUrl: cloudinaryUrl || null,
+
+      // ✅ Legacy compatibility (kuch jagah use ho raha hai)
+      // NO MORE ":::" - clean mediaId
+      mediaId: metaHandle || metaNumericId || '',
+      url: cloudinaryUrl || '',
+
+      // File info
+      filename: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
+      wabaId: account.wabaId,
+      whatsappAccountId: account.id,
+    };
+
+    console.log('✅ Upload complete - Clean response:', {
+      metaHandle: responseData.mediaHandle
+        ? responseData.mediaHandle.substring(0, 30) + '...'
+        : 'none',
+      metaNumericId: responseData.metaNumericId || 'none',
+      cloudinaryUrl: responseData.cloudinaryUrl
+        ? responseData.cloudinaryUrl.substring(0, 60)
+        : 'none',
+      hasSmuggling: false, // ✅ Confirmed: no ":::" in response
     });
 
     return res.json({
       success: true,
       message: 'Media uploaded successfully',
-      data: {
-        // Sneak the permanent URL through the frontend back to us using a delimited string
-        mediaId: `${mediaHandle}:::${cloudinaryUrl || localUrl || ''}`,
-        handle: `${mediaHandle}:::${cloudinaryUrl || localUrl || ''}`,
-        url: cloudinaryUrl || localUrl || '',
-        localUrl: localUrl,
-        filename: file.originalname,
-        mimeType: file.mimetype,
-        size: file.size,
-        wabaId: account.wabaId,
-      },
+      data: responseData,
     });
+
   } catch (error: any) {
-    console.error('❌ Upload failed:', error.message);
+    console.error('❌ Template media upload failed:', error.message);
     next(error instanceof AppError ? error : new AppError(error.message, 500));
   }
 };

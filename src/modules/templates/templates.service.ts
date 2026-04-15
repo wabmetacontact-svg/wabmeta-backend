@@ -612,33 +612,45 @@ export class TemplatesService {
   /**
    * ✅ NEW: Helper to extract smuggled URL from mediaId
    */
-  private extractSmuggledMedia(mediaId: string | undefined | null, existingContent: string | undefined | null): { mediaId: string | null, content: string | null } {
-    const isScontent = (url: string | null | undefined) => !!url && url.includes('scontent.whatsapp');
-    
-    if (!mediaId) {
-      return { 
-        mediaId: null, 
-        content: isScontent(existingContent) ? null : (existingContent || null) 
+  private extractSmuggledMedia(
+    mediaId: string | undefined | null,
+    existingContent: string | undefined | null
+  ): { mediaId: string | null; content: string | null } {
+
+    const isScontent = (url: string | null | undefined) =>
+      !!url && url.includes('scontent.whatsapp');
+
+    const isExpiredHandle = (id: string | null | undefined) =>
+      !!id && id.startsWith('4:');
+
+    // ✅ CASE 1: Clean format (new upload - no smuggling)
+    if (mediaId && !mediaId.includes(':::')) {
+      return {
+        mediaId: mediaId,
+        content: isScontent(existingContent)
+          ? null
+          : existingContent || null,
       };
     }
-    
-    if (mediaId.includes(':::')) {
+
+    // ✅ CASE 2: Legacy smuggled format "handle:::url"
+    if (mediaId?.includes(':::')) {
       const parts = mediaId.split(':::');
-      const smuggledUrl = parts[1];
-      const realId = parts[0] || null;
-      
-      // Prioritize smuggled URL, then fallback to existing only if not scontent
-      let content = smuggledUrl || null;
-      if (!content && existingContent && !isScontent(existingContent)) {
-        content = existingContent;
-      }
-      
-      return { mediaId: realId, content };
+      const rawHandle = parts[0] || null;
+      const smuggledUrl = parts[1] || null;
+
+      // Clean URL prefer karo
+      const content =
+        (smuggledUrl && !isScontent(smuggledUrl) ? smuggledUrl : null) ||
+        (existingContent && !isScontent(existingContent) ? existingContent : null);
+
+      return { mediaId: rawHandle, content };
     }
-    
-    return { 
-      mediaId, 
-      content: isScontent(existingContent) ? null : (existingContent || null) 
+
+    // ✅ CASE 3: No mediaId
+    return {
+      mediaId: null,
+      content: isScontent(existingContent) ? null : existingContent || null,
     };
   }
 
@@ -647,30 +659,78 @@ export class TemplatesService {
    */
   async create(
     organizationId: string,
-    input: CreateTemplateInput & { whatsappAccountId?: string }
+    input: CreateTemplateInput & {
+      whatsappAccountId?: string;
+      headerMediaId?: string;
+      headerContent?: string;
+      // ✅ NEW: Clean fields from updated upload
+      metaNumericId?: string | null;
+      cloudinaryUrl?: string | null;
+      permanentUrl?: string | null;
+    }
   ): Promise<TemplateResponse> {
-    const {
-      name,
-      language,
-      category,
-      headerType,
-      headerContent,
-      bodyText,
-      footerText,
-      buttons,
-      variables,
-      whatsappAccountId,
-      headerMediaId,
-    } = input;
 
-    // ✅ For IMAGE/VIDEO/DOCUMENT templates, extract the sneaked permanent local URL from headerMediaId
-    const { mediaId: rawMediaId, content: extractedUrl } = this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
-    input.headerMediaId = rawMediaId || undefined;
+    const headerType = normalizeHeaderType(input.headerType);
 
-    const headerLocalUrl = (input as any).headerLocalUrl as string | undefined;
-    const mediaHeaderContent = ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))
-      ? (extractedUrl || headerLocalUrl || null)
-      : (headerContent || null);
+    // ✅ Resolve best media fields
+    let finalMetaId: string | null = null;
+    let finalCloudinaryUrl: string | null = null;
+
+    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+
+      // === Permanent URL resolve karo ===
+      // Priority: cloudinaryUrl > permanentUrl > smuggled URL > headerContent
+      finalCloudinaryUrl =
+        input.cloudinaryUrl ||
+        input.permanentUrl ||
+        (() => {
+          // Legacy: extract from smuggled format
+          if (input.headerMediaId?.includes(':::')) {
+            const url = input.headerMediaId.split(':::')[1];
+            return url && url.startsWith('http') && !url.includes('scontent') 
+              ? url 
+              : null;
+          }
+          return null;
+        })() ||
+        (input.headerContent?.startsWith('http') &&
+          !input.headerContent.includes('scontent')
+            ? input.headerContent
+            : null) ||
+        null;
+
+      // === Meta ID resolve karo ===
+      // Priority: metaNumericId > numeric from headerMediaId > handle
+      finalMetaId =
+        (input.metaNumericId || null) ||
+        (() => {
+          const rawId = input.headerMediaId?.split(':::')[0];
+          // Numeric ID = permanent (best choice)
+          if (rawId && /^\d+$/.test(rawId)) return rawId;
+          return null;
+        })() ||
+        // Handle (4:xxx) = template creation ke liye ok
+        input.headerMediaId?.split(':::')[0] ||
+        null;
+
+      console.log('✅ [Create] Media fields resolved:', {
+        finalMetaId: finalMetaId
+          ? (finalMetaId.length > 20
+              ? finalMetaId.substring(0, 20) + '...'
+              : finalMetaId)
+          : 'none',
+        finalCloudinaryUrl: finalCloudinaryUrl
+          ? finalCloudinaryUrl.substring(0, 60)
+          : 'none',
+        hasNumericId: finalMetaId ? /^\d+$/.test(finalMetaId) : false,
+      });
+    }
+
+    // Text header content
+    const mediaHeaderContent =
+      ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)
+        ? finalCloudinaryUrl    // ✅ Permanent URL DB me store hoga
+        : input.headerContent || null;
 
     // Validate template
     const validation = this.validateTemplate(input);
@@ -678,96 +738,22 @@ export class TemplatesService {
       throw new AppError(`Validation failed: ${validation.errors.join(', ')}`, 400);
     }
 
-    // ✅ FIXED: Template Media Validation (less strict)
-    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(input.headerType))) {
-      const mediaHandle = input.headerMediaId || input.headerContent;
-
-      if (!mediaHandle) {
-        throw new AppError(
-          `${input.headerType} template requires uploaded media. Please upload a file first.`,
-          400
-        );
-      }
-
-      // Only reject truly invalid formats
-      if (mediaHandle.startsWith('blob:')) {
-        throw new AppError(
-          'Local blob URLs not supported. Please upload the file first.',
-          400
-        );
-      }
-
-      // ✅ Accept: "4:..." handles, numeric IDs, URLs - all valid
-      console.log('✅ Media validation passed:', mediaHandle.substring(0, 40) + '...');
-    }
-
-    // ✅ FIXED: Handle all media ID formats correctly
-    let metaMediaId: string | null = rawMediaId || null;
+    // Check for WhatsApp account first
     let waData: Awaited<ReturnType<typeof getWhatsAppAccountWithToken>> | null = null;
     let canSyncToMeta = false;
-
-    // Check for WhatsApp account first
     try {
-      waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
+      waData = await getWhatsAppAccountWithToken(organizationId, input.whatsappAccountId);
       canSyncToMeta = true;
     } catch (err) {
       canSyncToMeta = false;
-    }
-
-    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(normalizeHeaderType(headerType))) {
-      // Use rawMediaId which has the `:::` permanent URL suffix already stripped!
-      const mediaHandle = rawMediaId || headerContent;
-
-      if (!mediaHandle) {
-        throw new AppError(`${headerType} template requires uploaded media`, 400);
-      }
-
-      // ✅ FIXED: Accept ALL valid media formats
-      if (mediaHandle.startsWith('4:')) {
-        // Resumable upload handle - PERFECT for template creation
-        console.log('✅ Using resumable upload handle for template');
-        metaMediaId = mediaHandle;
-      } else if (/^\d+$/.test(mediaHandle)) {
-        // Numeric media ID - also works
-        console.log('✅ Using numeric media ID for template');
-        metaMediaId = mediaHandle;
-      } else if (mediaHandle.startsWith('http') && canSyncToMeta && waData) {
-        // URL - need to upload to Meta first
-        console.log('🔄 URL detected, uploading to Meta...');
-        try {
-          metaMediaId = await uploadMediaToMeta(
-            mediaHandle,
-            normalizeHeaderType(headerType)!,
-            waData
-          );
-          console.log('✅ Uploaded to Meta, got ID:', metaMediaId);
-        } catch (uploadErr: any) {
-          console.warn('⚠️ Meta upload failed, using URL directly:', uploadErr.message);
-          metaMediaId = mediaHandle;
-        }
-      } else {
-        // Unknown format - try to use as-is
-        console.warn('⚠️ Unknown media format, using as-is:', mediaHandle.substring(0, 30));
-        metaMediaId = mediaHandle;
-      }
-    }
-
-    // Try to get account for non-media templates if not already fetched
-    if (!waData) {
-      try {
-        waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
-        canSyncToMeta = true;
-      } catch (err) {
-        canSyncToMeta = false;
-      }
     }
 
     // Check for duplicates
     const existing = await prisma.template.findFirst({
       where: {
         organizationId,
-        name,
-        language,
+        name: input.name,
+        language: input.language,
       },
     });
 
@@ -776,24 +762,24 @@ export class TemplatesService {
     }
 
     // Extract variables
-    const extractedVars = extractVariables(bodyText);
+    const extractedVars = extractVariables(input.bodyText);
     const finalVariables =
-      variables && variables.length > 0
-        ? variables
+      input.variables && input.variables.length > 0
+        ? input.variables
         : extractedVars.map((index) => ({ index, type: 'text' as const }));
 
     // Create template data
     const templateData: any = {
       organizationId,
-      name: normalizeTemplateName(name),
-      language,
-      category,
-      headerType: headerType || null,
-      headerContent: mediaHeaderContent,  // ✅ Permanent URL for media templates
-      headerMediaId: metaMediaId,
-      bodyText,
-      footerText: footerText || null,
-      buttons: toJsonValue(buttons || []),
+      name: normalizeTemplateName(input.name),
+      language: input.language,
+      category: input.category,
+      headerType: input.headerType || null,
+      headerContent: mediaHeaderContent,   // ✅ Permanent URL
+      headerMediaId: finalMetaId,          // ✅ Numeric ID ya handle
+      bodyText: input.bodyText,
+      footerText: input.footerText || null,
+      buttons: toJsonValue(input.buttons || []),
       variables: toJsonValue(finalVariables),
       status: canSyncToMeta ? 'PENDING' : 'DRAFT',
       metaTemplateId: null,
@@ -821,20 +807,20 @@ export class TemplatesService {
     if (canSyncToMeta && waData) {
       try {
         const metaPayload = buildMetaTemplatePayload({
-          name: normalizeTemplateName(name),
-          language,
-          category,
-          headerType: headerType || null,
-          headerContent: headerContent || null,
-          headerMediaId: metaMediaId, 
-          bodyText,
-          footerText: footerText || null,
-          buttons: (buttons || []) as any,
+          name: normalizeTemplateName(input.name),
+          language: input.language,
+          category: input.category,
+          headerType: input.headerType || null,
+          headerContent: input.headerContent || null,
+          headerMediaId: finalMetaId, 
+          bodyText: input.bodyText,
+          footerText: input.footerText || null,
+          buttons: (input.buttons || []) as any,
           variables: finalVariables,
         });
 
         console.log('📤 Submitting template to Meta WABA:', waData.wabaId);
-        console.log('📝 Template language:', toMetaLanguage(language));
+        console.log('📝 Template language:', toMetaLanguage(input.language));
 
         console.log('📦 Meta Payload:', JSON.stringify(metaPayload, null, 2));
 
@@ -866,8 +852,8 @@ export class TemplatesService {
           message: metaErr?.message,
           error_subcode: metaErr?.error_subcode,
           error_data: metaErr?.error_data,
-          templateName: name,
-          language: toMetaLanguage(language),
+          templateName: input.name,
+          language: toMetaLanguage(input.language),
           message_raw: e.message
         });
 
