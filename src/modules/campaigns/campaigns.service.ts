@@ -377,9 +377,8 @@ export class CampaignsService {
 
         if (!hasAnyValidMedia) {
           throw new AppError(
-            `Template "${tpl.name}" ka media missing hai. ` +
-            `Edit karo aur ${(tpl.headerType || 'media').toLowerCase()} ` +
-            `dobara upload karo.`,
+            `Template "${tpl.name}" has missing media. ` +
+            `Please edit the template and re-upload the ${(tpl.headerType || 'media').toLowerCase()}.`,
             400
           );
         }
@@ -1235,10 +1234,10 @@ export class CampaignsService {
       return mediaId; // Meta link field mein jayega
     }
 
-    // ❌ Kuch bhi valid nahi mila
+    // ❌ No valid media found
     throw new Error(
-      `Template "${template.name}" ka media invalid ya expired hai. ` +
-      `Please edit karo aur ${hType.toLowerCase()} re-upload karo.`
+      `Template "${template.name}" has invalid or expired media. ` +
+      `Please edit the template and re-upload the ${hType.toLowerCase()}.`
     );
   }
 
