@@ -150,7 +150,34 @@ class CallingController {
       const accountWithToken = await metaService.getAccountWithToken(account.id);
       if (!accountWithToken) throw new AppError('Token decryption failed. Please reconnect your WhatsApp account.', 500);
 
-      // Initiate the call via Meta API
+      // ✅ Step 1: Auto-enable calling on this phone number (if not already enabled)
+      // Per Meta docs: POST /<PHONE_NUMBER_ID>/settings must be called first
+      try {
+        await metaApi.enableCalling(account.phoneNumberId, accountWithToken.accessToken, {
+          callingEnabled: true,
+          inboundCallsEnabled: true,
+          callbackEnabled: true,
+        });
+        console.log('[Calling] ✅ Calling settings enabled for:', account.phoneNumberId);
+      } catch (settingsErr: any) {
+        // If settings enable fails due to eligibility (2000 limit), throw clear error
+        const settingsMsg = settingsErr?.metaError?.message || settingsErr?.message || '';
+        const settingsCode = settingsErr?.metaError?.code;
+        console.warn('[Calling] Settings enable warning:', settingsCode, settingsMsg);
+
+        if (settingsCode === 141000 || settingsMsg.includes('2000') || settingsMsg.includes('limit')) {
+          throw new AppError(
+            'WhatsApp Calling requires 2000+ business-initiated conversations/day. ' +
+            'Your current messaging tier is below this limit. ' +
+            'Send more campaigns to increase your tier, then try again.',
+            403
+          );
+        }
+        // Non-blocking: if settings fail for other reasons, still try the call
+        console.warn('[Calling] Could not update settings, attempting call anyway...');
+      }
+
+      // ✅ Step 2: Initiate the call via Meta API
       let callResult: { callId: string; status: string };
       try {
         callResult = await metaApi.initiateCall(
