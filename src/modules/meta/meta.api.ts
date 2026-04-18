@@ -1168,33 +1168,77 @@ class MetaApiClient {
   // CALLING API METHODS
   // ============================================
 
-  // ✅ 1. Enable calling feature on phone number
+  // ✅ 1. Enable calling feature on phone number (Full Schema)
   async enableCalling(
     phoneNumberId: string,
     accessToken: string,
     options: {
       callingEnabled: boolean;
       inboundCallsEnabled?: boolean;
-      callHoursEnabled?: boolean;
       callbackEnabled?: boolean;
+      // Country restriction
+      restrictToCountries?: string[];
+      // Call Hours
+      callHoursEnabled?: boolean;
+      timezone?: string;
+      weeklyHours?: Array<{
+        day: 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+        openTime: string;  // HHMM format e.g. "0900"
+        closeTime: string; // HHMM format e.g. "1800"
+      }>;
+      holidaySchedule?: Array<{
+        date: string;       // YYYY-MM-DD
+        startTime: string;  // HHMM
+        endTime: string;    // HHMM
+      }>;
     } = { callingEnabled: true }
   ): Promise<{ success: boolean; data?: any }> {
     try {
       console.log(`[Meta API] Enabling calling for ${phoneNumberId}...`);
 
+      // Build calling_settings payload
+      const callingSettings: any = {
+        status: options.callingEnabled ? 'ENABLED' : 'DISABLED',
+        callback_permission_status: options.callbackEnabled !== false ? 'ENABLED' : 'DISABLED',
+        sip: { status: 'DISABLED' }, // Use WhatsApp native calling
+      };
+
+      // Inbound calls
+      if (options.inboundCallsEnabled !== undefined) {
+        callingSettings.inbound_calls_enabled = options.inboundCallsEnabled;
+      }
+
+      // Country restriction (e.g. ["IN"] for India only)
+      if (options.restrictToCountries && options.restrictToCountries.length > 0) {
+        callingSettings.call_icons = {
+          restrict_to_user_countries: options.restrictToCountries,
+        };
+      }
+
+      // Call hours (business hours)
+      if (options.callHoursEnabled && options.weeklyHours && options.weeklyHours.length > 0) {
+        callingSettings.call_hours = {
+          status: 'ENABLED',
+          timezone_id: options.timezone || 'Asia/Kolkata',
+          weekly_operating_hours: options.weeklyHours.map((h) => ({
+            day_of_week: h.day,
+            open_time: h.openTime,
+            close_time: h.closeTime,
+          })),
+          holiday_schedule: options.holidaySchedule?.map((h) => ({
+            date: h.date,
+            start_time: h.startTime,
+            end_time: h.endTime,
+          })) || [],
+        };
+      } else {
+        callingSettings.call_hours = { status: 'DISABLED' };
+      }
+
       const response = await this.client.post(
         `/${phoneNumberId}/settings`,
-        {
-          calling_settings: {
-            calling_enabled: options.callingEnabled,
-            inbound_calls_enabled: options.inboundCallsEnabled ?? true,
-            call_hours_enabled: options.callHoursEnabled ?? false,
-            callback_enabled: options.callbackEnabled ?? true,
-          }
-        },
-        {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }
+        { calling: callingSettings },
+        { headers: { Authorization: `Bearer ${accessToken}` } }
       );
 
       console.log('[Meta API] ✅ Calling settings updated');

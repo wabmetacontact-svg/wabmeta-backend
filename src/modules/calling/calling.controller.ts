@@ -66,6 +66,11 @@ class CallingController {
         callbackEnabled,
         callHoursEnabled,
         whatsappAccountId,
+        // New fields
+        restrictToCountries,
+        timezone,
+        weeklyHours,
+        holidaySchedule,
       } = req.body;
 
       // Get account
@@ -87,7 +92,7 @@ class CallingController {
       const accountWithToken = await metaService.getAccountWithToken(account.id);
       if (!accountWithToken) throw new AppError('Token decryption failed', 500);
 
-      // Update calling settings
+      // Update calling settings with full schema
       const result = await metaApi.enableCalling(
         account.phoneNumberId,
         accountWithToken.accessToken,
@@ -96,6 +101,12 @@ class CallingController {
           inboundCallsEnabled: inboundCallsEnabled ?? true,
           callbackEnabled: callbackEnabled ?? true,
           callHoursEnabled: callHoursEnabled ?? false,
+          // Country restriction (default: India only)
+          restrictToCountries: restrictToCountries ?? ['IN'],
+          // Business hours (default: Mon-Fri 9AM-6PM IST)
+          timezone: timezone || 'Asia/Kolkata',
+          weeklyHours: weeklyHours || [],
+          holidaySchedule: holidaySchedule || [],
         }
       );
 
