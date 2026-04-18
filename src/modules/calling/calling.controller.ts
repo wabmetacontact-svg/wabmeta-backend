@@ -145,18 +145,74 @@ class CallingController {
         });
       }
 
-      if (!account) throw new AppError('No WhatsApp account found', 400);
+      if (!account) throw new AppError('No WhatsApp account found. Please connect a WhatsApp account first.', 400);
 
       const accountWithToken = await metaService.getAccountWithToken(account.id);
-      if (!accountWithToken) throw new AppError('Token decryption failed', 500);
+      if (!accountWithToken) throw new AppError('Token decryption failed. Please reconnect your WhatsApp account.', 500);
 
-      // Initiate the call
-      const callResult = await metaApi.initiateCall(
-        account.phoneNumberId,
-        accountWithToken.accessToken,
-        to,
-        `org:${organizationId}:contact:${contactId || 'unknown'}`
-      );
+      // Initiate the call via Meta API
+      let callResult: { callId: string; status: string };
+      try {
+        callResult = await metaApi.initiateCall(
+          account.phoneNumberId,
+          accountWithToken.accessToken,
+          to,
+          `org:${organizationId}:contact:${contactId || 'unknown'}`
+        );
+      } catch (metaErr: any) {
+        // ✅ Extract Meta-specific error details
+        const metaError = metaErr?.metaError || metaErr?.response?.data?.error;
+        const metaCode = metaError?.code;
+        const metaSubcode = metaError?.error_subcode;
+        const metaMsg = metaError?.message || metaErr?.message || '';
+
+        console.error('[Calling] Meta API error:', {
+          code: metaCode,
+          subcode: metaSubcode,
+          message: metaMsg,
+          phoneNumberId: account.phoneNumberId,
+        });
+
+        // ✅ Translate Meta error codes to friendly messages
+        if (metaCode === 141000 || metaSubcode === 2655010 || metaMsg.includes('not a valid Cloud API number')) {
+          throw new AppError(
+            'WhatsApp Calling API is not enabled for this phone number. ' +
+            'Your number needs to be separately approved by Meta for the Calling product. ' +
+            'Visit Meta Business Suite → WhatsApp → Calling to request access.',
+            400
+          );
+        }
+        if (metaCode === 100 || metaMsg.includes('not supported') || metaMsg.includes('not enabled')) {
+          throw new AppError(
+            'WhatsApp Calling is not enabled on this account. Enable it in Settings → WhatsApp Calling.',
+            400
+          );
+        }
+        if (metaCode === 131056 || metaMsg.includes('permission')) {
+          throw new AppError(
+            'Call permission required. The user must opt-in to receive calls from your business.',
+            403
+          );
+        }
+        if (metaCode === 131048 || metaMsg.includes('2000') || metaMsg.includes('limit')) {
+          throw new AppError(
+            'Your account needs 2000+ daily messaging limit to use calling. Please upgrade your account tier.',
+            403
+          );
+        }
+        if (metaCode === 190 || metaMsg.includes('token') || metaMsg.includes('OAuth')) {
+          throw new AppError('Access token expired. Please reconnect your WhatsApp account.', 401);
+        }
+        if (metaMsg.includes('not a valid phone number') || metaCode === 131026) {
+          throw new AppError(`Invalid phone number: ${to}. Use international format (e.g. 919876543210).`, 400);
+        }
+
+        // ✅ Generic Meta error — show actual message to help debug
+        throw new AppError(
+          metaMsg || 'Failed to initiate call. Check if WhatsApp Calling is enabled for your account.',
+          400
+        );
+      }
 
       // Save call log to DB (non-blocking, CallLog table may not exist yet)
       (prisma as any).callLog?.create({
