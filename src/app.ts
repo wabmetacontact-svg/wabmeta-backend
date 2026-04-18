@@ -31,6 +31,7 @@ import adminRoutes from './modules/admin/admin.routes';
 import analyticsRoutes from './modules/analytics/analytics.routes';
 import crmRoutes from './modules/crm/crm.routes';
 import automationRoutes from './modules/automation/automation.routes';
+import callingRoutes from './modules/calling/calling.routes';
 
 
 // ============================================
@@ -347,6 +348,9 @@ try {
 
   app.use('/api/automations', automationRoutes);
   console.log('  ✅ /api/automations');
+
+  app.use('/api/calling', callingRoutes);
+  console.log('  ✅ /api/calling');
 
   app.use('/api/chatbots', chatbotRoutes);
   console.log('  ✅ /api/chatbots');

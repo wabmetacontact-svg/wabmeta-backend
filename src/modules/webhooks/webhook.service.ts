@@ -167,6 +167,10 @@ export class WebhookService {
           await this.handleTemplateUpdate(payload, value);
           return { status: 'processed', reason: 'Template update processed' };
 
+        case 'calls':
+          await this.handleCallWebhook(payload, value);
+          return { status: 'processed', reason: 'Call webhook processed' };
+
         case 'messages':
         case 'statuses':
           // Existing handlers handle these downstream
@@ -1075,6 +1079,128 @@ export class WebhookService {
       }
     } catch (e) {
       console.error('handleSmbMessageEchoes error:', e);
+    }
+  }
+
+  // ✅ Handle calls webhook (inbound & outbound call events)
+  private async handleCallWebhook(payload: any, value: any) {
+    try {
+      const callData = value?.call || {};
+      const callId = callData.id;
+      const status = callData.status;
+      const direction = callData.direction; // 'inbound' | 'outbound'
+      const from = callData.from;
+      const to = callData.to;
+      const duration = callData.duration;
+
+      console.log(`📞 Call webhook received:`, {
+        callId,
+        status,
+        direction,
+        from: from ? String(from).substring(0, 6) : undefined,
+      });
+
+      // Phone number se organization find karo
+      const phoneNumberId = value?.metadata?.phone_number_id;
+      if (!phoneNumberId) return;
+
+      const account = await prisma.whatsAppAccount.findFirst({
+        where: { phoneNumberId },
+      });
+
+      if (!account) return;
+
+      // ✅ Inbound call - contact find/create
+      if (direction === 'inbound' && from) {
+        const cleanPhone = String(from).replace(/[^0-9]/g, '');
+        let phone10 = cleanPhone;
+        if (phone10.startsWith('91') && phone10.length === 12) {
+          phone10 = phone10.substring(2);
+        }
+
+        // Contact find/create
+        let contact = await prisma.contact.findFirst({
+          where: {
+            organizationId: account.organizationId,
+            OR: [
+              { phone: phone10 },
+              { phone: `+91${phone10}` },
+              { phone: `91${phone10}` },
+            ],
+          },
+        });
+
+        if (!contact) {
+          contact = await prisma.contact.create({
+            data: {
+              organizationId: account.organizationId,
+              phone: phone10,
+              firstName: 'Unknown',
+              status: 'ACTIVE',
+              source: 'WHATSAPP_CALL',
+            },
+          });
+          console.log('👤 New contact from inbound call:', phone10);
+        }
+
+        // Save call log (non-blocking)
+        (prisma as any).callLog?.create({
+          data: {
+            organizationId: account.organizationId,
+            whatsappAccountId: account.id,
+            contactId: contact.id,
+            callId: callId || `call_${Date.now()}`,
+            direction: 'INBOUND',
+            status: status || 'received',
+            from: cleanPhone,
+            to: account.phoneNumber,
+            duration: duration || null,
+            startedAt: new Date(),
+            endedAt: status === 'ended' ? new Date() : null,
+          },
+        })?.catch((dbErr: any) => console.warn('Call log DB save failed:', dbErr.message));
+
+        // ✅ Real-time notification emit
+        webhookEvents.emit('incomingCall', {
+          organizationId: account.organizationId,
+          callId,
+          from: cleanPhone,
+          contactId: contact.id,
+          contactName: contact.firstName || phone10,
+          status,
+          direction: 'INBOUND',
+          timestamp: new Date().toISOString(),
+        });
+
+        console.log(`📞 Inbound call processed from: ${phone10}`);
+      }
+
+      // ✅ Outbound call status update
+      if (direction === 'outbound' && callId) {
+        (prisma as any).callLog?.updateMany({
+          where: { callId },
+          data: {
+            status: status || 'updated',
+            duration: duration || undefined,
+            endedAt: status === 'ended' ? new Date() : undefined,
+          },
+        })?.catch((dbErr: any) => console.warn('Call log update failed:', dbErr.message));
+
+        // Status update emit
+        webhookEvents.emit('callStatusUpdate', {
+          organizationId: account.organizationId,
+          callId,
+          status,
+          duration,
+          direction: 'OUTBOUND',
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      console.log(`✅ Call webhook processed: ${callId} -> ${status}`);
+
+    } catch (e) {
+      console.error('handleCallWebhook error:', e);
     }
   }
 }

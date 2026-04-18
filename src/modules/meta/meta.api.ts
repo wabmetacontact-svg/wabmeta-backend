@@ -1165,6 +1165,246 @@ class MetaApiClient {
   }
 
   // ============================================
+  // CALLING API METHODS
+  // ============================================
+
+  // ✅ 1. Enable calling feature on phone number
+  async enableCalling(
+    phoneNumberId: string,
+    accessToken: string,
+    options: {
+      callingEnabled: boolean;
+      inboundCallsEnabled?: boolean;
+      callHoursEnabled?: boolean;
+      callbackEnabled?: boolean;
+    } = { callingEnabled: true }
+  ): Promise<{ success: boolean; data?: any }> {
+    try {
+      console.log(`[Meta API] Enabling calling for ${phoneNumberId}...`);
+
+      const response = await this.client.post(
+        `/${phoneNumberId}/settings`,
+        {
+          calling_settings: {
+            calling_enabled: options.callingEnabled,
+            inbound_calls_enabled: options.inboundCallsEnabled ?? true,
+            call_hours_enabled: options.callHoursEnabled ?? false,
+            callback_enabled: options.callbackEnabled ?? true,
+          }
+        },
+        {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        }
+      );
+
+      console.log('[Meta API] ✅ Calling settings updated');
+      return { success: true, data: response.data };
+
+    } catch (error: any) {
+      console.error('[Meta API] ❌ Enable calling failed:', error.response?.data);
+      throw this.handleError(error, 'Failed to enable calling');
+    }
+  }
+
+  // ✅ 2. Fetch calling settings
+  async getCallingSettings(
+    phoneNumberId: string,
+    accessToken: string
+  ): Promise<{
+    callingEnabled: boolean;
+    inboundCallsEnabled: boolean;
+    callbackEnabled: boolean;
+    callHoursEnabled: boolean;
+  }> {
+    try {
+      console.log(`[Meta API] Fetching call settings for ${phoneNumberId}...`);
+
+      const response = await this.client.get(
+        `/${phoneNumberId}/settings`,
+        {
+          params: {
+            access_token: accessToken,
+            fields: 'calling_settings',
+          }
+        }
+      );
+
+      const settings = response.data?.calling_settings || {};
+
+      return {
+        callingEnabled: settings.calling_enabled ?? false,
+        inboundCallsEnabled: settings.inbound_calls_enabled ?? false,
+        callbackEnabled: settings.callback_enabled ?? false,
+        callHoursEnabled: settings.call_hours_enabled ?? false,
+      };
+
+    } catch (error: any) {
+      console.error('[Meta API] ❌ Get calling settings failed');
+      return {
+        callingEnabled: false,
+        inboundCallsEnabled: false,
+        callbackEnabled: false,
+        callHoursEnabled: false,
+      };
+    }
+  }
+
+  // ✅ 3. Business-initiated call
+  async initiateCall(
+    phoneNumberId: string,
+    accessToken: string,
+    to: string,
+    callbackData?: string
+  ): Promise<{
+    callId: string;
+    status: string;
+  }> {
+    try {
+      const cleanTo = to.replace(/[^0-9]/g, '');
+      console.log(`[Meta API] Initiating call to ${cleanTo.substring(0, 5)}...`);
+
+      const payload: any = {
+        messaging_product: 'whatsapp',
+        to: cleanTo,
+        type: 'call',
+      };
+
+      if (callbackData) {
+        payload.callback_data = callbackData;
+      }
+
+      const response = await this.client.post(
+        `/${phoneNumberId}/calls`,
+        payload,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        }
+      );
+
+      console.log('[Meta API] ✅ Call initiated:', response.data);
+
+      return {
+        callId: response.data?.call_id || response.data?.id,
+        status: response.data?.status || 'initiated',
+      };
+
+    } catch (error: any) {
+      console.error('[Meta API] ❌ Call initiation failed:', error.response?.data);
+      throw this.handleError(error, 'Failed to initiate call');
+    }
+  }
+
+  // ✅ 4. Check/request call permissions
+  async requestCallPermission(
+    phoneNumberId: string,
+    accessToken: string,
+    to: string
+  ): Promise<{
+    permitted: boolean;
+    permissionId?: string;
+  }> {
+    try {
+      const cleanTo = to.replace(/[^0-9]/g, '');
+
+      const response = await this.client.post(
+        `/${phoneNumberId}/call_permissions`,
+        {
+          messaging_product: 'whatsapp',
+          to: cleanTo,
+        },
+        {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        }
+      );
+
+      return {
+        permitted: true,
+        permissionId: response.data?.id,
+      };
+
+    } catch (error: any) {
+      const metaErr = error.response?.data?.error;
+      if (metaErr?.code === 131056) {
+        return { permitted: false };
+      }
+      throw this.handleError(error, 'Failed to request call permission');
+    }
+  }
+
+  // ✅ 5. Subscribe to calls webhook
+  async subscribeToCallsWebhook(
+    wabaId: string,
+    accessToken: string
+  ): Promise<boolean> {
+    try {
+      console.log('[Meta API] Subscribing to calls webhook...');
+
+      const response = await this.client.post(
+        `/${wabaId}/subscribed_apps`,
+        {
+          subscribed_fields: ['messages', 'calls', 'call_logs'],
+        },
+        {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        }
+      );
+
+      console.log('[Meta API] ✅ Calls webhook subscribed');
+      return response.data?.success === true;
+
+    } catch (error: any) {
+      console.error('[Meta API] ❌ Calls webhook subscription failed');
+      throw this.handleError(error, 'Failed to subscribe to calls webhook');
+    }
+  }
+
+  // ✅ 6. Get call logs
+  async getCallLogs(
+    phoneNumberId: string,
+    accessToken: string,
+    limit: number = 20
+  ): Promise<Array<{
+    callId: string;
+    direction: 'inbound' | 'outbound';
+    status: string;
+    duration?: number;
+    startTime: string;
+    endTime?: string;
+    from: string;
+    to: string;
+  }>> {
+    try {
+      const response = await this.client.get(
+        `/${phoneNumberId}/call_logs`,
+        {
+          params: {
+            access_token: accessToken,
+            limit,
+            fields: 'id,direction,status,duration,start_time,end_time,from,to',
+          }
+        }
+      );
+
+      const logs = response.data?.data || [];
+
+      return logs.map((log: any) => ({
+        callId: log.id,
+        direction: log.direction,
+        status: log.status,
+        duration: log.duration,
+        startTime: log.start_time,
+        endTime: log.end_time,
+        from: log.from,
+        to: log.to,
+      }));
+
+    } catch (error: any) {
+      console.error('[Meta API] ❌ Get call logs failed');
+      return [];
+    }
+  }
+
+  // ============================================
   // UTILITY
   // ============================================
 
