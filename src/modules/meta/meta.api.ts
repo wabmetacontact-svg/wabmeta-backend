@@ -1268,18 +1268,25 @@ class MetaApiClient {
         {
           params: {
             access_token: accessToken,
-            fields: 'calling_settings',
+            fields: 'calling,calling_settings', // try both old and new field names
           }
         }
       );
 
-      const settings = response.data?.calling_settings || {};
+      // Try new 'calling' field + fallback to old 'calling_settings'
+      const calling = response.data?.calling || response.data?.calling_settings || {};
 
       return {
-        callingEnabled: settings.calling_enabled ?? false,
-        inboundCallsEnabled: settings.inbound_calls_enabled ?? false,
-        callbackEnabled: settings.callback_enabled ?? false,
-        callHoursEnabled: settings.call_hours_enabled ?? false,
+        callingEnabled: calling.status === 'ENABLED' || calling.calling_enabled === true || false,
+        inboundCallsEnabled: calling.inbound_calls_enabled ?? true,
+        callbackEnabled:
+          calling.callback_permission_status === 'ENABLED' ||
+          calling.callback_enabled === true ||
+          true,
+        callHoursEnabled:
+          calling.call_hours?.status === 'ENABLED' ||
+          calling.call_hours_enabled === true ||
+          false,
       };
 
     } catch (error: any) {

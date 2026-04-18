@@ -15,10 +15,10 @@ class CallingController {
       const organizationId = (req as AuthRequest).user?.organizationId;
       if (!organizationId) throw new AppError('Organization required', 400);
 
-      // Get WhatsApp account
+      // Get WhatsApp account (any status, not just CONNECTED)
       const account = await prisma.whatsAppAccount.findFirst({
-        where: { organizationId, status: 'CONNECTED' },
-        orderBy: { isDefault: 'desc' },
+        where: { organizationId, isActive: true },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
       });
 
       if (!account) {
@@ -26,19 +26,35 @@ class CallingController {
           success: true,
           data: {
             callingEnabled: false,
-            message: 'No WhatsApp account connected',
+            inboundCallsEnabled: true,
+            callbackEnabled: true,
+            callHoursEnabled: false,
+            message: 'No WhatsApp account found',
           },
         });
       }
 
-      const accountWithToken = await metaService.getAccountWithToken(account.id);
-      if (!accountWithToken) throw new AppError('Token decryption failed', 500);
+      // Get token safely
+      let settings = {
+        callingEnabled: false,
+        inboundCallsEnabled: true,
+        callbackEnabled: true,
+        callHoursEnabled: false,
+      };
 
-      // Get calling settings from Meta
-      const settings = await metaApi.getCallingSettings(
-        account.phoneNumberId,
-        accountWithToken.accessToken
-      );
+      try {
+        const accountWithToken = await metaService.getAccountWithToken(account.id);
+        if (accountWithToken?.accessToken) {
+          // Get calling settings from Meta (may fail if calling not supported yet)
+          settings = await metaApi.getCallingSettings(
+            account.phoneNumberId,
+            accountWithToken.accessToken
+          );
+        }
+      } catch (metaErr: any) {
+        // Meta settings fetch failed — return defaults (non-blocking)
+        console.warn('[Calling] Could not fetch Meta calling settings:', metaErr?.message || metaErr);
+      }
 
       return res.json({
         success: true,
