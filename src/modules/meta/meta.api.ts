@@ -1317,6 +1317,7 @@ class MetaApiClient {
       callbackData?: string;
       bodyText?: string;        // Message body above the button
       buttonText?: string;      // Label on the call button (default: "Call us")
+      businessPhoneNumber?: string; // Actual E.164 number e.g. "919876543210"
     }
   ): Promise<{
     messageId: string;
@@ -1326,7 +1327,13 @@ class MetaApiClient {
       const cleanTo = to.replace(/[^0-9]/g, '');
       console.log(`[Meta API] Sending call CTA to ${cleanTo.substring(0, 5)}...`);
 
-      // Business-initiated calls use an interactive message with a call button
+      // Build the wa.me call URL using the actual business phone number
+      // Format: https://wa.me/<E.164_without_plus>?call=true
+      // Fallback: just the wa.me link if phone number not provided
+      const businessPhone = (options?.businessPhoneNumber || phoneNumberId).replace(/[^0-9]/g, '');
+      const callUrl = `https://wa.me/${businessPhone}?call=true`;
+
+      // Business-initiated calls use an interactive message with a call CTA button
       const payload: any = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -1335,13 +1342,13 @@ class MetaApiClient {
         interactive: {
           type: 'cta_url',
           body: {
-            text: options?.bodyText || 'Tap the button below to start a call with us.',
+            text: options?.bodyText || '📞 Aap hamse WhatsApp Call ke zariye baat kar sakte hain. Niche button dabayein.',
           },
           action: {
             name: 'cta_url',
             parameters: {
-              display_text: options?.buttonText || 'Call us',
-              url: `https://wa.me/call/${phoneNumberId}`,
+              display_text: options?.buttonText || '📞 Call Now',
+              url: callUrl,
             },
           },
         },
