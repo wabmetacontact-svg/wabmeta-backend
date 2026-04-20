@@ -1327,11 +1327,28 @@ class MetaApiClient {
       const cleanTo = to.replace(/[^0-9]/g, '');
       console.log(`[Meta API] Sending call CTA to ${cleanTo.substring(0, 5)}...`);
 
-      // Build the wa.me call URL using the actual business phone number
-      // Format: https://wa.me/<E.164_without_plus>?call=true
-      // Fallback: just the wa.me link if phone number not provided
-      const businessPhone = (options?.businessPhoneNumber || phoneNumberId).replace(/[^0-9]/g, '');
-      const callUrl = `https://wa.me/${businessPhone}?call=true`;
+      // ── Build wa.me call URL ──────────────────────────────────────────
+      // phoneNumberId is Meta's internal 16-digit ID — NEVER use it as a phone number.
+      // Only use businessPhoneNumber if it's a real E.164 number (≤15 digits after cleaning).
+      const rawBusinessPhone = (options?.businessPhoneNumber || '').replace(/[^0-9]/g, '');
+      const isRealPhone = rawBusinessPhone.length >= 7 && rawBusinessPhone.length <= 15;
+
+      let callUrl: string;
+      let bodyText: string;
+      let buttonText: string;
+
+      if (isRealPhone) {
+        // ✅ Valid phone number → wa.me call link
+        callUrl = `https://wa.me/${rawBusinessPhone}?call=true`;
+        bodyText = options?.bodyText || '📞 Aap hamse WhatsApp Call ke zariye baat kar sakte hain. Niche button dabayein.';
+        buttonText = options?.buttonText || '📞 Call Now';
+      } else {
+        // ⚠️ No valid phone number — send a plain text message instead of broken link
+        console.warn('[Meta API] ⚠️ No valid business phone number for wa.me URL — sending text-only call invite');
+        callUrl = 'https://wa.me/';  // fallback (will be replaced below with text-only message)
+        bodyText = options?.bodyText || '📞 Please call us back on WhatsApp to connect with our team.';
+        buttonText = options?.buttonText || '📞 Call Us';
+      }
 
       // Business-initiated calls use an interactive message with a call CTA button
       const payload: any = {
@@ -1342,12 +1359,12 @@ class MetaApiClient {
         interactive: {
           type: 'cta_url',
           body: {
-            text: options?.bodyText || '📞 Aap hamse WhatsApp Call ke zariye baat kar sakte hain. Niche button dabayein.',
+            text: bodyText,
           },
           action: {
             name: 'cta_url',
             parameters: {
-              display_text: options?.buttonText || '📞 Call Now',
+              display_text: buttonText,
               url: callUrl,
             },
           },

@@ -204,9 +204,44 @@ class CallingController {
         console.warn('[Calling] Could not update settings, attempting call anyway...');
       }
 
-      // ✅ Step 2: Send a call CTA message (requires active 24h session)
+      // ✅ Step 2: Resolve actual business phone number for wa.me URL
+      // account.phoneNumber may be null, or stored as display format like "+91 76781 03840"
+      // phoneNumberId is Meta's 16-digit internal ID — NOT a real phone number for wa.me
+      let businessPhoneNumber: string | undefined = undefined;
+
+      const rawPhone = (account as any).phoneNumber || (account as any).displayPhoneNumber || '';
+      const cleanedPhone = rawPhone.replace(/[^0-9]/g, '');
+
+      // A real E.164 number is 7–15 digits. phoneNumberId is 16 digits — reject it.
+      if (cleanedPhone.length >= 7 && cleanedPhone.length <= 15) {
+        businessPhoneNumber = cleanedPhone;
+        console.log('[Calling] Using stored phone number:', businessPhoneNumber);
+      } else {
+        // Fetch from Meta API as fallback
+        console.log('[Calling] Stored phone number invalid/missing, fetching from Meta...');
+        try {
+          const phoneDetails = await metaApi.getPhoneNumberDetails(
+            account.phoneNumberId,
+            accountWithToken.accessToken
+          );
+          const fetched = (phoneDetails.displayPhoneNumber || '').replace(/[^0-9]/g, '');
+          if (fetched.length >= 7 && fetched.length <= 15) {
+            businessPhoneNumber = fetched;
+            console.log('[Calling] ✅ Fetched phone number from Meta:', businessPhoneNumber);
+          }
+        } catch (e: any) {
+          console.warn('[Calling] Could not fetch phone number from Meta:', e?.message);
+        }
+      }
+
+      if (!businessPhoneNumber) {
+        console.warn('[Calling] ⚠️ Could not resolve business phone number — wa.me URL will be incomplete');
+      }
+
+      // ✅ Step 3: Send a call CTA message (requires active 24h session)
       // WhatsApp Business Calling does NOT support cold-calling via /calls endpoint.
       // We send an interactive message with a Call button instead.
+      // Customer taps "Call Now" → opens wa.me/<phone>?call=true → WhatsApp voice call starts
       let callResult: { messageId: string; status: string };
       try {
         callResult = await metaApi.initiateCall(
@@ -215,6 +250,7 @@ class CallingController {
           to,
           {
             callbackData: `org:${organizationId}:contact:${contactId || 'unknown'}`,
+            businessPhoneNumber,
           }
         );
       } catch (metaErr: any) {
