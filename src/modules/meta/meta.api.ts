@@ -1203,10 +1203,7 @@ class MetaApiClient {
         sip: { status: 'DISABLED' }, // Use WhatsApp native calling
       };
 
-      // Inbound calls
-      if (options.inboundCallsEnabled !== undefined) {
-        callingSettings.inbound_calls_enabled = options.inboundCallsEnabled;
-      }
+      // NOTE: inbound_calls_enabled is NOT a valid key for the calling param (Meta removed it)
 
       // Country restriction (e.g. ["IN"] for India only)
       if (options.restrictToCountries && options.restrictToCountries.length > 0) {
@@ -1216,6 +1213,7 @@ class MetaApiClient {
       }
 
       // Call hours (business hours)
+      // Meta requires timezone_id + weekly_operating_hours even when status=DISABLED
       if (options.callHoursEnabled && options.weeklyHours && options.weeklyHours.length > 0) {
         callingSettings.call_hours = {
           status: 'ENABLED',
@@ -1232,7 +1230,12 @@ class MetaApiClient {
           })) || [],
         };
       } else {
-        callingSettings.call_hours = { status: 'DISABLED' };
+        // Meta still requires these fields even when DISABLED
+        callingSettings.call_hours = {
+          status: 'DISABLED',
+          timezone_id: options.timezone || 'Asia/Kolkata',
+          weekly_operating_hours: [],
+        };
       }
 
       const response = await this.client.post(
