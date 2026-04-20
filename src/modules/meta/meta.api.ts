@@ -1213,7 +1213,7 @@ class MetaApiClient {
       }
 
       // Call hours (business hours)
-      // Meta requires timezone_id + weekly_operating_hours even when status=DISABLED
+      // ⚠️ When DISABLED, omit call_hours entirely — Meta rejects weekly_operating_hours: [] via schema
       if (options.callHoursEnabled && options.weeklyHours && options.weeklyHours.length > 0) {
         callingSettings.call_hours = {
           status: 'ENABLED',
@@ -1229,14 +1229,8 @@ class MetaApiClient {
             end_time: h.endTime,
           })) || [],
         };
-      } else {
-        // Meta still requires these fields even when DISABLED
-        callingSettings.call_hours = {
-          status: 'DISABLED',
-          timezone_id: options.timezone || 'Asia/Kolkata',
-          weekly_operating_hours: [],
-        };
       }
+      // else: omit call_hours entirely when disabled — avoids schema validation error
 
       const response = await this.client.post(
         `/${phoneNumberId}/settings`,
@@ -1303,43 +1297,75 @@ class MetaApiClient {
     }
   }
 
-  // ✅ 3. Business-initiated call
+  // ✅ 3. Business-initiated call (via interactive message with Call button)
+  //
+  // ⚠️ IMPORTANT: WhatsApp Business Calling does NOT support cold-calling.
+  //    The /calls endpoint does not exist — it throws "Missing session parameter".
+  //    Business-initiated calls work by sending an interactive message with a
+  //    "call" CTA button. The user must be within an active 24-hour messaging
+  //    session (they must have messaged you first).
+  //
+  //    Flow:
+  //      1. User sends a message → opens 24h session
+  //      2. Business sends interactive message with call CTA button
+  //      3. User taps the button → call is initiated on their device
   async initiateCall(
     phoneNumberId: string,
     accessToken: string,
     to: string,
-    callbackData?: string
+    options?: {
+      callbackData?: string;
+      bodyText?: string;        // Message body above the button
+      buttonText?: string;      // Label on the call button (default: "Call us")
+    }
   ): Promise<{
-    callId: string;
+    messageId: string;
     status: string;
   }> {
     try {
       const cleanTo = to.replace(/[^0-9]/g, '');
-      console.log(`[Meta API] Initiating call to ${cleanTo.substring(0, 5)}...`);
+      console.log(`[Meta API] Sending call CTA to ${cleanTo.substring(0, 5)}...`);
 
+      // Business-initiated calls use an interactive message with a call button
       const payload: any = {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to: cleanTo,
-        type: 'call',
+        type: 'interactive',
+        interactive: {
+          type: 'cta_url',
+          body: {
+            text: options?.bodyText || 'Tap the button below to start a call with us.',
+          },
+          action: {
+            name: 'cta_url',
+            parameters: {
+              display_text: options?.buttonText || 'Call us',
+              url: `https://wa.me/call/${phoneNumberId}`,
+            },
+          },
+        },
       };
 
-      if (callbackData) {
-        payload.callback_data = callbackData;
+      if (options?.callbackData) {
+        // callback_data goes on the top-level message for session tracking
+        payload.biz_opaque_callback_data = options.callbackData;
       }
 
       const response = await this.client.post(
-        `/${phoneNumberId}/calls`,
+        `/${phoneNumberId}/messages`,
         payload,
         {
           headers: { Authorization: `Bearer ${accessToken}` }
         }
       );
 
-      console.log('[Meta API] ✅ Call initiated:', response.data);
+      const messageId = response.data?.messages?.[0]?.id;
+      console.log('[Meta API] ✅ Call CTA message sent:', messageId);
 
       return {
-        callId: response.data?.call_id || response.data?.id,
-        status: response.data?.status || 'initiated',
+        messageId,
+        status: response.data?.messages?.[0]?.message_status || 'sent',
       };
 
     } catch (error: any) {

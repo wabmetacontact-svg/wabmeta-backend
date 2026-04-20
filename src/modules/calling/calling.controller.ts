@@ -204,14 +204,18 @@ class CallingController {
         console.warn('[Calling] Could not update settings, attempting call anyway...');
       }
 
-      // ✅ Step 2: Initiate the call via Meta API
-      let callResult: { callId: string; status: string };
+      // ✅ Step 2: Send a call CTA message (requires active 24h session)
+      // WhatsApp Business Calling does NOT support cold-calling via /calls endpoint.
+      // We send an interactive message with a Call button instead.
+      let callResult: { messageId: string; status: string };
       try {
         callResult = await metaApi.initiateCall(
           account.phoneNumberId,
           accountWithToken.accessToken,
           to,
-          `org:${organizationId}:contact:${contactId || 'unknown'}`
+          {
+            callbackData: `org:${organizationId}:contact:${contactId || 'unknown'}`,
+          }
         );
       } catch (metaErr: any) {
         // ✅ Extract Meta-specific error details
@@ -228,6 +232,14 @@ class CallingController {
         });
 
         // ✅ Translate Meta error codes to friendly messages
+        if (metaCode === 131009 && metaSubcode === 2494010) {
+          throw new AppError(
+            'WhatsApp Calling requires an active messaging session. ' +
+            'The customer must send you a message first (within 24 hours) before you can initiate a call. ' +
+            'Ask the customer to message you on WhatsApp, then try calling.',
+            400
+          );
+        }
         if (metaCode === 141000 || metaSubcode === 2655010 || metaMsg.includes('not a valid Cloud API number')) {
           throw new AppError(
             'WhatsApp Calling API is not enabled for this phone number. ' +
@@ -275,7 +287,7 @@ class CallingController {
           whatsappAccountId: account.id,
           contactId: contactId || null,
           conversationId: conversationId || null,
-          callId: callResult.callId,
+          callId: callResult.messageId,
           direction: 'OUTBOUND',
           status: callResult.status,
           to: to.replace(/[^0-9]/g, ''),
