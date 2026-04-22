@@ -366,13 +366,10 @@ class BillingService {
       return { eligible: false, reason: 'No active subscription' };
     }
 
-    const eligibleTypes = ['QUARTERLY', 'BIANNUAL', 'ANNUAL'];
-    const isEligiblePlan = eligibleTypes.includes(subscription.plan?.type || '');
-
-    if (!isEligiblePlan) {
+    if (subscription.plan?.type === 'FREE_DEMO') {
       return {
         eligible: false,
-        reason: 'Wallet feature is only available for 3-month (Quarterly) plans or higher. Monthly and Free plans are not eligible.',
+        reason: 'Wallet feature is not available on the Free plan. Please upgrade to a Monthly, Quarterly, or Annual plan to enable it.',
       };
     }
 

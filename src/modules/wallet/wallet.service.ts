@@ -84,12 +84,11 @@ async function verifyMinimumPlan(organizationId: string): Promise<{
     };
   }
 
-  // Check plan duration - must be QUARTERLY, BIANNUAL, or ANNUAL
-  const eligiblePlanTypes = ['QUARTERLY', 'BIANNUAL', 'ANNUAL'];
-  if (!eligiblePlanTypes.includes(subscription.plan?.type || '')) {
+  // Check plan duration - Only block FREE_DEMO
+  if (subscription.plan?.type === 'FREE_DEMO') {
     return {
       eligible: false,
-      reason: 'Wallet feature is only available for Quarterly, Bi-annual, and Annual plans. Monthly and Free plans are not eligible.',
+      reason: 'Wallet feature is not available on the Free plan. Please upgrade to a Monthly, Quarterly, or Annual plan to enable it.',
     };
   }
 

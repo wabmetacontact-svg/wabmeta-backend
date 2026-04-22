@@ -10,6 +10,7 @@ import {
 import { metaApi } from '../meta/meta.api';
 import { safeDecrypt, maskToken } from '../../utils/encryption';
 import prisma from '../../config/database';
+import { deductWalletForTemplate } from '../wallet/wallet.deduction.service';
 
 // ============================================
 // INTERFACES
@@ -488,6 +489,36 @@ class WhatsAppService {
       const waMessageId = (response as any)?.messages?.[0]?.id || response?.messageId;
       if (!waMessageId) throw new Error('No message ID returned');
 
+      // ✅ ── WALLET DEDUCTION (Meta send ke BAAD, non-blocking) ─────────────────
+      const orgId = organizationId || account.organizationId;
+      
+      // Template category DB se fetch karo
+      const templateForCategory = await prisma.template.findFirst({
+        where: {
+          organizationId: orgId,
+          name: templateName,
+        },
+        select: { category: true },
+      });
+
+      // Fire & forget - message blocking nahi hoga
+      deductWalletForTemplate({
+        organizationId: orgId,
+        templateName,
+        templateCategory: templateForCategory?.category,
+        recipientPhone: to,
+        waMessageId,
+      }).then(result => {
+        if (result.walletUsed) {
+          console.log(`💳 Wallet: -₹${result.amount} for ${templateName}`);
+        } else {
+          console.log(`💳 Wallet skip: ${result.reason}`);
+        }
+      }).catch(err => {
+        console.error('💳 Wallet deduction failed (non-blocking):', err.message);
+      });
+      // ✅ ── END WALLET DEDUCTION ────────────────────────────────────────────────
+
       // ✅ 2.5 Extract Media URL for saving
       let mediaUrlForDB = null;
       const headerComp = components?.find((c: any) => c.type === 'header');
@@ -911,6 +942,33 @@ class WhatsAppService {
       );
     }
 
+    // ✅ ── WALLET PRE-CHECK for Campaign ────────────────────────────────────────
+    const orgId = campaign.whatsappAccount.organizationId;
+    
+    const { deductWalletForCampaign } = await import('../wallet/wallet.deduction.service');
+    
+    const walletCheck = await deductWalletForCampaign({
+      organizationId: orgId,
+      templateName: campaign.template.name,
+      templateCategory: campaign.template.category,
+      totalRecipients: campaign.campaignContacts.length,
+      campaignId,
+    });
+
+    // Log wallet status
+    if (walletCheck.walletActive) {
+      console.log(`💳 Wallet check for campaign:`);
+      console.log(`   Estimated cost: ₹${walletCheck.estimatedCost.toFixed(2)}`);
+      console.log(`   Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
+      
+      if (!walletCheck.canProceed) {
+        console.warn(`⚠️ Wallet balance low! Shortfall: ₹${walletCheck.shortfall.toFixed(2)}`);
+        console.warn(`⚠️ Campaign will continue but wallet may run out`);
+        // Note: Campaign block nahi karte, user ko notification jayega
+      }
+    }
+    // ✅ ── END WALLET PRE-CHECK ──────────────────────────────────────────────────
+
     const results: CampaignSendResult = {
       sent: 0,
       failed: 0,
@@ -961,6 +1019,21 @@ class WhatsAppService {
         );
 
         results.sent++;
+
+        // ✅ ── PER-MESSAGE WALLET DEDUCTION ──────────────────────────────────────
+        if (walletCheck.walletActive) {
+          deductWalletForTemplate({
+            organizationId: orgId,
+            templateName: campaign.template.name,
+            templateCategory: campaign.template.category,
+            recipientPhone: formattedPhone,
+            waMessageId: messageResult.messageId,
+            campaignId,
+          }).catch(err => {
+            console.error(`💳 Campaign wallet deduction failed for ${formattedPhone}:`, err.message);
+          });
+        }
+        // ✅ ── END DEDUCTION ─────────────────────────────────────────────────────
         console.log(
           `✅ Sent to ${recipient.contact.phone} (${messageResult.messageId})`
         );
