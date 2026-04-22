@@ -87,29 +87,13 @@ async function verifyMinimumPlan(organizationId: string): Promise<{
   // Check plan duration - must be QUARTERLY, BIANNUAL, or ANNUAL
   const eligiblePlanTypes = ['QUARTERLY', 'BIANNUAL', 'ANNUAL'];
   if (!eligiblePlanTypes.includes(subscription.plan?.type || '')) {
-    // Also check if they've been subscribed for 3+ months
-    const planStart = new Date(subscription.currentPeriodStart);
-    const now = new Date();
-    const monthsDiff =
-      (now.getFullYear() - planStart.getFullYear()) * 12 +
-      (now.getMonth() - planStart.getMonth());
-
-    if (monthsDiff < 3) {
-      return {
-        eligible: false,
-        reason: `Minimum 3-month subscription required. You have ${monthsDiff} month(s) remaining.`,
-        monthsActive: monthsDiff,
-      };
-    }
+    return {
+      eligible: false,
+      reason: 'Wallet feature is only available for Quarterly, Bi-annual, and Annual plans. Monthly and Free plans are not eligible.',
+    };
   }
 
-  const planStart = new Date(subscription.currentPeriodStart);
-  const now = new Date();
-  const monthsActive =
-    (now.getFullYear() - planStart.getFullYear()) * 12 +
-    (now.getMonth() - planStart.getMonth());
-
-  return { eligible: true, monthsActive };
+  return { eligible: true };
 }
 
 // ─── Helper: Reset Monthly Limit If Needed ────────────────────────────────────

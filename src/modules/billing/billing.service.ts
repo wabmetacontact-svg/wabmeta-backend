@@ -370,18 +370,10 @@ class BillingService {
     const isEligiblePlan = eligibleTypes.includes(subscription.plan?.type || '');
 
     if (!isEligiblePlan) {
-      // Check months subscribed
-      const start = new Date(subscription.currentPeriodStart);
-      const months =
-        (new Date().getFullYear() - start.getFullYear()) * 12 +
-        (new Date().getMonth() - start.getMonth());
-
-      if (months < 3) {
-        return {
-          eligible: false,
-          reason: `Need 3+ months subscription. Current: ${months} month(s)`,
-        };
-      }
+      return {
+        eligible: false,
+        reason: 'Wallet feature is only available for 3-month (Quarterly) plans or higher. Monthly and Free plans are not eligible.',
+      };
     }
 
     return { eligible: true };
