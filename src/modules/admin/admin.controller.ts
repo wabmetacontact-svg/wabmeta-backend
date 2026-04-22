@@ -901,6 +901,120 @@ export class AdminController {
       next(error);
     }
   }
+
+  // ============================================
+  // WALLET MANAGEMENT
+  // ============================================
+
+  async adminGetAllWallets(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { page, limit, flagged, isActive } = req.query;
+      
+      const { getAllWallets } = await import('../wallet/wallet.service');
+      
+      const result = await getAllWallets({
+        page: Number(page) || 1,
+        limit: Number(limit) || 20,
+        flagged: flagged === 'true' ? true : flagged === 'false' ? false : undefined,
+        isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
+      });
+
+      return sendSuccess(res, result, 'Wallets retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async adminGetWalletRequests(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { status, page, limit } = req.query;
+      
+      const { getAccessRequests } = await import('../wallet/wallet.service');
+      
+      const result = await getAccessRequests({
+        status: status as string,
+        page: Number(page) || 1,
+        limit: Number(limit) || 20,
+      });
+
+      return sendSuccess(res, result, 'Wallet requests retrieved');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async adminReviewWalletRequest(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { requestId } = req.params;
+      const { action, note } = req.body;
+      const adminId = req.admin?.id!;
+
+      if (!['approve', 'reject'].includes(action)) {
+        throw new AppError("Action must be 'approve' or 'reject'", 400);
+      }
+
+      const { reviewWalletRequest } = await import('../wallet/wallet.service');
+      
+      const result = await reviewWalletRequest(requestId as string, adminId, action, note);
+      return sendSuccess(res, result, result.message);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async adminAdjustWalletBalance(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = req.params;
+      const { type, amount, note } = req.body;
+      const adminId = req.admin?.id!;
+
+      const { adminAdjustBalance } = await import('../wallet/wallet.service');
+      
+      const result = await adminAdjustBalance(organizationId as string, adminId, {
+        type,
+        amountRupees: Number(amount),
+        note,
+      });
+
+      return sendSuccess(res, result, 'Balance adjusted successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async adminSetWalletCredit(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = req.params;
+      const { creditLimit, enable } = req.body;
+
+      const { setCreditLimit } = await import('../wallet/wallet.service');
+      
+      const result = await setCreditLimit(
+        organizationId as string,
+        Number(creditLimit),
+        Boolean(enable)
+      );
+
+      return sendSuccess(res, result, 'Credit limit updated');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async adminFlagWallet(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = req.params;
+      const { reason, unflag } = req.body;
+      const adminId = req.admin?.id!;
+
+      const { flagWallet } = await import('../wallet/wallet.service');
+      
+      const result = await flagWallet(organizationId as string, adminId, reason, unflag);
+      return sendSuccess(res, result, result.message);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const adminController = new AdminController();

@@ -429,4 +429,38 @@ router.post(
   adminController.disconnectWhatsAppAccount.bind(adminController)
 );
 
+// ============================================
+// WALLET MANAGEMENT ROUTES
+// ============================================
+
+router.get(
+  '/wallets',
+  adminController.adminGetAllWallets.bind(adminController)
+);
+
+router.get(
+  '/wallets/requests',
+  adminController.adminGetWalletRequests.bind(adminController)
+);
+
+router.patch(
+  '/wallets/requests/:requestId/review',
+  adminController.adminReviewWalletRequest.bind(adminController)
+);
+
+router.patch(
+  '/wallets/:organizationId/adjust',
+  adminController.adminAdjustWalletBalance.bind(adminController)
+);
+
+router.patch(
+  '/wallets/:organizationId/credit',
+  adminController.adminSetWalletCredit.bind(adminController)
+);
+
+router.patch(
+  '/wallets/:organizationId/flag',
+  adminController.adminFlagWallet.bind(adminController)
+);
+
 export default router;
