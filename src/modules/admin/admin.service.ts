@@ -291,6 +291,20 @@ export class AdminService {
         (s: any) => s.connectionType === 'WHATSAPP_BUSINESS_APP' && s.status === 'CONNECTED'
       )?._count || 0;
 
+      // ✅ ADD: Wallet Stats
+      const [
+        totalActiveWallets,
+        pendingWalletRequests,
+        totalWalletBalance,
+      ] = await Promise.all([
+        prisma.wallet.count({ where: { isActive: true } }),
+        prisma.walletAccessRequest.count({ where: { status: 'pending' } }),
+        prisma.wallet.aggregate({
+          where: { isActive: true },
+          _sum: { balancePaise: true },
+        }),
+      ]);
+
       return {
         users: {
           total: totalUsers,
@@ -325,6 +339,11 @@ export class AdminService {
           totalContacts,
           totalCampaigns,
         },
+        wallet: {
+          totalActiveWallets,
+          pendingRequests: pendingWalletRequests,
+          totalBalanceHeld: (totalWalletBalance._sum.balancePaise || 0) / 100,
+        },
       };
     } catch (error) {
       console.error('Dashboard stats error:', error);
@@ -335,6 +354,7 @@ export class AdminService {
         messages: { totalSent: 0, todaySent: 0, thisMonthSent: 0 },
         revenue: { totalRevenue: 0, monthlyRevenue: 0, todayRevenue: 0, mrr: 0, arr: 0 },
         whatsapp: { connectedAccounts: 0, cloudApiConnected: 0, businessAppConnected: 0, totalContacts: 0, totalCampaigns: 0 },
+        wallet: { totalActiveWallets: 0, pendingRequests: 0, totalBalanceHeld: 0 },
       };
     }
   }

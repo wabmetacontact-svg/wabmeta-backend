@@ -353,6 +353,41 @@ class BillingService {
   }
 
   // ============================================
+  // ✅ CHECK WALLET ELIGIBILITY
+  // ============================================
+
+  async checkWalletEligibility(organizationId: string) {
+    const subscription = await prisma.subscription.findUnique({
+      where: { organizationId },
+      include: { plan: true },
+    });
+
+    if (!subscription || subscription.status !== 'ACTIVE') {
+      return { eligible: false, reason: 'No active subscription' };
+    }
+
+    const eligibleTypes = ['QUARTERLY', 'BIANNUAL', 'ANNUAL'];
+    const isEligiblePlan = eligibleTypes.includes(subscription.plan?.type || '');
+
+    if (!isEligiblePlan) {
+      // Check months subscribed
+      const start = new Date(subscription.currentPeriodStart);
+      const months =
+        (new Date().getFullYear() - start.getFullYear()) * 12 +
+        (new Date().getMonth() - start.getMonth());
+
+      if (months < 3) {
+        return {
+          eligible: false,
+          reason: `Need 3+ months subscription. Current: ${months} month(s)`,
+        };
+      }
+    }
+
+    return { eligible: true };
+  }
+
+  // ============================================
   // GET SUBSCRIPTION
   // ============================================
 

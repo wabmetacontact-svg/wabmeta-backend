@@ -37,6 +37,8 @@ model User {
   ownedOrganizations   Organization[]       @relation("OrganizationOwner")
   memberships          OrganizationMember[]
   refreshTokens        RefreshToken[]
+  wallet               Wallet[]
+  walletAccessRequests WalletAccessRequest[]
 
   @@index([email])
   @@index([googleId])
@@ -94,6 +96,8 @@ model Organization {
   webhooks                Webhook[]
   webhookLogs             WebhookLog[]
   whatsappAccounts        WhatsAppAccount[]
+  wallet                  Wallet?
+  walletAccessRequest     WalletAccessRequest[]
 
   @@index([slug])
   @@index([ownerId])
@@ -738,6 +742,7 @@ model AdminUser {
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  reviewedWalletRequests WalletAccessRequest[]
 
   @@index([email])
   @@index([role])
@@ -1081,4 +1086,127 @@ enum ActivityType {
   TASK
   STAGE_CHANGE
   STATUS_CHANGE
+}
+
+// ─── Wallet Access Request ─────────────────────────────────────────────────────
+model WalletAccessRequest {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  reason         String
+  additionalInfo String?
+  status         String   @default("pending") // pending | approved | rejected
+  reviewedBy     String?
+  reviewNote     String?
+  reviewedAt     DateTime?
+  planVerified   Boolean  @default(false)
+  requestedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewer       AdminUser?   @relation(fields: [reviewedBy], references: [id])
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([requestedAt])
+}
+
+// ─── Wallet ───────────────────────────────────────────────────────────────────
+model Wallet {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+  userId         String
+
+  // Access Control
+  isActive          Boolean  @default(false)
+  accessGrantedAt   DateTime?
+  accessGrantedBy   String?  // AdminUser id
+
+  // Balance (stored in paise - INR smallest unit)
+  balancePaise      Int      @default(0)  // Always store in paise
+  reservedPaise     Int      @default(0)
+  currency          String   @default("INR")
+
+  // Credit System
+  creditEnabled     Boolean  @default(false)
+  creditLimitPaise  Int      @default(0)
+  creditUsedPaise   Int      @default(0)
+
+  // Limits (in paise)
+  maxTopUpPaise     Int      @default(5000000)   // ₹50,000
+  maxMonthlyPaise   Int      @default(20000000)  // ₹2,00,000
+  currentMonthPaise Int      @default(0)
+  monthResetDate    DateTime
+
+  // Low Balance Alert (in paise)
+  lowThresholdPaise    Int      @default(50000)  // ₹500
+  lowAlertSent         Boolean  @default(false)
+  lastAlertSentAt      DateTime?
+
+  // Stats (in paise)
+  totalCreditedPaise   Int      @default(0)
+  totalDebitedPaise    Int      @default(0)
+  lastTransactionAt    DateTime?
+
+  // Fraud Detection
+  flagged      Boolean  @default(false)
+  flagReason   String?
+  flaggedAt    DateTime?
+  flaggedBy    String?  // AdminUser id
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User                 @relation(fields: [userId], references: [id])
+  transactions    WalletTransaction[]
+
+  @@index([organizationId])
+  @@index([isActive])
+  @@index([flagged])
+}
+
+// ─── Wallet Transaction ───────────────────────────────────────────────────────
+model WalletTransaction {
+  id            String   @id @default(cuid())
+  walletId      String
+  transactionId String   @unique @default(cuid())
+
+  type          String   // credit | debit | refund | admin_credit | admin_debit | reserved | released
+
+  // Amounts in paise
+  amountPaise        Int
+  balanceBeforePaise Int
+  balanceAfterPaise  Int
+
+  currency      String   @default("INR")
+  description   String
+  status        String   @default("completed") // pending | completed | failed | reversed
+
+  // Meta related
+  metaChargeId  String?
+  metaService   String?  // message_sending | template_message | api_usage | other
+
+  // Payment related (top-ups)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+
+  // Admin related
+  performedBy   String?  // AdminUser id
+  note          String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([razorpayPaymentId])
 }

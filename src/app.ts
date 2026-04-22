@@ -32,7 +32,7 @@ import analyticsRoutes from './modules/analytics/analytics.routes';
 import crmRoutes from './modules/crm/crm.routes';
 import automationRoutes from './modules/automation/automation.routes';
 import callingRoutes from './modules/calling/calling.routes';
-
+import walletRoutes from './modules/wallet/wallet.routes';
 
 // ============================================
 // VERIFY IMPORTS
@@ -354,6 +354,9 @@ try {
 
   app.use('/api/chatbots', chatbotRoutes);
   console.log('  ✅ /api/chatbots');
+
+  app.use('/api', walletRoutes);
+  console.log('  ✅ /api (wallet)');
 
   logger.info('✅ All API routes registered successfully');
 } catch (error: any) {
