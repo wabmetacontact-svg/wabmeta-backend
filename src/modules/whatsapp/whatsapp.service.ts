@@ -1022,17 +1022,19 @@ class WhatsAppService {
 
         // ✅ ── PER-MESSAGE WALLET DEDUCTION ──────────────────────────────────────
         if (walletCheck.walletActive) {
-          deductWalletForTemplate({
-            organizationId: orgId,
-            templateName: campaign.template.name,
-            templateCategory: campaign.template.category,
-            recipientPhone: formattedPhone,
-            waMessageId: messageResult.messageId,
-            campaignId,
-            campaignName: campaign.name,
-          }).catch(err => {
+          try {
+            await deductWalletForTemplate({
+              organizationId: orgId,
+              templateName: campaign.template.name,
+              templateCategory: campaign.template.category,
+              recipientPhone: formattedPhone,
+              waMessageId: messageResult.messageId,
+              campaignId,
+              campaignName: campaign.name,
+            });
+          } catch (err: any) {
             console.error(`💳 Campaign wallet deduction failed for ${formattedPhone}:`, err.message);
-          });
+          }
         }
         // ✅ ── END DEDUCTION ─────────────────────────────────────────────────────
         console.log(

@@ -751,6 +751,13 @@ export class CampaignsService {
 
       if (walletCheck.walletActive) {
         console.log(`💳 Wallet check: Estimated cost ₹${walletCheck.estimatedCost.toFixed(2)}, Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
+        
+        if (!walletCheck.canProceed) {
+          campaignSocketService.emitCampaignError(organizationId, campaignId, {
+            message: `⚠️ Low wallet balance! Est. cost ₹${walletCheck.estimatedCost.toFixed(2)}, available ₹${walletCheck.availableBalance.toFixed(2)}. Recharge soon!`,
+            code: 'LOW_BALANCE_WARNING'
+          });
+        }
       }
       // ───────────────────────────────────────────────────────────────────────────
 
@@ -850,15 +857,19 @@ export class CampaignsService {
 
                 // ✅ WALLET DEDUCTION
                 if (walletCheck.walletActive) {
-                  deductWalletForTemplate({
-                    organizationId,
-                    templateName: template.name,
-                    templateCategory: template.category,
-                    recipientPhone: cleanPhone,
-                    waMessageId: result.messageId,
-                    campaignId,
-                    campaignName: campaign.name,
-                  }).catch(e => console.warn(`💳 Wallet deduction failed for ${cleanPhone}:`, e.message));
+                  try {
+                    await deductWalletForTemplate({
+                      organizationId,
+                      templateName: template.name,
+                      templateCategory: template.category,
+                      recipientPhone: cleanPhone,
+                      waMessageId: result.messageId,
+                      campaignId,
+                      campaignName: campaign.name,
+                    });
+                  } catch (e: any) {
+                    console.warn(`💳 Wallet deduction failed for ${cleanPhone}:`, e.message);
+                  }
                 }
 
                 return { type: 'sent' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, waMessageId: result.messageId, metaCode: 0 };

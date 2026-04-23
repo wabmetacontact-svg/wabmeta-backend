@@ -55,89 +55,84 @@ export async function deductWalletForTemplate(params: {
   } = params;
 
   try {
-    // ── 1. Check if wallet exists & active ──────────────────────────────────────
-    const wallet = await prisma.wallet.findUnique({
-      where: { organizationId },
-    });
-
-    // Wallet nahi hai ya active nahi → Skip (Meta khud charge karega)
-    if (!wallet || !wallet.isActive) {
-      return {
-        deducted: false,
-        walletUsed: false,
-        amount: 0,
-        reason: 'Wallet not active - Meta will charge directly',
-      };
-    }
-
-    // Flagged wallet → Skip
-    if (wallet.flagged) {
-      return {
-        deducted: false,
-        walletUsed: false,
-        amount: 0,
-        reason: 'Wallet is flagged',
-      };
-    }
-
-    // ── 2. Get Template Category (from DB if not provided) ─────────────────────
-    let category = templateCategory;
-
-    if (!category) {
-      const template = await prisma.template.findFirst({
-        where: {
-          organizationId,
-          name: templateName,
-        },
-        select: { category: true },
+    // ── 1. Check if wallet exists & active (Inside Transaction) ────────────────
+    return await prisma.$transaction(async (tx) => {
+      const wallet = await tx.wallet.findUnique({
+        where: { organizationId },
       });
-      category = template?.category || 'MARKETING';
-    }
 
-    // ── 3. Calculate Amount ────────────────────────────────────────────────────
-    const rateRupees = getRateForCategory(category);
-    const amountPaise = Math.round(rateRupees * 100); // Convert to paise
+      // Wallet nahi hai ya active nahi → Skip (Meta khud charge karega)
+      if (!wallet || !wallet.isActive) {
+        return {
+          deducted: false,
+          walletUsed: false,
+          amount: 0,
+          reason: 'Wallet not active - Meta will charge directly',
+        };
+      }
 
-    // ── 4. Check Available Balance ─────────────────────────────────────────────
-    const availablePaise =
-      wallet.balancePaise +
-      (wallet.creditEnabled
-        ? wallet.creditLimitPaise - wallet.creditUsedPaise
-        : 0);
+      // Flagged wallet → Skip
+      if (wallet.flagged) {
+        return {
+          deducted: false,
+          walletUsed: false,
+          amount: 0,
+          reason: 'Wallet is flagged',
+        };
+      }
 
-    if (availablePaise < amountPaise) {
-      // Low balance - alert but don't block (Meta will charge directly)
-      await triggerLowBalanceAlert(wallet);
+      // ── 2. Get Template Category (from DB if not provided) ─────────────────────
+      let category = templateCategory;
+      if (!category) {
+        const template = await tx.template.findFirst({
+          where: { organizationId, name: templateName },
+          select: { category: true },
+        });
+        category = template?.category || 'MARKETING';
+      }
 
-      return {
-        deducted: false,
-        walletUsed: false,
-        amount: rateRupees,
-        reason: `Insufficient wallet balance (₹${wallet.balancePaise / 100} available, ₹${rateRupees} needed)`,
-      };
-    }
+      // ── 3. Calculate Amount ────────────────────────────────────────────────────
+      const rateRupees = getRateForCategory(category);
+      const amountPaise = Math.round(rateRupees * 100);
 
-    // ── 5. Deduct Balance (Atomic Transaction) ─────────────────────────────────
-    const balanceBeforePaise = wallet.balancePaise;
-    let newBalancePaise: number;
-    let creditDeductedPaise = 0;
+      // ── 4. Check Available Balance ─────────────────────────────────────────────
+      const availablePaise =
+        wallet.balancePaise +
+        (wallet.creditEnabled
+          ? wallet.creditLimitPaise - wallet.creditUsedPaise
+          : 0);
 
-    if (wallet.balancePaise >= amountPaise) {
-      newBalancePaise = wallet.balancePaise - amountPaise;
-    } else {
-      // Use remaining balance + credit
-      creditDeductedPaise = amountPaise - wallet.balancePaise;
-      newBalancePaise = 0;
-    }
+      if (availablePaise < amountPaise) {
+        // Low balance alert
+        await triggerLowBalanceAlert(wallet);
 
-    const categoryLabel = getCategoryLabel(category);
-    const description = campaignId
-      ? `Campaign template charge - ${categoryLabel} (${templateName}) → ${recipientPhone}`
-      : `Template charge - ${categoryLabel} (${templateName}) → ${recipientPhone}`;
+        return {
+          deducted: false,
+          walletUsed: false,
+          amount: rateRupees,
+          reason: `Insufficient wallet balance (₹${wallet.balancePaise / 100} available, ₹${rateRupees} needed)`,
+        };
+      }
 
-    await prisma.$transaction([
+      // ── 5. Deduct Balance ──────────────────────────────────────────────────────
+      const balanceBeforePaise = wallet.balancePaise;
+      let newBalancePaise: number;
+      let creditDeductedPaise = 0;
+
+      if (wallet.balancePaise >= amountPaise) {
+        newBalancePaise = wallet.balancePaise - amountPaise;
+      } else {
+        creditDeductedPaise = amountPaise - wallet.balancePaise;
+        newBalancePaise = 0;
+      }
+
+      const categoryLabel = getCategoryLabel(category);
+      const description = campaignId
+        ? `Campaign template charge - ${categoryLabel} (${templateName}) → ${recipientPhone}`
+        : `Template charge - ${categoryLabel} (${templateName}) → ${recipientPhone}`;
+
       // Update wallet balance
-      prisma.wallet.update({
+      await tx.wallet.update({
         where: { id: wallet.id },
         data: {
           balancePaise: newBalancePaise,
@@ -145,10 +140,10 @@ export async function deductWalletForTemplate(params: {
           totalDebitedPaise: { increment: amountPaise },
           lastTransactionAt: new Date(),
         },
-      }),
+      });
 
       // Create transaction record
-      prisma.walletTransaction.create({
+      await tx.walletTransaction.create({
         data: {
           walletId: wallet.id,
           type: 'debit',
@@ -161,24 +156,24 @@ export async function deductWalletForTemplate(params: {
           metaService: 'template_message',
           note: campaignName ? `Campaign: ${campaignName}` : (campaignId ? `Campaign: ${campaignId}` : undefined),
         },
-      }),
-    ]);
+      });
 
-    // ── 6. Check Low Balance After Deduction ───────────────────────────────────
-    if (newBalancePaise < wallet.lowThresholdPaise) {
-      const updatedWallet = { ...wallet, balancePaise: newBalancePaise };
-      await triggerLowBalanceAlert(updatedWallet as any);
-    }
+      // ── 6. Check Low Balance After Deduction ───────────────────────────────────
+      if (newBalancePaise < wallet.lowThresholdPaise) {
+        const updatedWallet = { ...wallet, balancePaise: newBalancePaise };
+        await triggerLowBalanceAlert(updatedWallet as any);
+      }
 
-    console.log(
-      `💳 Wallet deducted: ₹${rateRupees} (${categoryLabel}) for ${templateName} → ${recipientPhone}`
-    );
+      console.log(
+        `💳 Wallet deducted: ₹${rateRupees} (${categoryLabel}) for ${templateName} → ${recipientPhone}`
+      );
 
-    return {
-      deducted: true,
-      walletUsed: true,
-      amount: rateRupees,
-    };
+      return {
+        deducted: true,
+        walletUsed: true,
+        amount: rateRupees,
+      };
+    });
   } catch (error: any) {
     // Silent fail - don't block message sending if wallet deduction fails
     console.error('❌ Wallet deduction error (non-blocking):', error.message);
