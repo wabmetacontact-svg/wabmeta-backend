@@ -37,6 +37,7 @@ export async function deductWalletForTemplate(params: {
   recipientPhone: string;
   waMessageId?: string;
   campaignId?: string;
+  campaignName?: string;
 }): Promise<{
   deducted: boolean;
   walletUsed: boolean;
@@ -50,6 +51,7 @@ export async function deductWalletForTemplate(params: {
     recipientPhone,
     waMessageId,
     campaignId,
+    campaignName,
   } = params;
 
   try {
@@ -157,7 +159,7 @@ export async function deductWalletForTemplate(params: {
           status: 'completed',
           metaChargeId: waMessageId,
           metaService: 'template_message',
-          note: campaignId ? `Campaign: ${campaignId}` : undefined,
+          note: campaignName ? `Campaign: ${campaignName}` : (campaignId ? `Campaign: ${campaignId}` : undefined),
         },
       }),
     ]);

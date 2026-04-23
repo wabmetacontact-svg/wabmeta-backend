@@ -1029,6 +1029,7 @@ class WhatsAppService {
             recipientPhone: formattedPhone,
             waMessageId: messageResult.messageId,
             campaignId,
+            campaignName: campaign.name,
           }).catch(err => {
             console.error(`💳 Campaign wallet deduction failed for ${formattedPhone}:`, err.message);
           });

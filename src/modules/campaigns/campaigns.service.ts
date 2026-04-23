@@ -857,6 +857,7 @@ export class CampaignsService {
                     recipientPhone: cleanPhone,
                     waMessageId: result.messageId,
                     campaignId,
+                    campaignName: campaign.name,
                   }).catch(e => console.warn(`💳 Wallet deduction failed for ${cleanPhone}:`, e.message));
                 }
 
