@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import { inboxService } from '../inbox/inbox.service';
 import prisma from '../../config/database';
+import { deductWalletForTemplate, deductWalletForCampaign } from '../wallet/wallet.deduction.service';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -739,6 +740,20 @@ export class CampaignsService {
       const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
       const template = campaign.template;
 
+      // ✅ ── WALLET PRE-CHECK ────────────────────────────────────────────────────
+      const walletCheck = await deductWalletForCampaign({
+        organizationId,
+        templateName: template.name,
+        templateCategory: template.category,
+        totalRecipients: await prisma.campaignContact.count({ where: { campaignId, status: 'PENDING' } }),
+        campaignId,
+      });
+
+      if (walletCheck.walletActive) {
+        console.log(`💳 Wallet check: Estimated cost ₹${walletCheck.estimatedCost.toFixed(2)}, Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
+      }
+      // ───────────────────────────────────────────────────────────────────────────
+
       // ============================================
       // ✅ SPEED CONFIG - TUNED FOR MAXIMUM THROUGHPUT
       // ============================================
@@ -832,6 +847,19 @@ export class CampaignsService {
                   campaign.whatsappAccount.wabaId
                 );
                 const result = await metaApi.sendMessage(phoneNumberId, accessToken, cleanPhone, payload);
+
+                // ✅ WALLET DEDUCTION
+                if (walletCheck.walletActive) {
+                  deductWalletForTemplate({
+                    organizationId,
+                    templateName: template.name,
+                    templateCategory: template.category,
+                    recipientPhone: cleanPhone,
+                    waMessageId: result.messageId,
+                    campaignId,
+                  }).catch(e => console.warn(`💳 Wallet deduction failed for ${cleanPhone}:`, e.message));
+                }
+
                 return { type: 'sent' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, waMessageId: result.messageId, metaCode: 0 };
               } catch (err: any) {
                 const reason = this.extractFailureReason(err);
