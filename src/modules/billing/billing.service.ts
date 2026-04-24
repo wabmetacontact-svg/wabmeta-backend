@@ -299,7 +299,7 @@ class BillingService {
               status: SubscriptionStatus.ACTIVE,
               billingCycle: 'monthly',
               currentPeriodStart: new Date(),
-              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days trial
+              currentPeriodEnd: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 2 days trial
             },
             include: { plan: true }
           });
