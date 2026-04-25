@@ -92,45 +92,55 @@ export class WebhookService {
     return { content: `[${type}]`, mediaUrl: null };
   }
 
-  private async findOrCreateContact(organizationId: string, phone10: string) {
-    const variants = [phone10, `+91${phone10}`, `91${phone10}`];
-
-    let contact = await prisma.contact.findFirst({
-      where: {
-        organizationId,
-        OR: variants.map((p) => ({ phone: p })),
-      },
-    });
-
-    if (!contact) {
-      try {
-        contact = await prisma.contact.create({
-          data: {
-            organizationId,
-            phone: phone10,
-            countryCode: '+91',
-            firstName: 'Unknown',
-            status: 'ACTIVE',
-            source: 'WHATSAPP_INBOUND',
-          },
-        });
-        console.log(`👤 Created new contact from inbound: ${phone10}`);
-      } catch (error: any) {
-        if (error.code === 'P2002') {
-          contact = await prisma.contact.findFirst({
-            where: {
+  private async findOrCreateContact(
+      organizationId: string, 
+      phone10: string
+  ): Promise<{ contact: any; wasNewlyCreated: boolean }> {
+      
+      const variants = [phone10, `+91${phone10}`, `91${phone10}`];
+  
+      let contact = await prisma.contact.findFirst({
+          where: {
               organizationId,
               OR: variants.map((p) => ({ phone: p })),
-            },
-          });
-          if (!contact) throw error;
-        } else {
-          throw error;
-        }
+          },
+      });
+  
+      // ✅ Track creation status
+      let wasNewlyCreated = false;
+  
+      if (!contact) {
+          try {
+              contact = await prisma.contact.create({
+                  data: {
+                      organizationId,
+                      phone: phone10,
+                      countryCode: '+91',
+                      firstName: 'Unknown',
+                      status: 'ACTIVE',
+                      source: 'WHATSAPP_INBOUND',
+                  },
+              });
+              wasNewlyCreated = true;
+              console.log(`👤 New contact created: ${phone10}`);
+          } catch (error: any) {
+              if (error.code === 'P2002') {
+                  contact = await prisma.contact.findFirst({
+                      where: {
+                          organizationId,
+                          OR: variants.map((p) => ({ phone: p })),
+                      },
+                  });
+                  if (!contact) throw error;
+                  // Race condition me dusre request ne banaya
+                  wasNewlyCreated = false;
+              } else {
+                  throw error;
+              }
+          }
       }
-    }
-
-    return contact;
+  
+      return { contact: contact!, wasNewlyCreated };
   }
 
   // -----------------------------
@@ -326,7 +336,7 @@ export class WebhookService {
       let phone10 = waFrom;
       if (phone10.startsWith('91') && phone10.length === 12) phone10 = phone10.substring(2);
 
-      const contact = await this.findOrCreateContact(organizationId, phone10);
+      const { contact, wasNewlyCreated } = await this.findOrCreateContact(organizationId, phone10);
 
       let conversation = await prisma.conversation.findFirst({
         where: { organizationId, contactId: contact.id },
@@ -503,42 +513,49 @@ export class WebhookService {
 
       console.log(`✅ Inbound message saved and conversation updated: ${updatedConversation.id}`);
 
-      // ✅ TRIGGER: Unknown Message Automation
+      // ✅ AUTOMATION TRIGGERS - Clean Logic
       try {
-        const contactIsNew = !await prisma.contact.findFirst({
-          where: {
-            organizationId,
-            phone: phone10,
-            createdAt: {
-              lt: new Date(Date.now() - 60000), // Older than 1 minute
-            },
-          },
-        });
-
-        if (contactIsNew) {
-          await automationEngine.triggerUnknownMessage({
-            organizationId,
-            contactId: contact.id,
-            phone: contact.phone,
-            message: content,
-            conversationId: updatedConversation.id,
-          });
-        }
-      } catch (e) {
-        console.error('Unknown message automation error:', e);
+          if (wasNewlyCreated) {
+              // 🆕 Brand new contact - UNKNOWN_MESSAGE trigger
+              console.log(`🤖 New contact detected → triggerUnknownMessage`);
+              await automationEngine.triggerUnknownMessage({
+                  organizationId,
+                  contactId: contact.id,
+                  phone: contact.phone,
+                  message: content,
+                  conversationId: updatedConversation.id,
+              });
+          } else {
+              // 👤 Existing contact - KEYWORD trigger check
+              console.log(`🔑 Existing contact → triggerKeyword check`);
+              const triggered = await automationEngine.triggerKeyword({
+                  organizationId,
+                  contactId: contact.id,
+                  phone: contact.phone,
+                  message: content,
+                  conversationId: updatedConversation.id,
+              });
+              
+              if (triggered) {
+                  console.log('🤖 Keyword automation triggered for existing contact');
+              }
+          }
+      } catch (automationError) {
+          // ✅ Automation error inbox ko affect na kare
+          console.error('🤖 Automation error (non-blocking):', automationError);
       }
 
-      // ✅ DETECT BUTTON CLICKS
+      // ✅ Button click handler - dono cases me check karo
       if (msgType === 'INTERACTIVE') {
-        const buttonId = message?.interactive?.button_reply?.id;
-        if (buttonId) {
-          automationEngine.handleButtonClick({
-            organizationId,
-            contactId: contact.id,
-            buttonId,
-            conversationId: updatedConversation.id,
-          }).catch((e: any) => console.error('Button click error:', e));
-        }
+          const buttonId = message?.interactive?.button_reply?.id;
+          if (buttonId) {
+              automationEngine.handleButtonClick({
+                  organizationId,
+                  contactId: contact.id,
+                  buttonId,
+                  conversationId: updatedConversation.id,
+              }).catch((e: any) => console.error('Button click error:', e));
+          }
       }
 
       // ✅ Clear inbox cache
@@ -581,22 +598,7 @@ export class WebhookService {
         },
       });
 
-      // ✅ Check for keyword automations
-      try {
-        const automationTriggered = await automationEngine.triggerKeyword({
-          organizationId,
-          contactId: contact.id,
-          phone: contact.phone,
-          message: content,
-          conversationId: updatedConversation.id,
-        });
-        
-        if (automationTriggered) {
-          console.log('🤖 Automation handled this message');
-        }
-      } catch (e) {
-        console.error('Automation trigger error:', e);
-      }
+
 
       // ✅ Trigger Chatbot Engine
       if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {

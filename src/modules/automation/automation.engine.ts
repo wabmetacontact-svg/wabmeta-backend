@@ -570,31 +570,73 @@ class AutomationEngine {
   // ==========================================
   // ✅ ACTION: SEND TEMPLATE
   // ==========================================
-  private async actionSendTemplate(context: TriggerContext, config: any): Promise<void> {
+  private async actionSendTemplate(
+    context: TriggerContext, 
+    config: any
+): Promise<void> {
+    
+    // ✅ Step 1: Config validation with proper logging
+    if (!config.templateId) {
+        console.error('❌ [send_template] templateId missing in action config:', config);
+        return;
+    }
+    
+    if (!context.phone) {
+        console.error('❌ [send_template] phone missing in context:', context);
+        return;
+    }
+    
+    // ✅ Step 2: WhatsApp account fetch
     const account = await this.getDefaultAccount(context.organizationId);
-    if (!account || !context.phone || !config.templateId) return;
-
+    if (!account) {
+        console.error(`❌ [send_template] No connected WhatsApp account for org: ${context.organizationId}`);
+        return;
+    }
+    
+    // ✅ Step 3: Template fetch with better error logging
     const template = await prisma.template.findUnique({
-      where: { id: config.templateId },
+        where: { id: config.templateId },
     });
 
-    if (!template || template.status !== 'APPROVED') {
-      console.warn('⚠️ Template not found or not approved');
-      return;
+    if (!template) {
+        console.error(`❌ [send_template] Template not found in DB: ${config.templateId}`);
+        return;
     }
 
-    await whatsappService.sendTemplateMessage({
-      accountId: account.id,
-      to: context.phone,
-      templateName: template.name,
-      templateLanguage: template.language,
-      components: config.components || [],
-      conversationId: context.conversationId,
-      organizationId: context.organizationId,
-    });
+    if (template.status !== 'APPROVED') {
+        console.error(
+            `❌ [send_template] Template "${template.name}" status is "${template.status}". ` +
+            `Only APPROVED templates can be sent.`
+        );
+        return;
+    }
 
-    console.log(`✅ Sent template ${template.name} to ${context.phone}`);
-  }
+    console.log(`📋 Sending template: ${template.name} → ${context.phone}`);
+
+    try {
+        // ✅ Step 4: Correct sendTemplateMessage call
+        const result = await whatsappService.sendTemplateMessage({
+            accountId: account.id,
+            to: context.phone,
+            templateName: template.name,
+            templateLanguage: template.language,
+            components: config.components || [],
+            conversationId: context.conversationId,
+            organizationId: context.organizationId,
+        });
+
+        console.log(`✅ [send_template] Template sent successfully!`);
+        console.log(`   waMessageId: ${result.waMessageId}`);
+        
+    } catch (error: any) {
+        console.error(`❌ [send_template] Failed to send template "${template.name}":`, {
+            error: error.message,
+            phone: context.phone,
+            templateId: config.templateId,
+        });
+        throw error; // Re-throw so executeSequence can catch it
+    }
+}
 
   // ==========================================
   // ✅ ACTION: WAIT FOR RESPONSE
@@ -742,27 +784,55 @@ class AutomationEngine {
   }
 
   private async actionDelay(config: any): Promise<void> {
-    const duration = config.duration || 1;
+    // ✅ Frontend 'value' bhejta hai, backend 'duration' expect karta tha
+    const duration = config.duration || config.value || 1;
     const unit = config.unit || 'seconds';
 
-    let ms = duration * 1000;
+    let ms = duration * 1000; // default: seconds
     if (unit === 'minutes') ms = duration * 60 * 1000;
-    if (unit === 'hours') ms = duration * 60 * 60 * 1000;
+    if (unit === 'hours')   ms = duration * 60 * 60 * 1000;
+    if (unit === 'days')    ms = duration * 24 * 60 * 60 * 1000;
 
-    console.log(`⏳ Waiting ${duration} ${unit}...`);
+    // ✅ Production safety: max 30 seconds delay in automation engine
+    // (Long delays should use scheduled jobs, not setTimeout)
+    const MAX_SAFE_DELAY = 30 * 1000;
+    if (ms > MAX_SAFE_DELAY) {
+        console.warn(
+            `⚠️ [delay] Requested ${duration} ${unit} (${ms}ms) exceeds max. ` +
+            `Capping at ${MAX_SAFE_DELAY / 1000}s for safety.`
+        );
+        ms = MAX_SAFE_DELAY;
+    }
+
+    console.log(`⏳ [delay] Waiting ${duration} ${unit} (${ms}ms)...`);
     await new Promise((resolve) => setTimeout(resolve, ms));
-  }
+    console.log(`✅ [delay] Done waiting`);
+}
 
-  private async actionAddTag(context: TriggerContext, config: any): Promise<void> {
-    if (!context.contactId || !config.tag) return;
+  private async actionAddTag(
+    context: TriggerContext, 
+    config: any
+): Promise<void> {
+    if (!context.contactId) {
+        console.warn('⚠️ [add_tag] No contactId in context');
+        return;
+    }
+    
+    // ✅ Both keys support karo - frontend 'tagName' bhejta hai
+    const tagValue = config.tag || config.tagName;
+    
+    if (!tagValue) {
+        console.warn('⚠️ [add_tag] No tag value. Config received:', config);
+        return;
+    }
 
     await prisma.contact.update({
-      where: { id: context.contactId },
-      data: { tags: { push: config.tag } },
+        where: { id: context.contactId },
+        data: { tags: { push: tagValue } },
     });
 
-    console.log(`✅ Added tag: ${config.tag}`);
-  }
+    console.log(`✅ [add_tag] Tag "${tagValue}" added to contact: ${context.contactId}`);
+}
 
   private async actionCreateLead(context: TriggerContext, config: any): Promise<void> {
     if (!context.contactId) return;
