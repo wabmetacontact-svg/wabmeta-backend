@@ -115,6 +115,16 @@ router.post('/conversations/:id/messages', (req, res, next) =>
   inboxController.sendMessage(req as any, res, next)
 );
 
+// DELETE /inbox/conversations/:id/messages/:messageId
+router.delete('/conversations/:id/messages/:messageId', (req, res, next) =>
+  inboxController.deleteMessage(req as any, res, next)
+);
+
+// PATCH /inbox/conversations/:id/messages/:messageId (edit content)
+router.patch('/conversations/:id/messages/:messageId', (req, res, next) =>
+  inboxController.editMessage(req as any, res, next)
+);
+
 // ==========================================
 // ARCHIVE
 // ==========================================

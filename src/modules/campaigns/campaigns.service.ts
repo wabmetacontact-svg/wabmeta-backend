@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import { inboxService } from '../inbox/inbox.service';
 import prisma from '../../config/database';
-import { deductWalletForTemplate, deductWalletForCampaign } from '../wallet/wallet.deduction.service';
+import { deductWalletForTemplate, deductWalletForCampaign, getRateForCategory } from '../wallet/wallet.deduction.service';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -774,6 +774,7 @@ export class CampaignsService {
 
       let hasMore = true;
       let totalProcessed = 0;
+      let totalSentCount = 0; // ✅ Track total successfully sent for single bulk deduction
       let consecutiveFailures = 0;
       let rateLimitHits = 0;
 
@@ -890,6 +891,7 @@ export class CampaignsService {
 
             if (data.type === 'sent') {
               batchSent.push({ id: data.id, waMessageId: data.waMessageId, contactId: data.contactId, phone: data.phone });
+              totalSentCount++; // ✅ Increment sent counter
               consecutiveFailures = 0;
             } else {
               batchFailed.push({ id: data.id, reason: data.reason, contactId: data.contactId, phone: data.phone });
@@ -982,6 +984,77 @@ export class CampaignsService {
 
       // ✅ Final sync (HEAVY sync only at END)
       const finalCounters = await this.syncCampaignCounters(campaignId);
+
+      // ✅ ── SINGLE BULK WALLET DEDUCTION ──────────────────────────────────────
+      // One deduction for ALL sent messages - NOT per-recipient
+      if (walletCheck.walletActive && totalSentCount > 0) {
+        try {
+          // ✅ INTEGER paise arithmetic - avoids floating-point errors
+          // e.g. 0.15 * 150 = 22.4999... (bug).  15 paise × 150 = 2250 paise (correct)
+          const rateRupees      = getRateForCategory(template.category || 'MARKETING');
+          const ratePaise       = Math.round(rateRupees * 100);       // e.g. 15 for UTILITY
+          const totalAmountPaise = ratePaise * totalSentCount;         // e.g. 15 × 150 = 2250
+          const totalAmountRupees = totalAmountPaise / 100;            // e.g. 22.50
+
+          console.log(`💳 Bulk deduction: ${totalSentCount} msgs × ₹${rateRupees} = ₹${totalAmountRupees} (${totalAmountPaise} paise)`);
+
+          await prisma.$transaction(async (tx) => {
+            const wallet = await tx.wallet.findUnique({ where: { organizationId } });
+            if (!wallet || !wallet.isActive || wallet.flagged) {
+              console.warn('💳 Wallet not available for bulk deduction - skipping');
+              return;
+            }
+
+            const balanceBeforePaise = wallet.balancePaise;
+
+            // Available = wallet balance + credit headroom
+            const creditHeadroom  = wallet.creditEnabled
+              ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+              : 0;
+            const availablePaise  = wallet.balancePaise + creditHeadroom;
+
+            // Deduct as much as available (never go below 0)
+            const actualDeductPaise   = Math.min(totalAmountPaise, availablePaise);
+            const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
+            const newBalancePaise     = Math.max(0, wallet.balancePaise - actualDeductPaise);
+
+            await tx.wallet.update({
+              where: { id: wallet.id },
+              data: {
+                balancePaise: newBalancePaise,
+                creditUsedPaise: { increment: creditDeductedPaise },
+                totalDebitedPaise: { increment: actualDeductPaise },
+                lastTransactionAt: new Date(),
+              },
+            });
+
+            const categoryLabel = (template.category || 'Template')
+              .charAt(0).toUpperCase() +
+              (template.category || 'template').slice(1).toLowerCase();
+
+            await tx.walletTransaction.create({
+              data: {
+                walletId: wallet.id,
+                type: 'debit',
+                amountPaise: actualDeductPaise,
+                balanceBeforePaise,
+                balanceAfterPaise: newBalancePaise,
+                description: `Campaign charge - ${categoryLabel} (${template.name}) × ${totalSentCount} messages`,
+                status: 'completed',
+                metaService: 'template_message',
+                note: `Campaign: ${campaign.name}`,
+              },
+            });
+
+            console.log(`✅ Campaign wallet deducted: ₹${(actualDeductPaise / 100).toFixed(2)} for ${totalSentCount} msgs ("${campaign.name}")`);
+          });
+        } catch (walletErr: any) {
+          console.error('💳 Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
+        }
+      } else {
+        console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${totalSentCount}`);
+      }
+      // ✅ ── END BULK DEDUCTION ─────────────────────────────────────────────────
 
       if (finalCounters.pendingCount === 0) {
         await prisma.campaign.update({

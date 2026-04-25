@@ -827,6 +827,41 @@ export class InboxController {
       `);
     }
   }
+
+  // ==========================================
+  // DELETE MESSAGE
+  // DELETE /inbox/conversations/:id/messages/:messageId
+  // ==========================================
+  async deleteMessage(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+      const { id, messageId } = req.params as { id: string; messageId: string };
+      const result = await inboxService.deleteMessage(organizationId, id, messageId);
+      return sendSuccess(res, result, 'Message deleted');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // EDIT MESSAGE
+  // PATCH /inbox/conversations/:id/messages/:messageId
+  // body: { content: string }
+  // ==========================================
+  async editMessage(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+      const { id, messageId } = req.params as { id: string; messageId: string };
+      const { content } = req.body;
+      if (!content?.trim()) throw new AppError('Content is required', 400);
+      const updated = await inboxService.editMessage(organizationId, id, messageId, content.trim());
+      return sendSuccess(res, updated, 'Message updated');
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const inboxController = new InboxController();

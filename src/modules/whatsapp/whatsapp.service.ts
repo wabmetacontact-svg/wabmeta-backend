@@ -10,7 +10,7 @@ import {
 import { metaApi } from '../meta/meta.api';
 import { safeDecrypt, maskToken } from '../../utils/encryption';
 import prisma from '../../config/database';
-import { deductWalletForTemplate } from '../wallet/wallet.deduction.service';
+import { deductWalletForTemplate, getRateForCategory } from '../wallet/wallet.deduction.service';
 
 // ============================================
 // INTERFACES
@@ -1084,6 +1084,76 @@ class WhatsAppService {
     }
 
     await this.checkCampaignCompletion(campaignId);
+
+    // ✅ ── SINGLE BULK WALLET DEDUCTION ─────────────────────────────────────
+    // One deduction for ALL sent messages - NOT per-recipient
+    if (walletCheck.walletActive && results.sent > 0) {
+      try {
+        const templateCategory  = campaign.template?.category || 'MARKETING';
+        // ✅ INTEGER paise arithmetic - avoids floating-point errors
+        // e.g. 0.15 * 150 = 22.4999... (bug).  15 paise × 150 = 2250 paise (correct)
+        const rateRupees        = getRateForCategory(templateCategory);
+        const ratePaise         = Math.round(rateRupees * 100);     // e.g. 15 for UTILITY
+        const totalAmountPaise  = ratePaise * results.sent;          // e.g. 15 × 150 = 2250
+        const totalAmountRupees = totalAmountPaise / 100;            // e.g. 22.50
+
+        console.log(`💳 Bulk deduction: ${results.sent} msgs × ₹${rateRupees} = ₹${totalAmountRupees} (${totalAmountPaise} paise)`);
+
+        await prisma.$transaction(async (tx) => {
+          const wallet = await tx.wallet.findUnique({ where: { organizationId: orgId } });
+          if (!wallet || !wallet.isActive || wallet.flagged) {
+            console.warn('💳 Wallet not available for bulk deduction - skipping');
+            return;
+          }
+
+          const balanceBeforePaise = wallet.balancePaise;
+
+          // Available = wallet balance + credit headroom
+          const creditHeadroom  = wallet.creditEnabled
+            ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+            : 0;
+          const availablePaise  = wallet.balancePaise + creditHeadroom;
+
+          // Deduct as much as available (never go below 0)
+          const actualDeductPaise   = Math.min(totalAmountPaise, availablePaise);
+          const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
+          const newBalancePaise     = Math.max(0, wallet.balancePaise - actualDeductPaise);
+
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: {
+              balancePaise: newBalancePaise,
+              creditUsedPaise: { increment: creditDeductedPaise },
+              totalDebitedPaise: { increment: actualDeductPaise },
+              lastTransactionAt: new Date(),
+            },
+          });
+
+          const categoryLabel = templateCategory.charAt(0).toUpperCase() + templateCategory.slice(1).toLowerCase();
+
+          await tx.walletTransaction.create({
+            data: {
+              walletId: wallet.id,
+              type: 'debit',
+              amountPaise: actualDeductPaise,
+              balanceBeforePaise,
+              balanceAfterPaise: newBalancePaise,
+              description: `Campaign charge - ${categoryLabel} (${campaign.template.name}) × ${results.sent} messages`,
+              status: 'completed',
+              metaService: 'template_message',
+              note: `Campaign: ${campaign.name}`,
+            },
+          });
+
+          console.log(`✅ Bulk wallet deducted: ₹${(actualDeductPaise / 100).toFixed(2)} for ${results.sent} msgs ("${campaign.name}")`);
+        });
+      } catch (walletErr: any) {
+        console.error('💳 Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
+      }
+    } else {
+      console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${results.sent}`);
+    }
+    // ✅ ── END BULK DEDUCTION ─────────────────────────────────────────────────
 
     console.log(`📢 ========== CAMPAIGN END ==========`);
     console.log(`   Sent: ${results.sent}`);

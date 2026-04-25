@@ -554,6 +554,33 @@ export class InboxService {
 
     return message;
   }
+
+  // Delete a single message (local DB only)
+  async deleteMessage(organizationId: string, conversationId: string, messageId: string) {
+    await this.getConversationById(organizationId, conversationId);
+    const msg = await prisma.message.findFirst({ where: { id: messageId, conversationId } });
+    if (!msg) throw new AppError('Message not found', 404);
+    await prisma.message.delete({ where: { id: messageId } });
+    const last = await prisma.message.findFirst({ where: { conversationId }, orderBy: { createdAt: 'desc' } });
+    await prisma.conversation.update({ where: { id: conversationId }, data: {
+      lastMessagePreview: last?.content?.substring(0, 100) || '',
+      lastMessageAt: last?.createdAt || new Date(),
+    }});
+    return { success: true, messageId };
+  }
+
+  // Edit a message content (outbound TEXT only)
+  async editMessage(organizationId: string, conversationId: string, messageId: string, newContent: string) {
+    await this.getConversationById(organizationId, conversationId);
+    const msg = await prisma.message.findFirst({ where: { id: messageId, conversationId } });
+    if (!msg) throw new AppError('Message not found', 404);
+    if (msg.direction !== 'OUTBOUND') throw new AppError('Only outbound messages can be edited', 400);
+    if (msg.type !== 'TEXT') throw new AppError('Only text messages can be edited', 400);
+    return prisma.message.update({
+      where: { id: messageId },
+      data: { content: newContent, metadata: { ...(msg.metadata as any || {}), edited: true, editedAt: new Date().toISOString() } },
+    });
+  }
 }
 
 export const inboxService = new InboxService();
