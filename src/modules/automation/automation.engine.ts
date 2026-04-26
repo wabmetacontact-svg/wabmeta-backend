@@ -613,14 +613,60 @@ class AutomationEngine {
 
     console.log(`📋 Sending template: ${template.name} → ${context.phone}`);
 
+    // Convert language
+    const toMetaLang = (lang?: string): string => {
+        if (!lang) return 'en_US';
+        const l = lang.toLowerCase();
+        if (l === 'en' || l === 'english') return 'en_US';
+        if (l === 'hi' || l === 'hindi') return 'hi';
+        return lang.includes('_') ? lang : lang; 
+    };
+
+    // Auto-build components if missing
+    let components = config.components || [];
+    if (components.length === 0) {
+        if (template.headerType && template.headerType !== 'NONE') {
+            const hType = template.headerType.toUpperCase();
+            if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
+                const mediaIdOrUrl = template.headerMediaId || template.headerContent;
+                if (mediaIdOrUrl) {
+                    const isId = /^\d+$/.test(mediaIdOrUrl);
+                    components.push({
+                        type: 'header',
+                        parameters: [{
+                            type: hType.toLowerCase(),
+                            [hType.toLowerCase()]: isId ? { id: mediaIdOrUrl } : { link: mediaIdOrUrl }
+                        }]
+                    });
+                }
+            } else if (hType === 'TEXT' && template.headerContent && template.headerContent.includes('{{1}}')) {
+                // Dummy variable for header text if needed
+                components.push({
+                    type: 'header',
+                    parameters: [{ type: 'text', text: 'User' }]
+                });
+            }
+        }
+
+        // Auto-fill body variables if needed
+        const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
+        if (bodyMatches.length > 0) {
+            const bodyParams = bodyMatches.map(() => ({ type: 'text', text: 'Customer' }));
+            components.push({
+                type: 'body',
+                parameters: bodyParams
+            });
+        }
+    }
+
     try {
         // ✅ Step 4: Correct sendTemplateMessage call
         const result = await whatsappService.sendTemplateMessage({
             accountId: account.id,
             to: context.phone,
             templateName: template.name,
-            templateLanguage: template.language,
-            components: config.components || [],
+            templateLanguage: toMetaLang(template.language),
+            components: components,
             conversationId: context.conversationId,
             organizationId: context.organizationId,
         });
