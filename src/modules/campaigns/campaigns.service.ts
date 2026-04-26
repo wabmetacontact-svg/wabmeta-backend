@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import { inboxService } from '../inbox/inbox.service';
 import prisma from '../../config/database';
-import { deductWalletForTemplate, deductWalletForCampaign, getRateForCategory } from '../wallet/wallet.deduction.service';
+import { deductWalletForCampaign, getRateForCategory } from '../wallet/wallet.deduction.service';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -855,23 +855,6 @@ export class CampaignsService {
                   campaign.whatsappAccount.wabaId
                 );
                 const result = await metaApi.sendMessage(phoneNumberId, accessToken, cleanPhone, payload);
-
-                // ✅ WALLET DEDUCTION
-                if (walletCheck.walletActive) {
-                  try {
-                    await deductWalletForTemplate({
-                      organizationId,
-                      templateName: template.name,
-                      templateCategory: template.category,
-                      recipientPhone: cleanPhone,
-                      waMessageId: result.messageId,
-                      campaignId,
-                      campaignName: campaign.name,
-                    });
-                  } catch (e: any) {
-                    console.warn(`💳 Wallet deduction failed for ${cleanPhone}:`, e.message);
-                  }
-                }
 
                 return { type: 'sent' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, waMessageId: result.messageId, metaCode: 0 };
               } catch (err: any) {
