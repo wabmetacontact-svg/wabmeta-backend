@@ -615,11 +615,14 @@ class AutomationEngine {
 
     // Convert language
     const toMetaLang = (lang?: string): string => {
-        if (!lang) return 'en_US';
-        const l = lang.toLowerCase();
-        if (l === 'en' || l === 'english') return 'en_US';
-        if (l === 'hi' || l === 'hindi') return 'hi';
-        return lang.includes('_') ? lang : lang; 
+        const l = String(lang || '').trim();
+        if (!l) return 'en_US';
+        if (l.length >= 2 && l.length <= 6 && !l.includes(' ')) return l;
+        const mapping: Record<string, string> = {
+            english: 'en_US', hindi: 'hi', spanish: 'es_ES',
+            portuguese: 'pt_BR', french: 'fr_FR', german: 'de_DE', italian: 'it_IT',
+        };
+        return mapping[l.toLowerCase()] || l;
     };
 
     // Auto-build components if missing
