@@ -114,6 +114,19 @@ export const verifyTopUp = async (req: Request, res: Response) => {
   }
 };
 
+export const getMessageAnalytics = async (req: Request, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) return errorResponse(res, 'Organization not found', 400);
+
+    const data = await walletService.getWalletMessageAnalytics(organizationId);
+    return sendSuccess(res, data, 'Analytics retrieved');
+  } catch (err: any) {
+    return errorResponse(res, err.message, err.statusCode || 500);
+  }
+};
+
+
 // ─── Admin Controllers ─────────────────────────────────────────────────────────
 export const adminGetRequests = async (req: Request, res: Response) => {
   try {

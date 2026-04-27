@@ -8,6 +8,7 @@ const router = Router();
 // ─── User Routes ──────────────────────────────────────────────────────────────
 router.get('/wallet', authenticate, walletController.getWallet);
 router.post('/wallet/request-access', authenticate, walletController.requestAccess);
+router.get('/wallet/analytics', authenticate, walletController.getMessageAnalytics);
 router.get('/wallet/transactions', authenticate, walletController.getTransactions);
 router.post('/wallet/topup/create-order', authenticate, walletController.createTopUp);
 router.post('/wallet/topup/verify', authenticate, walletController.verifyTopUp);

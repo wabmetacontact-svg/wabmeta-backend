@@ -830,3 +830,107 @@ export async function flagWallet(
     message: unflag ? 'Wallet unflagged' : 'Wallet flagged',
   };
 }
+
+// ─── 14. Wallet Message Analytics (Meta-style insights) ─────────────────────
+export async function getWalletMessageAnalytics(organizationId: string) {
+  const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
+
+  const RATES: Record<string, number> = {
+    MARKETING: 0.90,
+    UTILITY: 0.15,
+    AUTHENTICATION: 0.15,
+    AUTHENTICATION_INTERNATIONAL: 2.50,
+    SERVICE: 0.00,
+  };
+
+  // 1. All outbound messages
+  const allOutbound = await prisma.message.findMany({
+    where: { conversation: { organizationId }, direction: 'OUTBOUND' },
+    select: { status: true },
+  });
+  const messagesSent      = allOutbound.length;
+  const messagesDelivered = allOutbound.filter(m => ['DELIVERED','READ'].includes(m.status)).length;
+  const messagesReceived  = await prisma.message.count({
+    where: { conversation: { organizationId }, direction: 'INBOUND' },
+  });
+
+  // 2. Campaign stats grouped by template category
+  const campaigns = await prisma.campaign.findMany({
+    where: { organizationId },
+    include: { template: { select: { category: true } } },
+  });
+
+  const categoryStats: Record<string, { sent: number; delivered: number }> = {
+    MARKETING:                    { sent: 0, delivered: 0 },
+    UTILITY:                      { sent: 0, delivered: 0 },
+    AUTHENTICATION:               { sent: 0, delivered: 0 },
+    AUTHENTICATION_INTERNATIONAL: { sent: 0, delivered: 0 },
+    SERVICE:                      { sent: 0, delivered: 0 },
+  };
+
+  for (const c of campaigns) {
+    const cat = (c.template?.category || 'MARKETING').toUpperCase();
+    const key = Object.keys(categoryStats).find(k => cat.includes(k)) || 'MARKETING';
+    categoryStats[key].sent      += c.sentCount      || 0;
+    categoryStats[key].delivered += c.deliveredCount || 0;
+  }
+
+  // 3. Wallet debit transactions → cost per category
+  const costByCategory: Record<string, number> = {
+    MARKETING: 0, UTILITY: 0, AUTHENTICATION: 0,
+    AUTHENTICATION_INTERNATIONAL: 0, SERVICE: 0,
+  };
+  let totalChargesPaise = 0;
+
+  if (wallet) {
+    const debits = await prisma.walletTransaction.findMany({
+      where: { walletId: wallet.id, type: 'debit', metaService: 'template_message' },
+      select: { amountPaise: true, description: true },
+    });
+    for (const d of debits) {
+      totalChargesPaise += d.amountPaise;
+      const desc = (d.description || '').toUpperCase();
+      if (desc.includes('AUTH') && desc.includes('INTL')) {
+        costByCategory.AUTHENTICATION_INTERNATIONAL += d.amountPaise;
+      } else if (desc.includes('AUTH')) {
+        costByCategory.AUTHENTICATION += d.amountPaise;
+      } else if (desc.includes('UTILITY')) {
+        costByCategory.UTILITY += d.amountPaise;
+      } else if (desc.includes('SERVICE')) {
+        costByCategory.SERVICE += d.amountPaise;
+      } else {
+        costByCategory.MARKETING += d.amountPaise;
+      }
+    }
+  }
+
+  const categories = [
+    { key: 'MARKETING',                    label: 'Marketing',                    rate: RATES.MARKETING                    },
+    { key: 'UTILITY',                      label: 'Utility',                      rate: RATES.UTILITY                      },
+    { key: 'AUTHENTICATION',               label: 'Authentication',               rate: RATES.AUTHENTICATION               },
+    { key: 'AUTHENTICATION_INTERNATIONAL', label: 'Authentication - International', rate: RATES.AUTHENTICATION_INTERNATIONAL },
+    { key: 'SERVICE',                      label: 'Service',                      rate: RATES.SERVICE                      },
+  ];
+
+  return {
+    allMessages: { sent: messagesSent, delivered: messagesDelivered, received: messagesReceived },
+    messagesDelivered: categories.map(c => ({
+      category: c.key, label: c.label, delivered: categoryStats[c.key].delivered,
+    })),
+    freeMessagesDelivered: { freeCustomerService: 0, freeEntryPoint: 0, total: 0 },
+    paidMessagesDelivered: categories.map(c => ({
+      category: c.key, label: c.label, delivered: categoryStats[c.key].delivered,
+    })),
+    approximateCharges: {
+      total: toRupees(totalChargesPaise),
+      byCategory: categories.map(c => ({
+        category: c.key,
+        label:    c.label,
+        cost:     toRupees(costByCategory[c.key]),
+        rate:     c.rate,
+        count:    categoryStats[c.key].sent,
+      })),
+    },
+    rates: RATES,
+  };
+}
