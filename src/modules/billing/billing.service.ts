@@ -1039,8 +1039,63 @@ class BillingService {
   // ============================================
 
   async getInvoices(organizationId: string, limit: number = 10, offset: number = 0): Promise<any[]> {
-    // TODO: Integrate with Razorpay invoices
-    return [];
+    try {
+      // 1. Get Subscription Payments
+      const payments = await prisma.payment.findMany({
+        where: { organizationId },
+        orderBy: { paidAt: 'desc' },
+        take: limit + offset, // fetch enough to cover pagination
+      });
+
+      // 2. Get Wallet Topups (only credits/topups)
+      const wallet = await prisma.wallet.findUnique({
+        where: { organizationId },
+        select: { id: true }
+      });
+
+      let topups: any[] = [];
+      if (wallet) {
+        topups = await prisma.walletTransaction.findMany({
+          where: {
+            walletId: wallet.id,
+            type: { in: ['credit', 'admin_credit'] },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: limit + offset,
+        });
+      }
+
+      // 3. Format and combine
+      const formattedPayments = payments.map(p => ({
+        id: p.id,
+        amount: p.amount, // in paise
+        status: p.status === 'SUCCESS' ? 'paid' : p.status.toLowerCase(),
+        date: p.paidAt || p.createdAt,
+        description: `Plan: ${p.planName || p.description}`,
+        type: 'subscription',
+        downloadUrl: null,
+      }));
+
+      const formattedTopups = topups.map(t => ({
+        id: t.id,
+        amount: t.amountPaise,
+        status: t.status === 'completed' ? 'paid' : t.status.toLowerCase(),
+        date: t.createdAt,
+        description: `Wallet: ${t.description || 'Top-up'}`,
+        type: 'wallet_topup',
+        downloadUrl: null,
+      }));
+
+      // Merge and sort
+      const combined = [...formattedPayments, ...formattedTopups]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(offset, offset + limit);
+
+      return combined;
+    } catch (error) {
+      console.error('Failed to get invoices:', error);
+      return [];
+    }
   }
 
   async getInvoice(invoiceId: string, organizationId: string): Promise<any> {
