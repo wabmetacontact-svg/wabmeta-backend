@@ -1,4 +1,5 @@
 // src/modules/chatbot/chatbot.engine.ts
+// COMPLETE REPLACE
 
 import prisma from '../../config/database';
 import { whatsappService } from '../whatsapp/whatsapp.service';
@@ -24,7 +25,6 @@ interface FlowNode {
       type: string;
       params: Record<string, any>;
     };
-    nextNodeId?: string;
   };
   position: { x: number; y: number };
 }
@@ -44,58 +44,83 @@ interface FlowData {
 
 interface ChatSession {
   chatbotId: string;
+  organizationId: string;
   currentNodeId: string;
   variables: Record<string, any>;
   waitingForInput: boolean;
+  // Button node ke liye - kaunse buttons expect kar rahe hain
+  expectedButtons?: Array<{ id: string; text: string; nextNodeId?: string }>;
   startedAt: Date;
   lastActivityAt: Date;
+  messageCount: number;
 }
 
 // ============================================
-// SESSION STORE
-// In-memory → Redis se replace karo production mein
+// SESSION STORE - Thread Safe
 // ============================================
 
 class SessionStore {
   private sessions = new Map<string, ChatSession>();
+  private locks = new Set<string>();
 
   get(key: string): ChatSession | undefined {
     return this.sessions.get(key);
   }
 
   set(key: string, session: ChatSession): void {
+    session.lastActivityAt = new Date();
     this.sessions.set(key, session);
   }
 
   delete(key: string): void {
     this.sessions.delete(key);
+    this.locks.delete(key);
   }
 
-  // Expired sessions cleanup
+  isLocked(key: string): boolean {
+    return this.locks.has(key);
+  }
+
+  lock(key: string): void {
+    this.locks.add(key);
+  }
+
+  unlock(key: string): void {
+    this.locks.delete(key);
+  }
+
+  // Expired sessions cleanup (30 min default)
   cleanup(maxAgeMs = 30 * 60 * 1000): void {
     const now = Date.now();
     for (const [key, session] of this.sessions.entries()) {
       if (now - session.lastActivityAt.getTime() > maxAgeMs) {
         this.sessions.delete(key);
+        this.locks.delete(key);
         console.log(`🗑️ Session expired: ${key}`);
       }
     }
+  }
+
+  size(): number {
+    return this.sessions.size;
   }
 }
 
 const sessionStore = new SessionStore();
 
 // Cleanup every 10 minutes
-setInterval(() => sessionStore.cleanup(), 10 * 60 * 1000);
+setInterval(() => {
+  sessionStore.cleanup();
+}, 10 * 60 * 1000);
 
 // ============================================
-// CHATBOT ENGINE
+// CHATBOT ENGINE - BULLETPROOF
 // ============================================
 
 export class ChatbotEngine {
 
   // ==========================================
-  // MAIN ENTRY: Process incoming message
+  // MAIN ENTRY POINT
   // ==========================================
   async processMessage(
     conversationId: string,
@@ -104,116 +129,130 @@ export class ChatbotEngine {
     senderPhone: string,
     isNewConversation: boolean
   ): Promise<void> {
-    try {
-      console.log(`🤖 Processing: "${messageContent}" | conv: ${conversationId} | new: ${isNewConversation}`);
+    const sessionKey = `${organizationId}:${conversationId}`;
 
-      // 1. Check existing session
-      const sessionKey = `${organizationId}:${conversationId}`;
+    // ✅ Concurrent message protection
+    if (sessionStore.isLocked(sessionKey)) {
+      console.log(`🔒 Session locked, skipping: ${sessionKey}`);
+      return;
+    }
+
+    sessionStore.lock(sessionKey);
+
+    try {
+      const cleanMessage = (messageContent || '').trim();
+      console.log(`\n🤖 ===== CHATBOT ENGINE =====`);
+      console.log(`   Msg: "${cleanMessage}"`);
+      console.log(`   Phone: ${senderPhone}`);
+      console.log(`   New: ${isNewConversation}`);
+      console.log(`   Sessions active: ${sessionStore.size()}`);
+
+      // 1. Existing session check
       const existingSession = sessionStore.get(sessionKey);
 
-      // 2. Find matching chatbot
+      // 2. Find chatbot
       const chatbot = await this.findMatchingChatbot(
         organizationId,
-        messageContent,
+        cleanMessage,
         isNewConversation,
         existingSession?.chatbotId
       );
 
       if (!chatbot) {
-        console.log('🤖 No chatbot matched for this message');
+        console.log(`🤖 No chatbot found for this message`);
         return;
       }
 
       const flowData = chatbot.flowData as unknown as FlowData;
 
       if (!flowData?.nodes?.length) {
-        console.log('🤖 Chatbot has no flow nodes');
+        console.log(`🤖 Chatbot "${chatbot.name}" has no flow`);
         return;
       }
 
-      // 3. Get WhatsApp account
+      // 3. WhatsApp account
       const account = await prisma.whatsAppAccount.findFirst({
         where: { organizationId, status: 'CONNECTED' },
         orderBy: { isDefault: 'desc' },
       });
 
       if (!account) {
-        console.error('🤖 No connected WhatsApp account');
+        console.error(`🤖 No WhatsApp account connected`);
         return;
       }
 
-      // 4. Handle session
+      // 4. Session handling
       let session = existingSession;
 
       if (!session || isNewConversation) {
-        // New session → find start node
+        // ── NEW SESSION ──────────────────────────
+        console.log(`🆕 Creating new session for chatbot: ${chatbot.name}`);
+
+        // Send welcome message if set
+        if (chatbot.welcomeMessage && isNewConversation) {
+          await this.sendText(
+            account, senderPhone,
+            chatbot.welcomeMessage,
+            conversationId, organizationId
+          );
+          await this.sleep(500);
+        }
+
         const startNode = flowData.nodes.find(n => n.type === 'start');
         if (!startNode) {
-          console.error('🤖 No start node found in flow');
+          console.error(`🤖 No start node in flow`);
           return;
         }
 
-        // First actual node after start
         const firstNodeId = this.getNextNodeId(startNode.id, flowData);
         if (!firstNodeId) {
-          console.error('🤖 Start node has no connected node');
+          console.error(`🤖 Start node not connected`);
           return;
         }
 
         session = {
           chatbotId: chatbot.id,
+          organizationId,
           currentNodeId: firstNodeId,
           variables: {
             phone: senderPhone,
             conversationId,
+            message: cleanMessage,
           },
           waitingForInput: false,
           startedAt: new Date(),
           lastActivityAt: new Date(),
+          messageCount: 0,
         };
 
-        console.log(`🤖 New session started → node: ${firstNodeId}`);
       } else {
-        // Existing session → handle user input
-        session.lastActivityAt = new Date();
-        session.variables['lastInput'] = messageContent;
-        session.variables['lastInputAt'] = new Date().toISOString();
+        // ── EXISTING SESSION ─────────────────────
+        console.log(`🔄 Resuming session at node: ${session.currentNodeId}`);
+        session.variables['lastInput'] = cleanMessage;
+        session.variables['message'] = cleanMessage;
+        session.messageCount++;
 
-        // If waiting for input (button/question node)
         if (session.waitingForInput) {
-          session.waitingForInput = false;
+          // User ne input diya - process karo
+          session = await this.handleUserInput(
+            session, cleanMessage, flowData
+          );
+        } else {
+          // Session hai but wait nahi kar raha
+          // Keyword match check karo - new chatbot trigger?
+          const newChatbot = await this.findMatchingChatbot(
+            organizationId, cleanMessage, false, undefined
+          );
 
-          // Check button reply
-          const currentNode = flowData.nodes.find(n => n.id === session!.currentNodeId);
-
-          if (currentNode?.type === 'button') {
-            // WhatsApp button_reply → match by title or id
-            const matchedButton = currentNode.data.buttons?.find(
-              b =>
-                b.text.toLowerCase() === messageContent.toLowerCase() ||
-                b.id === messageContent ||
-                messageContent.toLowerCase().includes(b.text.toLowerCase())
+          if (newChatbot && newChatbot.id !== session.chatbotId) {
+            // Different chatbot keyword match - reset session
+            console.log(`🔀 Different chatbot triggered, resetting session`);
+            sessionStore.delete(sessionKey);
+            await this.processMessage(
+              conversationId, organizationId,
+              cleanMessage, senderPhone, true
             );
-
-            if (matchedButton) {
-              // Find edge with sourceHandle = button id
-              const buttonEdge = flowData.edges.find(
-                e => e.source === currentNode.id &&
-                  (e.sourceHandle === matchedButton.id ||
-                    e.sourceHandle === matchedButton.text)
-              );
-
-              if (buttonEdge) {
-                session.currentNodeId = buttonEdge.target;
-                console.log(`🤖 Button "${matchedButton.text}" → node: ${buttonEdge.target}`);
-              } else {
-                // Fallback: any edge from this button node
-                const anyEdge = flowData.edges.find(e => e.source === currentNode.id);
-                if (anyEdge) {
-                  session.currentNodeId = anyEdge.target;
-                }
-              }
-            }
+            return;
           }
         }
       }
@@ -221,25 +260,126 @@ export class ChatbotEngine {
       // 5. Save session
       sessionStore.set(sessionKey, session);
 
-      // 6. Execute flow from current node
-      await this.executeFlow(
-        session,
-        flowData,
-        account,
-        conversationId,
-        organizationId,
-        senderPhone,
-        sessionKey
-      );
+      // 6. Execute flow
+      if (!session.waitingForInput) {
+        await this.executeFlow(
+          session, flowData, account,
+          conversationId, organizationId,
+          senderPhone, sessionKey,
+          chatbot.fallbackMessage || ''
+        );
+      }
 
     } catch (error) {
-      console.error('🤖 ChatbotEngine.processMessage error:', error);
+      console.error(`🤖 Engine error:`, error);
+    } finally {
+      sessionStore.unlock(sessionKey);
+      console.log(`🤖 ===== ENGINE END =====\n`);
     }
   }
 
   // ==========================================
+  // HANDLE USER INPUT
+  // Button reply ya free text process karo
+  // ==========================================
+  private async handleUserInput(
+    session: ChatSession,
+    input: string,
+    flowData: FlowData
+  ): Promise<ChatSession> {
+    const currentNode = flowData.nodes.find(n => n.id === session.currentNodeId);
+
+    if (!currentNode) {
+      session.waitingForInput = false;
+      return session;
+    }
+
+    console.log(`🎯 Handling input for node type: ${currentNode.type}`);
+
+    if (currentNode.type === 'button') {
+      // ── BUTTON NODE ──────────────────────────
+      const buttons = currentNode.data.buttons || [];
+
+      // Match strategies (order matters):
+      // 1. Exact text match (case insensitive)
+      // 2. Partial text match
+      // 3. Button ID match
+      // 4. Number match (user ne "1" ya "2" daba diya)
+      // 5. Any edge (fallback)
+
+      let matchedButton: { id: string; text: string } | null = null;
+      const inputLower = input.toLowerCase().trim();
+
+      // Strategy 1: Exact match
+      matchedButton = buttons.find(
+        b => b.text.toLowerCase().trim() === inputLower
+      ) || null;
+
+      // Strategy 2: Partial match
+      if (!matchedButton) {
+        matchedButton = buttons.find(
+          b => inputLower.includes(b.text.toLowerCase().trim()) ||
+               b.text.toLowerCase().trim().includes(inputLower)
+        ) || null;
+      }
+
+      // Strategy 3: ID match
+      if (!matchedButton) {
+        matchedButton = buttons.find(b => b.id === input) || null;
+      }
+
+      // Strategy 4: Number match (1, 2, 3)
+      if (!matchedButton) {
+        const num = parseInt(input);
+        if (!isNaN(num) && num >= 1 && num <= buttons.length) {
+          matchedButton = buttons[num - 1];
+        }
+      }
+
+      if (matchedButton) {
+        console.log(`✅ Button matched: "${matchedButton.text}"`);
+
+        // Find edge with this button's sourceHandle
+        const buttonEdge = flowData.edges.find(
+          e => e.source === currentNode.id &&
+            (e.sourceHandle === matchedButton!.id ||
+             e.sourceHandle === matchedButton!.text ||
+             e.label === matchedButton!.text)
+        );
+
+        if (buttonEdge) {
+          session.currentNodeId = buttonEdge.target;
+          console.log(`➡️ Moving to: ${buttonEdge.target}`);
+        } else {
+          // Fallback: first edge from this node
+          const anyEdge = flowData.edges.find(e => e.source === currentNode.id);
+          if (anyEdge) {
+            session.currentNodeId = anyEdge.target;
+            console.log(`➡️ Fallback edge to: ${anyEdge.target}`);
+          }
+        }
+      } else {
+        console.log(`❌ No button matched for: "${input}"`);
+        // Stay on same node - will send fallback
+      }
+
+      session.waitingForInput = false;
+
+    } else if (currentNode.type === 'condition') {
+      // ── CONDITION NODE ───────────────────────
+      // Input already in variables, just evaluate
+      session.waitingForInput = false;
+
+    } else {
+      // ── OTHER NODES ──────────────────────────
+      session.waitingForInput = false;
+    }
+
+    return session;
+  }
+
+  // ==========================================
   // EXECUTE FLOW
-  // Auto-advances through nodes until user input needed
   // ==========================================
   private async executeFlow(
     session: ChatSession,
@@ -249,11 +389,12 @@ export class ChatbotEngine {
     organizationId: string,
     senderPhone: string,
     sessionKey: string,
+    fallbackMessage: string,
     depth = 0
   ): Promise<void> {
-    // Prevent infinite loops
-    if (depth > 20) {
-      console.error('🤖 Max depth reached - possible infinite loop');
+    // Max depth guard
+    if (depth > 25) {
+      console.error(`🤖 Max depth (25) reached - infinite loop protection`);
       return;
     }
 
@@ -261,87 +402,174 @@ export class ChatbotEngine {
 
     if (!node) {
       console.log(`🤖 Node not found: ${session.currentNodeId}`);
+
+      // Send fallback if available
+      if (fallbackMessage) {
+        await this.sendText(
+          account, senderPhone,
+          fallbackMessage,
+          conversationId, organizationId
+        );
+      }
       return;
     }
 
-    console.log(`🤖 Executing node [${node.type}] id: ${node.id} depth: ${depth}`);
+    console.log(`▶️ Node [${node.type}] id:${node.id} depth:${depth}`);
 
     switch (node.type) {
+
+      // ────────────────────────────────────────
       case 'start': {
+        const nextId = this.getNextNodeId(node.id, flowData);
+        if (nextId) {
+          session.currentNodeId = nextId;
+          sessionStore.set(sessionKey, session);
+          await this.executeFlow(
+            session, flowData, account,
+            conversationId, organizationId,
+            senderPhone, sessionKey,
+            fallbackMessage, depth + 1
+          );
+        }
+        break;
+      }
+
+      // ────────────────────────────────────────
+      case 'message': {
+        const text = node.data.message || '';
+        if (text.trim()) {
+          const finalText = this.replaceVariables(text, session.variables);
+          await this.sendText(
+            account, senderPhone,
+            finalText, conversationId, organizationId
+          );
+        }
+
         // Auto-advance
         const nextId = this.getNextNodeId(node.id, flowData);
         if (nextId) {
           session.currentNodeId = nextId;
           sessionStore.set(sessionKey, session);
-          await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, depth + 1);
+          await this.sleep(600); // Natural typing delay
+          await this.executeFlow(
+            session, flowData, account,
+            conversationId, organizationId,
+            senderPhone, sessionKey,
+            fallbackMessage, depth + 1
+          );
+        } else {
+          // No next node - end of flow
+          sessionStore.delete(sessionKey);
         }
         break;
       }
 
-      case 'message': {
-        const text = this.replaceVariables(node.data.message || '', session.variables);
-        await this.sendTextMessage(account, senderPhone, text, conversationId, organizationId);
-
-        // Auto-advance to next node
-        const nextId = this.getNextNodeId(node.id, flowData);
-        if (nextId) {
-          session.currentNodeId = nextId;
-          sessionStore.set(sessionKey, session);
-          // Small delay between messages
-          await this.sleep(500);
-          await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, depth + 1);
-        }
-        break;
-      }
-
+      // ────────────────────────────────────────
       case 'button': {
-        const text = this.replaceVariables(node.data.message || 'Choose an option:', session.variables);
+        const text = node.data.message || 'Choose an option:';
         const buttons = node.data.buttons || [];
 
-        await this.sendButtonMessage(account, senderPhone, text, buttons, conversationId, organizationId);
+        if (buttons.length === 0) {
+          // No buttons configured - treat as message
+          await this.sendText(
+            account, senderPhone,
+            text, conversationId, organizationId
+          );
+          const nextId = this.getNextNodeId(node.id, flowData);
+          if (nextId) {
+            session.currentNodeId = nextId;
+            sessionStore.set(sessionKey, session);
+            await this.executeFlow(
+              session, flowData, account,
+              conversationId, organizationId,
+              senderPhone, sessionKey,
+              fallbackMessage, depth + 1
+            );
+          }
+          break;
+        }
+
+        const finalText = this.replaceVariables(text, session.variables);
+
+        // ✅ Try interactive buttons first, fallback to numbered list
+        const sent = await this.sendButtonMessage(
+          account, senderPhone,
+          finalText, buttons,
+          conversationId, organizationId
+        );
+
+        if (!sent) {
+          // Fallback: numbered text list
+          const numberedText = `${finalText}\n\n${
+            buttons.map((b, i) => `${i + 1}. ${b.text}`).join('\n')
+          }`;
+          await this.sendText(
+            account, senderPhone,
+            numberedText, conversationId, organizationId
+          );
+        }
 
         // Wait for user response
         session.waitingForInput = true;
+        session.expectedButtons = buttons;
         sessionStore.set(sessionKey, session);
         break;
       }
 
+      // ────────────────────────────────────────
       case 'condition': {
         const condition = node.data.condition;
         const result = this.evaluateCondition(condition, session.variables);
+        console.log(`🔀 Condition result: ${result}`);
 
-        // Find YES or NO edge
+        // Find matching edge
         const handleId = result ? 'true' : 'false';
-        const edge = flowData.edges.find(
+        let edge = flowData.edges.find(
           e => e.source === node.id && e.sourceHandle === handleId
         );
 
         // Fallback: any edge
-        const fallbackEdge = flowData.edges.find(e => e.source === node.id);
-        const targetEdge = edge || fallbackEdge;
+        if (!edge) {
+          edge = flowData.edges.find(e => e.source === node.id);
+        }
 
-        if (targetEdge) {
-          session.currentNodeId = targetEdge.target;
+        if (edge) {
+          session.currentNodeId = edge.target;
           sessionStore.set(sessionKey, session);
-          await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, depth + 1);
+          await this.executeFlow(
+            session, flowData, account,
+            conversationId, organizationId,
+            senderPhone, sessionKey,
+            fallbackMessage, depth + 1
+          );
         }
         break;
       }
 
+      // ────────────────────────────────────────
       case 'delay': {
-        const delayMs = Math.min(node.data.delay || 1000, 5000); // Max 5 seconds
-        console.log(`🤖 Delay: ${delayMs}ms`);
+        const delayMs = Math.min(
+          node.data.delay || 1000,
+          10000 // Max 10 seconds
+        );
+        console.log(`⏱️ Delay: ${delayMs}ms`);
         await this.sleep(delayMs);
 
         const nextId = this.getNextNodeId(node.id, flowData);
         if (nextId) {
           session.currentNodeId = nextId;
           sessionStore.set(sessionKey, session);
-          await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, depth + 1);
+          await this.executeFlow(
+            session, flowData, account,
+            conversationId, organizationId,
+            senderPhone, sessionKey,
+            fallbackMessage, depth + 1
+          );
         }
         break;
       }
 
+      // ────────────────────────────────────────
       case 'action': {
         await this.executeAction(
           node.data.action,
@@ -355,19 +583,25 @@ export class ChatbotEngine {
         if (nextId) {
           session.currentNodeId = nextId;
           sessionStore.set(sessionKey, session);
-          await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, depth + 1);
+          await this.executeFlow(
+            session, flowData, account,
+            conversationId, organizationId,
+            senderPhone, sessionKey,
+            fallbackMessage, depth + 1
+          );
         }
         break;
       }
 
+      // ────────────────────────────────────────
       case 'end': {
-        console.log('🤖 Flow completed ✅');
+        console.log(`🏁 Flow ended`);
         sessionStore.delete(sessionKey);
         break;
       }
 
       default:
-        console.log(`🤖 Unknown node type: ${node.type}`);
+        console.log(`❓ Unknown node: ${node.type}`);
     }
   }
 
@@ -380,12 +614,15 @@ export class ChatbotEngine {
     isNewConversation: boolean,
     existingChatbotId?: string
   ) {
-    // If session already has a chatbot, use it
+    // Use existing chatbot if session active
     if (existingChatbotId) {
-      const chatbot = await prisma.chatbot.findFirst({
+      const bot = await prisma.chatbot.findFirst({
         where: { id: existingChatbotId, organizationId, status: 'ACTIVE' },
       });
-      if (chatbot) return chatbot;
+      if (bot) {
+        console.log(`🔄 Using existing chatbot: ${bot.name}`);
+        return bot;
+      }
     }
 
     const allActive = await prisma.chatbot.findMany({
@@ -396,78 +633,77 @@ export class ChatbotEngine {
 
     const lowerMsg = messageContent.toLowerCase().trim();
 
-    // 1. Check keyword match (exact or contains)
-    for (const chatbot of allActive) {
-      const keywords = (chatbot.triggerKeywords as string[]) || [];
-      for (const kw of keywords) {
-        if (lowerMsg === kw.toLowerCase() || lowerMsg.includes(kw.toLowerCase())) {
-          console.log(`🤖 Keyword match: "${kw}" → ${chatbot.name}`);
-          return chatbot;
-        }
+    // 1. Keyword match - exact first
+    for (const bot of allActive) {
+      const keywords = (bot.triggerKeywords as string[]) || [];
+      const exactMatch = keywords.find(
+        kw => kw.toLowerCase().trim() === lowerMsg
+      );
+      if (exactMatch) {
+        console.log(`🎯 Exact keyword match: "${exactMatch}" → ${bot.name}`);
+        return bot;
       }
     }
 
-    // 2. New conversation → use default chatbot
+    // 2. Keyword match - partial
+    for (const bot of allActive) {
+      const keywords = (bot.triggerKeywords as string[]) || [];
+      const partialMatch = keywords.find(
+        kw => lowerMsg.includes(kw.toLowerCase().trim()) ||
+              kw.toLowerCase().trim().includes(lowerMsg)
+      );
+      if (partialMatch) {
+        console.log(`🎯 Partial keyword match: "${partialMatch}" → ${bot.name}`);
+        return bot;
+      }
+    }
+
+    // 3. New conversation → default bot
     if (isNewConversation) {
-      const defaultBot = allActive.find(c => c.isDefault);
+      const defaultBot = allActive.find(b => b.isDefault);
       if (defaultBot) {
-        console.log(`🤖 Default chatbot: ${defaultBot.name}`);
+        console.log(`🏠 Default bot for new conversation: ${defaultBot.name}`);
         return defaultBot;
       }
-    }
-
-    // 3. Existing session with active flow → check any bot without keywords (catch-all)
-    if (!isNewConversation) {
-      const catchAll = allActive.find(
-        c => c.isDefault && (!c.triggerKeywords || (c.triggerKeywords as string[]).length === 0)
-      );
-      if (catchAll) return catchAll;
+      // First active bot as fallback
+      if (allActive.length === 1) return allActive[0];
     }
 
     return null;
   }
 
   // ==========================================
-  // GET NEXT NODE via edges
+  // SEND TEXT - skipWindowCheck = true (BOT)
   // ==========================================
-  private getNextNodeId(nodeId: string, flowData: FlowData): string | null {
-    const edge = flowData.edges.find(e => e.source === nodeId && !e.sourceHandle);
-    if (edge) return edge.target;
-
-    // Try any edge from this node
-    const anyEdge = flowData.edges.find(e => e.source === nodeId);
-    return anyEdge?.target || null;
-  }
-
-  // ==========================================
-  // SEND TEXT MESSAGE
-  // ==========================================
-  private async sendTextMessage(
+  private async sendText(
     account: any,
     to: string,
     text: string,
     conversationId: string,
     organizationId: string
   ): Promise<void> {
-    try {
-      if (!text.trim()) return;
+    if (!text?.trim()) return;
 
+    try {
       await whatsappService.sendTextMessage(
         account.id,
         to,
         text,
         conversationId,
-        organizationId
+        organizationId,
+        undefined, // tempId
+        undefined, // clientMsgId
+        true // ✅ skipWindowCheck - bot messages bypass 24h check
       );
-
-      console.log(`🤖 Sent: "${text.substring(0, 60)}"`);
+      console.log(`📤 Bot sent: "${text.substring(0, 50)}"`);
     } catch (error) {
-      console.error('🤖 sendTextMessage error:', error);
+      console.error(`🤖 sendText error:`, error);
     }
   }
 
   // ==========================================
   // SEND BUTTON MESSAGE
+  // Returns true if sent, false if failed
   // ==========================================
   private async sendButtonMessage(
     account: any,
@@ -476,13 +712,21 @@ export class ChatbotEngine {
     buttons: Array<{ id: string; text: string }>,
     conversationId: string,
     organizationId: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
-      if (!buttons.length) {
-        // Fallback: send as text
-        await this.sendTextMessage(account, to, text, conversationId, organizationId);
-        return;
-      }
+      // WhatsApp button text max 20 chars
+      const validButtons = buttons
+        .slice(0, 3)
+        .filter(b => b.text?.trim())
+        .map(b => ({
+          type: 'reply' as const,
+          reply: {
+            id: b.id || `btn_${Date.now()}`,
+            title: b.text.trim().substring(0, 20),
+          },
+        }));
+
+      if (!validButtons.length) return false;
 
       await whatsappService.sendMessage({
         accountId: account.id,
@@ -491,67 +735,20 @@ export class ChatbotEngine {
         content: {
           interactive: {
             type: 'button',
-            body: { text },
-            action: {
-              buttons: buttons.slice(0, 3).map(b => ({
-                type: 'reply',
-                reply: {
-                  id: b.id,
-                  title: b.text.substring(0, 20),
-                },
-              })),
-            },
+            body: { text: text.substring(0, 1024) },
+            action: { buttons: validButtons },
           },
         },
         conversationId,
         organizationId,
+        skipWindowCheck: true, // ✅ Bot messages bypass 24h check
       });
 
-      console.log(`🤖 Sent button message with ${buttons.length} buttons`);
+      console.log(`📤 Bot sent ${validButtons.length} buttons`);
+      return true;
     } catch (error) {
-      console.error('🤖 sendButtonMessage error:', error);
-      // Fallback to text
-      try {
-        const fallbackText = `${text}\n\n${buttons.map((b, i) => `${i + 1}. ${b.text}`).join('\n')}`;
-        await this.sendTextMessage(account, to, fallbackText, conversationId, organizationId);
-      } catch (e) {
-        console.error('🤖 Fallback text also failed:', e);
-      }
-    }
-  }
-
-  // ==========================================
-  // EVALUATE CONDITION
-  // ==========================================
-  private evaluateCondition(
-    condition: { variable: string; operator: string; value: string } | undefined,
-    variables: Record<string, any>
-  ): boolean {
-    if (!condition) return true;
-
-    const { variable, operator, value } = condition;
-    const varValue = String(variables[variable] || '').toLowerCase();
-    const compareValue = String(value || '').toLowerCase();
-
-    switch (operator) {
-      case 'equals':       return varValue === compareValue;
-      case 'not_equals':   return varValue !== compareValue;
-      case 'contains':     return varValue.includes(compareValue);
-      case 'starts_with':  return varValue.startsWith(compareValue);
-      case 'ends_with':    return varValue.endsWith(compareValue);
-      case 'greater_than': return Number(varValue) > Number(compareValue);
-      case 'less_than':    return Number(varValue) < Number(compareValue);
-      case 'is_empty':     return !varValue || varValue === '';
-      case 'is_not_empty': return !!(varValue && varValue !== '');
-      // Legacy operators
-      case 'startsWith':   return varValue.startsWith(compareValue);
-      case 'endsWith':     return varValue.endsWith(compareValue);
-      case 'greaterThan':  return Number(varValue) > Number(compareValue);
-      case 'lessThan':     return Number(varValue) < Number(compareValue);
-      case 'exists':       return !!(varValue && varValue !== '');
-      default:
-        console.warn(`🤖 Unknown operator: ${operator}`);
-        return false;
+      console.error(`🤖 Button send failed, will use text fallback:`, error);
+      return false;
     }
   }
 
@@ -567,15 +764,16 @@ export class ChatbotEngine {
   ): Promise<void> {
     if (!action) return;
 
-    console.log(`🤖 Action: ${action.type}`, action.params);
+    console.log(`⚡ Action: ${action.type}`);
 
     try {
       switch (action.type) {
+
         case 'tagContact': {
           const tag = action.params?.tag;
           if (!tag) break;
 
-          // Find contact by phone (multiple formats)
+          // Multiple phone format support
           const phone10 = phone.replace(/\D/g, '').slice(-10);
           await prisma.contact.updateMany({
             where: {
@@ -584,14 +782,13 @@ export class ChatbotEngine {
                 { phone: phone10 },
                 { phone: `+91${phone10}` },
                 { phone: `91${phone10}` },
-                { phone: phone },
+                { phone },
+                { phone: `+${phone}` },
               ],
             },
-            data: {
-              tags: { push: tag },
-            },
+            data: { tags: { push: tag } },
           });
-          console.log(`🤖 Tag added: ${tag}`);
+          console.log(`🏷️ Tagged contact: ${tag}`);
           break;
         }
 
@@ -599,13 +796,12 @@ export class ChatbotEngine {
           const { name, value } = action.params || {};
           if (name) {
             session.variables[name] = value;
-            console.log(`🤖 Variable set: ${name} = ${value}`);
+            console.log(`📝 Variable: ${name} = ${value}`);
           }
           break;
         }
 
         case 'createLead': {
-          // Find contact
           const phone10 = phone.replace(/\D/g, '').slice(-10);
           const contact = await prisma.contact.findFirst({
             where: {
@@ -614,20 +810,33 @@ export class ChatbotEngine {
                 { phone: phone10 },
                 { phone: `+91${phone10}` },
                 { phone: `91${phone10}` },
+                { phone },
               ],
             },
           });
 
           if (contact) {
-            await (prisma as any).lead?.create({
-              data: {
+            // Check existing open lead
+            const existing = await prisma.lead.findFirst({
+              where: {
                 organizationId,
                 contactId: contact.id,
-                title: action.params?.title || 'Chatbot Lead',
-                source: 'chatbot',
-                status: 'NEW',
+                status: { notIn: ['WON', 'LOST'] },
               },
-            }).catch(() => console.log('🤖 Lead table not found, skipping'));
+            });
+
+            if (!existing) {
+              await prisma.lead.create({
+                data: {
+                  organizationId,
+                  contactId: contact.id,
+                  title: action.params?.title || 'Chatbot Lead',
+                  source: 'chatbot',
+                  status: 'NEW',
+                },
+              });
+              console.log(`💼 Lead created`);
+            }
           }
           break;
         }
@@ -636,34 +845,115 @@ export class ChatbotEngine {
           const { url, method = 'POST' } = action.params || {};
           if (!url) break;
 
-          await fetch(url, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              phone,
-              organizationId,
-              conversationId,
-              variables: session.variables,
-            }),
-          });
-          console.log(`🤖 Webhook called: ${url}`);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+
+          try {
+            await fetch(url, {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                phone,
+                organizationId,
+                conversationId,
+                variables: session.variables,
+                timestamp: new Date().toISOString(),
+              }),
+              signal: controller.signal,
+            });
+            console.log(`🌐 Webhook: ${url}`);
+          } finally {
+            clearTimeout(timeout);
+          }
           break;
         }
 
         default:
-          console.log(`🤖 Unknown action: ${action.type}`);
+          console.log(`❓ Unknown action: ${action.type}`);
       }
     } catch (error) {
-      console.error(`🤖 Action "${action.type}" error:`, error);
+      console.error(`⚡ Action "${action.type}" error:`, error);
+    }
+  }
+
+  // ==========================================
+  // EVALUATE CONDITION
+  // ==========================================
+  private evaluateCondition(
+    condition: { variable: string; operator: string; value: string } | undefined,
+    variables: Record<string, any>
+  ): boolean {
+    if (!condition) return true;
+
+    const { variable, operator, value } = condition;
+    const varValue = String(variables[variable] ?? '').toLowerCase().trim();
+    const compareValue = String(value ?? '').toLowerCase().trim();
+
+    switch (operator) {
+      case 'equals':
+      case '=':
+        return varValue === compareValue;
+
+      case 'not_equals':
+      case '!=':
+        return varValue !== compareValue;
+
+      case 'contains':
+        return varValue.includes(compareValue);
+
+      case 'not_contains':
+        return !varValue.includes(compareValue);
+
+      case 'starts_with':
+      case 'startsWith':
+        return varValue.startsWith(compareValue);
+
+      case 'ends_with':
+      case 'endsWith':
+        return varValue.endsWith(compareValue);
+
+      case 'greater_than':
+      case 'greaterThan':
+        return Number(varValue) > Number(compareValue);
+
+      case 'less_than':
+      case 'lessThan':
+        return Number(varValue) < Number(compareValue);
+
+      case 'is_empty':
+        return !varValue || varValue === '';
+
+      case 'is_not_empty':
+      case 'exists':
+        return !!(varValue && varValue !== '');
+
+      default:
+        console.warn(`❓ Unknown operator: ${operator}`);
+        return false;
     }
   }
 
   // ==========================================
   // HELPERS
   // ==========================================
+
+  private getNextNodeId(nodeId: string, flowData: FlowData): string | null {
+    // Find edge without sourceHandle (default/main edge)
+    const defaultEdge = flowData.edges.find(
+      e => e.source === nodeId && !e.sourceHandle
+    );
+    if (defaultEdge) return defaultEdge.target;
+
+    // Any edge from this node
+    const anyEdge = flowData.edges.find(e => e.source === nodeId);
+    return anyEdge?.target || null;
+  }
+
   private replaceVariables(text: string, variables: Record<string, any>): string {
     return text.replace(/\{\{(\w+)\}\}/g, (_, key) => {
-      return variables[key] !== undefined ? String(variables[key]) : `{{${key}}}`;
+      return variables[key] !== undefined
+        ? String(variables[key])
+        : `{{${key}}}`;
     });
   }
 
@@ -671,11 +961,26 @@ export class ChatbotEngine {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // ✅ Public: Clear session (call when human takes over)
+  // ✅ Public: Human takeover ke liye session clear karo
   clearSession(organizationId: string, conversationId: string): void {
     const key = `${organizationId}:${conversationId}`;
     sessionStore.delete(key);
     console.log(`🤖 Session cleared: ${key}`);
+  }
+
+  // ✅ Public: Session info check karo
+  getSessionInfo(organizationId: string, conversationId: string) {
+    const key = `${organizationId}:${conversationId}`;
+    const session = sessionStore.get(key);
+    if (!session) return null;
+    return {
+      chatbotId: session.chatbotId,
+      currentNodeId: session.currentNodeId,
+      waitingForInput: session.waitingForInput,
+      messageCount: session.messageCount,
+      startedAt: session.startedAt,
+      lastActivityAt: session.lastActivityAt,
+    };
   }
 }
 

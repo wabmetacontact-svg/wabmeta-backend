@@ -26,6 +26,7 @@ interface SendMessageOptions {
   tempId?: string;
   clientMsgId?: string;
   mediaUrl?: string;  // ✅ ADD THIS
+  skipWindowCheck?: boolean;  // ✅ ADD THIS
 }
 
 interface SendTemplateOptions {
@@ -382,7 +383,8 @@ class WhatsAppService {
     conversationId?: string,
     organizationId?: string,
     tempId?: string,
-    clientMsgId?: string
+    clientMsgId?: string,
+    skipWindowCheck?: boolean  // ✅ ADD THIS
   ) {
     return this.sendMessage({
       accountId,
@@ -392,7 +394,8 @@ class WhatsAppService {
       conversationId,
       organizationId,
       tempId,
-      clientMsgId
+      clientMsgId,
+      skipWindowCheck,  // ✅ PASS KARO
     });
   }
 
@@ -656,7 +659,7 @@ class WhatsAppService {
 
       // ✅ 24-HOUR WINDOW CHECK (For Text/Media/Interactive)
       // Meta requires Templates for messages outside the 24h window
-      if (type !== 'template') {
+      if (type !== 'template' && !options.skipWindowCheck) {
         const contact = await this.getOrCreateContact(organizationId, to);
         const conversation = await this.getOrCreateConversation(
           organizationId,
