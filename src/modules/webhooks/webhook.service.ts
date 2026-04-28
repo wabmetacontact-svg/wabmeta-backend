@@ -602,13 +602,12 @@ export class WebhookService {
 
       // ✅ Trigger Chatbot Engine
       if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {
-        const isNew = !conversation; // Use the check from earlier
         chatbotEngine.processMessage(
           updatedConversation.id,
           organizationId,
           content || '',
           waFrom,
-          isNew
+          wasNewlyCreated
         ).catch(e => console.error('🤖 Chatbot engine trigger error:', e));
       }
     } catch (e) {
