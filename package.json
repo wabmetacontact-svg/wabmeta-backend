@@ -24,6 +24,7 @@
     "generate:key": "node -e \"console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))\""
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@paralleldrive/cuid2": "^3.3.0",
     "@prisma/client": "^5.22.0",
     "@types/bcryptjs": "^2.4.6",

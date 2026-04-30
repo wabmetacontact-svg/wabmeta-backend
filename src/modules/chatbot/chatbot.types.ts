@@ -2,13 +2,14 @@
 
 export interface FlowNode {
   id: string;
-  type: 'start' | 'message' | 'button' | 'list' | 'condition' | 'delay' | 'action';
+  type: 'start' | 'message' | 'button' | 'list' | 'condition' | 'delay' | 'action' | 'ai';
   position: { x: number; y: number };
   data: {
     label?: string;
     message?: string;
     messageType?: 'text' | 'image' | 'video' | 'document' | 'audio' | 'list';
     mediaUrl?: string;
+    systemPrompt?: string;
     buttons?: Array<{
       id: string;
       text: string;
@@ -88,6 +89,7 @@ export interface ChatbotSession {
   chatbotId: string;
   currentNodeId: string;
   variables: Record<string, any>;
+  chatHistory?: any[];
   lastInteractionAt: Date;
   messageCount: number;
 }

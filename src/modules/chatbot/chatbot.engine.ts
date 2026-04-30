@@ -3,6 +3,7 @@
 
 import prisma from '../../config/database';
 import { whatsappService } from '../whatsapp/whatsapp.service';
+import { aiService } from './ai.service';
 
 // ============================================
 // TYPES
@@ -10,7 +11,7 @@ import { whatsappService } from '../whatsapp/whatsapp.service';
 
 interface FlowNode {
   id: string;
-  type: 'start' | 'message' | 'button' | 'list' | 'condition' | 'delay' | 'action' | 'end';
+  type: 'start' | 'message' | 'button' | 'list' | 'condition' | 'delay' | 'action' | 'ai' | 'end';
   data: {
     label?: string;
     message?: string;
@@ -22,6 +23,7 @@ interface FlowNode {
     }>;
     mediaUrl?: string;
     messageType?: string;
+    systemPrompt?: string;
     condition?: {
       variable: string;
       operator: string;
@@ -54,6 +56,7 @@ interface ChatSession {
   organizationId: string;
   currentNodeId: string;
   variables: Record<string, any>;
+  chatHistory?: any[];
   waitingForInput: boolean;
   // Button node ke liye - kaunse buttons expect kar rahe hain
   expectedButtons?: Array<{ id: string; text: string; nextNodeId?: string }>;
