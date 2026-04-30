@@ -756,6 +756,56 @@ export class ChatbotEngine {
       }
 
       // ────────────────────────────────────────
+      case 'ai': {
+        const systemPrompt = node.data.systemPrompt || 'You are a helpful assistant.';
+        const userMessage = session.variables.message || '';
+        
+        // Ensure chat history exists
+        if (!session.chatHistory) {
+          session.chatHistory = [];
+        }
+
+        // Get AI response
+        const aiResponse = await aiService.generateResponse(
+          systemPrompt,
+          userMessage,
+          session.chatHistory
+        );
+
+        // Save to history
+        session.chatHistory.push({ role: 'user', content: userMessage });
+        session.chatHistory.push({ role: 'model', content: aiResponse });
+
+        // Keep history manageable (last 10 messages = 5 interactions)
+        if (session.chatHistory.length > 10) {
+          session.chatHistory = session.chatHistory.slice(-10);
+        }
+
+        // Send response to user
+        await this.sendText(
+          account, senderPhone,
+          aiResponse, conversationId, organizationId
+        );
+
+        const nextId = this.getNextNodeId(node.id, flowData);
+        if (nextId) {
+          session.currentNodeId = nextId;
+          sessionStore.set(sessionKey, session);
+          await this.executeFlow(
+            session, flowData, account,
+            conversationId, organizationId,
+            senderPhone, sessionKey,
+            fallbackMessage, depth + 1
+          );
+        } else {
+          // If no next node, AI acts as a chat interface, wait for more input on this same node
+          session.waitingForInput = true;
+          sessionStore.set(sessionKey, session);
+        }
+        break;
+      }
+
+      // ────────────────────────────────────────
       case 'end': {
         console.log(`🏁 Flow ended`);
         sessionStore.delete(sessionKey);
