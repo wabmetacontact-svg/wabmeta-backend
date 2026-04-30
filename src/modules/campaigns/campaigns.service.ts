@@ -385,6 +385,15 @@ export class CampaignsService {
         }
       }
     }
+    
+    // ✅ Wallet Balance Check (Minimum ₹20 required)
+    const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
+    if (wallet && wallet.isActive) {
+      const balance = wallet.balancePaise / 100;
+      if (balance <= 20) {
+        throw new AppError(`Your wallet balance is very low (₹${balance.toFixed(2)}). You need to add balance to run this campaign. Minimum ₹20.00 required.`, 400);
+      }
+    }
 
     const updated = await prisma.campaign.update({
       where: { id: campaignId },
@@ -753,10 +762,28 @@ export class CampaignsService {
         console.log(`💳 Wallet check: Estimated cost ₹${walletCheck.estimatedCost.toFixed(2)}, Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
         
         if (!walletCheck.canProceed) {
-          campaignSocketService.emitCampaignError(organizationId, campaignId, {
-            message: `⚠️ Low wallet balance! Est. cost ₹${walletCheck.estimatedCost.toFixed(2)}, available ₹${walletCheck.availableBalance.toFixed(2)}. Recharge soon!`,
-            code: 'LOW_BALANCE_WARNING'
+          // ✅ Pause campaign if balance is too low
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'PAUSED' }
           });
+
+          campaignSocketService.emitCampaignUpdate(organizationId, campaignId, { 
+            status: 'PAUSED', 
+            message: walletCheck.availableBalance <= 20 
+              ? `⚠️ Campaign paused: Wallet balance very low (₹${walletCheck.availableBalance.toFixed(2)}). Please add balance.`
+              : `⚠️ Campaign paused: Insufficient balance for this campaign.`
+          });
+
+          campaignSocketService.emitCampaignError(organizationId, campaignId, {
+            message: walletCheck.availableBalance <= 20
+              ? `Your wallet balance is very low (₹${walletCheck.availableBalance.toFixed(2)}). You need to add balance to resume.`
+              : `Insufficient balance! Est. cost ₹${walletCheck.estimatedCost.toFixed(2)}, available ₹${walletCheck.availableBalance.toFixed(2)}.`,
+            code: 'LOW_BALANCE_ERROR'
+          });
+
+          this.processingCampaigns.delete(campaignId);
+          return;
         }
       }
       // ───────────────────────────────────────────────────────────────────────────

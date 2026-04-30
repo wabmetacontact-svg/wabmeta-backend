@@ -102,15 +102,21 @@ export async function deductWalletForTemplate(params: {
           ? wallet.creditLimitPaise - wallet.creditUsedPaise
           : 0);
 
-      if (availablePaise < amountPaise) {
+      const availableRupees = availablePaise / 100;
+
+      if (availablePaise < amountPaise || availableRupees <= 20) {
         // Low balance alert
         await triggerLowBalanceAlert(wallet);
+
+        const reason = availableRupees <= 20 
+          ? `Wallet balance very low (₹${availableRupees.toFixed(2)}). Minimum ₹20.00 required.`
+          : `Insufficient wallet balance (₹${availableRupees.toFixed(2)} available, ₹${rateRupees} needed)`;
 
         return {
           deducted: false,
           walletUsed: false,
           amount: rateRupees,
-          reason: `Insufficient wallet balance (₹${wallet.balancePaise / 100} available, ₹${rateRupees} needed)`,
+          reason,
         };
       }
 
@@ -241,8 +247,11 @@ export async function deductWalletForCampaign(params: {
   const shortfallPaise = Math.max(0, estimatedCostPaise - availablePaise);
   const shortfallRupees = shortfallPaise / 100;
 
+  // ✅ New Limit: Must have at least ₹20 to run any campaign
+  const hasMinimumBalance = availableRupees > 20;
+
   return {
-    canProceed: availablePaise >= estimatedCostPaise,
+    canProceed: availablePaise >= estimatedCostPaise && hasMinimumBalance,
     estimatedCost: estimatedCostRupees,
     availableBalance: availableRupees,
     shortfall: shortfallRupees,
