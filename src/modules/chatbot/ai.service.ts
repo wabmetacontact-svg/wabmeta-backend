@@ -33,7 +33,7 @@ class AIService {
 
       const completion = await groq.chat.completions.create({
         messages: messages as any,
-        model: "llama3-8b-8192", // More reliable free tier model
+        model: "llama-3.1-8b-instant", // Latest stable free tier model
         temperature: 0.7,
         max_tokens: 1024,
       });
