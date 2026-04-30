@@ -10,11 +10,18 @@ import { whatsappService } from '../whatsapp/whatsapp.service';
 
 interface FlowNode {
   id: string;
-  type: 'start' | 'message' | 'button' | 'condition' | 'delay' | 'action' | 'end';
+  type: 'start' | 'message' | 'button' | 'list' | 'condition' | 'delay' | 'action' | 'end';
   data: {
     label?: string;
     message?: string;
     buttons?: Array<{ id: string; text: string }>;
+    listButtonText?: string;
+    listSections?: Array<{
+      title?: string;
+      rows: Array<{ id: string; title: string; description?: string }>;
+    }>;
+    mediaUrl?: string;
+    messageType?: string;
     condition?: {
       variable: string;
       operator: string;
@@ -365,6 +372,69 @@ export class ChatbotEngine {
 
       session.waitingForInput = false;
 
+    } else if (currentNode.type === 'list') {
+      // ── LIST NODE ──────────────────────────
+      const sections = currentNode.data.listSections || [];
+      let allRows: Array<{ id: string; title: string; description?: string }> = [];
+      sections.forEach(s => {
+          if (s.rows) allRows = allRows.concat(s.rows);
+      });
+
+      let matchedRow: { id: string; title: string } | null = null;
+      const inputLower = input.toLowerCase().trim();
+
+      // Strategy 1: Exact match
+      matchedRow = allRows.find(
+        r => r.title.toLowerCase().trim() === inputLower
+      ) || null;
+
+      // Strategy 2: Partial match
+      if (!matchedRow) {
+        matchedRow = allRows.find(
+          r => inputLower.includes(r.title.toLowerCase().trim()) ||
+               r.title.toLowerCase().trim().includes(inputLower)
+        ) || null;
+      }
+
+      // Strategy 3: ID match
+      if (!matchedRow) {
+        matchedRow = allRows.find(r => r.id === input) || null;
+      }
+      
+      // Strategy 4: Number match
+      if (!matchedRow) {
+        const num = parseInt(input);
+        if (!isNaN(num) && num >= 1 && num <= allRows.length) {
+          matchedRow = allRows[num - 1];
+        }
+      }
+
+      if (matchedRow) {
+        console.log(`✅ List option matched: "${matchedRow.title}"`);
+
+        const listEdge = flowData.edges.find(
+          e => e.source === currentNode.id &&
+            (e.sourceHandle === matchedRow!.id ||
+             e.sourceHandle === matchedRow!.title ||
+             e.label === matchedRow!.title)
+        );
+
+        if (listEdge) {
+          session.currentNodeId = listEdge.target;
+          console.log(`➡️ Moving to: ${listEdge.target}`);
+        } else {
+          const anyEdge = flowData.edges.find(e => e.source === currentNode.id);
+          if (anyEdge) {
+            session.currentNodeId = anyEdge.target;
+            console.log(`➡️ Fallback edge to: ${anyEdge.target}`);
+          }
+        }
+      } else {
+        console.log(`❌ No list option matched for: "${input}"`);
+      }
+
+      session.waitingForInput = false;
+
     } else if (currentNode.type === 'condition') {
       // ── CONDITION NODE ───────────────────────
       // Input already in variables, just evaluate
@@ -437,12 +507,39 @@ export class ChatbotEngine {
       // ────────────────────────────────────────
       case 'message': {
         const text = node.data.message || '';
-        if (text.trim()) {
-          const finalText = this.replaceVariables(text, session.variables);
-          await this.sendText(
-            account, senderPhone,
-            finalText, conversationId, organizationId
-          );
+        const messageType = node.data.messageType || 'text';
+        const mediaUrl = node.data.mediaUrl;
+        const finalText = text.trim() ? this.replaceVariables(text, session.variables) : '';
+
+        if (messageType === 'text') {
+            if (finalText) {
+              await this.sendText(
+                account, senderPhone,
+                finalText, conversationId, organizationId
+              );
+            }
+        } else if (['image', 'video', 'document', 'audio'].includes(messageType) && mediaUrl) {
+            try {
+                await whatsappService.sendMediaMessage(
+                    account.id,
+                    senderPhone,
+                    messageType as any,
+                    mediaUrl,
+                    finalText || undefined, // caption
+                    conversationId,
+                    organizationId,
+                    undefined,
+                    undefined
+                );
+            } catch (error) {
+                console.error(`🤖 Media send failed, will use text fallback:`, error);
+                if (finalText) {
+                    await this.sendText(
+                        account, senderPhone,
+                        finalText, conversationId, organizationId
+                    );
+                }
+            }
         }
 
         // Auto-advance
@@ -512,6 +609,68 @@ export class ChatbotEngine {
         // Wait for user response
         session.waitingForInput = true;
         session.expectedButtons = buttons;
+        sessionStore.set(sessionKey, session);
+        break;
+      }
+
+      // ────────────────────────────────────────
+      case 'list': {
+        const text = node.data.message || 'Please select an option:';
+        const finalText = this.replaceVariables(text, session.variables);
+        const listButtonText = node.data.listButtonText || 'Options';
+        const sections = node.data.listSections || [];
+
+        if (sections.length === 0) {
+          // No options configured - treat as message
+          await this.sendText(
+            account, senderPhone,
+            text, conversationId, organizationId
+          );
+          const nextId = this.getNextNodeId(node.id, flowData);
+          if (nextId) {
+            session.currentNodeId = nextId;
+            sessionStore.set(sessionKey, session);
+            await this.executeFlow(
+              session, flowData, account,
+              conversationId, organizationId,
+              senderPhone, sessionKey,
+              fallbackMessage, depth + 1
+            );
+          }
+          break;
+        }
+
+        const sent = await this.sendListMessage(
+          account, senderPhone,
+          finalText, listButtonText, sections,
+          conversationId, organizationId
+        );
+
+        if (!sent) {
+          // Fallback: numbered text list
+          let flatOptions: Array<{title: string}> = [];
+          sections.forEach(s => {
+              if (s.rows) flatOptions = flatOptions.concat(s.rows);
+          });
+          const numberedText = `${finalText}\n\n${
+            flatOptions.map((b, i) => `${i + 1}. ${b.title}`).join('\n')
+          }`;
+          await this.sendText(
+            account, senderPhone,
+            numberedText, conversationId, organizationId
+          );
+        }
+
+        // Wait for user response
+        session.waitingForInput = true;
+        session.expectedButtons = []; // We can store list expectations too if needed
+        sections.forEach(s => {
+          if (s.rows) {
+            s.rows.forEach(r => {
+              session.expectedButtons!.push({ id: r.id, text: r.title });
+            });
+          }
+        });
         sessionStore.set(sessionKey, session);
         break;
       }
@@ -748,6 +907,58 @@ export class ChatbotEngine {
       return true;
     } catch (error) {
       console.error(`🤖 Button send failed, will use text fallback:`, error);
+      return false;
+    }
+  }
+
+  // ==========================================
+  // SEND LIST MESSAGE
+  // Returns true if sent, false if failed
+  // ==========================================
+  private async sendListMessage(
+    account: any,
+    to: string,
+    text: string,
+    buttonText: string,
+    sections: Array<{ title?: string; rows: Array<{ id: string; title: string; description?: string }> }>,
+    conversationId: string,
+    organizationId: string
+  ): Promise<boolean> {
+    try {
+      const validSections = sections.filter(s => s.rows && s.rows.length > 0).map(s => ({
+        title: s.title ? s.title.substring(0, 24) : undefined,
+        rows: s.rows.slice(0, 10).map(r => ({
+          id: r.id || `row_${Date.now()}_${Math.random()}`,
+          title: r.title.substring(0, 24),
+          description: r.description ? r.description.substring(0, 72) : undefined
+        }))
+      })).slice(0, 10);
+
+      if (!validSections.length) return false;
+
+      await whatsappService.sendMessage({
+        accountId: account.id,
+        to,
+        type: 'interactive',
+        content: {
+          interactive: {
+            type: 'list',
+            body: { text: text.substring(0, 1024) },
+            action: { 
+                button: buttonText.substring(0, 20),
+                sections: validSections 
+            },
+          },
+        },
+        conversationId,
+        organizationId,
+        skipWindowCheck: true,
+      });
+
+      console.log(`📤 Bot sent list with ${validSections.reduce((acc, s) => acc + s.rows.length, 0)} options`);
+      return true;
+    } catch (error) {
+      console.error(`🤖 List send failed, will use text fallback:`, error);
       return false;
     }
   }

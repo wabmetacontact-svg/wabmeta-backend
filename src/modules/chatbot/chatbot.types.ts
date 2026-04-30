@@ -2,16 +2,27 @@
 
 export interface FlowNode {
   id: string;
-  type: 'start' | 'message' | 'button' | 'condition' | 'delay' | 'action';
+  type: 'start' | 'message' | 'button' | 'list' | 'condition' | 'delay' | 'action';
   position: { x: number; y: number };
   data: {
     label?: string;
     message?: string;
+    messageType?: 'text' | 'image' | 'video' | 'document' | 'audio' | 'list';
+    mediaUrl?: string;
     buttons?: Array<{
       id: string;
       text: string;
       type: 'reply' | 'url' | 'phone';
       value?: string;
+    }>;
+    listButtonText?: string;
+    listSections?: Array<{
+      title?: string;
+      rows: Array<{
+        id: string;
+        title: string;
+        description?: string;
+      }>;
     }>;
     condition?: {
       type: 'keyword' | 'contains' | 'exact' | 'regex';
