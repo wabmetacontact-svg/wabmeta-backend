@@ -2,6 +2,7 @@ import prisma from '../../config/database';
 import { whatsappService } from '../whatsapp/whatsapp.service';
 import { automationService } from './automation.service';
 import { AutomationTrigger } from '@prisma/client';
+import { deductWalletForTemplate } from '../wallet/wallet.deduction.service';
 
 interface AutomationAction {
   id: string;
@@ -436,7 +437,7 @@ class AutomationEngine {
             break;
 
           case 'send_template':
-            await this.actionSendTemplate({ ...context, contactId }, action.config);
+            await this.actionSendTemplate({ ...context, contactId }, { ...action.config, _automationId: automationId });
             break;
 
           case 'wait_for_response':
@@ -676,7 +677,26 @@ class AutomationEngine {
 
         console.log(`✅ [send_template] Template sent successfully!`);
         console.log(`   waMessageId: ${result.waMessageId}`);
-        
+
+        // ✅ Step 5: Wallet Deduction (non-blocking)
+        const deductionResult = await deductWalletForTemplate({
+            organizationId: context.organizationId,
+            templateName: template.name,
+            templateCategory: (template as any).category,
+            recipientPhone: context.phone,
+            waMessageId: result.waMessageId,
+            automationId: config._automationId,
+            automationName: `Automation → ${template.name}`,
+        });
+
+        if (deductionResult.deducted) {
+            console.log(
+                `💳 [send_template] Wallet deducted ₹${deductionResult.amount} for automation template → ${context.phone}`
+            );
+        } else if (deductionResult.walletUsed === false && deductionResult.reason) {
+            console.log(`💳 [send_template] Wallet skip: ${deductionResult.reason}`);
+        }
+
     } catch (error: any) {
         console.error(`❌ [send_template] Failed to send template "${template.name}":`, {
             error: error.message,

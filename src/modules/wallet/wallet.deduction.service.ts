@@ -38,6 +38,8 @@ export async function deductWalletForTemplate(params: {
   waMessageId?: string;
   campaignId?: string;
   campaignName?: string;
+  automationId?: string;
+  automationName?: string;
 }): Promise<{
   deducted: boolean;
   walletUsed: boolean;
@@ -52,6 +54,8 @@ export async function deductWalletForTemplate(params: {
     waMessageId,
     campaignId,
     campaignName,
+    automationId,
+    automationName,
   } = params;
 
   try {
@@ -133,7 +137,9 @@ export async function deductWalletForTemplate(params: {
       }
 
       const categoryLabel = getCategoryLabel(category);
-      const description = campaignId
+      const description = automationId
+        ? `Automation template charge - ${categoryLabel} (${templateName}) → ${recipientPhone}`
+        : campaignId
         ? `Campaign template charge - ${categoryLabel} (${templateName}) → ${recipientPhone}`
         : `Template charge - ${categoryLabel} (${templateName}) → ${recipientPhone}`;
 
@@ -160,7 +166,13 @@ export async function deductWalletForTemplate(params: {
           status: 'completed',
           metaChargeId: waMessageId,
           metaService: 'template_message',
-          note: campaignName ? `Campaign: ${campaignName}` : (campaignId ? `Campaign: ${campaignId}` : undefined),
+          note: automationId
+            ? `Automation trigger: ${automationName || automationId}`
+            : campaignName
+            ? `Campaign: ${campaignName}`
+            : campaignId
+            ? `Campaign: ${campaignId}`
+            : undefined,
         },
       });
 
