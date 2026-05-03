@@ -34,6 +34,7 @@ interface FlowNode {
       type: string;
       params: Record<string, any>;
     };
+    waitForInput?: boolean;
   };
   position: { x: number; y: number };
 }
@@ -248,8 +249,12 @@ export class ChatbotEngine {
             session, cleanMessage, flowData
           );
         } else {
-          // Session hai but wait nahi kar raha
-          // Keyword match check karo - new chatbot trigger?
+          // ── EXISTING SESSION, NOT WAITING ────────
+          // Session hai but current node user input expect nahi kar raha
+          // ye tab hota hai jab user flow ke beech mein random message bheje
+          console.log(`⚠️ Session active but not waiting for input at node: ${session.currentNodeId}`);
+
+          // Keyword match check - kya naya chatbot trigger hoga?
           const newChatbot = await this.findMatchingChatbot(
             organizationId, cleanMessage, false, undefined
           );
@@ -263,6 +268,30 @@ export class ChatbotEngine {
               cleanMessage, senderPhone, true
             );
             return;
+          }
+
+          // Current node check - agar ye message node waitForInput=true pe ruka hua hai
+          const currentNode = flowData.nodes.find(n => n.id === session!.currentNodeId);
+          if (currentNode?.type === 'message' && currentNode.data.waitForInput) {
+            // Resume flow from next node
+            console.log(`▶️ Resuming flow after waitForInput message node`);
+            const nextId = this.getNextNodeId(currentNode.id, flowData);
+            if (nextId) {
+              session.currentNodeId = nextId;
+              session.variables['lastInput'] = cleanMessage;
+              session.variables['message'] = cleanMessage;
+              session.waitingForInput = false;
+            }
+          } else {
+            // Fallback: user kuch bhi bola but flow ne expect nahi kiya
+            if (chatbot.fallbackMessage) {
+              await this.sendText(
+                account, senderPhone,
+                chatbot.fallbackMessage,
+                conversationId, organizationId
+              );
+            }
+            // Flow ko current position pe hi rakhenge — user ko button ya list se respond karna chahiye
           }
         }
       }
@@ -443,6 +472,21 @@ export class ChatbotEngine {
       // Input already in variables, just evaluate
       session.waitingForInput = false;
 
+    } else if (currentNode.type === 'message' && currentNode.data.waitForInput) {
+      // ── MESSAGE NODE (waitForInput) ──────────
+      // User ka input store karo, next node pe move karo
+      console.log(`✅ [message waitForInput] User replied: "${input}"`);
+      session.variables['lastInput'] = input;
+      session.variables['message'] = input;
+
+      // Move to next node
+      const nextId = this.getNextNodeId(currentNode.id, flowData);
+      if (nextId) {
+        session.currentNodeId = nextId;
+        console.log(`➡️ Moving to next node: ${nextId}`);
+      }
+      session.waitingForInput = false;
+
     } else {
       // ── OTHER NODES ──────────────────────────
       session.waitingForInput = false;
@@ -545,7 +589,15 @@ export class ChatbotEngine {
             }
         }
 
-        // Auto-advance
+        // ✅ waitForInput: true → message bhejo, user ka wait karo
+        if (node.data.waitForInput) {
+          console.log(`⏸️ [message] waitForInput=true → pausing for user input`);
+          session.waitingForInput = true;
+          sessionStore.set(sessionKey, session);
+          break; // Stop here, resume on next user message
+        }
+
+        // Auto-advance to next node
         const nextId = this.getNextNodeId(node.id, flowData);
         if (nextId) {
           session.currentNodeId = nextId;
