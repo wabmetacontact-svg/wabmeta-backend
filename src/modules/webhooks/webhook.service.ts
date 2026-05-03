@@ -521,7 +521,7 @@ export class WebhookService {
               await automationEngine.triggerUnknownMessage({
                   organizationId,
                   contactId: contact.id,
-                  phone: contact.phone,
+                  phone: waFrom,            // ✅ Full number with country code (e.g. 917982722016)
                   message: content,
                   conversationId: updatedConversation.id,
               });
@@ -531,7 +531,7 @@ export class WebhookService {
               const triggered = await automationEngine.triggerKeyword({
                   organizationId,
                   contactId: contact.id,
-                  phone: contact.phone,
+                  phone: waFrom,            // ✅ Full number with country code
                   message: content,
                   conversationId: updatedConversation.id,
               });

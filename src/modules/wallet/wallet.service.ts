@@ -831,6 +831,71 @@ export async function flagWallet(
   };
 }
 
+// ─── 14. Activate / Deactivate Wallet (Admin) ────────────────────────────────
+export async function setWalletActive(
+  organizationId: string,
+  adminId: string,
+  activate: boolean,
+  reason?: string
+) {
+  const wallet = await prisma.wallet.findUnique({
+    where: { organizationId },
+    include: { organization: { select: { name: true } } },
+  });
+
+  if (!wallet) throw new AppError('Wallet not found for this organization', 404);
+
+  if (wallet.isActive === activate) {
+    throw new AppError(
+      `Wallet is already ${activate ? 'active' : 'inactive'}`,
+      400
+    );
+  }
+
+  await prisma.$transaction([
+    // 1. Update wallet status
+    prisma.wallet.update({
+      where: { id: wallet.id },
+      data: activate
+        ? {
+            isActive: true,
+            accessGrantedAt: new Date(),
+            accessGrantedBy: adminId,
+          }
+        : {
+            isActive: false,
+            accessGrantedAt: null,
+            accessGrantedBy: null,
+          },
+    }),
+
+    // 2. Create audit transaction record
+    prisma.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        type: activate ? 'admin_credit' : 'admin_debit',
+        amountPaise: 0,
+        balanceBeforePaise: wallet.balancePaise,
+        balanceAfterPaise: wallet.balancePaise,
+        description: activate
+          ? `Wallet activated by admin${reason ? ': ' + reason : ''}`
+          : `Wallet deactivated by admin${reason ? ': ' + reason : ''}`,
+        status: 'completed',
+        performedBy: adminId,
+        note: reason || (activate ? 'Admin activation' : 'Admin deactivation'),
+      },
+    }),
+  ]);
+
+  return {
+    success: true,
+    isActive: activate,
+    message: activate
+      ? `Wallet activated for ${(wallet as any).organization?.name || organizationId}`
+      : `Wallet deactivated and unlinked for ${(wallet as any).organization?.name || organizationId}`,
+  };
+}
+
 // ─── 14. Wallet Message Analytics (Meta-style insights) ─────────────────────
 export async function getWalletMessageAnalytics(organizationId: string) {
   const wallet = await prisma.wallet.findUnique({ where: { organizationId } });

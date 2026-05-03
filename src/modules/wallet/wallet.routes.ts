@@ -20,5 +20,6 @@ router.patch('/admin/wallets/requests/:requestId/review', adminAuth, walletContr
 router.patch('/admin/wallets/:organizationId/adjust', adminAuth, walletController.adminAdjustBalance);
 router.patch('/admin/wallets/:organizationId/credit', adminAuth, walletController.adminSetCredit);
 router.patch('/admin/wallets/:organizationId/flag', adminAuth, walletController.adminFlagWallet);
+router.patch('/admin/wallets/:organizationId/toggle', adminAuth, walletController.adminToggleWallet);
 
 export default router;

@@ -162,12 +162,24 @@ export class ChatbotEngine {
       const existingSession = sessionStore.get(sessionKey);
 
       // 2. Find chatbot
-      const chatbot = await this.findMatchingChatbot(
+      let chatbot = await this.findMatchingChatbot(
         organizationId,
         cleanMessage,
         isNewConversation,
         existingSession?.chatbotId
       );
+
+      // If no chatbot found but stale session exists → clear session and retry as new
+      if (!chatbot && existingSession) {
+        console.log(`⚠️ No chatbot found for existing session. Clearing stale session and retrying...`);
+        sessionStore.delete(sessionKey);
+        chatbot = await this.findMatchingChatbot(
+          organizationId,
+          cleanMessage,
+          true, // treat as new to allow default bot
+          undefined
+        );
+      }
 
       if (!chatbot) {
         console.log(`🤖 No chatbot found for this message`);
@@ -358,7 +370,7 @@ export class ChatbotEngine {
       if (!matchedButton) {
         matchedButton = buttons.find(
           b => inputLower.includes(b.text.toLowerCase().trim()) ||
-               b.text.toLowerCase().trim().includes(inputLower)
+            b.text.toLowerCase().trim().includes(inputLower)
         ) || null;
       }
 
@@ -382,8 +394,8 @@ export class ChatbotEngine {
         const buttonEdge = flowData.edges.find(
           e => e.source === currentNode.id &&
             (e.sourceHandle === matchedButton!.id ||
-             e.sourceHandle === matchedButton!.text ||
-             e.label === matchedButton!.text)
+              e.sourceHandle === matchedButton!.text ||
+              e.label === matchedButton!.text)
         );
 
         if (buttonEdge) {
@@ -409,7 +421,7 @@ export class ChatbotEngine {
       const sections = currentNode.data.listSections || [];
       let allRows: Array<{ id: string; title: string; description?: string }> = [];
       sections.forEach(s => {
-          if (s.rows) allRows = allRows.concat(s.rows);
+        if (s.rows) allRows = allRows.concat(s.rows);
       });
 
       let matchedRow: { id: string; title: string } | null = null;
@@ -424,7 +436,7 @@ export class ChatbotEngine {
       if (!matchedRow) {
         matchedRow = allRows.find(
           r => inputLower.includes(r.title.toLowerCase().trim()) ||
-               r.title.toLowerCase().trim().includes(inputLower)
+            r.title.toLowerCase().trim().includes(inputLower)
         ) || null;
       }
 
@@ -432,7 +444,7 @@ export class ChatbotEngine {
       if (!matchedRow) {
         matchedRow = allRows.find(r => r.id === input) || null;
       }
-      
+
       // Strategy 4: Number match
       if (!matchedRow) {
         const num = parseInt(input);
@@ -447,8 +459,8 @@ export class ChatbotEngine {
         const listEdge = flowData.edges.find(
           e => e.source === currentNode.id &&
             (e.sourceHandle === matchedRow!.id ||
-             e.sourceHandle === matchedRow!.title ||
-             e.label === matchedRow!.title)
+              e.sourceHandle === matchedRow!.title ||
+              e.label === matchedRow!.title)
         );
 
         if (listEdge) {
@@ -559,34 +571,34 @@ export class ChatbotEngine {
         const finalText = text.trim() ? this.replaceVariables(text, session.variables) : '';
 
         if (messageType === 'text') {
+          if (finalText) {
+            await this.sendText(
+              account, senderPhone,
+              finalText, conversationId, organizationId
+            );
+          }
+        } else if (['image', 'video', 'document', 'audio'].includes(messageType) && mediaUrl) {
+          try {
+            await whatsappService.sendMediaMessage(
+              account.id,
+              senderPhone,
+              messageType as any,
+              mediaUrl,
+              finalText || undefined, // caption
+              conversationId,
+              organizationId,
+              undefined,
+              undefined
+            );
+          } catch (error) {
+            console.error(`🤖 Media send failed, will use text fallback:`, error);
             if (finalText) {
               await this.sendText(
                 account, senderPhone,
                 finalText, conversationId, organizationId
               );
             }
-        } else if (['image', 'video', 'document', 'audio'].includes(messageType) && mediaUrl) {
-            try {
-                await whatsappService.sendMediaMessage(
-                    account.id,
-                    senderPhone,
-                    messageType as any,
-                    mediaUrl,
-                    finalText || undefined, // caption
-                    conversationId,
-                    organizationId,
-                    undefined,
-                    undefined
-                );
-            } catch (error) {
-                console.error(`🤖 Media send failed, will use text fallback:`, error);
-                if (finalText) {
-                    await this.sendText(
-                        account, senderPhone,
-                        finalText, conversationId, organizationId
-                    );
-                }
-            }
+          }
         }
 
         // ✅ waitForInput: true → message bhejo, user ka wait karo
@@ -652,9 +664,8 @@ export class ChatbotEngine {
 
         if (!sent) {
           // Fallback: numbered text list
-          const numberedText = `${finalText}\n\n${
-            buttons.map((b, i) => `${i + 1}. ${b.text}`).join('\n')
-          }`;
+          const numberedText = `${finalText}\n\n${buttons.map((b, i) => `${i + 1}. ${b.text}`).join('\n')
+            }`;
           await this.sendText(
             account, senderPhone,
             numberedText, conversationId, organizationId
@@ -703,13 +714,12 @@ export class ChatbotEngine {
 
         if (!sent) {
           // Fallback: numbered text list
-          let flatOptions: Array<{title: string}> = [];
+          let flatOptions: Array<{ title: string }> = [];
           sections.forEach(s => {
-              if (s.rows) flatOptions = flatOptions.concat(s.rows);
+            if (s.rows) flatOptions = flatOptions.concat(s.rows);
           });
-          const numberedText = `${finalText}\n\n${
-            flatOptions.map((b, i) => `${i + 1}. ${b.title}`).join('\n')
-          }`;
+          const numberedText = `${finalText}\n\n${flatOptions.map((b, i) => `${i + 1}. ${b.title}`).join('\n')
+            }`;
           await this.sendText(
             account, senderPhone,
             numberedText, conversationId, organizationId
@@ -811,7 +821,7 @@ export class ChatbotEngine {
       case 'ai': {
         const systemPrompt = node.data.systemPrompt || 'You are a helpful assistant.';
         const userMessage = session.variables.message || '';
-        
+
         // Ensure chat history exists
         if (!session.chatHistory) {
           session.chatHistory = [];
@@ -914,7 +924,7 @@ export class ChatbotEngine {
       const keywords = (bot.triggerKeywords as string[]) || [];
       const partialMatch = keywords.find(
         kw => lowerMsg.includes(kw.toLowerCase().trim()) ||
-              kw.toLowerCase().trim().includes(lowerMsg)
+          kw.toLowerCase().trim().includes(lowerMsg)
       );
       if (partialMatch) {
         console.log(`🎯 Partial keyword match: "${partialMatch}" → ${bot.name}`);
@@ -1049,9 +1059,9 @@ export class ChatbotEngine {
           interactive: {
             type: 'list',
             body: { text: text.substring(0, 1024) },
-            action: { 
-                button: buttonText.substring(0, 20),
-                sections: validSections 
+            action: {
+              button: buttonText.substring(0, 20),
+              sections: validSections
             },
           },
         },

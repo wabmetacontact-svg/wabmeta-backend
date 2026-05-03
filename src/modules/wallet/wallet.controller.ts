@@ -242,3 +242,26 @@ export const adminFlagWallet = async (req: Request, res: Response) => {
     return errorResponse(res, err.message, err.statusCode || 500);
   }
 };
+
+export const adminToggleWallet = async (req: Request, res: Response) => {
+  try {
+    const adminId = (req as any).admin?.id;
+    const { organizationId } = req.params;
+    const { activate, reason } = req.body;
+
+    if (typeof activate !== 'boolean') {
+      return errorResponse(res, "'activate' must be a boolean (true to activate, false to deactivate)", 400);
+    }
+
+    const result = await walletService.setWalletActive(
+      organizationId as string,
+      adminId,
+      activate,
+      reason
+    );
+
+    return sendSuccess(res, result, result.message);
+  } catch (err: any) {
+    return errorResponse(res, err.message, err.statusCode || 500);
+  }
+};
