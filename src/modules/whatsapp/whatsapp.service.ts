@@ -193,7 +193,23 @@ class WhatsAppService {
    * Format phone number for WhatsApp API
    */
   private formatPhoneNumber(phone: string): string {
-    return phone.replace(/[^0-9]/g, '');
+    const digits = phone.replace(/[^0-9]/g, '');
+
+    // 10-digit number → Indian mobile (no country code) → prepend 91
+    if (digits.length === 10) {
+      console.log(`📞 formatPhoneNumber: 10-digit number detected, prepending 91 → 91${digits}`);
+      return `91${digits}`;
+    }
+
+    // 0XXXXXXXXXX format (11 digits starting with 0) → strip leading 0, prepend 91
+    if (digits.length === 11 && digits.startsWith('0')) {
+      const fixed = `91${digits.slice(1)}`;
+      console.log(`📞 formatPhoneNumber: 0-prefixed number detected → ${fixed}`);
+      return fixed;
+    }
+
+    // Already has country code (e.g. 917xxxxxxxxx = 12 digits)
+    return digits;
   }
 
   /**
