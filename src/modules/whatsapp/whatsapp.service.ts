@@ -213,26 +213,30 @@ class WhatsAppService {
   }
 
   /**
-   * Get or create contact
+   * Get or create contact — always stores in canonical E.164 format: +919XXXXXXXXX
    */
   private async getOrCreateContact(
     organizationId: string,
     phone: string
   ): Promise<any> {
-    const formattedPhone = phone.startsWith('+')
-      ? phone
-      : `+${this.formatPhoneNumber(phone)}`;
+    // ✅ Canonical format: +919340103340
+    const digits = phone.replace(/[^0-9]/g, '');
+    const normalized = digits.length === 10 ? `91${digits}`
+      : (digits.length === 11 && digits.startsWith('0')) ? `91${digits.slice(1)}`
+      : digits;
 
-    const cleanPhone = this.formatPhoneNumber(phone);
+    const canonical = `+${normalized}`;       // +919340103340
+    const withoutPlus = normalized;           // 919340103340
+    const tenDigit = normalized.slice(-10);   // 9340103340
 
     let contact = await prisma.contact.findFirst({
       where: {
         organizationId,
         OR: [
-          { phone: formattedPhone },
-          { phone: cleanPhone },
-          { phone: `+${cleanPhone}` }
-        ]
+          { phone: canonical },
+          { phone: withoutPlus },
+          { phone: tenDigit },
+        ],
       },
     });
 
@@ -240,13 +244,21 @@ class WhatsAppService {
       contact = await prisma.contact.create({
         data: {
           organizationId,
-          phone: formattedPhone,
+          phone: canonical,   // ✅ Always store canonical format
           source: 'WHATSAPP',
           firstName: 'Unknown',
-          status: 'ACTIVE'
+          status: 'ACTIVE',
         },
       });
-      console.log(`👤 Created new contact: ${contact.id}`);
+      console.log(`👤 Created new contact: ${canonical}`);
+    } else if (contact.phone !== canonical) {
+      // ✅ Silent migration: update old-format phone to canonical
+      await prisma.contact.update({
+        where: { id: contact.id },
+        data: { phone: canonical },
+      }).catch(() => {});
+      contact.phone = canonical;
+      console.log(`🔄 Migrated contact phone → ${canonical}`);
     }
 
     return contact;
@@ -678,69 +690,112 @@ class WhatsAppService {
       // ✅ 24-HOUR WINDOW CHECK (For Text/Media/Interactive)
       // Meta requires Templates for messages outside the 24h window
       if (type !== 'template' && !options.skipWindowCheck) {
-        const contact = await this.getOrCreateContact(organizationId, to);
-        const conversation = await this.getOrCreateConversation(
-          organizationId,
-          contact.id,
-          account.phoneNumberId,
-          '',
-          conversationId
-        );
+        try {
+          // Lightweight fetch — do NOT use getOrCreateConversation (it modifies data)
+          let conv: any = null;
 
-        if (conversation) {
-          const now = new Date();
-          let windowExpired = false;
+          if (conversationId) {
+            conv = await prisma.conversation.findUnique({
+              where: { id: conversationId },
+              select: {
+                id: true,
+                isWindowOpen: true,
+                windowExpiresAt: true,
+                lastCustomerMessageAt: true,
+              },
+            });
+          }
 
-          // ✅ Priority 1: Use isWindowOpen + windowExpiresAt (most reliable)
-          if ((conversation as any).windowExpiresAt) {
-            const expiresAt = new Date((conversation as any).windowExpiresAt);
-            windowExpired = expiresAt <= now;
-          } else if ((conversation as any).isWindowOpen === false) {
-            // Explicitly marked closed
-            windowExpired = true;
-          } else {
-            // ✅ Priority 2: lastCustomerMessageAt fallback
-            const lastCustomerMsgAt = (conversation as any).lastCustomerMessageAt;
-            if (lastCustomerMsgAt) {
-              windowExpired = (now.getTime() - new Date(lastCustomerMsgAt).getTime()) > 24 * 60 * 60 * 1000;
-            } else {
-              // ✅ Priority 3: Check if ANY inbound message exists in this conversation
-              const inboundCount = await prisma.message.count({
+          if (!conv) {
+            // Find by contact + org
+            const contact = await prisma.contact.findFirst({
+              where: {
+                organizationId,
+                OR: [
+                  { phone: to },
+                  { phone: `+${this.formatPhoneNumber(to)}` },
+                  { phone: this.formatPhoneNumber(to) },
+                ],
+              },
+              select: { id: true },
+            });
+
+            if (contact) {
+              conv = await prisma.conversation.findUnique({
                 where: {
-                  conversationId: conversation.id,
-                  direction: 'INBOUND',
+                  organizationId_contactId: { organizationId, contactId: contact.id },
+                },
+                select: {
+                  id: true,
+                  isWindowOpen: true,
+                  windowExpiresAt: true,
+                  lastCustomerMessageAt: true,
                 },
               });
-              // No inbound message at all → window closed
-              windowExpired = inboundCount === 0;
             }
           }
 
+          // If no conversation exists yet, it's a fresh outbound — block it
+          if (!conv) {
+            const errorMsg = 'No inbound message from user yet. You must start with a Template Message.';
+            console.warn(`⚠️ ${errorMsg}`);
+            throw new Error(errorMsg);
+          }
+
+          const now = new Date();
+          let windowExpired = false;
+
+          // ✅ Priority 1: windowExpiresAt is the most reliable signal
+          if (conv.windowExpiresAt) {
+            windowExpired = new Date(conv.windowExpiresAt) <= now;
+          } else if (conv.isWindowOpen === false) {
+            windowExpired = true;
+          } else if (conv.lastCustomerMessageAt) {
+            // Priority 2: last customer message time
+            windowExpired = (now.getTime() - new Date(conv.lastCustomerMessageAt).getTime()) > 24 * 60 * 60 * 1000;
+          } else {
+            // Priority 3: count inbound messages
+            const inboundCount = await prisma.message.count({
+              where: { conversationId: conv.id, direction: MessageDirection.INBOUND },
+            });
+            windowExpired = inboundCount === 0;
+          }
+
           if (windowExpired) {
-            const lastCustomerMsgAt = (conversation as any).lastCustomerMessageAt;
-            const errorMsg = lastCustomerMsgAt
+            const errorMsg = conv.lastCustomerMessageAt
               ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
               : 'No inbound message from user yet. You must start with a Template Message.';
 
             console.warn(`⚠️ ${errorMsg}`);
 
             // Save as failed message so user sees it in inbox
-            await prisma.message.create({
-              data: {
-                conversationId: conversation.id,
-                whatsappAccountId: accountId,
-                direction: MessageDirection.OUTBOUND,
-                type: this.mapMessageType(type),
-                content: this.extractMessageContent(type, content),
-                status: MessageStatus.FAILED,
-                failureReason: errorMsg,
-                sentAt: now,
-                failedAt: now,
-              },
-            });
+            if (conv.id) {
+              await prisma.message.create({
+                data: {
+                  conversationId: conv.id,
+                  whatsappAccountId: accountId,
+                  direction: MessageDirection.OUTBOUND,
+                  type: this.mapMessageType(type),
+                  content: this.extractMessageContent(type, content),
+                  status: MessageStatus.FAILED,
+                  failureReason: errorMsg,
+                  sentAt: now,
+                  failedAt: now,
+                },
+              }).catch(() => {}); // non-blocking, don't crash on this
+            }
 
             throw new Error(errorMsg);
           }
+        } catch (windowCheckErr: any) {
+          // Re-throw only real window errors, not DB lookup errors
+          if (windowCheckErr.message?.includes('Template Message') || 
+              windowCheckErr.message?.includes('window closed') ||
+              windowCheckErr.message?.includes('session expired')) {
+            throw windowCheckErr;
+          }
+          // DB lookup failed silently — allow message to proceed, Meta API will validate
+          console.warn('⚠️ Window check lookup failed (non-critical), proceeding:', windowCheckErr.message);
         }
       }
 
