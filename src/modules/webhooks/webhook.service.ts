@@ -602,12 +602,29 @@ export class WebhookService {
 
       // ✅ Trigger Chatbot Engine
       if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {
+        // isNewConversation = true if:
+        // 1. Contact was just created (brand new), OR
+        // 2. This is the first message in this conversation (messageCount was 0 before this)
+        const isNewConversation = wasNewlyCreated || (updatedConversation.unreadCount <= 1);
+
+        // For button/list replies, pass the button ID too so engine can match edges
+        let chatbotContent = content || '';
+        if (msgType === 'INTERACTIVE') {
+          const iType = message?.interactive?.type;
+          if (iType === 'button_reply') {
+            // Pass both id and title so engine can match either
+            chatbotContent = message.interactive.button_reply.id || message.interactive.button_reply.title || content || '';
+          } else if (iType === 'list_reply') {
+            chatbotContent = message.interactive.list_reply.id || message.interactive.list_reply.title || content || '';
+          }
+        }
+
         chatbotEngine.processMessage(
           updatedConversation.id,
           organizationId,
-          content || '',
+          chatbotContent,
           waFrom,
-          wasNewlyCreated
+          isNewConversation
         ).catch(e => console.error('🤖 Chatbot engine trigger error:', e));
       }
     } catch (e) {

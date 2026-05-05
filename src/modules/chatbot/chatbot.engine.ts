@@ -390,12 +390,19 @@ export class ChatbotEngine {
       if (matchedButton) {
         console.log(`✅ Button matched: "${matchedButton.text}"`);
 
-        // Find edge with this button's sourceHandle
+        // ✅ Find edge - try multiple matching strategies:
+        // 1. sourceHandle === button.id (ReactFlow standard)
+        // 2. sourceHandle === button.text
+        // 3. label === button.text
+        // 4. input itself is the button ID (WhatsApp sends button_reply.id)
         const buttonEdge = flowData.edges.find(
-          e => e.source === currentNode.id &&
-            (e.sourceHandle === matchedButton!.id ||
-              e.sourceHandle === matchedButton!.text ||
-              e.label === matchedButton!.text)
+          e => e.source === currentNode.id && (
+            e.sourceHandle === matchedButton!.id ||
+            e.sourceHandle === matchedButton!.text ||
+            e.sourceHandle === input ||
+            e.label === matchedButton!.text ||
+            e.label === matchedButton!.id
+          )
         );
 
         if (buttonEdge) {
@@ -457,10 +464,14 @@ export class ChatbotEngine {
         console.log(`✅ List option matched: "${matchedRow.title}"`);
 
         const listEdge = flowData.edges.find(
-          e => e.source === currentNode.id &&
-            (e.sourceHandle === matchedRow!.id ||
-              e.sourceHandle === matchedRow!.title ||
-              e.label === matchedRow!.title)
+          e => e.source === currentNode.id && (
+            e.sourceHandle === matchedRow!.id ||
+            e.sourceHandle === matchedRow!.title ||
+            // ✅ input itself may be the row ID sent by WhatsApp (list_reply.id)
+            e.sourceHandle === input ||
+            e.label === matchedRow!.title ||
+            e.label === matchedRow!.id
+          )
         );
 
         if (listEdge) {
@@ -497,6 +508,15 @@ export class ChatbotEngine {
         session.currentNodeId = nextId;
         console.log(`➡️ Moving to next node: ${nextId}`);
       }
+      session.waitingForInput = false;
+
+    } else if (currentNode.type === 'ai') {
+      // ── AI NODE ──────────────────────────────
+      // User ne reply diya AI se — lastInput set karo, same node pe rehna hai
+      console.log(`✅ [ai node] User replied to AI: "${input}"`);
+      session.variables['lastInput'] = input;
+      session.variables['message'] = input;
+      // Stay on same AI node — executeFlow will process it
       session.waitingForInput = false;
 
     } else {
@@ -820,7 +840,15 @@ export class ChatbotEngine {
       // ────────────────────────────────────────
       case 'ai': {
         const systemPrompt = node.data.systemPrompt || 'You are a helpful assistant.';
-        const userMessage = session.variables.message || '';
+        // ✅ Use lastInput if session was waiting, else current message
+        const userMessage = session.variables.lastInput || session.variables.message || '';
+
+        if (!userMessage.trim()) {
+          // No user message yet - just wait for input
+          session.waitingForInput = true;
+          sessionStore.set(sessionKey, session);
+          break;
+        }
 
         // Ensure chat history exists
         if (!session.chatHistory) {
@@ -838,10 +866,13 @@ export class ChatbotEngine {
         session.chatHistory.push({ role: 'user', content: userMessage });
         session.chatHistory.push({ role: 'model', content: aiResponse });
 
-        // Keep history manageable (last 10 messages = 5 interactions)
-        if (session.chatHistory.length > 10) {
-          session.chatHistory = session.chatHistory.slice(-10);
+        // Keep history manageable (last 20 messages = 10 interactions)
+        if (session.chatHistory.length > 20) {
+          session.chatHistory = session.chatHistory.slice(-20);
         }
+
+        // ✅ Clear lastInput so next message is treated fresh
+        session.variables.lastInput = '';
 
         // Send response to user
         await this.sendText(
@@ -860,9 +891,10 @@ export class ChatbotEngine {
             fallbackMessage, depth + 1
           );
         } else {
-          // If no next node, AI acts as a chat interface, wait for more input on this same node
+          // ✅ No next node: AI stays in conversation mode
           session.waitingForInput = true;
           sessionStore.set(sessionKey, session);
+          console.log(`🤖 AI node: staying in conversation mode`);
         }
         break;
       }

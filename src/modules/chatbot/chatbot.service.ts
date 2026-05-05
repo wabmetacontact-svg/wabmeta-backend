@@ -121,6 +121,16 @@ export class ChatbotService {
 
     if (!chatbot) throw new AppError('Chatbot not found', 404);
 
+    // ✅ Validate flow before activating
+    const flowData = chatbot.flowData as any;
+    const nodes: any[] = flowData?.nodes || [];
+    const hasStart = nodes.some((n: any) => n.type === 'start');
+    const hasOtherNode = nodes.filter((n: any) => n.type !== 'start').length > 0;
+
+    if (!hasStart || !hasOtherNode) {
+      throw new AppError('Chatbot flow mein Start node aur kam se kam ek aur node hona zaroori hai', 400);
+    }
+
     return prisma.chatbot.update({
       where: { id: chatbotId },
       data: { status: 'ACTIVE' },
