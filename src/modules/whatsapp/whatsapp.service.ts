@@ -292,7 +292,7 @@ class WhatsAppService {
             lastMessageAt: new Date(),
             lastMessagePreview: messagePreview,
             unreadCount: 0,
-            isWindowOpen: true,
+            isWindowOpen: false, // ✅ Outbound-initiated: no inbound yet, window closed
             isRead: true
           },
         });
@@ -307,16 +307,18 @@ class WhatsAppService {
         if (!conversation) throw err;
       }
     } else {
-      await prisma.conversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageAt: new Date(),
-          lastMessagePreview: messagePreview,
-          isWindowOpen: true,
-          isRead: true,
-          unreadCount: 0 // ✅ Reset unread count when sending a message
-        },
-      });
+      // ✅ Only update preview/time — do NOT touch isWindowOpen (preserve real state)
+      if (messagePreview) {
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            lastMessageAt: new Date(),
+            lastMessagePreview: messagePreview,
+            isRead: true,
+            unreadCount: 0,
+          },
+        });
+      }
     }
 
     return conversation;
@@ -686,11 +688,36 @@ class WhatsAppService {
         );
 
         if (conversation) {
-          const lastCustomerMsgAt = conversation.lastCustomerMessageAt;
           const now = new Date();
-          const windowExpired = !lastCustomerMsgAt || (now.getTime() - new Date(lastCustomerMsgAt).getTime()) > 24 * 60 * 60 * 1000;
+          let windowExpired = false;
+
+          // ✅ Priority 1: Use isWindowOpen + windowExpiresAt (most reliable)
+          if ((conversation as any).windowExpiresAt) {
+            const expiresAt = new Date((conversation as any).windowExpiresAt);
+            windowExpired = expiresAt <= now;
+          } else if ((conversation as any).isWindowOpen === false) {
+            // Explicitly marked closed
+            windowExpired = true;
+          } else {
+            // ✅ Priority 2: lastCustomerMessageAt fallback
+            const lastCustomerMsgAt = (conversation as any).lastCustomerMessageAt;
+            if (lastCustomerMsgAt) {
+              windowExpired = (now.getTime() - new Date(lastCustomerMsgAt).getTime()) > 24 * 60 * 60 * 1000;
+            } else {
+              // ✅ Priority 3: Check if ANY inbound message exists in this conversation
+              const inboundCount = await prisma.message.count({
+                where: {
+                  conversationId: conversation.id,
+                  direction: 'INBOUND',
+                },
+              });
+              // No inbound message at all → window closed
+              windowExpired = inboundCount === 0;
+            }
+          }
 
           if (windowExpired) {
+            const lastCustomerMsgAt = (conversation as any).lastCustomerMessageAt;
             const errorMsg = lastCustomerMsgAt
               ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
               : 'No inbound message from user yet. You must start with a Template Message.';

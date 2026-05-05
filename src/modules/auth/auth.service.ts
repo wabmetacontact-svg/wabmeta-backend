@@ -29,6 +29,9 @@ const googleClient = new OAuth2Client(config.google.clientId);
 import { getRedis } from '../../config/redis';
 const redis = getRedis();
 
+// WhatsApp API (for Welcome + OTP messages)
+import { whatsappApi } from '../whatsapp/whatsapp.api';
+
 const OTP_PREFIX = 'otp:';
 
 // ============================================
@@ -46,6 +49,38 @@ const sendEmailNonBlocking = (options: { to: string; subject: string; html: stri
     .catch((err) => {
       console.error('📧 Email failed (promise rejected):', err);
     });
+};
+
+// ✅ Non-blocking WhatsApp template sender
+// phoneNumberId & accessToken: aapka WabMeta platform number use karega
+const sendWATemplateNonBlocking = (
+  phone: string,
+  templateName: string,
+  components?: { body?: string[] }
+) => {
+  // Platform ke pehle WhatsApp account se bhejo
+  // NOTE: Replace these with your actual platform phoneNumberId and accessToken from DB or config
+  const platformPhoneNumberId = (config as any).meta?.platformPhoneNumberId || process.env.PLATFORM_WA_PHONE_ID;
+  const platformAccessToken   = (config as any).meta?.platformAccessToken   || process.env.PLATFORM_WA_ACCESS_TOKEN;
+
+  if (!platformPhoneNumberId || !platformAccessToken || !phone) {
+    console.warn('⚠️ WhatsApp not configured for platform messages. Set PLATFORM_WA_PHONE_ID and PLATFORM_WA_ACCESS_TOKEN');
+    return;
+  }
+
+  // Format phone: add country code if missing
+  const formattedPhone = phone.startsWith('+') ? phone.replace('+', '') : `91${phone}`;
+
+  void whatsappApi.sendTemplateMessage(
+    platformPhoneNumberId,
+    formattedPhone,
+    templateName,
+    'en',
+    components ? { body: components.body } : undefined,
+    platformAccessToken
+  )
+    .then(() => console.log(`✅ WhatsApp [${templateName}] sent to ${formattedPhone}`))
+    .catch((err) => console.warn(`⚠️ WhatsApp [${templateName}] failed (non-critical):`, err?.message));
 };
 
 const formatUserResponse = (user: any): AuthUser => ({
@@ -234,6 +269,13 @@ export class AuthService {
       subject: emailContent.subject,
       html: emailContent.html,
     });
+
+    // ✅ Send WhatsApp welcome message (non-blocking, non-critical)
+    if (phone) {
+      sendWATemplateNonBlocking(phone, 'wabmeta_welcome', {
+        body: [firstName || 'there'],  // {{1}} = user ka naam
+      });
+    }
 
     // Generate tokens
     const tokens = await generateTokens(result.user.id, result.user.email, result.organization?.id);
@@ -566,6 +608,13 @@ export class AuthService {
       subject: emailContent.subject,
       html: emailContent.html,
     });
+
+    // ✅ Send WhatsApp OTP (non-blocking, non-critical)
+    if (user.phone) {
+      sendWATemplateNonBlocking(user.phone, 'wabmeta_otp', {
+        body: [otp],  // {{1}} = OTP code
+      });
+    }
 
     return { message: 'OTP sent to your email' };
   }
