@@ -21,7 +21,7 @@ interface AIResponse {
 // ============================================
 class AIService {
   private genAI: GoogleGenerativeAI;
-  private modelName = 'gemini-2.5-proiwj';
+  private modelName = 'gemini-2.5-pro';
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
