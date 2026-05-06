@@ -41,7 +41,9 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const morgan_1 = __importDefault(require("morgan"));
+const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const errorHandler_1 = require("./middleware/errorHandler");
 const requestLogger_1 = require("./middleware/requestLogger");
 const logger_1 = require("./utils/logger");
@@ -63,6 +65,10 @@ const inbox_routes_1 = __importDefault(require("./modules/inbox/inbox.routes"));
 const billing_routes_1 = __importDefault(require("./modules/billing/billing.routes"));
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const analytics_routes_1 = __importDefault(require("./modules/analytics/analytics.routes"));
+const crm_routes_1 = __importDefault(require("./modules/crm/crm.routes"));
+const automation_routes_1 = __importDefault(require("./modules/automation/automation.routes"));
+const calling_routes_1 = __importDefault(require("./modules/calling/calling.routes"));
+const wallet_routes_1 = __importDefault(require("./modules/wallet/wallet.routes"));
 // ============================================
 // VERIFY IMPORTS
 // ============================================
@@ -86,32 +92,29 @@ app.set('trust proxy', 1);
 app.use((0, helmet_1.default)({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow loading media on different domains
 }));
 // ============================================
 // CORS CONFIGURATION
 // ============================================
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
-    : [
-        'http://localhost:3000',
-        'http://localhost:5173',
-        'https://wabmeta.com',
-        'https://www.wabmeta.com',
-    ];
+const allowedOrigins = [
+    'https://wabmeta.com',
+    'https://www.wabmeta.com',
+    'http://localhost:5173',
+    'http://localhost:3000',
+];
 console.log('🔒 CORS Allowed Origins:', allowedOrigins);
 app.use((0, cors_1.default)({
-    origin: function (origin, callback) {
-        // Allow requests with no origin (mobile apps, curl, Postman, Meta webhooks)
-        if (!origin) {
+    origin: (origin, callback) => {
+        // ✅ No origin (mobile apps, postman, Meta webhooks)
+        if (!origin)
             return callback(null, true);
-        }
-        // Check if origin is in allowed list
-        if (allowedOrigins.indexOf(origin) !== -1) {
+        if (allowedOrigins.includes(origin)) {
             callback(null, true);
         }
         else {
             console.warn(`⚠️ CORS blocked origin: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
+            callback(new Error(`CORS blocked: ${origin}`));
         }
     },
     credentials: true,
@@ -119,14 +122,23 @@ app.use((0, cors_1.default)({
     allowedHeaders: [
         'Content-Type',
         'Authorization',
+        'authorization',
         'X-Requested-With',
         'X-Organization-Id',
         'x-organization-id',
+        'X-Access-Token',
+        'x-access-token',
         'Accept',
         'Origin',
         'X-Hub-Signature-256',
     ],
-    exposedHeaders: ['Content-Range', 'X-Content-Range', 'X-Total-Count'],
+    exposedHeaders: [
+        'Content-Range',
+        'X-Content-Range',
+        'X-Total-Count',
+        'x-new-access-token',
+        'x-token-refreshed',
+    ],
     maxAge: 600,
     optionsSuccessStatus: 204,
 }));
@@ -139,6 +151,7 @@ app.options('*', (0, cors_1.default)());
 // ============================================
 app.use(express_1.default.json({ limit: '10mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
+app.use((0, cookie_parser_1.default)());
 // ============================================
 // LOGGING
 // ============================================
@@ -156,7 +169,20 @@ app.use((req, res, next) => {
 // ============================================
 // STATIC FILES
 // ============================================
-app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
+const uploadsDir = path_1.default.join(process.cwd(), 'uploads');
+// Create if not exists
+if (!fs_1.default.existsSync(uploadsDir)) {
+    fs_1.default.mkdirSync(uploadsDir, { recursive: true });
+    console.log('📁 Created uploads directory:', uploadsDir);
+}
+console.log('📁 Uploads dir:', uploadsDir);
+console.log('📁 Uploads exists:', fs_1.default.existsSync(uploadsDir));
+// ✅ Serve with CORS
+app.use('/uploads', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+}, express_1.default.static(uploadsDir));
 // ============================================
 // HEALTH CHECK ROUTES
 // ============================================
@@ -166,6 +192,14 @@ app.get('/', (req, res) => {
         message: 'WabMeta API Server',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
+    });
+});
+// ✅ Health check - sabse upar hona chahiye
+app.get('/api/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: Math.floor(process.uptime()),
     });
 });
 app.get('/health', (req, res) => {
@@ -241,6 +275,13 @@ console.log('✅ Inline webhook handlers registered');
 // ============================================
 // API ROUTES
 // ============================================
+// Support for legacy/misconfigured frontend paths (/api/v1/api/* -> /api/*)
+app.use((req, res, next) => {
+    if (req.url.startsWith('/api/v1/api')) {
+        req.url = req.url.replace('/api/v1/api', '/api');
+    }
+    next();
+});
 console.log('🔧 Registering API routes...');
 try {
     // Test route
@@ -274,8 +315,6 @@ try {
     console.log('  ✅ /api/meta');
     app.use('/api/whatsapp', whatsapp_routes_1.default);
     console.log('  ✅ /api/whatsapp');
-    app.use('/api/chatbot', chatbot_routes_1.default);
-    console.log('  ✅ /api/chatbot');
     app.use('/api/inbox', inbox_routes_1.default);
     console.log('  ✅ /api/inbox');
     app.use('/api/billing', billing_routes_1.default);
@@ -284,6 +323,16 @@ try {
     console.log('  ✅ /api/admin');
     app.use('/api/analytics', analytics_routes_1.default);
     console.log('  ✅ /api/analytics');
+    app.use('/api/crm', crm_routes_1.default);
+    console.log('  ✅ /api/crm');
+    app.use('/api/automations', automation_routes_1.default);
+    console.log('  ✅ /api/automations');
+    app.use('/api/calling', calling_routes_1.default);
+    console.log('  ✅ /api/calling');
+    app.use('/api/chatbots', chatbot_routes_1.default);
+    console.log('  ✅ /api/chatbots');
+    app.use('/api', wallet_routes_1.default);
+    console.log('  ✅ /api (wallet)');
     logger_1.logger.info('✅ All API routes registered successfully');
 }
 catch (error) {

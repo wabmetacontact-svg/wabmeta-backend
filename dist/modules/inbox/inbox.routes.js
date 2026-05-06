@@ -11,6 +11,11 @@ const multer_1 = __importDefault(require("multer"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const router = (0, express_1.Router)();
+// ==========================================
+// PUBLIC MEDIA PROXY (Used for showing images in UI)
+// ==========================================
+router.get('/media/:mediaId', (req, res, next) => inbox_controller_1.inboxController.getMedia(req, res, next));
+router.get('/media-proxy', (req, res, next) => inbox_controller_1.inboxController.getMedia(req, res, next));
 router.use(auth_1.authenticate);
 // ==========================================
 // MULTER CONFIG (uploads/media)
@@ -30,7 +35,7 @@ const upload = (0, multer_1.default)({
     limits: { fileSize: 16 * 1024 * 1024 }, // 16MB
 });
 // ==========================================
-// MEDIA (NEW)
+// MEDIA (REMOVED: Moved to public section)
 // ==========================================
 // POST /inbox/media/upload
 router.post('/media/upload', upload.single('file'), (req, res, next) => inbox_controller_1.inboxController.uploadMedia(req, res, next));
@@ -60,6 +65,10 @@ router.patch('/conversations/:id/read', (req, res, next) => inbox_controller_1.i
 // ==========================================
 router.get('/conversations/:id/messages', (req, res, next) => inbox_controller_1.inboxController.getMessages(req, res, next));
 router.post('/conversations/:id/messages', (req, res, next) => inbox_controller_1.inboxController.sendMessage(req, res, next));
+// DELETE /inbox/conversations/:id/messages/:messageId
+router.delete('/conversations/:id/messages/:messageId', (req, res, next) => inbox_controller_1.inboxController.deleteMessage(req, res, next));
+// PATCH /inbox/conversations/:id/messages/:messageId (edit content)
+router.patch('/conversations/:id/messages/:messageId', (req, res, next) => inbox_controller_1.inboxController.editMessage(req, res, next));
 // ==========================================
 // ARCHIVE
 // ==========================================

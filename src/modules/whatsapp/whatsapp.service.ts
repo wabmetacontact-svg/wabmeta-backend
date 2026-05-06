@@ -195,20 +195,10 @@ class WhatsAppService {
   private formatPhoneNumber(phone: string): string {
     const digits = phone.replace(/[^0-9]/g, '');
 
-    // 10-digit number → Indian mobile (no country code) → prepend 91
-    if (digits.length === 10) {
-      console.log(`📞 formatPhoneNumber: 10-digit number detected, prepending 91 → 91${digits}`);
-      return `91${digits}`;
+    if (digits.length <= 10 && !phone.startsWith('+')) {
+      throw new Error(`Phone number ${phone} is missing a country code. Messages cannot be sent without a country code.`);
     }
 
-    // 0XXXXXXXXXX format (11 digits starting with 0) → strip leading 0, prepend 91
-    if (digits.length === 11 && digits.startsWith('0')) {
-      const fixed = `91${digits.slice(1)}`;
-      console.log(`📞 formatPhoneNumber: 0-prefixed number detected → ${fixed}`);
-      return fixed;
-    }
-
-    // Already has country code (e.g. 917xxxxxxxxx = 12 digits)
     return digits;
   }
 
@@ -219,11 +209,8 @@ class WhatsAppService {
     organizationId: string,
     phone: string
   ): Promise<any> {
-    // ✅ Canonical format: +919340103340
     const digits = phone.replace(/[^0-9]/g, '');
-    const normalized = digits.length === 10 ? `91${digits}`
-      : (digits.length === 11 && digits.startsWith('0')) ? `91${digits.slice(1)}`
-      : digits;
+    const normalized = digits; // Meta always sends inbound phone with country code
 
     const canonical = `+${normalized}`;       // +919340103340
     const withoutPlus = normalized;           // 919340103340

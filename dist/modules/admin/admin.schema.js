@@ -1,7 +1,7 @@
 "use strict";
 // src/modules/admin/admin.schema.ts
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateSystemSettingsSchema = exports.getActivityLogsSchema = exports.updatePlanSchema = exports.createPlanSchema = exports.updateSubscriptionSchema = exports.deleteOrganizationSchema = exports.updateOrganizationSchema = exports.getOrganizationByIdSchema = exports.getOrganizationsSchema = exports.deleteUserSchema = exports.updateUserStatusSchema = exports.updateUserSchema = exports.getUserByIdSchema = exports.getUsersSchema = exports.updateAdminSchema = exports.createAdminSchema = exports.adminLoginSchema = void 0;
+exports.updateSystemSettingsSchema = exports.getActivityLogsSchema = exports.updatePlanSchema = exports.createPlanSchema = exports.updateSubscriptionSchema = exports.deleteOrganizationSchema = exports.updateOrganizationSchema = exports.getOrganizationByIdSchema = exports.getOrganizationsSchema = exports.deleteUserSchema = exports.updateUserPasswordSchema = exports.updateUserStatusSchema = exports.updateUserSchema = exports.getUserByIdSchema = exports.getUsersSchema = exports.updateAdminSchema = exports.createAdminSchema = exports.adminLoginSchema = void 0;
 const zod_1 = require("zod");
 // ============================================
 // COMMON VALIDATORS
@@ -81,6 +81,14 @@ exports.updateUserStatusSchema = zod_1.z.object({
         status: zod_1.z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED', 'PENDING_VERIFICATION'], {
             required_error: 'Status is required',
         }),
+    }),
+});
+exports.updateUserPasswordSchema = zod_1.z.object({
+    params: zod_1.z.object({
+        id: zod_1.z.string().min(1, 'User ID is required'),
+    }),
+    body: zod_1.z.object({
+        password: zod_1.z.string().min(4, 'Password must be at least 4 characters'),
     }),
 });
 exports.deleteUserSchema = idParamSchema;

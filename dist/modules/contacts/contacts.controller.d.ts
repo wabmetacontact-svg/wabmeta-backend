@@ -21,6 +21,11 @@ export declare class ContactsController {
     addContactsToGroup(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     removeContactsFromGroup(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     getGroupContacts(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
+    getFeatureAccess(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    getCountryCodes(req: AuthRequest, res: Response): Promise<Response<any, Record<string, any>>>;
+    simpleBulkPaste(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    csvUpload(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    getImportStats(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
 }
 export declare const contactsController: ContactsController;
 //# sourceMappingURL=contacts.controller.d.ts.map

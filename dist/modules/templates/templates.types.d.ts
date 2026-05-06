@@ -8,6 +8,7 @@ export interface TemplateButton {
 export interface TemplateVariable {
     index: number;
     type: 'text' | 'currency' | 'date_time' | 'image' | 'document' | 'video';
+    example?: string;
     defaultValue?: string;
 }
 export interface CreateTemplateInput {
@@ -16,6 +17,7 @@ export interface CreateTemplateInput {
     category: TemplateCategory;
     headerType?: string | null;
     headerContent?: string | null;
+    headerMediaId?: string | null;
     bodyText: string;
     footerText?: string | null;
     buttons?: TemplateButton[];
@@ -28,6 +30,7 @@ export interface UpdateTemplateInput {
     category?: TemplateCategory;
     headerType?: string | null;
     headerContent?: string | null;
+    headerMediaId?: string | null;
     bodyText?: string;
     footerText?: string | null;
     buttons?: TemplateButton[];
@@ -43,6 +46,7 @@ export interface TemplatesQueryInput {
     sortBy?: 'createdAt' | 'updatedAt' | 'name' | 'status';
     sortOrder?: 'asc' | 'desc';
     whatsappAccountId?: string;
+    wabaId?: string;
 }
 export interface TemplateResponse {
     id: string;
@@ -51,6 +55,7 @@ export interface TemplateResponse {
     category: TemplateCategory;
     headerType: string | null;
     headerContent: string | null;
+    headerMediaId: string | null;
     bodyText: string;
     footerText: string | null;
     buttons: TemplateButton[];

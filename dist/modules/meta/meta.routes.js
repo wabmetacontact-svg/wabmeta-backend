@@ -191,17 +191,21 @@ router.post('/webhook', async (req, res) => {
     }
 });
 // ============================================
+// PUBLIC OAUTH CALLBACKS
+// These use state token verification instead of JWT
+// ============================================
+router.post('/callback', meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
+router.post('/connect', meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
+// ============================================
 // PROTECTED ROUTES
 // ============================================
 router.use(auth_1.authenticate);
 // ============================================
-// OAUTH & CONNECTION ROUTES
+// OAUTH & CONNECTION ROUTES (Private - to generate URL)
 // ============================================
 router.get('/oauth-url', meta_controller_1.metaController.getOAuthUrl.bind(meta_controller_1.metaController));
 router.get('/auth/url', meta_controller_1.metaController.getAuthUrl.bind(meta_controller_1.metaController));
 router.post('/initiate-connection', meta_controller_1.metaController.initiateConnection.bind(meta_controller_1.metaController));
-router.post('/callback', meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
-router.post('/connect', meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
 // ============================================
 // CONFIGURATION ROUTES
 // ============================================
@@ -537,6 +541,8 @@ router.delete('/organizations/:organizationId/disconnect', async (req, res, next
 router.get('/accounts', meta_controller_1.metaController.getAccounts.bind(meta_controller_1.metaController));
 router.get('/accounts/:id', meta_controller_1.metaController.getAccount.bind(meta_controller_1.metaController));
 router.delete('/accounts/:id', meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
+// ✅ Also support POST /accounts/:id/disconnect (frontend uses this)
+router.post('/accounts/:id/disconnect', meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
 // ============================================
 // HEALTH CHECK
 // ============================================

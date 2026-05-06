@@ -17,6 +17,8 @@ const google_auth_library_1 = require("google-auth-library");
 const googleClient = new google_auth_library_1.OAuth2Client(config_1.config.google.clientId);
 const redis_1 = require("../../config/redis");
 const redis = (0, redis_1.getRedis)();
+// WhatsApp API (for Welcome + OTP messages)
+const whatsapp_api_1 = require("../whatsapp/whatsapp.api");
 const OTP_PREFIX = 'otp:';
 // ============================================
 // HELPER FUNCTIONS
@@ -32,6 +34,23 @@ const sendEmailNonBlocking = (options) => {
         .catch((err) => {
         console.error('📧 Email failed (promise rejected):', err);
     });
+};
+// ✅ Non-blocking WhatsApp template sender
+// phoneNumberId & accessToken: aapka WabMeta platform number use karega
+const sendWATemplateNonBlocking = (phone, templateName, components) => {
+    // Platform ke pehle WhatsApp account se bhejo
+    // NOTE: Replace these with your actual platform phoneNumberId and accessToken from DB or config
+    const platformPhoneNumberId = config_1.config.meta?.platformPhoneNumberId || process.env.PLATFORM_WA_PHONE_ID;
+    const platformAccessToken = config_1.config.meta?.platformAccessToken || process.env.PLATFORM_WA_ACCESS_TOKEN;
+    if (!platformPhoneNumberId || !platformAccessToken || !phone) {
+        console.warn('⚠️ WhatsApp not configured for platform messages. Set PLATFORM_WA_PHONE_ID and PLATFORM_WA_ACCESS_TOKEN');
+        return;
+    }
+    // Format phone: add country code if missing
+    const formattedPhone = phone.startsWith('+') ? phone.replace('+', '') : `91${phone}`;
+    void whatsapp_api_1.whatsappApi.sendTemplateMessage(platformPhoneNumberId, formattedPhone, templateName, 'en', components ? { body: components.body } : undefined, platformAccessToken)
+        .then(() => console.log(`✅ WhatsApp [${templateName}] sent to ${formattedPhone}`))
+        .catch((err) => console.warn(`⚠️ WhatsApp [${templateName}] failed (non-critical):`, err?.message));
 };
 const formatUserResponse = (user) => ({
     id: user.id,
@@ -138,42 +157,45 @@ class AuthService {
                     status: 'PENDING_VERIFICATION',
                 },
             });
-            // Create organization if name provided (your current flow)
-            let organization = null;
-            if (organizationName && organizationName.trim().length > 0) {
-                organization = await tx.organization.create({
-                    data: {
-                        name: organizationName.trim(),
-                        slug: (0, otp_1.generateSlug)(organizationName),
-                        ownerId: user.id,
-                        planType: 'FREE_DEMO',
-                    },
-                });
-                // Add user as organization member
-                await tx.organizationMember.create({
-                    data: {
-                        organizationId: organization.id,
-                        userId: user.id,
-                        role: 'OWNER',
-                        joinedAt: new Date(),
-                    },
-                });
-                // Wait, we can define the subscription for FREE_DEMO if needed, else it is handled
-                const freePlan = await tx.plan.findUnique({ where: { type: 'FREE_DEMO' } });
-                if (!freePlan) {
-                    throw new errorHandler_1.AppError('FREE_DEMO plan not found. Please run db:seed.', 500);
-                }
-                await tx.subscription.create({
-                    data: {
-                        organizationId: organization.id,
-                        planId: freePlan.id,
-                        status: 'ACTIVE',
-                        billingCycle: 'monthly',
-                        currentPeriodStart: new Date(),
-                        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-                    },
-                });
+            // Create organization always
+            const computedOrgName = organizationName && organizationName.trim().length > 0
+                ? organizationName.trim()
+                : `${firstName || 'User'}'s Workspace`;
+            const organization = await tx.organization.create({
+                data: {
+                    name: computedOrgName,
+                    slug: (0, otp_1.generateSlug)(computedOrgName) + '-' + Math.random().toString(36).substring(2, 7),
+                    ownerId: user.id,
+                    planType: 'FREE_DEMO',
+                    featureSimpleBulkUpload: false,
+                    featureCsvUpload: true,
+                    featureOverrideByAdmin: false,
+                },
+            });
+            // Add user as organization member
+            await tx.organizationMember.create({
+                data: {
+                    organizationId: organization.id,
+                    userId: user.id,
+                    role: 'OWNER',
+                    joinedAt: new Date(),
+                },
+            });
+            // Wait, we can define the subscription for FREE_DEMO if needed, else it is handled
+            const freePlan = await tx.plan.findUnique({ where: { type: 'FREE_DEMO' } });
+            if (!freePlan) {
+                throw new errorHandler_1.AppError('FREE_DEMO plan not found. Please run db:seed.', 500);
             }
+            await tx.subscription.create({
+                data: {
+                    organizationId: organization.id,
+                    planId: freePlan.id,
+                    status: 'ACTIVE',
+                    billingCycle: 'monthly',
+                    currentPeriodStart: new Date(),
+                    currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                },
+            });
             return { user, organization };
         });
         // Send verification email (✅ non-blocking)
@@ -184,6 +206,12 @@ class AuthService {
             subject: emailContent.subject,
             html: emailContent.html,
         });
+        // ✅ Send WhatsApp welcome message (non-blocking, non-critical)
+        if (phone) {
+            sendWATemplateNonBlocking(phone, 'wabmeta_welcome', {
+                body: [firstName || 'there'], // {{1}} = user ka naam
+            });
+        }
         // Generate tokens
         const tokens = await generateTokens(result.user.id, result.user.email, result.organization?.id);
         return {
@@ -249,10 +277,43 @@ class AuthService {
             // throw new AppError('Please verify your email before logging in', 403);
         }
         // Get default organization
-        const organization = await getDefaultOrganization(user.id);
+        let organization = await getDefaultOrganization(user.id);
         if (!organization) {
-            console.log('⚠️ No organization found for user');
-            // You might want to create one here or handle differently
+            console.log('⚠️ No organization found for user, auto-creating...');
+            const orgName = `${user.firstName || 'User'}'s Workspace`;
+            organization = await database_1.default.organization.create({
+                data: {
+                    name: orgName,
+                    slug: (0, otp_1.generateSlug)(orgName) + '-' + Math.random().toString(36).substring(2, 7),
+                    ownerId: user.id,
+                    planType: 'FREE_DEMO',
+                    featureSimpleBulkUpload: false,
+                    featureCsvUpload: true,
+                    featureOverrideByAdmin: false,
+                },
+            });
+            await database_1.default.organizationMember.create({
+                data: {
+                    organizationId: organization.id,
+                    userId: user.id,
+                    role: 'OWNER',
+                    joinedAt: new Date(),
+                },
+            });
+            // Assign FREE_DEMO subscription
+            const freePlan = await database_1.default.plan.findUnique({ where: { type: 'FREE_DEMO' } });
+            if (freePlan) {
+                await database_1.default.subscription.create({
+                    data: {
+                        organizationId: organization.id,
+                        planId: freePlan.id,
+                        status: 'ACTIVE',
+                        billingCycle: 'monthly',
+                        currentPeriodStart: new Date(),
+                        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                    },
+                });
+            }
         }
         // Update last login
         await database_1.default.user.update({
@@ -422,6 +483,12 @@ class AuthService {
             subject: emailContent.subject,
             html: emailContent.html,
         });
+        // ✅ Send WhatsApp OTP (non-blocking, non-critical)
+        if (user.phone) {
+            sendWATemplateNonBlocking(user.phone, 'wabmeta_otp', {
+                body: [otp], // {{1}} = OTP code
+            });
+        }
         return { message: 'OTP sent to your email' };
     }
     // ==========================================
@@ -533,9 +600,12 @@ class AuthService {
             const organization = await database_1.default.organization.create({
                 data: {
                     name: `${given_name}'s Workspace`,
-                    slug: (0, otp_1.generateSlug)(`${given_name}-workspace`),
+                    slug: (0, otp_1.generateSlug)(`${given_name}-workspace`) + '-' + Math.random().toString(36).substring(2, 7),
                     ownerId: user.id,
                     planType: 'FREE_DEMO',
+                    featureSimpleBulkUpload: false,
+                    featureCsvUpload: true,
+                    featureOverrideByAdmin: false,
                 },
             });
             await database_1.default.organizationMember.create({
@@ -567,7 +637,43 @@ class AuthService {
             data: { lastLoginAt: new Date() },
         });
         // Get organization
-        const organization = await getDefaultOrganization(user.id);
+        let organization = await getDefaultOrganization(user.id);
+        // Auto heal Google Users missing organization
+        if (!organization) {
+            const orgName = `${user.firstName || 'User'}'s Workspace`;
+            organization = await database_1.default.organization.create({
+                data: {
+                    name: orgName,
+                    slug: (0, otp_1.generateSlug)(orgName) + '-' + Math.random().toString(36).substring(2, 7),
+                    ownerId: user.id,
+                    planType: 'FREE_DEMO',
+                    featureSimpleBulkUpload: false,
+                    featureCsvUpload: true,
+                    featureOverrideByAdmin: false,
+                },
+            });
+            await database_1.default.organizationMember.create({
+                data: {
+                    organizationId: organization.id,
+                    userId: user.id,
+                    role: 'OWNER',
+                    joinedAt: new Date(),
+                },
+            });
+            const freePlan = await database_1.default.plan.findUnique({ where: { type: 'FREE_DEMO' } });
+            if (freePlan) {
+                await database_1.default.subscription.create({
+                    data: {
+                        organizationId: organization.id,
+                        planId: freePlan.id,
+                        status: 'ACTIVE',
+                        billingCycle: 'monthly',
+                        currentPeriodStart: new Date(),
+                        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                    },
+                });
+            }
+        }
         // Generate tokens
         const tokens = await generateTokens(user.id, user.email, organization?.id);
         return {

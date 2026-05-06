@@ -43,18 +43,10 @@ const config_1 = require("./config");
 const database_1 = __importDefault(require("./config/database"));
 const socket_1 = require("./socket");
 const encryption_1 = require("./utils/encryption");
+const scheduler_service_1 = require("./services/scheduler.service");
 // Optional services
-let messageQueueWorker = null;
 let webhookService = null;
 async function loadOptionalServices() {
-    try {
-        const queueModule = await Promise.resolve().then(() => __importStar(require('./services/messageQueue.service')));
-        messageQueueWorker = queueModule.messageQueueWorker;
-        console.log('✅ Message queue service loaded');
-    }
-    catch (error) {
-        console.log('ℹ️  Message queue service not available (optional)');
-    }
     try {
         const webhookModule = await Promise.resolve().then(() => __importStar(require('./modules/webhooks/webhook.service')));
         webhookService = webhookModule.webhookService;
@@ -121,32 +113,7 @@ async function bootstrap() {
         console.log('📦 Loading optional services...');
         await loadOptionalServices();
         // ============================================
-        // Step 4: Start Message Queue Worker
-        // ============================================
-        if (messageQueueWorker) {
-            console.log('🔄 Starting message queue worker...');
-            try {
-                await messageQueueWorker.start();
-                console.log('✅ Message queue worker started');
-                messageQueueWorker.on('message:sent', (data) => {
-                    // Silent - only log in dev if needed
-                });
-                messageQueueWorker.on('message:failed', (data) => {
-                    console.error(`❌ Message failed: ${data.error}`);
-                });
-                messageQueueWorker.on('batch:complete', (data) => {
-                    if (data.processed > 0) {
-                        console.log(`✅ Batch processed: ${data.succeeded}/${data.processed} in ${data.duration}ms`);
-                    }
-                });
-            }
-            catch (error) {
-                console.error('⚠️ Failed to start message queue worker:', error);
-                console.log('ℹ️  Server will continue without queue worker');
-            }
-        }
-        // ============================================
-        // Step 5: Create HTTP Server
+        // Step 4: Create HTTP Server
         // ============================================
         const server = http_1.default.createServer(app_1.default);
         // ============================================
@@ -160,7 +127,20 @@ async function bootstrap() {
         // ============================================
         console.log('⏰ Starting cron jobs...');
         startCronJobs();
+        (0, scheduler_service_1.initializeScheduler)();
         console.log('✅ Cron jobs started');
+        // ============================================
+        // Step 7.1: Initialize Campaign Recovery
+        // ============================================
+        try {
+            const { campaignRecoveryService } = await Promise.resolve().then(() => __importStar(require('./modules/campaigns/campaigns.recovery.service')));
+            console.log('🔄 Initializing campaign recovery service...');
+            await campaignRecoveryService.initialize();
+            console.log('✅ Campaign recovery service initialized');
+        }
+        catch (error) {
+            console.warn('⚠️  Campaign recovery initialization failed:', error);
+        }
         // ============================================
         // Step 8: Initialize Redis (NEW)
         // ============================================
@@ -185,7 +165,7 @@ async function bootstrap() {
             console.log(`   🌍 Environment:   ${config_1.config.app.env}`);
             console.log(`   🔗 Frontend:      ${config_1.config.frontendUrl}`);
             console.log(`   🔐 Encryption:    ${encryptionValid ? 'ENABLED ✓' : 'DISABLED ✗'}`);
-            console.log(`   📨 Queue Worker:  ${messageQueueWorker?.isRunning ? 'RUNNING ✓' : 'DISABLED ✗'}`);
+            console.log(`   📨 Campaigns:     DIRECT SEND ✓`);
             console.log(`   🔌 Socket.io:     ENABLED ✓`);
             console.log('');
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -200,11 +180,6 @@ async function bootstrap() {
             server.close(async () => {
                 console.log('✅ HTTP server closed');
                 try {
-                    if (messageQueueWorker && messageQueueWorker.isRunning) {
-                        console.log('🔄 Stopping message queue worker...');
-                        await messageQueueWorker.stop();
-                        console.log('✅ Message queue worker stopped');
-                    }
                     await database_1.default.$disconnect();
                     console.log('✅ Database disconnected');
                 }
@@ -287,18 +262,7 @@ function startCronJobs() {
             }
         }, 60 * 60 * 1000);
     }
-    // ✅ 4. Clean up old queue messages daily
-    if (messageQueueWorker?.cleanupOldMessages) {
-        setInterval(async () => {
-            try {
-                await messageQueueWorker.cleanupOldMessages(30);
-            }
-            catch (error) {
-                console.error('❌ Error in queue cleanup cron:', error);
-            }
-        }, 24 * 60 * 60 * 1000);
-    }
-    // ✅ 5. **NEW: Process Scheduled Campaigns** (Every minute)
+    // ✅ 4. **Process Scheduled Campaigns** (Every minute)
     setInterval(async () => {
         try {
             await processScheduledCampaigns();
@@ -306,7 +270,7 @@ function startCronJobs() {
         catch (error) {
             console.error('❌ Error in scheduled campaigns cron:', error);
         }
-    }, 60 * 1000 // Every 1 minute
+    }, 30 * 1000 // Every 30 seconds (Improved precision from 60s)
     );
     console.log('✅ All cron jobs started (including scheduled campaigns)');
 }

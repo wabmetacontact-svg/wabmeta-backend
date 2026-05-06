@@ -51,13 +51,19 @@ const nodeDataSchema = zod_1.z.object({
 }).passthrough();
 const flowNodeSchema = zod_1.z.object({
     id: zod_1.z.string(),
-    type: zod_1.z.enum(['trigger', 'message', 'question', 'condition', 'action', 'delay', 'api', 'assign', 'tag', 'end']),
+    // ✅ All node types used by the chatbot engine
+    type: zod_1.z.enum([
+        'start', 'message', 'button', 'list', 'ai',
+        'condition', 'delay', 'action', 'end',
+        // Legacy/alternate names (backward compat)
+        'trigger', 'question', 'assign', 'tag', 'api',
+    ]),
     position: zod_1.z.object({
         x: zod_1.z.number(),
         y: zod_1.z.number(),
     }),
     data: nodeDataSchema,
-});
+}).passthrough();
 const flowEdgeSchema = zod_1.z.object({
     id: zod_1.z.string(),
     source: zod_1.z.string(),
@@ -79,7 +85,7 @@ const flowDataSchema = zod_1.z.object({
         y: zod_1.z.number(),
         zoom: zod_1.z.number(),
     }).optional(),
-});
+}).passthrough();
 // ============================================
 // REQUEST SCHEMAS
 // ============================================

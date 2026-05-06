@@ -185,7 +185,11 @@ class InboxService {
             database_1.default.message.count({ where }),
         ]);
         // ✅ Reverse back to chronological order for the UI (Bottom = Newest)
-        const chronologicalMessages = [...messages].reverse();
+        // ✅ Ensure timestamp is always populated for frontend
+        const chronologicalMessages = [...messages].reverse().map(m => ({
+            ...m,
+            timestamp: m.timestamp || m.createdAt
+        }));
         return {
             messages: chronologicalMessages,
             meta: {
@@ -384,8 +388,8 @@ class InboxService {
         if (!conversation) {
             conversation = await database_1.default.conversation.create({
                 data: {
-                    organizationId,
-                    contactId,
+                    organization: { connect: { id: organizationId } },
+                    contact: { connect: { id: contactId } },
                     isWindowOpen: true,
                     unreadCount: 0,
                 },
@@ -422,6 +426,52 @@ class InboxService {
             },
         });
         return message;
+    }
+    /**
+     * Send template message
+     */
+    async sendTemplateMessage(organizationId, conversationId, templateName, language, params, bodyText) {
+        // Store only the body text, not full JSON
+        const message = await database_1.default.message.create({
+            data: {
+                conversationId,
+                direction: 'OUTBOUND',
+                type: 'TEMPLATE',
+                content: bodyText, // ✅ Store readable text only
+                status: 'PENDING',
+                timestamp: new Date(),
+            },
+        });
+        return message;
+    }
+    // Delete a single message (local DB only)
+    async deleteMessage(organizationId, conversationId, messageId) {
+        await this.getConversationById(organizationId, conversationId);
+        const msg = await database_1.default.message.findFirst({ where: { id: messageId, conversationId } });
+        if (!msg)
+            throw new AppError('Message not found', 404);
+        await database_1.default.message.delete({ where: { id: messageId } });
+        const last = await database_1.default.message.findFirst({ where: { conversationId }, orderBy: { createdAt: 'desc' } });
+        await database_1.default.conversation.update({ where: { id: conversationId }, data: {
+                lastMessagePreview: last?.content?.substring(0, 100) || '',
+                lastMessageAt: last?.createdAt || new Date(),
+            } });
+        return { success: true, messageId };
+    }
+    // Edit a message content (outbound TEXT only)
+    async editMessage(organizationId, conversationId, messageId, newContent) {
+        await this.getConversationById(organizationId, conversationId);
+        const msg = await database_1.default.message.findFirst({ where: { id: messageId, conversationId } });
+        if (!msg)
+            throw new AppError('Message not found', 404);
+        if (msg.direction !== 'OUTBOUND')
+            throw new AppError('Only outbound messages can be edited', 400);
+        if (msg.type !== 'TEXT')
+            throw new AppError('Only text messages can be edited', 400);
+        return database_1.default.message.update({
+            where: { id: messageId },
+            data: { content: newContent, metadata: { ...(msg.metadata || {}), edited: true, editedAt: new Date().toISOString() } },
+        });
     }
 }
 exports.InboxService = InboxService;

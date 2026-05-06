@@ -78,7 +78,7 @@ class UsersController {
     async getSessions(req, res, next) {
         try {
             const userId = req.user.id;
-            const currentToken = req.cookies.refreshToken;
+            const currentToken = req.cookies?.refreshToken;
             const sessions = await users_service_1.usersService.getActiveSessions(userId, currentToken);
             return (0, response_1.sendSuccess)(res, sessions, 'Sessions fetched successfully');
         }
@@ -106,7 +106,7 @@ class UsersController {
     async revokeAllSessions(req, res, next) {
         try {
             const userId = req.user.id;
-            const currentToken = req.cookies.refreshToken;
+            const currentToken = req.cookies?.refreshToken;
             const result = await users_service_1.usersService.revokeAllSessions(userId, currentToken);
             return (0, response_1.sendSuccess)(res, result, result.message);
         }

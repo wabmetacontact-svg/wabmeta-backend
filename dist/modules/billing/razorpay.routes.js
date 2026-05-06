@@ -117,7 +117,7 @@ router.post("/verify", async (req, res, next) => {
                 where: { id: organizationId },
                 data: { planType },
             });
-            await tx.subscription.upsert({
+            const subscription = await tx.subscription.upsert({
                 where: { organizationId },
                 update: {
                     planId: plan.id,
@@ -140,6 +140,25 @@ router.post("/verify", async (req, res, next) => {
                     nextPaymentAt: end,
                 },
             });
+            // ✅ Create Payment record for revenue tracking
+            await tx.payment.create({
+                data: {
+                    organizationId,
+                    subscriptionId: subscription.id,
+                    razorpayOrderId: razorpay_order_id,
+                    razorpayPaymentId: razorpay_payment_id,
+                    razorpaySignature: razorpay_signature,
+                    amount: selected.amount, // Amount in paise from PRICE_MAP
+                    currency: "INR",
+                    status: "SUCCESS",
+                    planId: plan.id,
+                    planName: selected.label,
+                    billingCycle: planKey,
+                    description: `${selected.label} plan subscription`,
+                    receipt: `org_${organizationId}_${Date.now()}`.slice(0, 40),
+                    paidAt: now,
+                },
+            });
             // ✅ Fix: Use valid ActivityAction enum value
             await tx.activityLog.create({
                 data: {
@@ -152,7 +171,8 @@ router.post("/verify", async (req, res, next) => {
                         event: 'razorpay_success',
                         planKey,
                         razorpay_order_id,
-                        razorpay_payment_id
+                        razorpay_payment_id,
+                        amount: selected.amount,
                     },
                 },
             });

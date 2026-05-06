@@ -15,6 +15,9 @@ declare class TemplatesController {
     submit(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     sync(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     checkConnection(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    uploadToMeta(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    reuploadMedia(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    fixMedia(req: any, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 }
 export declare const templatesController: TemplatesController;
 export default templatesController;

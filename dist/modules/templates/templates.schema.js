@@ -16,7 +16,7 @@ exports.createTemplateSchema = zod_1.z.object({
         language: zod_1.z.string().min(1).default('en'),
         category: zod_1.z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).default('MARKETING'),
         headerType: zod_1.z.string().optional().nullable(),
-        headerContent: zod_1.z.string().max(60).optional().nullable(),
+        headerContent: zod_1.z.string().max(1024).optional().nullable(),
         bodyText: zod_1.z
             .string()
             .min(1, 'Body text is required')
@@ -31,6 +31,7 @@ exports.createTemplateSchema = zod_1.z.object({
         variables: zod_1.z.array(zod_1.z.object({
             index: zod_1.z.number(),
             type: zod_1.z.string(),
+            example: zod_1.z.any().optional(),
         })).optional(),
         whatsappAccountId: zod_1.z.string().optional(),
     }),
@@ -52,7 +53,7 @@ exports.updateTemplateSchema = zod_1.z.object({
         language: zod_1.z.string().min(1).optional(),
         category: zod_1.z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).optional(),
         headerType: zod_1.z.string().optional().nullable(),
-        headerContent: zod_1.z.string().max(60).optional().nullable(),
+        headerContent: zod_1.z.string().max(1024).optional().nullable(),
         bodyText: zod_1.z.string().min(1).max(1024).optional(),
         footerText: zod_1.z.string().max(60).optional().nullable(),
         buttons: zod_1.z.array(zod_1.z.object({
@@ -64,6 +65,7 @@ exports.updateTemplateSchema = zod_1.z.object({
         variables: zod_1.z.array(zod_1.z.object({
             index: zod_1.z.number(),
             type: zod_1.z.string(),
+            example: zod_1.z.any().optional(),
         })).optional(),
     }),
 });

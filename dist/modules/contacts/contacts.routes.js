@@ -11,15 +11,36 @@ const auth_1 = require("../../middleware/auth");
 const validate_1 = require("../../middleware/validate");
 const planLimits_1 = require("../../middleware/planLimits");
 const contacts_schema_1 = require("./contacts.schema");
-const contacts_import_middleware_1 = require("./contacts.import.middleware");
 const router = (0, express_1.Router)();
-const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Multer config for CSV upload
+const upload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'text/csv' ||
+            file.originalname.endsWith('.csv') ||
+            file.mimetype === 'application/vnd.ms-excel') {
+            cb(null, true);
+        }
+        else {
+            cb(new Error('Only CSV files are allowed'));
+        }
+    },
+});
 // All routes require authentication
 router.use(auth_1.authenticate);
+// ============================================
+// FEATURE ACCESS & COMMON
+// ============================================
+router.get('/feature-access', contacts_controller_1.contactsController.getFeatureAccess.bind(contacts_controller_1.contactsController));
+router.get('/country-codes', contacts_controller_1.contactsController.getCountryCodes.bind(contacts_controller_1.contactsController));
 // ============================================
 // CONTACT ROUTES (STATIC FIRST)
 // ============================================
 router.get('/stats', contacts_controller_1.contactsController.getStats.bind(contacts_controller_1.contactsController));
+router.get('/import-stats', contacts_controller_1.contactsController.getImportStats.bind(contacts_controller_1.contactsController));
 router.get('/tags', contacts_controller_1.contactsController.getTags.bind(contacts_controller_1.contactsController));
 router.get('/export', contacts_controller_1.contactsController.export.bind(contacts_controller_1.contactsController));
 router.post('/refresh-profiles/batch', contacts_controller_1.contactsController.refreshUnknownNames.bind(contacts_controller_1.contactsController));
@@ -40,11 +61,14 @@ router.delete('/groups/:groupId/contacts', (0, validate_1.validate)(contacts_sch
 // ============================================
 router.get('/', contacts_controller_1.contactsController.getList.bind(contacts_controller_1.contactsController));
 router.post('/', (0, validate_1.validate)(contacts_schema_1.createContactSchema), planLimits_1.checkContactLimit, contacts_controller_1.contactsController.create.bind(contacts_controller_1.contactsController));
-// ✅ Import contacts (NOW supports JSON + Array + CSV file)
-router.post('/import', contacts_import_middleware_1.contactsImportMiddleware, // converts array/file into {contacts:[]}
-planLimits_1.checkContactLimit, // ✅ ADD THIS
-(0, validate_1.validate)(contacts_schema_1.importContactsSchema), // validates normalized body
-contacts_controller_1.contactsController.import.bind(contacts_controller_1.contactsController));
+// Import contacts - with file upload
+router.post('/import', upload.single('file'), (req, res, next) => {
+    contacts_controller_1.contactsController.import(req, res, next);
+});
+// ✅ Simple Bulk Paste (₹2,500+)
+router.post('/bulk-paste', contacts_controller_1.contactsController.simpleBulkPaste.bind(contacts_controller_1.contactsController));
+// ✅ CSV Upload (₹899+)
+router.post('/csv-upload', contacts_controller_1.contactsController.csvUpload.bind(contacts_controller_1.contactsController));
 router.patch('/bulk', (0, validate_1.validate)(contacts_schema_1.bulkUpdateSchema), contacts_controller_1.contactsController.bulkUpdate.bind(contacts_controller_1.contactsController));
 router.delete('/bulk', (0, validate_1.validate)(contacts_schema_1.bulkDeleteSchema), contacts_controller_1.contactsController.bulkDelete.bind(contacts_controller_1.contactsController));
 // ============================================

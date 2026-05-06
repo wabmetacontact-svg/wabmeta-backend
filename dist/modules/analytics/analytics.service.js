@@ -114,33 +114,40 @@ class AnalyticsService {
                 createdAt: true,
             },
         });
-        // Process daily stats
+        // Process daily stats - Fill in zeros for a continuous timeline
         const dailyStats = {};
+        // Initialize all dates in the range
+        for (let i = 0; i <= days; i++) {
+            const date = new Date();
+            date.setDate(date.getDate() - (days - i));
+            const dateKey = date.toISOString().split('T')[0];
+            dailyStats[dateKey] = {
+                date: dateKey,
+                sent: 0,
+                delivered: 0,
+                read: 0,
+                failed: 0,
+                received: 0,
+            };
+        }
+        // Fill in actual data
         messages.forEach((msg) => {
             const dateKey = msg.createdAt.toISOString().split('T')[0];
-            if (!dailyStats[dateKey]) {
-                dailyStats[dateKey] = {
-                    date: dateKey,
-                    sent: 0,
-                    delivered: 0,
-                    read: 0,
-                    failed: 0,
-                    received: 0,
-                };
-            }
-            if (msg.direction === 'OUTBOUND') {
-                dailyStats[dateKey].sent++;
-                if (msg.status === 'DELIVERED')
-                    dailyStats[dateKey].delivered++;
-                if (msg.status === 'READ') {
-                    dailyStats[dateKey].delivered++;
-                    dailyStats[dateKey].read++;
+            if (dailyStats[dateKey]) {
+                if (msg.direction === 'OUTBOUND') {
+                    dailyStats[dateKey].sent++;
+                    if (msg.status === 'DELIVERED')
+                        dailyStats[dateKey].delivered++;
+                    if (msg.status === 'READ') {
+                        dailyStats[dateKey].delivered++;
+                        dailyStats[dateKey].read++;
+                    }
+                    if (msg.status === 'FAILED')
+                        dailyStats[dateKey].failed++;
                 }
-                if (msg.status === 'FAILED')
-                    dailyStats[dateKey].failed++;
-            }
-            else {
-                dailyStats[dateKey].received++;
+                else {
+                    dailyStats[dateKey].received++;
+                }
             }
         });
         // Convert to array and sort
@@ -283,14 +290,19 @@ class AnalyticsService {
                 createdAt: true,
             },
         });
-        // Process daily stats
+        // Process daily stats - Fill in zeros for a continuous timeline
         const dailyStats = {};
+        for (let i = 0; i <= days; i++) {
+            const date = new Date();
+            date.setDate(date.getDate() - (days - i));
+            const dateKey = date.toISOString().split('T')[0];
+            dailyStats[dateKey] = { date: dateKey, count: 0 };
+        }
         contacts.forEach((contact) => {
             const dateKey = contact.createdAt.toISOString().split('T')[0];
-            if (!dailyStats[dateKey]) {
-                dailyStats[dateKey] = { date: dateKey, count: 0 };
+            if (dailyStats[dateKey]) {
+                dailyStats[dateKey].count++;
             }
-            dailyStats[dateKey].count++;
         });
         const chartData = Object.values(dailyStats).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         // Source breakdown

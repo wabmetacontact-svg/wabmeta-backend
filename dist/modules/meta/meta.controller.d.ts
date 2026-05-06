@@ -20,6 +20,7 @@ export declare class MetaController {
     getIntegrationStatus(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     verifyWebhook(req: Request, res: Response, next: NextFunction): Promise<void>;
     handleWebhook(req: Request, res: Response): Promise<void>;
+    completeConnection(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 }
 export declare const metaController: MetaController;
 export default metaController;

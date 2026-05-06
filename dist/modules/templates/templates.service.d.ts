@@ -9,10 +9,19 @@ export declare class TemplatesService {
         errors: string[];
     };
     /**
+     * ✅ NEW: Helper to extract smuggled URL from mediaId
+     */
+    private extractSmuggledMedia;
+    /**
      * Create new template
      */
     create(organizationId: string, input: CreateTemplateInput & {
         whatsappAccountId?: string;
+        headerMediaId?: string;
+        headerContent?: string;
+        metaNumericId?: string | null;
+        cloudinaryUrl?: string | null;
+        permanentUrl?: string | null;
     }): Promise<TemplateResponse>;
     /**
      * Get list of templates with filtering
@@ -39,7 +48,11 @@ export declare class TemplatesService {
     /**
      * Update template
      */
-    update(organizationId: string, templateId: string, input: UpdateTemplateInput): Promise<TemplateResponse>;
+    update(organizationId: string, templateId: string, input: UpdateTemplateInput & {
+        headerMediaId?: string;
+        headerContent?: string;
+        whatsappAccountId?: string;
+    }): Promise<TemplateResponse>;
     /**
      * Delete template
      */

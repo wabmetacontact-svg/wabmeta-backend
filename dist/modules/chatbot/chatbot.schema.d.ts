@@ -10,7 +10,7 @@ export declare const createChatbotSchema: z.ZodObject<{
         flowData: z.ZodOptional<z.ZodObject<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
-                type: z.ZodEnum<["trigger", "message", "question", "condition", "action", "delay", "api", "assign", "tag", "end"]>;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
                 position: z.ZodObject<{
                     x: z.ZodNumber;
                     y: z.ZodNumber;
@@ -229,109 +229,449 @@ export declare const createChatbotSchema: z.ZodObject<{
                     tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
                     tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
                 }, z.ZodTypeAny, "passthrough">>;
-            }, "strip", z.ZodTypeAny, {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }, {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
-                        id: string;
-                        title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }>, "many">;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
             edges: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
                 source: z.ZodString;
@@ -390,60 +730,692 @@ export declare const createChatbotSchema: z.ZodObject<{
                 x: number;
                 zoom: number;
             }>>;
-        }, "strip", z.ZodTypeAny, {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -455,66 +1427,7 @@ export declare const createChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
-                y: number;
-                x: number;
-                zoom: number;
-            } | undefined;
-        }, {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
-                        id: string;
-                        title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
-                        rows: {
-                            id: string;
-                            title: string;
-                            description?: string | undefined;
-                        }[];
-                        title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }[];
-            edges: {
+            }, {
                 target: string;
                 id: string;
                 source: string;
@@ -526,72 +1439,1435 @@ export declare const createChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        }>>;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
+                y: number;
+                x: number;
+                zoom: number;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough">>>;
     }, "strip", z.ZodTypeAny, {
         name: string;
-        isDefault: boolean;
         triggerKeywords: string[];
+        isDefault: boolean;
         description?: string | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectOutputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -603,73 +2879,724 @@ export declare const createChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     }, {
         name: string;
         description?: string | undefined;
-        isDefault?: boolean | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectInputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -681,77 +3608,730 @@ export declare const createChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         name: string;
-        isDefault: boolean;
         triggerKeywords: string[];
+        isDefault: boolean;
         description?: string | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectOutputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -763,13 +4343,33 @@ export declare const createChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     };
@@ -777,61 +4377,692 @@ export declare const createChatbotSchema: z.ZodObject<{
     body: {
         name: string;
         description?: string | undefined;
-        isDefault?: boolean | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectInputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -843,14 +5074,35 @@ export declare const createChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     };
@@ -873,7 +5125,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
         flowData: z.ZodOptional<z.ZodObject<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
-                type: z.ZodEnum<["trigger", "message", "question", "condition", "action", "delay", "api", "assign", "tag", "end"]>;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
                 position: z.ZodObject<{
                     x: z.ZodNumber;
                     y: z.ZodNumber;
@@ -1092,109 +5344,449 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
                     tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
                 }, z.ZodTypeAny, "passthrough">>;
-            }, "strip", z.ZodTypeAny, {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }, {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
-                        id: string;
-                        title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }>, "many">;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
             edges: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
                 source: z.ZodString;
@@ -1253,60 +5845,692 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 x: number;
                 zoom: number;
             }>>;
-        }, "strip", z.ZodTypeAny, {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -1318,66 +6542,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
-                y: number;
-                x: number;
-                zoom: number;
-            } | undefined;
-        }, {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
-                        id: string;
-                        title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
-                        rows: {
-                            id: string;
-                            title: string;
-                            description?: string | undefined;
-                        }[];
-                        title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }[];
-            edges: {
+            }, {
                 target: string;
                 id: string;
                 source: string;
@@ -1389,13 +6554,744 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        }>>;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
+                y: number;
+                x: number;
+                zoom: number;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough">>>;
         status: z.ZodOptional<z.ZodNativeEnum<{
             DRAFT: "DRAFT";
             ACTIVE: "ACTIVE";
@@ -1405,61 +7301,692 @@ export declare const updateChatbotSchema: z.ZodObject<{
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         description?: string | null | undefined;
-        isDefault?: boolean | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectOutputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -1471,75 +7998,727 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     }, {
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         description?: string | null | undefined;
-        isDefault?: boolean | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectInputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -1551,14 +8730,35 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     }>;
@@ -1567,61 +8767,692 @@ export declare const updateChatbotSchema: z.ZodObject<{
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         description?: string | null | undefined;
-        isDefault?: boolean | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectOutputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -1633,14 +9464,35 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     };
@@ -1652,61 +9504,692 @@ export declare const updateChatbotSchema: z.ZodObject<{
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         description?: string | null | undefined;
-        isDefault?: boolean | undefined;
-        flowData?: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        flowData?: z.objectInputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -1718,14 +10201,35 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        } | undefined;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     };
@@ -1912,7 +10416,7 @@ export declare const saveFlowSchema: z.ZodObject<{
         flowData: z.ZodObject<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
-                type: z.ZodEnum<["trigger", "message", "question", "condition", "action", "delay", "api", "assign", "tag", "end"]>;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
                 position: z.ZodObject<{
                     x: z.ZodNumber;
                     y: z.ZodNumber;
@@ -2131,109 +10635,449 @@ export declare const saveFlowSchema: z.ZodObject<{
                     tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
                     tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
                 }, z.ZodTypeAny, "passthrough">>;
-            }, "strip", z.ZodTypeAny, {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }, {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
-                        id: string;
-                        title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }>, "many">;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
             edges: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
                 source: z.ZodString;
@@ -2292,60 +11136,692 @@ export declare const saveFlowSchema: z.ZodObject<{
                 x: number;
                 zoom: number;
             }>>;
-        }, "strip", z.ZodTypeAny, {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
                     y: number;
                     x: number;
-                };
-            }[];
-            edges: {
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
                 target: string;
                 id: string;
                 source: string;
@@ -2357,66 +11833,7 @@ export declare const saveFlowSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
-                y: number;
-                x: number;
-                zoom: number;
-            } | undefined;
-        }, {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
-                        id: string;
-                        title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
-                        rows: {
-                            id: string;
-                            title: string;
-                            description?: string | undefined;
-                        }[];
-                        title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }[];
-            edges: {
+            }, {
                 target: string;
                 id: string;
                 source: string;
@@ -2428,67 +11845,968 @@ export declare const saveFlowSchema: z.ZodObject<{
                 label?: string | undefined;
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
-            }[];
-            viewport?: {
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
                 y: number;
                 x: number;
                 zoom: number;
-            } | undefined;
-        }>;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            nodes: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">>, "many">;
+            edges: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                source: z.ZodString;
+                target: z.ZodString;
+                sourceHandle: z.ZodOptional<z.ZodString>;
+                targetHandle: z.ZodOptional<z.ZodString>;
+                label: z.ZodOptional<z.ZodString>;
+                data: z.ZodOptional<z.ZodObject<{
+                    condition: z.ZodOptional<z.ZodString>;
+                    buttonId: z.ZodOptional<z.ZodString>;
+                    optionValue: z.ZodOptional<z.ZodString>;
+                }, "strip", z.ZodTypeAny, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }, {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                }>>;
+            }, "strip", z.ZodTypeAny, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }, {
+                target: string;
+                id: string;
+                source: string;
+                data?: {
+                    condition?: string | undefined;
+                    buttonId?: string | undefined;
+                    optionValue?: string | undefined;
+                } | undefined;
+                label?: string | undefined;
+                sourceHandle?: string | undefined;
+                targetHandle?: string | undefined;
+            }>, "many">;
+            viewport: z.ZodOptional<z.ZodObject<{
+                x: z.ZodNumber;
+                y: z.ZodNumber;
+                zoom: z.ZodNumber;
+            }, "strip", z.ZodTypeAny, {
+                y: number;
+                x: number;
+                zoom: number;
+            }, {
+                y: number;
+                x: number;
+                zoom: number;
+            }>>;
+        }, z.ZodTypeAny, "passthrough">>;
     }, "strip", z.ZodTypeAny, {
         flowData: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+            nodes: z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }[];
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">[];
             edges: {
                 target: string;
                 id: string;
@@ -2507,61 +12825,233 @@ export declare const saveFlowSchema: z.ZodObject<{
                 x: number;
                 zoom: number;
             } | undefined;
+        } & {
+            [k: string]: unknown;
         };
     }, {
         flowData: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+            nodes: z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }[];
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">[];
             edges: {
                 target: string;
                 id: string;
@@ -2580,63 +13070,235 @@ export declare const saveFlowSchema: z.ZodObject<{
                 x: number;
                 zoom: number;
             } | undefined;
+        } & {
+            [k: string]: unknown;
         };
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         flowData: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+            nodes: z.objectOutputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }[];
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">[];
             edges: {
                 target: string;
                 id: string;
@@ -2655,6 +13317,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 x: number;
                 zoom: number;
             } | undefined;
+        } & {
+            [k: string]: unknown;
         };
     };
     params: {
@@ -2663,58 +13327,228 @@ export declare const saveFlowSchema: z.ZodObject<{
 }, {
     body: {
         flowData: {
-            nodes: {
-                type: "message" | "end" | "tag" | "delay" | "action" | "condition" | "assign" | "trigger" | "question" | "api";
-                data: {
-                    label: string;
-                    text?: string | undefined;
-                    options?: string[] | undefined;
-                    buttons?: {
+            nodes: z.objectInputType<{
+                id: z.ZodString;
+                type: z.ZodEnum<["start", "message", "button", "list", "ai", "condition", "delay", "action", "end", "trigger", "question", "assign", "tag", "api"]>;
+                position: z.ZodObject<{
+                    x: z.ZodNumber;
+                    y: z.ZodNumber;
+                }, "strip", z.ZodTypeAny, {
+                    y: number;
+                    x: number;
+                }, {
+                    y: number;
+                    x: number;
+                }>;
+                data: z.ZodObject<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
                         id: string;
                         title: string;
-                    }[] | undefined;
-                    mediaUrl?: string | undefined;
-                    errorMessage?: string | undefined;
-                    triggerType?: "keyword" | "first_message" | "all_messages" | "button_click" | undefined;
-                    keywords?: string[] | undefined;
-                    messageType?: "text" | "image" | "video" | "document" | "buttons" | "list" | undefined;
-                    listSections?: {
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
                         rows: {
                             id: string;
                             title: string;
                             description?: string | undefined;
                         }[];
                         title?: string | undefined;
-                    }[] | undefined;
-                    listButtonText?: string | undefined;
-                    questionText?: string | undefined;
-                    variableName?: string | undefined;
-                    validationType?: "number" | "email" | "text" | "phone" | "options" | "date" | undefined;
-                    conditionType?: "tag" | "variable" | "contact_field" | "time" | undefined;
-                    conditionVariable?: string | undefined;
-                    conditionOperator?: "contains" | "equals" | "not_equals" | "starts_with" | "ends_with" | "greater_than" | "less_than" | "is_empty" | "is_not_empty" | undefined;
-                    conditionValue?: string | undefined;
-                    actionType?: "subscribe" | "unsubscribe" | "add_tag" | "remove_tag" | "update_contact" | "notify_agent" | undefined;
-                    actionValue?: string | undefined;
-                    delayDuration?: number | undefined;
-                    apiUrl?: string | undefined;
-                    apiMethod?: "GET" | "DELETE" | "POST" | "PUT" | undefined;
-                    apiHeaders?: Record<string, string> | undefined;
-                    apiBody?: string | undefined;
-                    apiResponseVariable?: string | undefined;
-                    assignTo?: "user" | "team" | "round_robin" | undefined;
-                    assignUserId?: string | undefined;
-                    tagAction?: "add" | "remove" | undefined;
-                    tagNames?: string[] | undefined;
-                } & {
-                    [k: string]: unknown;
-                };
-                id: string;
-                position: {
-                    y: number;
-                    x: number;
-                };
-            }[];
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+                    label: z.ZodString;
+                    triggerType: z.ZodOptional<z.ZodEnum<["keyword", "first_message", "all_messages", "button_click"]>>;
+                    keywords: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    messageType: z.ZodOptional<z.ZodEnum<["text", "image", "video", "document", "buttons", "list"]>>;
+                    text: z.ZodOptional<z.ZodString>;
+                    mediaUrl: z.ZodOptional<z.ZodString>;
+                    buttons: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        id: z.ZodString;
+                        title: z.ZodString;
+                    }, "strip", z.ZodTypeAny, {
+                        id: string;
+                        title: string;
+                    }, {
+                        id: string;
+                        title: string;
+                    }>, "many">>;
+                    listSections: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                        title: z.ZodOptional<z.ZodString>;
+                        rows: z.ZodArray<z.ZodObject<{
+                            id: z.ZodString;
+                            title: z.ZodString;
+                            description: z.ZodOptional<z.ZodString>;
+                        }, "strip", z.ZodTypeAny, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }, {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }>, "many">;
+                    }, "strip", z.ZodTypeAny, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }, {
+                        rows: {
+                            id: string;
+                            title: string;
+                            description?: string | undefined;
+                        }[];
+                        title?: string | undefined;
+                    }>, "many">>;
+                    listButtonText: z.ZodOptional<z.ZodString>;
+                    questionText: z.ZodOptional<z.ZodString>;
+                    variableName: z.ZodOptional<z.ZodString>;
+                    validationType: z.ZodOptional<z.ZodEnum<["text", "number", "email", "phone", "date", "options"]>>;
+                    options: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                    errorMessage: z.ZodOptional<z.ZodString>;
+                    conditionType: z.ZodOptional<z.ZodEnum<["variable", "contact_field", "tag", "time"]>>;
+                    conditionVariable: z.ZodOptional<z.ZodString>;
+                    conditionOperator: z.ZodOptional<z.ZodEnum<["equals", "not_equals", "contains", "starts_with", "ends_with", "greater_than", "less_than", "is_empty", "is_not_empty"]>>;
+                    conditionValue: z.ZodOptional<z.ZodString>;
+                    actionType: z.ZodOptional<z.ZodEnum<["subscribe", "unsubscribe", "add_tag", "remove_tag", "update_contact", "notify_agent"]>>;
+                    actionValue: z.ZodOptional<z.ZodString>;
+                    delayDuration: z.ZodOptional<z.ZodNumber>;
+                    apiUrl: z.ZodOptional<z.ZodString>;
+                    apiMethod: z.ZodOptional<z.ZodEnum<["GET", "POST", "PUT", "DELETE"]>>;
+                    apiHeaders: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+                    apiBody: z.ZodOptional<z.ZodString>;
+                    apiResponseVariable: z.ZodOptional<z.ZodString>;
+                    assignTo: z.ZodOptional<z.ZodEnum<["user", "team", "round_robin"]>>;
+                    assignUserId: z.ZodOptional<z.ZodString>;
+                    tagAction: z.ZodOptional<z.ZodEnum<["add", "remove"]>>;
+                    tagNames: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+                }, z.ZodTypeAny, "passthrough">>;
+            }, z.ZodTypeAny, "passthrough">[];
             edges: {
                 target: string;
                 id: string;
@@ -2733,6 +13567,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 x: number;
                 zoom: number;
             } | undefined;
+        } & {
+            [k: string]: unknown;
         };
     };
     params: {

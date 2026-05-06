@@ -26,6 +26,24 @@ class MetaService {
             hasWebhookSecret: !!webhookSecret,
         };
     }
+    // ✅ Detect Connection Type Helper
+    detectConnectionType(metaData) {
+        if (!metaData)
+            return 'CLOUD_API';
+        // Check if it's Cloud API
+        if (metaData.api_version || metaData.cloud_api || metaData.platformType === 'CLOUD_API') {
+            return 'CLOUD_API';
+        }
+        // Check if it's Business App
+        if (metaData.business_app || metaData.app_based || metaData.platformType === 'WHATSAPP_BUSINESS_APP') {
+            return 'BUSINESS_APP';
+        }
+        // Check if it's On-Premise
+        if (metaData.on_premise || metaData.self_hosted || metaData.platformType === 'ON_PREMISE') {
+            return 'ON_PREMISE';
+        }
+        return 'CLOUD_API';
+    }
     // ============================================
     // OAUTH & CONFIGURATION
     // ============================================
@@ -76,10 +94,11 @@ class MetaService {
     // ============================================
     // CONNECTION FLOW - ✅ FIXED RECONNECT LOGIC
     // ============================================
-    async completeConnection(codeOrToken, organizationId, userId, onProgress) {
+    async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress) {
         try {
             console.log('\n🔄 ========== META CONNECTION START ==========');
             console.log('   Organization ID:', organizationId);
+            console.log('   Connection Type:', connectionType);
             console.log('   User ID:', userId);
             // ============================================
             // STEP 1: Get Access Token
@@ -190,6 +209,9 @@ class MetaService {
                 status: 'completed',
                 message: `Found phone: ${primaryPhone.displayPhoneNumber}`,
             });
+            // Auto-detect connection type based on primary phone data
+            const autoDetected = this.detectConnectionType(primaryPhone);
+            const finalConnectionType = autoDetected !== 'CLOUD_API' ? autoDetected : connectionType;
             // ============================================
             // STEP 4: Subscribe to Webhooks
             // ============================================
@@ -258,6 +280,7 @@ class MetaService {
                             verifiedName: primaryPhone.verifiedName,
                             qualityRating: primaryPhone.qualityRating,
                             status: client_1.WhatsAppAccountStatus.CONNECTED,
+                            connectionType: finalConnectionType,
                             isDefault: existingAccount.isDefault || !hasDefault, // Restore or set as default if no other default
                             codeVerificationStatus: primaryPhone.codeVerificationStatus,
                             nameStatus: primaryPhone.nameStatus,
@@ -302,6 +325,7 @@ class MetaService {
                             tokenExpiresAt,
                             webhookSecret: encryptedWebhookSecret,
                             status: client_1.WhatsAppAccountStatus.CONNECTED,
+                            connectionType: finalConnectionType,
                             isDefault: accountCount === 0,
                             codeVerificationStatus: primaryPhone.codeVerificationStatus,
                             nameStatus: primaryPhone.nameStatus,
@@ -332,6 +356,7 @@ class MetaService {
                         tokenExpiresAt,
                         webhookSecret: encryptedWebhookSecret,
                         status: client_1.WhatsAppAccountStatus.CONNECTED,
+                        connectionType: finalConnectionType,
                         isDefault: accountCount === 0,
                         codeVerificationStatus: primaryPhone.codeVerificationStatus,
                         nameStatus: primaryPhone.nameStatus,
@@ -406,8 +431,19 @@ class MetaService {
         console.log(`   Account ID: ${accountId}`);
         console.log(`   Organization: ${account.organizationId}`);
         console.log(`   Phone: ${account.phoneNumber}`);
-        const decryptedToken = (0, encryption_1.safeDecryptStrict)(account.accessToken);
-        if (!decryptedToken || !(0, encryption_1.isMetaToken)(decryptedToken)) {
+        let decryptedToken = (0, encryption_1.safeDecryptStrict)(account.accessToken);
+        // ✅ AUTO-FIX: If token is plain text (not encrypted), encrypt it now
+        if (!decryptedToken && account.accessToken && (0, encryption_1.isMetaToken)(account.accessToken)) {
+            console.log('🔄 Auto-fixing plain text token for account:', accountId);
+            const encryptedToken = (0, encryption_1.encrypt)(account.accessToken);
+            await database_1.default.whatsAppAccount.update({
+                where: { id: accountId },
+                data: { accessToken: encryptedToken }
+            });
+            decryptedToken = account.accessToken;
+            console.log('✅ Token encrypted and saved successfully');
+        }
+        if (!decryptedToken) {
             console.error(`❌ Failed to decrypt token for account: ${accountId}`);
             console.error(`   Possible causes:`);
             console.error(`   1. Token was not encrypted properly`);
@@ -624,6 +660,7 @@ class MetaService {
                 name: true,
                 language: true,
                 metaTemplateId: true,
+                headerMediaId: true, // ✅ Must fetch to preserve during sync
             },
         });
         const existingMap = new Map(existingTemplates.map((t) => [`${t.name}_${t.language}`, t]));
@@ -641,7 +678,9 @@ class MetaService {
                 const key = `${metaTemplate.name}_${metaTemplate.language}`;
                 metaKeys.add(key);
                 const existing = existingMap.get(key);
-                const templateData = {
+                // ✅ Extract header handle from Meta's example (for new templates)
+                const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
+                const baseTemplateData = {
                     organizationId,
                     whatsappAccountId: accountId,
                     wabaId: account.wabaId,
@@ -659,14 +698,29 @@ class MetaService {
                     qualityScore: metaTemplate.quality_score?.score || null,
                 };
                 if (existing) {
+                    // ✅ CRITICAL: Preserve existing headerMediaId - Meta does NOT return it in sync
+                    // Overwriting it with null causes 403 errors during campaign send
+                    const updateData = { ...baseTemplateData };
+                    if (existing.headerMediaId) {
+                        // Keep existing mediaId if already set
+                        delete updateData.headerMediaId;
+                    }
+                    else if (extractedHeaderHandle) {
+                        // Populate from Meta's example handle if available (rare)
+                        updateData.headerMediaId = extractedHeaderHandle;
+                    }
                     await database_1.default.template.update({
                         where: { id: existing.id },
-                        data: templateData,
+                        data: updateData,
                     });
                     updated++;
                 }
                 else {
-                    await database_1.default.template.create({ data: templateData });
+                    // New template: set headerMediaId from extracted handle if available
+                    if (extractedHeaderHandle) {
+                        baseTemplateData.headerMediaId = extractedHeaderHandle;
+                    }
+                    await database_1.default.template.create({ data: baseTemplateData });
                     created++;
                 }
             }
@@ -721,7 +775,8 @@ class MetaService {
                             language: template.language,
                         },
                     });
-                    const templateData = {
+                    const extractedHandle = this.extractHeaderHandle(template.components);
+                    const baseData = {
                         organizationId: account.organizationId,
                         whatsappAccountId: accountId,
                         wabaId: wabaId,
@@ -739,13 +794,23 @@ class MetaService {
                         qualityScore: template.quality_score?.score || null,
                     };
                     if (existing) {
+                        // ✅ CRITICAL: Do NOT overwrite headerMediaId during sync
+                        const updateData = { ...baseData };
+                        if (existing.headerMediaId) {
+                            delete updateData.headerMediaId;
+                        }
+                        else if (extractedHandle) {
+                            updateData.headerMediaId = extractedHandle;
+                        }
                         await database_1.default.template.update({
                             where: { id: existing.id },
-                            data: templateData,
+                            data: updateData,
                         });
                     }
                     else {
-                        await database_1.default.template.create({ data: templateData });
+                        if (extractedHandle)
+                            baseData.headerMediaId = extractedHandle;
+                        await database_1.default.template.create({ data: baseData });
                     }
                     synced++;
                 }
@@ -807,7 +872,35 @@ class MetaService {
         if (!Array.isArray(components))
             return null;
         const header = components.find((c) => c.type === 'HEADER');
-        return header?.text || header?.example?.header_text?.[0] || null;
+        if (!header)
+            return null;
+        if (header.text)
+            return header.text;
+        // Media Header Example Extraction
+        if (header.example) {
+            const ex = header.example;
+            return ex.header_url?.[0] || ex.header_handle?.[0] || ex.header_text?.[0] || null;
+        }
+        return null;
+    }
+    // ✅ NEW: Extract header_handle from Meta's example (the actual Media ID)
+    extractHeaderHandle(components) {
+        if (!Array.isArray(components))
+            return null;
+        const header = components.find((c) => c.type === 'HEADER');
+        if (!header || !header.example)
+            return null;
+        // Meta returns the handle in example.header_handle array
+        const handle = header.example?.header_handle?.[0];
+        // ✅ CRITICAL: Handles starting with '4:' are NOT valid Media IDs for the messages endpoint.
+        // They are only for template creation examples.
+        // Media IDs must be numeric.
+        if (handle && /^\d+$/.test(handle)) {
+            return handle;
+        }
+        // If it starts with '4:', it's a resumable upload handle, NOT a Media ID.
+        // Sending this in the 'id' field of a message will fail with Error 100.
+        return null;
     }
     extractFooterText(components) {
         if (!Array.isArray(components))
@@ -829,14 +922,47 @@ class MetaService {
             if (component.type === 'BODY' && component.text) {
                 const matches = component.text.match(/\{\{(\d+)\}\}/g);
                 if (matches) {
-                    matches.forEach((match, index) => {
+                    matches.forEach((match) => {
+                        const index = parseInt(match.replace(/[^\d]/g, ''));
                         variables.push({
-                            index: index + 1,
-                            type: 'text',
+                            index,
+                            type: 'body',
                             placeholder: match,
                         });
                     });
                 }
+            }
+            else if (component.type === 'HEADER' && (component.text || component.format === 'TEXT')) {
+                const text = component.text || '';
+                const matches = text.match(/\{\{(\d+)\}\}/g);
+                if (matches) {
+                    matches.forEach((match) => {
+                        const index = parseInt(match.replace(/[^\d]/g, ''));
+                        variables.push({
+                            index,
+                            type: 'header',
+                            placeholder: match,
+                        });
+                    });
+                }
+            }
+            else if (component.type === 'BUTTONS' && Array.isArray(component.buttons)) {
+                component.buttons.forEach((btn, btnIndex) => {
+                    if (btn.type === 'URL' && btn.url) {
+                        const matches = btn.url.match(/\{\{(\d+)\}\}/g);
+                        if (matches) {
+                            matches.forEach((match) => {
+                                const varIndex = parseInt(match.replace(/[^\d]/g, ''));
+                                variables.push({
+                                    index: varIndex,
+                                    type: 'button',
+                                    buttonIndex: btnIndex,
+                                    placeholder: match,
+                                });
+                            });
+                        }
+                    }
+                });
             }
         }
         return variables;

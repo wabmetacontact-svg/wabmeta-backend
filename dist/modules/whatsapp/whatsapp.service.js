@@ -42,6 +42,7 @@ const client_1 = require("@prisma/client");
 const meta_api_1 = require("../meta/meta.api");
 const encryption_1 = require("../../utils/encryption");
 const database_1 = __importDefault(require("../../config/database"));
+const wallet_deduction_service_1 = require("../wallet/wallet.deduction.service");
 // ============================================
 // WHATSAPP SERVICE CLASS
 // ============================================
@@ -154,37 +155,51 @@ class WhatsAppService {
      * Format phone number for WhatsApp API
      */
     formatPhoneNumber(phone) {
-        return phone.replace(/[^0-9]/g, '');
+        const digits = phone.replace(/[^0-9]/g, '');
+        if (digits.length <= 10 && !phone.startsWith('+')) {
+            throw new Error(`Phone number ${phone} is missing a country code. Messages cannot be sent without a country code.`);
+        }
+        return digits;
     }
     /**
-     * Get or create contact
+     * Get or create contact — always stores in canonical E.164 format: +919XXXXXXXXX
      */
     async getOrCreateContact(organizationId, phone) {
-        const formattedPhone = phone.startsWith('+')
-            ? phone
-            : `+${this.formatPhoneNumber(phone)}`;
-        const cleanPhone = this.formatPhoneNumber(phone);
+        const digits = phone.replace(/[^0-9]/g, '');
+        const normalized = digits; // Meta always sends inbound phone with country code
+        const canonical = `+${normalized}`; // +919340103340
+        const withoutPlus = normalized; // 919340103340
+        const tenDigit = normalized.slice(-10); // 9340103340
         let contact = await database_1.default.contact.findFirst({
             where: {
                 organizationId,
                 OR: [
-                    { phone: formattedPhone },
-                    { phone: cleanPhone },
-                    { phone: `+${cleanPhone}` }
-                ]
+                    { phone: canonical },
+                    { phone: withoutPlus },
+                    { phone: tenDigit },
+                ],
             },
         });
         if (!contact) {
             contact = await database_1.default.contact.create({
                 data: {
                     organizationId,
-                    phone: formattedPhone,
+                    phone: canonical, // ✅ Always store canonical format
                     source: 'WHATSAPP',
                     firstName: 'Unknown',
-                    status: 'ACTIVE'
+                    status: 'ACTIVE',
                 },
             });
-            console.log(`👤 Created new contact: ${contact.id}`);
+            console.log(`👤 Created new contact: ${canonical}`);
+        }
+        else if (contact.phone !== canonical) {
+            // ✅ Silent migration: update old-format phone to canonical
+            await database_1.default.contact.update({
+                where: { id: contact.id },
+                data: { phone: canonical },
+            }).catch(() => { });
+            contact.phone = canonical;
+            console.log(`🔄 Migrated contact phone → ${canonical}`);
         }
         return contact;
     }
@@ -215,14 +230,12 @@ class WhatsAppService {
             try {
                 conversation = await database_1.default.conversation.create({
                     data: {
-                        organizationId,
-                        // ❌ Removing phoneNumberId here because it's a FK to PhoneNumber.id (CUID)
-                        // but we are passing Meta's numeric Phone ID. This was causing crashes.
-                        contactId,
+                        organization: { connect: { id: organizationId } },
+                        contact: { connect: { id: contactId } },
                         lastMessageAt: new Date(),
                         lastMessagePreview: messagePreview,
                         unreadCount: 0,
-                        isWindowOpen: true,
+                        isWindowOpen: false, // ✅ Outbound-initiated: no inbound yet, window closed
                         isRead: true
                     },
                 });
@@ -240,15 +253,18 @@ class WhatsAppService {
             }
         }
         else {
-            await database_1.default.conversation.update({
-                where: { id: conversation.id },
-                data: {
-                    lastMessageAt: new Date(),
-                    lastMessagePreview: messagePreview,
-                    isWindowOpen: true,
-                    isRead: true
-                },
-            });
+            // ✅ Only update preview/time — do NOT touch isWindowOpen (preserve real state)
+            if (messagePreview) {
+                await database_1.default.conversation.update({
+                    where: { id: conversation.id },
+                    data: {
+                        lastMessageAt: new Date(),
+                        lastMessagePreview: messagePreview,
+                        isRead: true,
+                        unreadCount: 0,
+                    },
+                });
+            }
         }
         return conversation;
     }
@@ -307,7 +323,8 @@ class WhatsAppService {
     /**
      * Send a text message
      */
-    async sendTextMessage(accountId, to, message, conversationId, organizationId, tempId, clientMsgId) {
+    async sendTextMessage(accountId, to, message, conversationId, organizationId, tempId, clientMsgId, skipWindowCheck // ✅ ADD THIS
+    ) {
         return this.sendMessage({
             accountId,
             to,
@@ -316,7 +333,8 @@ class WhatsAppService {
             conversationId,
             organizationId,
             tempId,
-            clientMsgId
+            clientMsgId,
+            skipWindowCheck, // ✅ PASS KARO
         });
     }
     // Helper function to hydrate template text
@@ -389,6 +407,41 @@ class WhatsAppService {
             const waMessageId = response?.messages?.[0]?.id || response?.messageId;
             if (!waMessageId)
                 throw new Error('No message ID returned');
+            // ✅ ── WALLET DEDUCTION (Meta send ke BAAD, non-blocking) ─────────────────
+            const orgId = organizationId || account.organizationId;
+            // Template category DB se fetch karo
+            const templateForCategory = await database_1.default.template.findFirst({
+                where: {
+                    organizationId: orgId,
+                    name: templateName,
+                },
+                select: { category: true },
+            });
+            // Fire & forget - message blocking nahi hoga
+            (0, wallet_deduction_service_1.deductWalletForTemplate)({
+                organizationId: orgId,
+                templateName,
+                templateCategory: templateForCategory?.category,
+                recipientPhone: to,
+                waMessageId,
+            }).then(result => {
+                if (result.walletUsed) {
+                    console.log(`💳 Wallet: -₹${result.amount} for ${templateName}`);
+                }
+                else {
+                    console.log(`💳 Wallet skip: ${result.reason}`);
+                }
+            }).catch(err => {
+                console.error('💳 Wallet deduction failed (non-blocking):', err.message);
+            });
+            // ✅ ── END WALLET DEDUCTION ────────────────────────────────────────────────
+            // ✅ 2.5 Extract Media URL for saving
+            let mediaUrlForDB = null;
+            const headerComp = components?.find((c) => c.type === 'header');
+            if (headerComp && headerComp.parameters && headerComp.parameters[0]) {
+                const param = headerComp.parameters[0];
+                mediaUrlForDB = param.image?.link || param.video?.link || param.document?.link || null;
+            }
             // ✅ 3. Save FULL CONTENT to Database
             let savedMessage = null;
             if (conversationId && organizationId) {
@@ -401,20 +454,17 @@ class WhatsAppService {
                         wamId: waMessageId,
                         direction: 'OUTBOUND',
                         type: 'TEMPLATE',
-                        // Store JSON to keep structure, but include body
-                        content: JSON.stringify({
-                            templateName,
-                            body: fullContent, // This is what we show in UI
-                            header: template?.headerContent || null,
-                            footer: template?.footerText || null,
-                            params: components
-                        }),
+                        content: fullContent,
+                        mediaUrl: mediaUrlForDB, // ✅ Save media URL if present
                         status: 'SENT',
                         sentAt: now,
+                        timestamp: now,
                         createdAt: now,
                         metadata: {
                             ...(tempId ? { tempId } : {}),
                             ...(clientMsgId ? { clientMsgId } : {}),
+                            templateName,
+                            buttons: template?.buttons || []
                         },
                     },
                 });
@@ -497,43 +547,128 @@ class WhatsAppService {
             console.log(`   Phone Number ID: ${account.phoneNumberId}`);
             const formattedTo = this.formatPhoneNumber(to);
             console.log(`   Formatted Phone: ${formattedTo}`);
-            // ✅ Check if contact has WhatsApp BEFORE sending
-            let contactValid = true;
-            try {
-                console.log('📞 Checking if contact has WhatsApp...');
-                const contactCheck = await meta_api_1.metaApi.checkContact(account.phoneNumberId, accessToken, formattedTo);
-                console.log('📞 CONTACT CHECK:', JSON.stringify(contactCheck, null, 2));
-                const status = contactCheck?.contacts?.[0]?.status;
-                if (status && status !== 'valid') {
-                    contactValid = false;
-                    const errorMsg = `Recipient does not have WhatsApp or number is invalid (status: ${status})`;
-                    console.error(`❌ ${errorMsg}`);
+            // ✅ 24-HOUR WINDOW CHECK (For Text/Media/Interactive)
+            // Meta requires Templates for messages outside the 24h window
+            if (type !== 'template' && !options.skipWindowCheck) {
+                try {
+                    // Lightweight fetch — do NOT use getOrCreateConversation (it modifies data)
+                    let conv = null;
                     if (conversationId) {
-                        const failedContent = this.extractMessageContent(type, content);
-                        await database_1.default.message.create({
-                            data: {
-                                conversationId,
-                                whatsappAccountId: accountId,
-                                direction: client_1.MessageDirection.OUTBOUND,
-                                type: this.mapMessageType(type),
-                                content: failedContent,
-                                status: client_1.MessageStatus.FAILED,
-                                failureReason: errorMsg,
-                                sentAt: new Date(),
-                                failedAt: new Date(),
+                        conv = await database_1.default.conversation.findUnique({
+                            where: { id: conversationId },
+                            select: {
+                                id: true,
+                                isWindowOpen: true,
+                                windowExpiresAt: true,
+                                lastCustomerMessageAt: true,
                             },
                         });
                     }
-                    throw new Error(errorMsg);
+                    if (!conv) {
+                        // Find by contact + org
+                        const contact = await database_1.default.contact.findFirst({
+                            where: {
+                                organizationId,
+                                OR: [
+                                    { phone: to },
+                                    { phone: `+${this.formatPhoneNumber(to)}` },
+                                    { phone: this.formatPhoneNumber(to) },
+                                ],
+                            },
+                            select: { id: true },
+                        });
+                        if (contact) {
+                            conv = await database_1.default.conversation.findUnique({
+                                where: {
+                                    organizationId_contactId: { organizationId, contactId: contact.id },
+                                },
+                                select: {
+                                    id: true,
+                                    isWindowOpen: true,
+                                    windowExpiresAt: true,
+                                    lastCustomerMessageAt: true,
+                                },
+                            });
+                        }
+                    }
+                    // If no conversation exists yet, it's a fresh outbound — block it
+                    if (!conv) {
+                        const errorMsg = 'No inbound message from user yet. You must start with a Template Message.';
+                        console.warn(`⚠️ ${errorMsg}`);
+                        throw new Error(errorMsg);
+                    }
+                    const now = new Date();
+                    let windowExpired = false;
+                    // ✅ Priority 1: windowExpiresAt is the most reliable signal
+                    if (conv.windowExpiresAt) {
+                        windowExpired = new Date(conv.windowExpiresAt) <= now;
+                    }
+                    else if (conv.isWindowOpen === false) {
+                        windowExpired = true;
+                    }
+                    else if (conv.lastCustomerMessageAt) {
+                        // Priority 2: last customer message time
+                        windowExpired = (now.getTime() - new Date(conv.lastCustomerMessageAt).getTime()) > 24 * 60 * 60 * 1000;
+                    }
+                    else {
+                        // Priority 3: count inbound messages
+                        const inboundCount = await database_1.default.message.count({
+                            where: { conversationId: conv.id, direction: client_1.MessageDirection.INBOUND },
+                        });
+                        windowExpired = inboundCount === 0;
+                    }
+                    if (windowExpired) {
+                        const errorMsg = conv.lastCustomerMessageAt
+                            ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
+                            : 'No inbound message from user yet. You must start with a Template Message.';
+                        console.warn(`⚠️ ${errorMsg}`);
+                        // Save as failed message so user sees it in inbox
+                        if (conv.id) {
+                            await database_1.default.message.create({
+                                data: {
+                                    conversationId: conv.id,
+                                    whatsappAccountId: accountId,
+                                    direction: client_1.MessageDirection.OUTBOUND,
+                                    type: this.mapMessageType(type),
+                                    content: this.extractMessageContent(type, content),
+                                    status: client_1.MessageStatus.FAILED,
+                                    failureReason: errorMsg,
+                                    sentAt: now,
+                                    failedAt: now,
+                                },
+                            }).catch(() => { }); // non-blocking, don't crash on this
+                        }
+                        throw new Error(errorMsg);
+                    }
                 }
-                console.log('✅ Contact has WhatsApp - proceeding with send');
-            }
-            catch (checkError) {
-                if (!contactValid) {
-                    throw checkError;
+                catch (windowCheckErr) {
+                    // Re-throw only real window errors, not DB lookup errors
+                    if (windowCheckErr.message?.includes('Template Message') ||
+                        windowCheckErr.message?.includes('window closed') ||
+                        windowCheckErr.message?.includes('session expired')) {
+                        throw windowCheckErr;
+                    }
+                    // DB lookup failed silently — allow message to proceed, Meta API will validate
+                    console.warn('⚠️ Window check lookup failed (non-critical), proceeding:', windowCheckErr.message);
                 }
-                console.warn('⚠️ Contact check failed, continuing anyway:', checkError.message);
             }
+            // ✅ Skip contact check to reduce latency (Meta API will fail on send if invalid anyway)
+            /*
+            let contactValid = true;
+            try {
+              console.log('📞 Checking if contact has WhatsApp...');
+      
+              const contactCheck = await metaApi.checkContact(
+                account.phoneNumberId,
+                accessToken,
+                formattedTo
+              );
+      
+              const status = contactCheck?.contacts?.[0]?.status;
+      
+              if (status && status !== 'valid') { ... }
+            } catch (err) { ... }
+            */
             // Prepare message payload
             const messagePayload = {
                 messaging_product: 'whatsapp',
@@ -553,6 +688,20 @@ class WhatsAppService {
             const messageContent = this.extractMessageContent(type, content);
             const messagePreview = messageContent.substring(0, 100);
             console.log(`   Message Content: ${messageContent.substring(0, 50)}...`);
+            // ✅ Extract mediaUrl properly
+            let mediaUrlForDB = null;
+            const mediaTypesList = ['image', 'video', 'audio', 'document', 'sticker'];
+            if (mediaTypesList.includes(type)) {
+                // Try all possible locations
+                mediaUrlForDB =
+                    content?.[type]?.link || // { image: { link: '...' } }
+                        content?.[type]?.url || // { image: { url: '...' } }
+                        content?.link || // { link: '...' }
+                        content?.url || // { url: '...' }
+                        options.mediaUrl || // Direct mediaUrl option
+                        null;
+                console.log(`💾 Media URL for ${type}:`, mediaUrlForDB);
+            }
             // Get or create conversation
             const conversation = await this.getOrCreateConversation(organizationId, contact.id, account.phoneNumberId, messagePreview, conversationId);
             // Save message to database
@@ -565,7 +714,9 @@ class WhatsAppService {
                     direction: client_1.MessageDirection.OUTBOUND,
                     type: this.mapMessageType(type),
                     content: messageContent,
+                    mediaUrl: mediaUrlForDB, // ✅ Properly set
                     status: client_1.MessageStatus.SENT,
+                    timestamp: new Date(),
                     sentAt: new Date(),
                     metadata: {
                         ...(tempId ? { tempId } : {}),
@@ -589,15 +740,7 @@ class WhatsAppService {
                 tempId: tempId || message.metadata?.tempId,
                 clientMsgId: clientMsgId || message.metadata?.clientMsgId,
                 message: {
-                    id: message.id,
-                    conversationId: conversation.id,
-                    waMessageId: message.waMessageId,
-                    wamId: message.wamId,
-                    direction: message.direction,
-                    type: message.type,
-                    content: message.content,
-                    status: message.status,
-                    createdAt: message.createdAt,
+                    ...message,
                     tempId: tempId || message.metadata?.tempId,
                     clientMsgId: clientMsgId || message.metadata?.clientMsgId,
                 },
@@ -666,7 +809,7 @@ class WhatsAppService {
     /**
      * Send bulk campaign messages - WITH CONTACT CHECK
      */
-    async sendCampaignMessages(campaignId, batchSize = 50, delayMs = 1000) {
+    async sendCampaignMessages(campaignId, batchSize = 500, delayMs = 50) {
         console.log(`\n📢 ========== CAMPAIGN START ==========`);
         console.log(`   Campaign ID: ${campaignId}`);
         console.log(`   Batch Size: ${batchSize}`);
@@ -704,6 +847,28 @@ class WhatsAppService {
             });
             throw new Error('Failed to get access token for campaign. Please reconnect WhatsApp account.');
         }
+        // ✅ ── WALLET PRE-CHECK for Campaign ────────────────────────────────────────
+        const orgId = campaign.whatsappAccount.organizationId;
+        const { deductWalletForCampaign } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.deduction.service')));
+        const walletCheck = await deductWalletForCampaign({
+            organizationId: orgId,
+            templateName: campaign.template.name,
+            templateCategory: campaign.template.category,
+            totalRecipients: campaign.campaignContacts.length,
+            campaignId,
+        });
+        // Log wallet status
+        if (walletCheck.walletActive) {
+            console.log(`💳 Wallet check for campaign:`);
+            console.log(`   Estimated cost: ₹${walletCheck.estimatedCost.toFixed(2)}`);
+            console.log(`   Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
+            if (!walletCheck.canProceed) {
+                console.warn(`⚠️ Wallet balance low! Shortfall: ₹${walletCheck.shortfall.toFixed(2)}`);
+                console.warn(`⚠️ Campaign will continue but wallet may run out`);
+                // Note: Campaign block nahi karte, user ko notification jayega
+            }
+        }
+        // ✅ ── END WALLET PRE-CHECK ──────────────────────────────────────────────────
         const results = {
             sent: 0,
             failed: 0,
@@ -712,24 +877,13 @@ class WhatsAppService {
         for (const recipient of campaign.campaignContacts) {
             try {
                 const formattedPhone = this.formatPhoneNumber(recipient.contact.phone);
-                // ✅ Check contact BEFORE sending
+                // ✅ Skip contact check to reduce latency
+                /*
                 try {
-                    console.log(`📞 Checking contact: ${formattedPhone}`);
-                    const contactCheck = await meta_api_1.metaApi.checkContact(campaign.whatsappAccount.phoneNumberId, accessToken, formattedPhone);
-                    console.log('📞 CONTACT CHECK:', JSON.stringify(contactCheck));
-                    const status = contactCheck?.contacts?.[0]?.status;
-                    if (status && status !== 'valid') {
-                        throw new Error(`Recipient WhatsApp check failed: ${status}`);
-                    }
-                    console.log('✅ Contact validated');
-                }
-                catch (checkError) {
-                    // If contact check explicitly fails, mark as failed
-                    if (checkError.message.includes('WhatsApp check failed')) {
-                        throw checkError;
-                    }
-                    console.warn('⚠️ Contact check failed:', checkError.message);
-                }
+                  console.log(`📞 Checking contact: ${formattedPhone}`);
+                  ...
+                } catch (checkError: any) { ... }
+                */
                 // Build template components
                 const components = this.buildTemplateComponents(campaign.template, {});
                 // Send message
@@ -756,15 +910,94 @@ class WhatsAppService {
             }
             catch (error) {
                 console.error(`❌ Failed to send to ${recipient.contact.phone}:`, error.message);
-                const errorMessage = error.response?.data?.error?.message ||
-                    error.response?.data?.message ||
-                    error.message;
-                await this.updateContactStatus(campaignId, recipient.contactId, client_1.MessageStatus.FAILED, undefined, errorMessage);
+                const errorData = error.response?.data?.error || {};
+                const errorCode = errorData.code;
+                const errorMessage = errorData.message || error.message;
+                // Human-readable mapping for common Meta errors
+                let failureReason = errorMessage;
+                if (errorCode === 131030 || errorMessage.includes('not a WhatsApp user')) {
+                    failureReason = 'Phone number is not registered on WhatsApp';
+                }
+                else if (errorCode === 131048 || errorCode === 131021 || errorMessage.includes('rate limit')) {
+                    failureReason = 'Meta messaging rate limit reached';
+                }
+                else if (errorCode === 131056 || errorCode === 131051 || errorMessage.includes('restricted') || errorMessage.includes('banned')) {
+                    failureReason = 'Phone number or account restricted by Meta';
+                }
+                else if (errorCode === 132000 || errorMessage.includes('template')) {
+                    failureReason = 'Template was rejected or is not approved by Meta';
+                }
+                else if (errorMessage.includes('expired') || errorMessage.includes('24h')) {
+                    failureReason = '24-hour window closed (No user reply)';
+                }
+                await this.updateContactStatus(campaignId, recipient.contactId, client_1.MessageStatus.FAILED, undefined, failureReason);
                 results.failed++;
                 results.errors.push(`${recipient.contact.phone}: ${errorMessage}`);
             }
         }
         await this.checkCampaignCompletion(campaignId);
+        // ✅ ── SINGLE BULK WALLET DEDUCTION ─────────────────────────────────────
+        // One deduction for ALL sent messages - NOT per-recipient
+        if (walletCheck.walletActive && results.sent > 0) {
+            try {
+                const templateCategory = campaign.template?.category || 'MARKETING';
+                // ✅ INTEGER paise arithmetic - avoids floating-point errors
+                // e.g. 0.15 * 150 = 22.4999... (bug).  15 paise × 150 = 2250 paise (correct)
+                const rateRupees = (0, wallet_deduction_service_1.getRateForCategory)(templateCategory);
+                const ratePaise = Math.round(rateRupees * 100); // e.g. 15 for UTILITY
+                const totalAmountPaise = ratePaise * results.sent; // e.g. 15 × 150 = 2250
+                const totalAmountRupees = totalAmountPaise / 100; // e.g. 22.50
+                console.log(`💳 Bulk deduction: ${results.sent} msgs × ₹${rateRupees} = ₹${totalAmountRupees} (${totalAmountPaise} paise)`);
+                await database_1.default.$transaction(async (tx) => {
+                    const wallet = await tx.wallet.findUnique({ where: { organizationId: orgId } });
+                    if (!wallet || !wallet.isActive || wallet.flagged) {
+                        console.warn('💳 Wallet not available for bulk deduction - skipping');
+                        return;
+                    }
+                    const balanceBeforePaise = wallet.balancePaise;
+                    // Available = wallet balance + credit headroom
+                    const creditHeadroom = wallet.creditEnabled
+                        ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+                        : 0;
+                    const availablePaise = wallet.balancePaise + creditHeadroom;
+                    // Deduct as much as available (never go below 0)
+                    const actualDeductPaise = Math.min(totalAmountPaise, availablePaise);
+                    const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
+                    const newBalancePaise = Math.max(0, wallet.balancePaise - actualDeductPaise);
+                    await tx.wallet.update({
+                        where: { id: wallet.id },
+                        data: {
+                            balancePaise: newBalancePaise,
+                            creditUsedPaise: { increment: creditDeductedPaise },
+                            totalDebitedPaise: { increment: actualDeductPaise },
+                            lastTransactionAt: new Date(),
+                        },
+                    });
+                    const categoryLabel = templateCategory.charAt(0).toUpperCase() + templateCategory.slice(1).toLowerCase();
+                    await tx.walletTransaction.create({
+                        data: {
+                            walletId: wallet.id,
+                            type: 'debit',
+                            amountPaise: actualDeductPaise,
+                            balanceBeforePaise,
+                            balanceAfterPaise: newBalancePaise,
+                            description: `Campaign charge - ${categoryLabel} (${campaign.template.name}) × ${results.sent} messages`,
+                            status: 'completed',
+                            metaService: 'template_message',
+                            note: `Campaign: ${campaign.name}`,
+                        },
+                    });
+                    console.log(`✅ Bulk wallet deducted: ₹${(actualDeductPaise / 100).toFixed(2)} for ${results.sent} msgs ("${campaign.name}")`);
+                });
+            }
+            catch (walletErr) {
+                console.error('💳 Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
+            }
+        }
+        else {
+            console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${results.sent}`);
+        }
+        // ✅ ── END BULK DEDUCTION ─────────────────────────────────────────────────
         console.log(`📢 ========== CAMPAIGN END ==========`);
         console.log(`   Sent: ${results.sent}`);
         console.log(`   Failed: ${results.failed}\n`);

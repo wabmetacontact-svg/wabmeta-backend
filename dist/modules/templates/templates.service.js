@@ -1,14 +1,15 @@
 "use strict";
-// 📁 src/modules/templates/templates.service.ts - FINAL COMPLETE VERSION
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.templatesService = exports.TemplatesService = void 0;
+const axios_1 = __importDefault(require("axios"));
 const database_1 = __importDefault(require("../../config/database"));
 const errorHandler_1 = require("../../middleware/errorHandler");
 const whatsapp_api_1 = require("../whatsapp/whatsapp.api");
 const meta_service_1 = require("../meta/meta.service");
+const meta_api_1 = require("../meta/meta.api");
 const encryption_1 = require("../../utils/encryption");
 // ============================================
 // HELPERS
@@ -19,7 +20,8 @@ const formatTemplate = (template) => ({
     language: template.language,
     category: template.category,
     headerType: template.headerType,
-    headerContent: template.headerContent,
+    headerContent: template.headerContent, // ✅ This should have Cloudinary URL
+    headerMediaId: template.headerMediaId, // ✅ This has Meta handle
     bodyText: template.bodyText,
     footerText: template.footerText,
     buttons: template.buttons || [],
@@ -33,6 +35,39 @@ const formatTemplate = (template) => ({
     wabaId: template.wabaId || null,
     whatsappAccountId: template.whatsappAccountId || null,
 });
+/**
+ * ✅ NEW: Helper to upload media to Meta during template creation
+ */
+const uploadMediaToMeta = async (cloudinaryUrl, headerType, waData) => {
+    try {
+        console.log('📤 Uploading media to Meta:', { cloudinaryUrl, headerType });
+        // Download from Cloudinary
+        const response = await axios_1.default.get(cloudinaryUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
+                'Accept': '*/*'
+            }
+        });
+        const buffer = Buffer.from(response.data);
+        const mimeType = response.headers['content-type'] ||
+            (headerType === 'IMAGE' ? 'image/jpeg' :
+                headerType === 'VIDEO' ? 'video/mp4' :
+                    'application/pdf');
+        const filename = cloudinaryUrl.split('/').pop()?.split('?')[0] ||
+            `media.${mimeType.split('/')[1]}`;
+        console.log('📥 Downloaded:', { size: buffer.length, mimeType, filename });
+        // Upload to Meta
+        const result = await meta_api_1.metaApi.uploadMedia(waData.phoneNumberId, waData.accessToken, buffer, mimeType, filename, waData.wabaId);
+        console.log('✅ Meta upload successful:', result.id);
+        return result.id;
+    }
+    catch (error) {
+        console.error('❌ Meta upload failed:', error.message);
+        throw new errorHandler_1.AppError(`Failed to upload ${headerType.toLowerCase()} to WhatsApp: ${error.response?.data?.error?.message || error.message}`, 400);
+    }
+};
 const extractVariables = (text) => {
     const regex = /\{\{(\d+)\}\}/g;
     const variables = [];
@@ -54,11 +89,35 @@ const toMetaLanguage = (lang) => {
     const l = String(lang || '').trim();
     if (!l)
         return 'en_US';
-    // If already has underscore (en_US, hi_IN), return as-is
-    if (l.includes('_'))
+    // If it's already a valid-looking Meta language code (e.g., 'en', 'en_US', 'hi'), use it directly
+    if (l.length >= 2 && l.length <= 6 && !l.includes(' ')) {
         return l;
-    // Return short code as-is (en, hi, es)
+    }
+    const mapping = {
+        'english': 'en_US',
+        'hindi': 'hi',
+        'spanish': 'es_ES',
+        'portuguese': 'pt_BR',
+        'french': 'fr_FR',
+        'german': 'de_DE',
+        'italian': 'it_IT',
+    };
+    const lower = l.toLowerCase();
+    if (mapping[lower])
+        return mapping[lower];
     return l;
+};
+/**
+ * Normalizes template name to Meta's strict requirements
+ */
+const normalizeTemplateName = (name) => {
+    return name
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_]/g, '')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, ''); // Trim leading/trailing underscores
 };
 const normalizeHeaderType = (t) => {
     const headerType = String(t || 'NONE').toUpperCase();
@@ -67,8 +126,17 @@ const normalizeHeaderType = (t) => {
 const buildMetaTemplatePayload = (t) => {
     const components = [];
     const headerType = normalizeHeaderType(t.headerType);
-    // Header component
+    console.log('🔧 Building Meta template payload:', {
+        name: t.name,
+        language: t.language,
+        headerType,
+        hasMediaUrl: !!(t.headerMediaId || t.headerContent),
+    });
+    // ============================================
+    // HEADER COMPONENT
+    // ============================================
     if (headerType && headerType !== 'NONE') {
+        // TEXT Header
         if (headerType === 'TEXT' && t.headerContent) {
             const headerVars = extractVariables(t.headerContent);
             const headerComp = {
@@ -77,192 +145,282 @@ const buildMetaTemplatePayload = (t) => {
                 text: t.headerContent,
             };
             if (headerVars.length > 0) {
+                const samples = headerVars.map(idx => {
+                    const v = t.variables?.find(var_item => var_item.index === idx);
+                    return v?.example || `Example${idx}`;
+                });
                 headerComp.example = {
-                    header_text: headerVars.map((i) => `Example${i}`),
+                    header_text: samples,
                 };
             }
             components.push(headerComp);
+            console.log('✅ TEXT header added');
         }
+        // ✅ FIXED: MEDIA Headers (IMAGE, VIDEO, DOCUMENT)
         else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-            throw new errorHandler_1.AppError(`HeaderType ${headerType} requires media upload. Use TEXT header for now.`, 400);
+            let mediaId = t.headerMediaId || t.headerContent;
+            if (!mediaId) {
+                throw new errorHandler_1.AppError(`${headerType} template requires uploaded media. Please upload a file first.`, 400);
+            }
+            // ✅ Clean up smuggled URLs if present
+            if (mediaId.includes(':::')) {
+                mediaId = mediaId.split(':::')[0];
+            }
+            const headerComp = {
+                type: 'HEADER',
+                format: headerType,
+            };
+            // ✅ CRITICAL: Detect media ID type and use correct field
+            if (mediaId.startsWith('4:')) {
+                // ✅ TYPE 1: Resumable Upload Handle (e.g., "4:dGVtcGxh...")
+                // Meta Template API accepts this in header_handle
+                console.log(`✅ Using resumable upload handle for ${headerType}`);
+                headerComp.example = {
+                    header_handle: [mediaId],
+                };
+            }
+            else if (/^\d+$/.test(mediaId)) {
+                // ✅ TYPE 2: Numeric Media ID (e.g., "1234567890")
+                // Also valid for template creation via header_handle
+                console.log(`✅ Using numeric media ID for ${headerType}:`, mediaId);
+                headerComp.example = {
+                    header_handle: [mediaId],
+                };
+            }
+            else if (mediaId.startsWith('http')) {
+                // ✅ TYPE 3: URL (Cloudinary or other hosted URL)
+                // Meta also accepts URLs in some cases
+                console.log(`✅ Using media URL for ${headerType}`);
+                headerComp.example = {
+                    header_handle: [mediaId],
+                };
+            }
+            else {
+                // ✅ TYPE 4: Unknown format - try as handle anyway
+                console.warn(`⚠️ Unknown media ID format, attempting as handle: ${mediaId.substring(0, 30)}...`);
+                headerComp.example = {
+                    header_handle: [mediaId],
+                };
+            }
+            components.push(headerComp);
+            console.log(`✅ ${headerType} header added`);
         }
     }
-    // Body component
+    // ============================================
+    // BODY COMPONENT (unchanged)
+    // ============================================
     const bodyVars = extractVariables(t.bodyText);
     const bodyComp = { type: 'BODY', text: t.bodyText };
     if (bodyVars.length > 0) {
+        const samples = bodyVars.map(idx => {
+            const v = t.variables?.find(var_item => var_item.index === idx);
+            return v?.example || `Sample${idx}`;
+        });
         bodyComp.example = {
-            body_text: [bodyVars.map((i) => `Example${i}`)],
+            body_text: [samples],
         };
     }
     components.push(bodyComp);
-    // Footer component
+    // ============================================
+    // FOOTER COMPONENT (unchanged)
+    // ============================================
     if (t.footerText) {
         components.push({ type: 'FOOTER', text: t.footerText });
     }
-    // Buttons component
+    // ============================================
+    // BUTTONS COMPONENT (unchanged)
+    // ============================================
     if (t.buttons && t.buttons.length > 0) {
-        const buttons = t.buttons.slice(0, 3).map((b) => {
+        const buttons = t.buttons.slice(0, 10).map((b) => {
             const type = String(b.type || '').toUpperCase();
-            if (type.includes('URL')) {
+            const btn = {
+                type: type.includes('PHONE') ? 'PHONE_NUMBER' : (type.includes('URL') ? 'URL' : 'QUICK_REPLY'),
+                text: b.text
+            };
+            if (btn.type === 'URL') {
                 if (!b.url)
                     throw new errorHandler_1.AppError('URL button requires url field', 400);
-                return { type: 'URL', text: b.text, url: b.url };
+                btn.url = b.url;
             }
-            if (type.includes('PHONE')) {
-                if (!b.phoneNumber)
-                    throw new errorHandler_1.AppError('PHONE button requires phoneNumber field', 400);
-                return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phoneNumber };
+            else if (btn.type === 'PHONE_NUMBER') {
+                btn.phone_number = b.phoneNumber || b.phone_number;
             }
-            return { type: 'QUICK_REPLY', text: b.text };
+            return btn;
         });
         components.push({ type: 'BUTTONS', buttons });
     }
-    return {
+    const payload = {
         name: t.name,
         language: toMetaLanguage(t.language),
         category: String(t.category || 'UTILITY').toUpperCase(),
         components,
     };
+    console.log('📦 Final Meta payload:', JSON.stringify(payload, null, 2));
+    return payload;
 };
 /**
- * ✅ IMPROVED: Get WhatsApp Account from BOTH table structures
- * Supports:
- * 1. Old structure: WhatsAppAccount table
- * 2. New structure: MetaConnection + PhoneNumber tables
+ * ✅ FIXED: Get WhatsApp Account with robust retry logic
  */
 const getWhatsAppAccountWithToken = async (organizationId, whatsappAccountId) => {
-    try {
-        console.log('🔍 Getting WhatsApp account:', { organizationId, whatsappAccountId });
-        // ============================================
-        // METHOD 1: Try WhatsAppAccount table (old structure)
-        // ============================================
-        const where = {
-            organizationId,
-            status: 'CONNECTED',
-        };
-        if (whatsappAccountId) {
-            where.id = whatsappAccountId;
-        }
-        else {
-            where.isDefault = true;
-        }
-        let waAccount = await database_1.default.whatsAppAccount.findFirst({
-            where,
-            orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-        });
-        // If no default, get any connected account
-        if (!waAccount && !whatsappAccountId) {
-            waAccount = await database_1.default.whatsAppAccount.findFirst({
-                where: {
-                    organizationId,
-                    status: 'CONNECTED',
-                },
-                orderBy: { createdAt: 'desc' },
+    const MAX_RETRIES = 5;
+    const RETRY_DELAYS = [500, 1000, 2000, 3000, 5000]; // Progressive delays
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            console.log(`🔍 [Attempt ${attempt + 1}/${MAX_RETRIES}] Getting WhatsApp account:`, {
+                organizationId,
+                whatsappAccountId: whatsappAccountId || 'auto-detect',
             });
-        }
-        // ============================================
-        // METHOD 2: Try MetaConnection table (new structure)
-        // ============================================
-        if (!waAccount) {
-            console.log('📋 WhatsAppAccount not found, trying MetaConnection...');
-            try {
-                const metaConnection = await database_1.default.metaConnection.findUnique({
-                    where: { organizationId },
-                    include: {
-                        phoneNumbers: {
-                            where: { isActive: true },
-                            orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
-                        },
+            // ============================================
+            // METHOD 1: Try WhatsAppAccount table
+            // ============================================
+            let waAccount = null;
+            if (whatsappAccountId) {
+                // ✅ Direct ID lookup (most reliable)
+                waAccount = await database_1.default.whatsAppAccount.findFirst({
+                    where: {
+                        id: whatsappAccountId,
+                        organizationId,
                     },
                 });
-                if (metaConnection && metaConnection.phoneNumbers?.length > 0) {
-                    const primaryPhone = metaConnection.phoneNumbers[0];
-                    console.log('✅ Found MetaConnection:', {
-                        wabaId: metaConnection.wabaId,
-                        phoneNumber: primaryPhone.phoneNumber,
-                    });
-                    // Get decrypted token
-                    const decryptedToken = (0, encryption_1.safeDecryptStrict)(metaConnection.accessToken) || metaConnection.accessToken;
-                    return {
-                        account: {
-                            id: primaryPhone.id,
-                            phoneNumberId: primaryPhone.phoneNumberId,
-                            wabaId: metaConnection.wabaId,
-                            phoneNumber: primaryPhone.phoneNumber,
-                            accessToken: decryptedToken,
-                            status: metaConnection.status,
+                console.log(`   Direct lookup by ID:`, waAccount ? '✅ Found' : '❌ Not found');
+            }
+            // ✅ Fallback: Find ANY connected account for this org
+            if (!waAccount) {
+                waAccount = await database_1.default.whatsAppAccount.findFirst({
+                    where: {
+                        organizationId,
+                        status: 'CONNECTED',
+                    },
+                    orderBy: [
+                        { isDefault: 'desc' },
+                        { createdAt: 'desc' },
+                    ],
+                });
+                console.log(`   Fallback connected lookup:`, waAccount ? '✅ Found' : '❌ Not found');
+            }
+            // ✅ Last resort: Find ANY account for this org (even pending)
+            if (!waAccount) {
+                waAccount = await database_1.default.whatsAppAccount.findFirst({
+                    where: {
+                        organizationId,
+                    },
+                    orderBy: [
+                        { status: 'asc' }, // CONNECTED is 'C', DISCONNECTED is 'D', PENDING is 'P'. Sort by status might be tricky.
+                        { createdAt: 'desc' },
+                    ],
+                });
+                console.log(`   Last resort lookup:`, waAccount ? `✅ Found (status: ${waAccount.status})` : '❌ Not found');
+            }
+            // ============================================
+            // METHOD 2: Try MetaConnection table (new structure)
+            // ============================================
+            if (!waAccount) {
+                console.log('📋 Trying MetaConnection table...');
+                try {
+                    const metaConnection = await database_1.default.metaConnection.findUnique({
+                        where: { organizationId },
+                        include: {
+                            phoneNumbers: {
+                                where: { isActive: true },
+                                orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+                            },
                         },
-                        accessToken: decryptedToken,
-                        wabaId: metaConnection.wabaId,
-                        phoneNumberId: primaryPhone.phoneNumberId,
-                    };
+                    });
+                    if (metaConnection && metaConnection.phoneNumbers?.length > 0) {
+                        const primaryPhone = metaConnection.phoneNumbers[0];
+                        console.log('✅ Found via MetaConnection:', {
+                            wabaId: metaConnection.wabaId,
+                            phone: primaryPhone.phoneNumber,
+                        });
+                        // Decrypt token
+                        const decryptedToken = (0, encryption_1.safeDecryptStrict)(metaConnection.accessToken);
+                        if (!decryptedToken) {
+                            throw new errorHandler_1.AppError('Failed to decrypt MetaConnection token', 500);
+                        }
+                        return {
+                            account: {
+                                id: primaryPhone.id,
+                                phoneNumberId: primaryPhone.phoneNumberId,
+                                wabaId: metaConnection.wabaId,
+                                phoneNumber: primaryPhone.phoneNumber,
+                                accessToken: decryptedToken,
+                                status: metaConnection.status,
+                            },
+                            accessToken: decryptedToken,
+                            wabaId: metaConnection.wabaId,
+                            phoneNumberId: primaryPhone.phoneNumberId,
+                        };
+                    }
+                }
+                catch (metaError) {
+                    console.log('⚠️ MetaConnection not available:', metaError.message);
                 }
             }
-            catch (metaError) {
-                console.log('⚠️ MetaConnection table not available or query failed');
+            // ============================================
+            // Account Found - Validate & Return
+            // ============================================
+            if (waAccount) {
+                console.log('✅ WhatsApp account found:', {
+                    id: waAccount.id,
+                    phone: waAccount.phoneNumber,
+                    status: waAccount.status,
+                    wabaId: waAccount.wabaId,
+                });
+                // Check if account has required fields
+                if (!waAccount.wabaId) {
+                    throw new errorHandler_1.AppError('WhatsApp Business Account ID missing. Please reconnect in Settings → WhatsApp.', 400);
+                }
+                if (!waAccount.accessToken) {
+                    throw new errorHandler_1.AppError('WhatsApp access token missing. Please reconnect in Settings → WhatsApp.', 400);
+                }
+                // Get decrypted token
+                const accountWithToken = await meta_service_1.metaService.getAccountWithToken(waAccount.id);
+                if (!accountWithToken) {
+                    throw new errorHandler_1.AppError('Failed to decrypt token. Please reconnect in Settings → WhatsApp.', 400);
+                }
+                return {
+                    account: {
+                        id: waAccount.id,
+                        phoneNumberId: waAccount.phoneNumberId,
+                        wabaId: waAccount.wabaId,
+                        phoneNumber: waAccount.phoneNumber,
+                        accessToken: accountWithToken.accessToken,
+                        status: waAccount.status,
+                        isDefault: waAccount.isDefault,
+                    },
+                    accessToken: accountWithToken.accessToken,
+                    wabaId: waAccount.wabaId,
+                    phoneNumberId: waAccount.phoneNumberId,
+                };
             }
-        }
-        // ============================================
-        // No account found - throw helpful error
-        // ============================================
-        if (!waAccount) {
-            const anyAccount = await database_1.default.whatsAppAccount.findFirst({
-                where: { organizationId },
-                select: { id: true, status: true, phoneNumber: true },
-            });
-            if (!anyAccount) {
-                throw new errorHandler_1.AppError('No WhatsApp account found. Please connect your WhatsApp Business account in Settings → WhatsApp.', 400);
+            // ============================================
+            // Account Not Found - Retry or Throw
+            // ============================================
+            if (attempt < MAX_RETRIES - 1) {
+                const delay = RETRY_DELAYS[attempt];
+                console.log(`⏳ Account not found, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
             }
-            else if (anyAccount.status === 'DISCONNECTED') {
-                throw new errorHandler_1.AppError(`WhatsApp account (${anyAccount.phoneNumber}) is disconnected. Please reconnect in Settings → WhatsApp.`, 400);
+            // All retries exhausted
+            throw new errorHandler_1.AppError('No WhatsApp account found. Please connect your WhatsApp Business account in Settings → WhatsApp.', 400);
+        }
+        catch (error) {
+            // If it's a retryable error and we have retries left
+            if (attempt < MAX_RETRIES - 1 &&
+                (error.message.includes('not found') || error.message.includes('No WhatsApp'))) {
+                const delay = RETRY_DELAYS[attempt];
+                console.log(`⏳ Error: ${error.message}, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
             }
-            else {
-                throw new errorHandler_1.AppError(`WhatsApp account (${anyAccount.phoneNumber}) status is ${anyAccount.status}. Please check Settings → WhatsApp.`, 400);
-            }
-        }
-        // ============================================
-        // Validate WhatsAppAccount has required fields
-        // ============================================
-        if (!waAccount.wabaId) {
-            throw new errorHandler_1.AppError('WhatsApp Business Account ID missing. Please reconnect your account in Settings → WhatsApp.', 400);
-        }
-        if (!waAccount.accessToken) {
-            throw new errorHandler_1.AppError('WhatsApp access token missing. Please reconnect your account in Settings → WhatsApp.', 400);
-        }
-        // Get decrypted token
-        const accountWithToken = await meta_service_1.metaService.getAccountWithToken(waAccount.id);
-        if (!accountWithToken) {
-            throw new errorHandler_1.AppError('Failed to decrypt WhatsApp access token. Please reconnect your account in Settings → WhatsApp.', 400);
-        }
-        console.log('✅ Using WhatsAppAccount:', {
-            id: waAccount.id,
-            phone: waAccount.phoneNumber,
-            wabaId: waAccount.wabaId,
-            isDefault: waAccount.isDefault,
-        });
-        return {
-            account: {
-                id: waAccount.id,
-                phoneNumberId: waAccount.phoneNumberId,
-                wabaId: waAccount.wabaId,
-                phoneNumber: waAccount.phoneNumber,
-                accessToken: accountWithToken.accessToken,
-                status: waAccount.status,
-                isDefault: waAccount.isDefault,
-            },
-            accessToken: accountWithToken.accessToken,
-            wabaId: waAccount.wabaId,
-            phoneNumberId: waAccount.phoneNumberId,
-        };
-    }
-    catch (error) {
-        console.error('❌ Get WhatsApp account error:', error);
-        if (error instanceof errorHandler_1.AppError) {
+            // Non-retryable or retries exhausted
+            console.error('❌ getWhatsAppAccountWithToken failed:', error);
             throw error;
         }
-        throw new errorHandler_1.AppError('Failed to get WhatsApp account: ' + error.message, 500);
     }
+    // Should never reach here, but TypeScript requires it
+    throw new errorHandler_1.AppError('No WhatsApp account found after all retries.', 400);
 };
 // ============================================
 // SERVICE CLASS
@@ -313,54 +471,138 @@ class TemplatesService {
         return { valid: errors.length === 0, errors };
     }
     /**
+     * ✅ NEW: Helper to extract smuggled URL from mediaId
+     */
+    extractSmuggledMedia(mediaId, existingContent) {
+        const isScontent = (url) => !!url && url.includes('scontent.whatsapp');
+        const isExpiredHandle = (id) => !!id && id.startsWith('4:');
+        // ✅ CASE 1: Clean format (new upload - no smuggling)
+        if (mediaId && !mediaId.includes(':::')) {
+            return {
+                mediaId: mediaId,
+                content: isScontent(existingContent)
+                    ? null
+                    : existingContent || null,
+            };
+        }
+        // ✅ CASE 2: Legacy smuggled format "handle:::url"
+        if (mediaId?.includes(':::')) {
+            const parts = mediaId.split(':::');
+            const rawHandle = parts[0] || null;
+            const smuggledUrl = parts[1] || null;
+            // Clean URL prefer karo
+            const content = (smuggledUrl && !isScontent(smuggledUrl) ? smuggledUrl : null) ||
+                (existingContent && !isScontent(existingContent) ? existingContent : null);
+            return { mediaId: rawHandle, content };
+        }
+        // ✅ CASE 3: No mediaId
+        return {
+            mediaId: null,
+            content: isScontent(existingContent) ? null : existingContent || null,
+        };
+    }
+    /**
      * Create new template
      */
     async create(organizationId, input) {
-        const { name, language, category, headerType, headerContent, bodyText, footerText, buttons, variables, whatsappAccountId, } = input;
+        const headerType = normalizeHeaderType(input.headerType);
+        // ✅ Resolve best media fields
+        let finalMetaId = null;
+        let finalCloudinaryUrl = null;
+        if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+            // === Permanent URL resolve karo ===
+            // Priority: cloudinaryUrl > permanentUrl > smuggled URL > headerContent
+            finalCloudinaryUrl =
+                input.cloudinaryUrl ||
+                    input.permanentUrl ||
+                    (() => {
+                        // Legacy: extract from smuggled format
+                        if (input.headerMediaId?.includes(':::')) {
+                            const url = input.headerMediaId.split(':::')[1];
+                            return url && url.startsWith('http') && !url.includes('scontent')
+                                ? url
+                                : null;
+                        }
+                        return null;
+                    })() ||
+                    (input.headerContent?.startsWith('http') &&
+                        !input.headerContent.includes('scontent')
+                        ? input.headerContent
+                        : null) ||
+                    null;
+            // === Meta ID resolve karo ===
+            // Priority: metaNumericId > numeric from headerMediaId > handle
+            finalMetaId =
+                (input.metaNumericId || null) ||
+                    (() => {
+                        const rawId = input.headerMediaId?.split(':::')[0];
+                        // Numeric ID = permanent (best choice)
+                        if (rawId && /^\d+$/.test(rawId))
+                            return rawId;
+                        return null;
+                    })() ||
+                    // Handle (4:xxx) = template creation ke liye ok
+                    input.headerMediaId?.split(':::')[0] ||
+                    null;
+            console.log('✅ [Create] Media fields resolved:', {
+                finalMetaId: finalMetaId
+                    ? (finalMetaId.length > 20
+                        ? finalMetaId.substring(0, 20) + '...'
+                        : finalMetaId)
+                    : 'none',
+                finalCloudinaryUrl: finalCloudinaryUrl
+                    ? finalCloudinaryUrl.substring(0, 60)
+                    : 'none',
+                hasNumericId: finalMetaId ? /^\d+$/.test(finalMetaId) : false,
+            });
+        }
+        // Text header content
+        const mediaHeaderContent = ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)
+            ? finalCloudinaryUrl // ✅ Permanent URL DB me store hoga
+            : input.headerContent || null;
         // Validate template
         const validation = this.validateTemplate(input);
         if (!validation.valid) {
             throw new errorHandler_1.AppError(`Validation failed: ${validation.errors.join(', ')}`, 400);
         }
-        // ✅ Try to get WhatsApp account (supports both table structures)
+        // Check for WhatsApp account first
         let waData = null;
         let canSyncToMeta = false;
         try {
-            waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
+            waData = await getWhatsAppAccountWithToken(organizationId, input.whatsappAccountId);
             canSyncToMeta = true;
-            console.log('✅ WhatsApp account found, will sync to Meta');
         }
         catch (err) {
-            console.warn('⚠️ No WhatsApp account found, creating local-only template');
             canSyncToMeta = false;
         }
         // Check for duplicates
         const existing = await database_1.default.template.findFirst({
             where: {
                 organizationId,
-                name,
-                language,
+                name: input.name,
+                language: input.language,
             },
         });
         if (existing) {
             throw new errorHandler_1.AppError('Template with this name and language already exists', 409);
         }
         // Extract variables
-        const extractedVars = extractVariables(bodyText);
-        const finalVariables = variables && variables.length > 0
-            ? variables
+        const extractedVars = extractVariables(input.bodyText);
+        const finalVariables = input.variables && input.variables.length > 0
+            ? input.variables
             : extractedVars.map((index) => ({ index, type: 'text' }));
         // Create template data
         const templateData = {
             organizationId,
-            name,
-            language,
-            category,
-            headerType: headerType || null,
-            headerContent: headerContent || null,
-            bodyText,
-            footerText: footerText || null,
-            buttons: toJsonValue(buttons || []),
+            name: normalizeTemplateName(input.name),
+            language: input.language,
+            category: input.category,
+            headerType: input.headerType || null,
+            headerContent: mediaHeaderContent, // ✅ Permanent URL
+            headerMediaId: finalMetaId, // ✅ Numeric ID ya handle
+            bodyText: input.bodyText,
+            footerText: input.footerText || null,
+            buttons: toJsonValue(input.buttons || []),
             variables: toJsonValue(finalVariables),
             status: canSyncToMeta ? 'PENDING' : 'DRAFT',
             metaTemplateId: null,
@@ -384,18 +626,21 @@ class TemplatesService {
         if (canSyncToMeta && waData) {
             try {
                 const metaPayload = buildMetaTemplatePayload({
-                    name,
-                    language,
-                    category,
-                    headerType: headerType || null,
-                    headerContent: headerContent || null,
-                    bodyText,
-                    footerText: footerText || null,
-                    buttons: (buttons || []),
+                    name: normalizeTemplateName(input.name),
+                    language: input.language,
+                    category: input.category,
+                    headerType: input.headerType || null,
+                    headerContent: input.headerContent || null,
+                    headerMediaId: finalMetaId,
+                    bodyText: input.bodyText,
+                    footerText: input.footerText || null,
+                    buttons: (input.buttons || []),
+                    variables: finalVariables,
                 });
                 console.log('📤 Submitting template to Meta WABA:', waData.wabaId);
-                console.log('📝 Template language:', toMetaLanguage(language));
-                const metaRes = await whatsapp_api_1.whatsappApi.createMessageTemplate(waData.wabaId, waData.accessToken, metaPayload);
+                console.log('📝 Template language:', toMetaLanguage(input.language));
+                console.log('📦 Meta Payload:', JSON.stringify(metaPayload, null, 2));
+                const metaRes = await whatsapp_api_1.whatsappApi.createMessageTemplateByVersion(waData.wabaId, waData.accessToken, metaPayload, 'v21.0');
                 const metaTemplateId = metaRes?.id || metaRes?.template_id;
                 if (metaTemplateId) {
                     await database_1.default.template.update({
@@ -409,15 +654,16 @@ class TemplatesService {
                 }
             }
             catch (e) {
-                const metaErr = e?.response?.data?.error;
+                const metaErr = e.metaError || e.response?.data?.error;
                 const msg = String(metaErr?.message || e?.message || 'Meta submission failed');
                 console.error('❌ Meta template create failed:', {
                     code: metaErr?.code,
                     message: metaErr?.message,
                     error_subcode: metaErr?.error_subcode,
                     error_data: metaErr?.error_data,
-                    templateName: name,
-                    language: toMetaLanguage(language),
+                    templateName: input.name,
+                    language: toMetaLanguage(input.language),
+                    message_raw: e.message
                 });
                 await database_1.default.template.update({
                     where: { id: template.id },
@@ -509,12 +755,16 @@ class TemplatesService {
         const waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
         const metaTemplates = await whatsapp_api_1.whatsappApi.listMessageTemplates(waData.wabaId, waData.accessToken);
         console.log(`📥 Found ${metaTemplates.length} templates in Meta`);
+        // ✅ Track found names to handle deletions
+        const foundMetaKeys = new Set();
         let synced = 0;
         for (const mt of metaTemplates) {
             try {
                 const metaId = String(mt.id);
                 const metaName = String(mt.name);
                 const metaLang = String(mt.language);
+                // Track this key (name:lang)
+                foundMetaKeys.add(`${metaName}:${metaLang}`);
                 const metaStatusRaw = String(mt.status || 'PENDING').toUpperCase();
                 const mappedStatus = metaStatusRaw === 'APPROVED'
                     ? 'APPROVED'
@@ -526,20 +776,43 @@ class TemplatesService {
                 const headerComponent = mt.components?.find((c) => c.type === 'HEADER');
                 const footerComponent = mt.components?.find((c) => c.type === 'FOOTER');
                 const buttonsComponent = mt.components?.find((c) => c.type === 'BUTTONS');
+                // Extract header content properly for media templates
+                let headerContent = headerComponent?.text || null;
+                if (!headerContent && headerComponent?.example) {
+                    headerContent = headerComponent.example.header_handle?.[0] ||
+                        headerComponent.example.header_text?.[0] || null;
+                }
                 const existing = await database_1.default.template.findFirst({
                     where: {
-                        organizationId,
+                        whatsappAccountId: waData.account?.id || waData.account?.id, // Use ID from waData
                         name: metaName,
                         language: metaLang,
                     },
                 });
+                // ✅ CRITICAL BUG FIX: Don't let Meta's expiring scontent CDN wipe out our permanent Cloudinary URL
+                // NEVER save scontent URLs as permanent headerContent.
+                const isScontent = (url) => !!url && url.includes('scontent.whatsapp');
+                let finalHeaderContent = isScontent(headerContent) ? null : headerContent;
+                // If we have an existing record with a good URL, ALWAYS keep it
+                if (existing && existing.headerContent && !isScontent(existing.headerContent)) {
+                    // If the incoming content is bad or missing, preserve the good one we have
+                    if (!finalHeaderContent) {
+                        finalHeaderContent = existing.headerContent;
+                    }
+                }
                 if (existing) {
                     // Update existing
                     const updateData = {
+                        organizationId, // ✅ CLAIM ownership (move with account)
                         metaTemplateId: metaId,
                         status: mappedStatus,
                         rejectionReason,
                         category: (String(mt.category || 'UTILITY').toUpperCase()),
+                        headerType: headerComponent?.format || null,
+                        headerContent: finalHeaderContent,
+                        bodyText: bodyComponent?.text || existing.bodyText,
+                        footerText: footerComponent?.text || existing.footerText,
+                        buttons: toJsonValue(buttonsComponent?.buttons || []),
                     };
                     if (waData.wabaId)
                         updateData.wabaId = waData.wabaId;
@@ -559,7 +832,7 @@ class TemplatesService {
                         category: (String(mt.category || 'UTILITY').toUpperCase()),
                         bodyText: bodyComponent?.text || 'Imported from Meta',
                         headerType: headerComponent?.format || null,
-                        headerContent: headerComponent?.text || null,
+                        headerContent: finalHeaderContent,
                         footerText: footerComponent?.text || null,
                         status: mappedStatus,
                         metaTemplateId: metaId,
@@ -579,8 +852,31 @@ class TemplatesService {
                 console.error(`Failed to sync template ${mt.name}:`, err.message);
             }
         }
-        console.log(`✅ Synced ${synced} templates from Meta`);
-        return { message: 'Templates synced from Meta', synced };
+        // ✅ Handle Ghost Templates (Deleted in Meta)
+        // Find templates in DB for this org/waba that were NOT in Meta's response
+        const dbTemplates = await database_1.default.template.findMany({
+            where: {
+                organizationId,
+                wabaId: waData.wabaId,
+                status: { in: ['APPROVED', 'PENDING'] } // Only worry about active ones
+            }
+        });
+        let cleaned = 0;
+        for (const dt of dbTemplates) {
+            if (!foundMetaKeys.has(`${dt.name}:${dt.language}`)) {
+                console.log(`⚠️ Marking ghost template as REJECTED (Deleted in Meta): ${dt.name}`);
+                await database_1.default.template.update({
+                    where: { id: dt.id },
+                    data: {
+                        status: 'REJECTED',
+                        rejectionReason: 'Template deleted from Meta Business Suite.'
+                    }
+                });
+                cleaned++;
+            }
+        }
+        console.log(`✅ Synced ${synced} templates. Cleaned ${cleaned} ghosts.`);
+        return { message: `Sync complete. ${synced} synced, ${cleaned} cleaned.`, synced };
     }
     /**
      * Get template by ID
@@ -604,29 +900,61 @@ class TemplatesService {
         if (!existing) {
             throw new errorHandler_1.AppError('Template not found', 404);
         }
-        if (existing.status === 'APPROVED' && existing.metaTemplateId) {
-            throw new errorHandler_1.AppError('Cannot modify approved templates. Create a new template instead.', 400);
+        // ✅ FIXED: Approved template mein sirf media update allow karo
+        const isApproved = existing.status === 'APPROVED' && existing.metaTemplateId;
+        if (isApproved) {
+            // ✅ Check: Kya sirf media update ho raha hai?
+            const isMediaOnlyUpdate = (input.headerMediaId || input.headerContent) &&
+                !input.name &&
+                !input.bodyText &&
+                !input.language &&
+                !input.category;
+            if (!isMediaOnlyUpdate) {
+                throw new errorHandler_1.AppError('Cannot modify approved templates content. ' +
+                    'You can only re-upload media for expired handles.', 400);
+            }
+            // ✅ ALLOW: Sirf headerMediaId aur headerContent update karo
+            console.log('🔄 Updating media for approved template:', templateId);
+            const { mediaId: rawMediaId, content: extractedUrl } = this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
+            const updated = await database_1.default.template.update({
+                where: { id: templateId },
+                data: {
+                    headerMediaId: rawMediaId || existing.headerMediaId,
+                    headerContent: extractedUrl || existing.headerContent,
+                    // ✅ Status APPROVED rahega - sirf media update hua
+                },
+            });
+            console.log('✅ Media updated for approved template:', templateId);
+            return formatTemplate(updated);
         }
+        // ✅ Non-approved templates: Full update allow karo
         let finalVariables = input.variables;
         if (input.bodyText) {
             const extracted = extractVariables(input.bodyText);
             if (!finalVariables || finalVariables.length === 0) {
-                finalVariables = extracted.map((index) => ({ index, type: 'text' }));
+                finalVariables = extracted.map((index) => ({
+                    index,
+                    type: 'text'
+                }));
             }
         }
+        const { mediaId: rawMediaId, content: extractedUrl } = this.extractSmuggledMedia(input.headerMediaId, input.headerContent);
         const updateData = {
             name: input.name,
             language: input.language,
             category: input.category,
             headerType: input.headerType,
-            headerContent: input.headerContent,
+            headerContent: extractedUrl,
+            headerMediaId: rawMediaId,
             bodyText: input.bodyText,
             footerText: input.footerText,
         };
-        if (input.buttons !== undefined)
+        if (input.buttons !== undefined) {
             updateData.buttons = toJsonValue(input.buttons);
-        if (finalVariables !== undefined)
+        }
+        if (finalVariables !== undefined) {
             updateData.variables = toJsonValue(finalVariables);
+        }
         if (input.bodyText || input.headerContent) {
             updateData.status = 'PENDING';
         }
@@ -634,7 +962,7 @@ class TemplatesService {
             where: { id: templateId },
             data: updateData,
         });
-        console.log(`✅ Template updated: ${templateId}`);
+        console.log('✅ Template updated:', templateId);
         return formatTemplate(updated);
     }
     /**
@@ -643,12 +971,42 @@ class TemplatesService {
     async delete(organizationId, templateId) {
         const template = await database_1.default.template.findFirst({
             where: { id: templateId, organizationId },
+            include: { whatsappAccount: true },
         });
         if (!template) {
             throw new errorHandler_1.AppError('Template not found', 404);
         }
+        // 1. Attempt to delete from Meta if synced
+        if (template.metaTemplateId && template.whatsappAccount) {
+            try {
+                const waData = await getWhatsAppAccountWithToken(organizationId, template.whatsappAccountId || undefined);
+                console.log(`📤 Deleting template "${template.name}" from Meta...`);
+                await whatsapp_api_1.whatsappApi.deleteMessageTemplate(waData.wabaId, waData.accessToken, template.name);
+                console.log('✅ Deleted from Meta');
+            }
+            catch (metaErr) {
+                console.warn('⚠️ Failed to delete template from Meta:', metaErr.message);
+                // We continue even if Meta delete fails (might already be deleted there)
+            }
+        }
+        // 2. Handle DB relations
+        // Nullify templateId in message history to preserve chat history but break link
+        await database_1.default.message.updateMany({
+            where: { templateId },
+            data: { templateId: null },
+        });
+        // Delete message queue entries for this template
+        await database_1.default.messageQueue.deleteMany({
+            where: { templateId },
+        });
+        // Handle Campaigns - If we want to allow delete, we must handle campaigns.
+        // We'll delete related campaigns too to ensure the delete succeeds.
+        await database_1.default.campaign.deleteMany({
+            where: { templateId },
+        });
+        // 3. Final Delete
         await database_1.default.template.delete({ where: { id: templateId } });
-        console.log(`✅ Template deleted: ${templateId}`);
+        console.log(`✅ Template completely deleted: ${templateId}`);
         return { message: 'Template deleted successfully' };
     }
     /**
@@ -776,13 +1134,15 @@ class TemplatesService {
             bodyText: template.bodyText,
             footerText: template.footerText,
             buttons: template.buttons || [],
+            variables: template.variables || [],
+            headerMediaId: template.headerMediaId || undefined,
         });
         console.log('📤 Submitting template to Meta:', {
             templateId,
             name: template.name,
             language: toMetaLanguage(template.language),
         });
-        const metaRes = await whatsapp_api_1.whatsappApi.createMessageTemplate(waData.wabaId, waData.accessToken, metaPayload);
+        const metaRes = await whatsapp_api_1.whatsappApi.createMessageTemplateByVersion(waData.wabaId, waData.accessToken, metaPayload, 'v17.0');
         const metaTemplateId = metaRes?.id || metaRes?.template_id;
         const updateData = {
             metaTemplateId: metaTemplateId ? String(metaTemplateId) : template.metaTemplateId,

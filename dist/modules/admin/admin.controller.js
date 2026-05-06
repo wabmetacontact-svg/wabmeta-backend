@@ -1,10 +1,47 @@
 "use strict";
 // src/modules/admin/admin.controller.ts
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminController = exports.AdminController = void 0;
 const admin_service_1 = require("./admin.service");
 const admin_billing_service_1 = require("./admin.billing.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
+const database_1 = __importDefault(require("../../config/database"));
 // ============================================
 // RESPONSE HELPERS
 // ============================================
@@ -202,6 +239,23 @@ class AdminController {
             next(error);
         }
     }
+    async updateUserPassword(req, res, next) {
+        try {
+            const id = getParamId(req.params.id);
+            const { password } = req.body;
+            if (!id) {
+                throw new errorHandler_1.AppError('User ID is required', 400);
+            }
+            if (!password) {
+                throw new errorHandler_1.AppError('Password is required', 400);
+            }
+            const user = await admin_service_1.adminService.updateUserPassword(id, { password });
+            return sendSuccess(res, user, 'User password updated successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
     async deleteUser(req, res, next) {
         try {
             const id = getParamId(req.params.id);
@@ -317,6 +371,72 @@ class AdminController {
             }
             const result = await admin_service_1.adminService.updateSubscription(id, req.body);
             return sendSuccess(res, result, 'Subscription updated successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // FEATURE MANAGEMENT
+    // ============================================
+    async getOrganizationFeatures(req, res, next) {
+        try {
+            const organizationId = getParamId(req.params.organizationId);
+            const org = await database_1.default.organization.findUnique({
+                where: { id: organizationId },
+                select: {
+                    id: true,
+                    name: true,
+                    planType: true,
+                    featureSimpleBulkUpload: true,
+                    featureCsvUpload: true,
+                    featureOverrideByAdmin: true
+                }
+            });
+            if (!org) {
+                throw new errorHandler_1.AppError('Organization not found', 404);
+            }
+            return sendSuccess(res, {
+                organizationId: org.id,
+                organizationName: org.name,
+                currentPlan: org.planType,
+                features: {
+                    simpleBulkPaste: org.featureSimpleBulkUpload ?? false,
+                    csvUpload: org.featureCsvUpload ?? false,
+                    adminOverride: org.featureOverrideByAdmin ?? false
+                }
+            }, 'Features fetched');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async updateOrganizationFeatures(req, res, next) {
+        try {
+            const organizationId = getParamId(req.params.organizationId);
+            const { simpleBulkPaste, csvUpload, enableOverride } = req.body;
+            const org = await database_1.default.organization.findUnique({
+                where: { id: organizationId }
+            });
+            if (!org) {
+                throw new errorHandler_1.AppError('Organization not found', 404);
+            }
+            const updated = await database_1.default.organization.update({
+                where: { id: organizationId },
+                data: {
+                    featureSimpleBulkUpload: simpleBulkPaste,
+                    featureCsvUpload: csvUpload,
+                    featureOverrideByAdmin: enableOverride ?? true
+                }
+            });
+            return sendSuccess(res, {
+                organizationId,
+                features: {
+                    simpleBulkPaste: updated.featureSimpleBulkUpload,
+                    csvUpload: updated.featureCsvUpload,
+                    adminOverride: updated.featureOverrideByAdmin
+                }
+            }, 'Features updated');
         }
         catch (error) {
             next(error);
@@ -554,12 +674,13 @@ class AdminController {
     // ============================================
     async getSubscriptions(req, res) {
         try {
-            const { page, limit, status, planType, search } = req.query;
+            const { page, limit, status, planType, excludePlanType, search } = req.query;
             const result = await admin_billing_service_1.adminBillingService.getAllSubscriptions({
                 page: page ? parseInt(page) : undefined,
                 limit: limit ? parseInt(limit) : undefined,
                 status: status,
                 planType: planType,
+                excludePlanType: excludePlanType,
                 search: search,
             });
             return sendSuccess(res, result, 'Subscriptions retrieved successfully');
@@ -580,6 +701,173 @@ class AdminController {
         catch (error) {
             console.error('Get subscription stats error:', error);
             return sendError(res, error.message || 'Failed to get stats', 500);
+        }
+    }
+    // ============================================
+    // WHATSAPP CONNECTION MANAGEMENT
+    // ============================================
+    async getWhatsAppStats(req, res, next) {
+        try {
+            const stats = await admin_service_1.adminService.getWhatsAppConnectionStats();
+            return sendSuccess(res, stats, 'WhatsApp stats fetched successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async updateConnectionType(req, res, next) {
+        try {
+            const accountId = getParamId(req.params.accountId);
+            const { connectionType } = req.body;
+            if (!connectionType) {
+                throw new errorHandler_1.AppError('Connection type is required', 400);
+            }
+            const result = await admin_service_1.adminService.updateWhatsAppConnectionType(accountId, connectionType);
+            return sendSuccess(res, result, 'Connection type updated successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async getWhatsAppConnections(req, res, next) {
+        try {
+            const connections = await database_1.default.whatsAppAccount.findMany({
+                include: {
+                    organization: {
+                        select: {
+                            id: true,
+                            name: true,
+                            owner: {
+                                select: {
+                                    id: true,
+                                    email: true,
+                                    firstName: true,
+                                    lastName: true
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' }
+            });
+            return sendSuccess(res, connections, 'WhatsApp connections fetched');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async disconnectWhatsAppAccount(req, res, next) {
+        try {
+            const accountId = getParamId(req.params.accountId);
+            if (!accountId) {
+                throw new errorHandler_1.AppError('Account ID required', 400);
+            }
+            // Soft disconnect (preserves data)
+            await database_1.default.whatsAppAccount.update({
+                where: { id: accountId },
+                data: {
+                    status: 'DISCONNECTED',
+                    accessToken: null,
+                    tokenExpiresAt: null,
+                    isActive: false
+                }
+            });
+            return sendSuccess(res, null, 'Account disconnected successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // WALLET MANAGEMENT
+    // ============================================
+    async adminGetAllWallets(req, res, next) {
+        try {
+            const { page, limit, flagged, isActive } = req.query;
+            const { getAllWallets } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.service')));
+            const result = await getAllWallets({
+                page: Number(page) || 1,
+                limit: Number(limit) || 20,
+                flagged: flagged === 'true' ? true : flagged === 'false' ? false : undefined,
+                isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
+            });
+            return sendSuccess(res, result, 'Wallets retrieved successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async adminGetWalletRequests(req, res, next) {
+        try {
+            const { status, page, limit } = req.query;
+            const { getAccessRequests } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.service')));
+            const result = await getAccessRequests({
+                status: status,
+                page: Number(page) || 1,
+                limit: Number(limit) || 20,
+            });
+            return sendSuccess(res, result, 'Wallet requests retrieved');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async adminReviewWalletRequest(req, res, next) {
+        try {
+            const { requestId } = req.params;
+            const { action, note } = req.body;
+            const adminId = req.admin?.id;
+            if (!['approve', 'reject'].includes(action)) {
+                throw new errorHandler_1.AppError("Action must be 'approve' or 'reject'", 400);
+            }
+            const { reviewWalletRequest } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.service')));
+            const result = await reviewWalletRequest(requestId, adminId, action, note);
+            return sendSuccess(res, result, result.message);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async adminAdjustWalletBalance(req, res, next) {
+        try {
+            const { organizationId } = req.params;
+            const { type, amount, note } = req.body;
+            const adminId = req.admin?.id;
+            const { adminAdjustBalance } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.service')));
+            const result = await adminAdjustBalance(organizationId, adminId, {
+                type,
+                amountRupees: Number(amount),
+                note,
+            });
+            return sendSuccess(res, result, 'Balance adjusted successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async adminSetWalletCredit(req, res, next) {
+        try {
+            const { organizationId } = req.params;
+            const { creditLimit, enable } = req.body;
+            const { setCreditLimit } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.service')));
+            const result = await setCreditLimit(organizationId, Number(creditLimit), Boolean(enable));
+            return sendSuccess(res, result, 'Credit limit updated');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async adminFlagWallet(req, res, next) {
+        try {
+            const { organizationId } = req.params;
+            const { reason, unflag } = req.body;
+            const adminId = req.admin?.id;
+            const { flagWallet } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.service')));
+            const result = await flagWallet(organizationId, adminId, reason, unflag);
+            return sendSuccess(res, result, result.message);
+        }
+        catch (error) {
+            next(error);
         }
     }
 }

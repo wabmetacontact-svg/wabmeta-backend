@@ -15,7 +15,7 @@ export declare const config: {
     readonly frontendUrl: string;
     readonly frontend: {
         readonly url: string;
-        readonly corsOrigins: readonly [string, "https://wabmeta.com", "https://www.wabmeta.com", "http://localhost:3000", "http://localhost:5173"];
+        readonly corsOrigins: readonly ["https://wabmeta.com", "https://www.wabmeta.com", "http://localhost:3000", "http://localhost:5173"];
     };
     readonly jwt: {
         readonly secret: string;
@@ -63,6 +63,12 @@ export declare const config: {
     };
     readonly redis: {
         readonly url: string;
+    };
+    readonly cloudinary: {
+        readonly cloudName: string;
+        readonly apiKey: string;
+        readonly apiSecret: string;
+        readonly folder: string;
     };
 };
 export default config;

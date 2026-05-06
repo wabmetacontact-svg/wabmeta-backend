@@ -84,87 +84,34 @@ export class ContactsService {
   // ==========================================
 
   /**
-   * Validate Indian phone number (10 digits starting with 6-9)
-   */
-  private validateIndianPhone(phone: string): boolean {
-    const cleaned = phone.replace(/[\s\-\(\)]/g, '');
-    const indianPhoneRegex = /^[6-9]\d{9}$/;
-    return indianPhoneRegex.test(cleaned);
-  }
-
-  /**
-   * Normalize phone to 10-digit format
-   */
-  private normalizeToTenDigits(phone: string): string {
-    let cleaned = phone.replace(/[\s\-\(\)\+]/g, '');
-
-    // Remove leading zeros
-    cleaned = cleaned.replace(/^0+/, '');
-
-    // Handle different formats
-    if (cleaned.startsWith('91') && cleaned.length === 12) {
-      return cleaned.substring(2);
-    } else if (cleaned.length === 10) {
-      return cleaned;
-    }
-
-    return cleaned;
-  }
-
-  /**
    * ✅ Validate and normalize phone (throws error if invalid)
    */
   private validateAndNormalizePhone(phone: string): string {
-    const normalized = this.normalizeToTenDigits(phone);
+    const { parsePhoneNumber } = require('../../utils/phoneInternational');
+    const parsed = parsePhoneNumber(phone);
 
-    if (!this.validateIndianPhone(normalized)) {
+    if (!parsed.isValid) {
       throw new AppError(
-        `Invalid phone number: ${phone}. Only Indian numbers (+91) starting with 6-9 are allowed.`,
+        `Invalid phone number: ${phone}. Must include country code (e.g., +91, +1).`,
         400
       );
     }
 
-    return normalized;
+    return parsed.fullNumber;
   }
 
   /**
-   * ✅ Try to normalize phone - returns null if invalid (for import)
-   */
-  /**
-   * ✅ Try to normalize phone - returns 10 digits if valid Indian Mobile, returns null if invalid.
+   * ✅ Try to normalize phone - returns full number if valid, returns null if invalid.
    */
   private tryNormalizePhone(phone: any): string | null {
     try {
       if (!phone) return null;
-      let cleaned = String(phone).trim();
-
-      // Remove non-numeric characters EXCEPT '+'
-      cleaned = cleaned.replace(/[^\d+]/g, '');
-
-      // Handle + if present
-      if (cleaned.startsWith('+')) {
-        cleaned = cleaned.substring(1);
+      const { parsePhoneNumber } = require('../../utils/phoneInternational');
+      const parsed = parsePhoneNumber(String(phone));
+      
+      if (parsed.isValid) {
+        return parsed.fullNumber;
       }
-
-      // Remove leading zeros (e.g., 098..., 0091...)
-      cleaned = cleaned.replace(/^0+/, '');
-
-      // If it starts with 91 and length is 12 (91 followed by 10 digits)
-      if (cleaned.startsWith('91') && cleaned.length === 12) {
-        cleaned = cleaned.substring(2);
-      }
-      // If it's just 10 digits (9876543210)
-      else if (cleaned.length === 10) {
-        // No action needed, will validate below
-      }
-      // If it's 10 digits but starts with 91 already stripped? 
-      // Above replace(/^0+/) handles 0091 which becomes 91...
-
-      // Final Check: Must be exactly 10 digits and start with 6, 7, 8, or 9
-      if (/^[6-9]\d{9}$/.test(cleaned)) {
-        return cleaned;
-      }
-
       return null;
     } catch {
       return null;
@@ -326,7 +273,7 @@ export class ContactsService {
       data: {
         organizationId,
         phone: national10,
-        countryCode: '+91',
+        countryCode: require('../../utils/phoneInternational').parsePhoneNumber(input.phone).countryCode || '+91',
         firstName: input.firstName || 'Unknown',
         lastName: input.lastName,
         email: input.email,
@@ -650,7 +597,7 @@ export class ContactsService {
           errors.push({
             row: rowNumber,
             phone: rawPhone.toString(),
-            error: 'Invalid phone number. Only Indian numbers (+91) starting with 6-9 are allowed.',
+            error: 'Invalid phone number. Must include country code (e.g., +91, +1).',
           });
           continue;
         }
@@ -679,7 +626,7 @@ export class ContactsService {
         validContacts.push({
           organizationId,
           phone: normalized,
-          countryCode: '+91',
+          countryCode: require('../../utils/phoneInternational').parsePhoneNumber(rawPhone.toString().trim()).countryCode || '+91',
           firstName: firstName.toString().trim() || 'Unknown',
           lastName: lastName.toString().trim() || null,
           email: email.toString().trim() || null,

@@ -1,19 +1,39 @@
-import { ChatbotSession } from './chatbot.types';
 export declare class ChatbotEngine {
-    processMessage(conversationId: string, organizationId: string, messageText: string, senderPhone: string, isNewConversation: boolean): Promise<{
-        handled: boolean;
-        responses: string[];
-    }>;
-    private processFlow;
-    private getNextNode;
-    private evaluateCondition;
+    processMessage(conversationId: string, organizationId: string, messageContent: string, senderPhone: string, isNewConversation: boolean): Promise<void>;
+    private createNewSession;
+    private handleExistingSession;
+    private processUserInput;
+    private matchButtonInput;
+    private matchListInput;
+    private executeFlow;
+    private executeMessageNode;
+    private executeButtonNode;
+    private executeListNode;
+    private executeConditionNode;
+    private executeAINode;
+    private findMatchingChatbot;
+    private sendText;
+    private sendButtonMessage;
+    private sendListMessage;
+    private findButtonEdge;
+    private findListEdge;
+    private getNextNodeId;
     private executeAction;
-    private formatButtonMessage;
-    private processVariables;
-    private sendResponses;
-    handleButtonResponse(conversationId: string, buttonPayload: string): Promise<void>;
-    clearSession(conversationId: string): void;
-    getSession(conversationId: string): ChatbotSession | undefined;
+    private evaluateCondition;
+    private replaceVariables;
+    private sleep;
+    clearSession(organizationId: string, conversationId: string): Promise<void>;
+    getSessionInfo(organizationId: string, conversationId: string): Promise<{
+        chatbotId: string;
+        currentNodeId: string;
+        waitingForInput: boolean;
+        expectedInputType: "text" | "button" | "list" | "any";
+        messageCount: number;
+        aiNodeActive: boolean;
+        historyLength: number;
+        startedAt: Date;
+        lastActivityAt: Date;
+    } | null>;
 }
 export declare const chatbotEngine: ChatbotEngine;
 //# sourceMappingURL=chatbot.engine.d.ts.map

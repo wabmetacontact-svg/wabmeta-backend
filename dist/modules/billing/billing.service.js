@@ -55,7 +55,7 @@ const SLUG_TO_PLAN_TYPE = {
 // ============================================
 const DEFAULT_PLAN_LIMITS = {
     FREE_DEMO: {
-        maxContacts: 50,
+        maxContacts: 1000,
         maxMessages: 100,
         maxCampaigns: 1,
         maxCampaignsPerMonth: 1,
@@ -256,7 +256,7 @@ class BillingService {
                             status: client_1.SubscriptionStatus.ACTIVE,
                             billingCycle: 'monthly',
                             currentPeriodStart: new Date(),
-                            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days trial
+                            currentPeriodEnd: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 2 days trial
                         },
                         include: { plan: true }
                     });
@@ -306,6 +306,25 @@ class BillingService {
                 message: 'Error checking subscription status',
             };
         }
+    }
+    // ============================================
+    // ✅ CHECK WALLET ELIGIBILITY
+    // ============================================
+    async checkWalletEligibility(organizationId) {
+        const subscription = await database_1.default.subscription.findUnique({
+            where: { organizationId },
+            include: { plan: true },
+        });
+        if (!subscription || subscription.status !== 'ACTIVE') {
+            return { eligible: false, reason: 'No active subscription' };
+        }
+        if (subscription.plan?.type === 'FREE_DEMO') {
+            return {
+                eligible: false,
+                reason: 'Wallet feature is not available on the Free plan. Please upgrade to a Monthly, Quarterly, or Annual plan to enable it.',
+            };
+        }
+        return { eligible: true };
     }
     // ============================================
     // GET SUBSCRIPTION
@@ -384,7 +403,7 @@ class BillingService {
                 monthlyPrice: 0,
                 yearlyPrice: 0,
                 ...DEFAULT_PLAN_LIMITS.FREE_DEMO,
-                features: ['100 messages', '1 campaign', '50 contacts', '2-day trial'],
+                features: ['100 Messages', 'Limited Campaigns', '1,000 Contacts', '2-Day Trial'],
                 isActive: true,
                 isRecommended: false,
                 popular: false,
@@ -755,10 +774,30 @@ class BillingService {
                 where: { id: organizationId },
                 data: { planType: plan.type }
             });
+            // ✅ Create Payment record for revenue tracking
+            await database_1.default.payment.create({
+                data: {
+                    organizationId,
+                    subscriptionId: subscription.id,
+                    razorpayOrderId: razorpay_order_id,
+                    razorpayPaymentId: razorpay_payment_id,
+                    razorpaySignature: razorpay_signature,
+                    amount: Number(order.amount) || Math.round(Number(plan.monthlyPrice) * 100), // Amount in paise
+                    currency: 'INR',
+                    status: 'SUCCESS',
+                    planId: plan.id,
+                    planName: plan.name,
+                    billingCycle: notes.billingCycle || 'monthly',
+                    description: `${plan.name} subscription`,
+                    receipt: order.receipt || `wm_${organizationId.slice(-6)}_${Date.now().toString().slice(-8)}`,
+                    paidAt: now,
+                },
+            });
             console.log('✅ Subscription activated:', {
                 subscriptionId: subscription.id,
                 planName: plan.name,
                 validUntil: periodEnd,
+                paymentRecorded: true,
             });
             return {
                 subscription,
@@ -854,8 +893,58 @@ class BillingService {
     // GET INVOICES
     // ============================================
     async getInvoices(organizationId, limit = 10, offset = 0) {
-        // TODO: Integrate with Razorpay invoices
-        return [];
+        try {
+            // 1. Get Subscription Payments
+            const payments = await database_1.default.payment.findMany({
+                where: { organizationId },
+                orderBy: { paidAt: 'desc' },
+                take: limit + offset, // fetch enough to cover pagination
+            });
+            // 2. Get Wallet Topups (only credits/topups)
+            const wallet = await database_1.default.wallet.findUnique({
+                where: { organizationId },
+                select: { id: true }
+            });
+            let topups = [];
+            if (wallet) {
+                topups = await database_1.default.walletTransaction.findMany({
+                    where: {
+                        walletId: wallet.id,
+                        type: { in: ['credit', 'admin_credit'] },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    take: limit + offset,
+                });
+            }
+            // 3. Format and combine
+            const formattedPayments = payments.map(p => ({
+                id: p.id,
+                amount: p.amount, // in paise
+                status: p.status === 'SUCCESS' ? 'paid' : p.status.toLowerCase(),
+                date: p.paidAt || p.createdAt,
+                description: `Plan: ${p.planName || p.description}`,
+                type: 'subscription',
+                downloadUrl: null,
+            }));
+            const formattedTopups = topups.map(t => ({
+                id: t.id,
+                amount: t.amountPaise,
+                status: t.status === 'completed' ? 'paid' : t.status.toLowerCase(),
+                date: t.createdAt,
+                description: `Wallet: ${t.description || 'Top-up'}`,
+                type: 'wallet_topup',
+                downloadUrl: null,
+            }));
+            // Merge and sort
+            const combined = [...formattedPayments, ...formattedTopups]
+                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                .slice(offset, offset + limit);
+            return combined;
+        }
+        catch (error) {
+            console.error('Failed to get invoices:', error);
+            return [];
+        }
     }
     async getInvoice(invoiceId, organizationId) {
         throw new Error('Invoice not found');

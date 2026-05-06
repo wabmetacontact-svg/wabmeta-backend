@@ -10,6 +10,7 @@ const config_1 = require("../../config");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const password_1 = require("../../utils/password");
 // In-memory system settings (use database in production)
 let systemSettings = {
     maintenanceMode: false,
@@ -88,10 +89,23 @@ class AdminService {
                 database_1.default.user.count({ where: { status: 'PENDING_VERIFICATION' } }),
                 database_1.default.user.count({ where: { status: 'SUSPENDED' } }),
             ]);
-            // Users this month
+            // ✅ FIXED: Calculate revenue from actual payments
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
             const startOfMonth = new Date();
             startOfMonth.setDate(1);
             startOfMonth.setHours(0, 0, 0, 0);
+            // ✅ Today's new users
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const todayUsers = await database_1.default.user.count({
+                where: {
+                    createdAt: {
+                        gte: today,
+                        lt: tomorrow
+                    }
+                }
+            });
             const usersThisMonth = await database_1.default.user.count({
                 where: { createdAt: { gte: startOfMonth } },
             });
@@ -118,7 +132,7 @@ class AdminService {
                     where: {
                         direction: 'OUTBOUND',
                         createdAt: {
-                            gte: new Date(new Date().setHours(0, 0, 0, 0)),
+                            gte: today,
                         },
                     },
                 }),
@@ -130,18 +144,88 @@ class AdminService {
                 }),
             ]);
             // WhatsApp stats
-            const [connectedAccounts, totalContacts, totalCampaigns] = await Promise.all([
-                database_1.default.whatsAppAccount.count({ where: { status: 'CONNECTED' } }),
+            const [totalContacts, totalCampaigns] = await Promise.all([
                 database_1.default.contact.count(),
                 database_1.default.campaign.count(),
             ]);
-            // Revenue (placeholder - adjust based on your billing model)
-            const activeSubscriptions = await database_1.default.subscription.count({
-                where: { status: 'ACTIVE' },
+            // ✅ Get ACTUAL revenue from Payment table (Exclude manual/admin assigned)
+            const [totalRevenue, monthlyRevenue, todayRevenue] = await Promise.all([
+                // Total all-time revenue (Only from Razorpay)
+                database_1.default.payment.aggregate({
+                    where: {
+                        status: 'SUCCESS',
+                        razorpayPaymentId: { not: null } // ✅ Only count actual purchases
+                    },
+                    _sum: {
+                        amount: true
+                    }
+                }),
+                // This month's revenue (Only from Razorpay)
+                database_1.default.payment.aggregate({
+                    where: {
+                        status: 'SUCCESS',
+                        razorpayPaymentId: { not: null }, // ✅ Only count actual purchases
+                        createdAt: {
+                            gte: startOfMonth
+                        }
+                    },
+                    _sum: {
+                        amount: true
+                    }
+                }),
+                // Today's revenue (Only from Razorpay)
+                database_1.default.payment.aggregate({
+                    where: {
+                        status: 'SUCCESS',
+                        razorpayPaymentId: { not: null }, // ✅ Only count actual purchases
+                        createdAt: {
+                            gte: today,
+                            lt: tomorrow
+                        }
+                    },
+                    _sum: {
+                        amount: true
+                    }
+                })
+            ]);
+            // ✅ Get subscription breakdown (Exclude manual/admin assigned for MRR)
+            const subscriptionsByPlan = await database_1.default.subscription.groupBy({
+                by: ['planId'],
+                where: {
+                    status: 'ACTIVE',
+                    paymentMethod: { not: 'admin_assigned' } // ✅ Only count actual paid subscriptions for MRR
+                },
+                _count: true
             });
-            // Simple MRR calculation (you'll want to make this more sophisticated)
-            const mrr = activeSubscriptions * 999; // Assuming average $999/month
-            const arr = mrr * 12;
+            // Get plan details for MRR calculation
+            const plans = await database_1.default.plan.findMany();
+            const planMap = new Map(plans.map(p => [p.id, p]));
+            // ✅ Calculate actual MRR from active subscriptions
+            let mrr = 0;
+            for (const sub of subscriptionsByPlan) {
+                if (!sub.planId)
+                    continue;
+                const plan = planMap.get(sub.planId);
+                if (plan) {
+                    mrr += Number(plan.monthlyPrice) * sub._count;
+                }
+            }
+            // ✅ WhatsApp connection stats with connectionType
+            const whatsappStats = await database_1.default.whatsAppAccount.groupBy({
+                by: ['connectionType', 'status'],
+                _count: true
+            });
+            const connectedCloudApi = whatsappStats.find((s) => s.connectionType === 'CLOUD_API' && s.status === 'CONNECTED')?._count || 0;
+            const connectedBusinessApp = whatsappStats.find((s) => s.connectionType === 'WHATSAPP_BUSINESS_APP' && s.status === 'CONNECTED')?._count || 0;
+            // ✅ ADD: Wallet Stats
+            const [totalActiveWallets, pendingWalletRequests, totalWalletBalance,] = await Promise.all([
+                database_1.default.wallet.count({ where: { isActive: true } }),
+                database_1.default.walletAccessRequest.count({ where: { status: 'pending' } }),
+                database_1.default.wallet.aggregate({
+                    where: { isActive: true },
+                    _sum: { balancePaise: true },
+                }),
+            ]);
             return {
                 users: {
                     total: totalUsers,
@@ -149,6 +233,7 @@ class AdminService {
                     pending: pendingUsers,
                     suspended: suspendedUsers,
                     newThisMonth: usersThisMonth,
+                    todayUsers, // ✅ Today's new users
                 },
                 organizations: {
                     total: totalOrgs,
@@ -161,25 +246,37 @@ class AdminService {
                     thisMonthSent: messagesThisMonth,
                 },
                 revenue: {
-                    mrr,
-                    arr,
+                    // ✅ Actual revenue from payments (in paise, divide by 100 for rupees)
+                    totalRevenue: totalRevenue._sum.amount || 0,
+                    monthlyRevenue: monthlyRevenue._sum.amount || 0,
+                    todayRevenue: todayRevenue._sum.amount || 0,
+                    mrr, // ✅ Actual MRR from active subscriptions
+                    arr: mrr * 12,
                 },
                 whatsapp: {
-                    connectedAccounts,
+                    connectedAccounts: connectedCloudApi + connectedBusinessApp,
+                    cloudApiConnected: connectedCloudApi,
+                    businessAppConnected: connectedBusinessApp,
                     totalContacts,
                     totalCampaigns,
+                },
+                wallet: {
+                    totalActiveWallets,
+                    pendingRequests: pendingWalletRequests,
+                    totalBalanceHeld: (totalWalletBalance._sum.balancePaise || 0) / 100,
                 },
             };
         }
         catch (error) {
             console.error('Dashboard stats error:', error);
-            // Return safe defaults on error
+            // Return safe defaults
             return {
-                users: { total: 0, active: 0, pending: 0, suspended: 0, newThisMonth: 0 },
+                users: { total: 0, active: 0, pending: 0, suspended: 0, newThisMonth: 0, todayUsers: 0 },
                 organizations: { total: 0, byPlan: {}, newThisMonth: 0 },
                 messages: { totalSent: 0, todaySent: 0, thisMonthSent: 0 },
-                revenue: { mrr: 0, arr: 0 },
-                whatsapp: { connectedAccounts: 0, totalContacts: 0, totalCampaigns: 0 },
+                revenue: { totalRevenue: 0, monthlyRevenue: 0, todayRevenue: 0, mrr: 0, arr: 0 },
+                whatsapp: { connectedAccounts: 0, cloudApiConnected: 0, businessAppConnected: 0, totalContacts: 0, totalCampaigns: 0 },
+                wallet: { totalActiveWallets: 0, pendingRequests: 0, totalBalanceHeld: 0 },
             };
         }
     }
@@ -217,6 +314,7 @@ class AdminService {
                     emailVerified: true,
                     createdAt: true,
                     lastLoginAt: true,
+                    password: true,
                     memberships: {
                         select: {
                             role: true,
@@ -282,12 +380,29 @@ class AdminService {
         }
         return {
             ...user,
-            password: undefined,
             organizations: user.memberships?.map((m) => ({
                 ...m.organization,
                 role: m.role,
             })),
         };
+    }
+    async updateUserPassword(id, data) {
+        const user = await database_1.default.user.findUnique({ where: { id } });
+        if (!user) {
+            throw new errorHandler_1.AppError('User not found', 404);
+        }
+        const hashedPassword = await (0, password_1.hashPassword)(data.password);
+        const updatedUser = await database_1.default.user.update({
+            where: { id },
+            data: {
+                password: hashedPassword,
+            },
+            select: {
+                id: true,
+                email: true,
+            },
+        });
+        return updatedUser;
     }
     async updateUser(id, data) {
         const user = await database_1.default.user.findUnique({ where: { id } });
@@ -894,6 +1009,53 @@ class AdminService {
             ...data,
         };
         return systemSettings;
+    }
+    // ==========================================
+    // WHATSAPP STATS AND OVERRIDES
+    // ==========================================
+    async getWhatsAppConnectionStats() {
+        const stats = await database_1.default.whatsAppAccount.groupBy({
+            by: ['connectionType', 'status'],
+            _count: true,
+        });
+        const formatted = {
+            cloudApi: { active: 0, inactive: 0, total: 0 },
+            businessApp: { active: 0, inactive: 0, total: 0 },
+            onPremise: { active: 0, inactive: 0, total: 0 },
+        };
+        stats.forEach((stat) => {
+            const type = (stat.connectionType || 'CLOUD_API').toUpperCase();
+            let key = 'cloudApi';
+            if (type === 'WHATSAPP_BUSINESS_APP' || type === 'BUSINESS_APP') {
+                key = 'businessApp';
+            }
+            else if (type === 'ON_PREMISE') {
+                key = 'onPremise';
+            }
+            formatted[key].total += stat._count;
+            if (stat.status === 'CONNECTED' || stat.status === 'active') {
+                formatted[key].active += stat._count;
+            }
+            else {
+                formatted[key].inactive += stat._count;
+            }
+        });
+        return formatted;
+    }
+    async updateWhatsAppConnectionType(accountId, connectionType) {
+        const account = await database_1.default.whatsAppAccount.findUnique({ where: { id: accountId } });
+        if (!account) {
+            throw new errorHandler_1.AppError('WhatsApp account not found', 404);
+        }
+        const updated = await database_1.default.whatsAppAccount.update({
+            where: { id: accountId },
+            data: { connectionType },
+        });
+        return {
+            success: true,
+            message: 'Connection type updated successfully',
+            account: updated,
+        };
     }
 }
 exports.AdminService = AdminService;

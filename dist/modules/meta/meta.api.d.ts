@@ -106,7 +106,7 @@ declare class MetaApiClient {
         status: string;
     }>;
     deleteTemplate(wabaId: string, accessToken: string, templateName: string): Promise<boolean>;
-    uploadMedia(phoneNumberId: string, accessToken: string, file: Buffer, mimeType: string, filename: string): Promise<{
+    uploadMedia(phoneNumberId: string, accessToken: string, file: Buffer, mimeType: string, filename: string, wabaId?: string): Promise<{
         id: string;
     }>;
     getMediaUrl(mediaId: string, accessToken: string): Promise<string>;
@@ -118,6 +118,57 @@ declare class MetaApiClient {
         metrics?: string[];
     }): Promise<any>;
     private handleError;
+    enableCalling(phoneNumberId: string, accessToken: string, options?: {
+        callingEnabled: boolean;
+        inboundCallsEnabled?: boolean;
+        callbackEnabled?: boolean;
+        restrictToCountries?: string[];
+        callHoursEnabled?: boolean;
+        timezone?: string;
+        weeklyHours?: Array<{
+            day: 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+            openTime: string;
+            closeTime: string;
+        }>;
+        holidaySchedule?: Array<{
+            date: string;
+            startTime: string;
+            endTime: string;
+        }>;
+    }): Promise<{
+        success: boolean;
+        data?: any;
+    }>;
+    getCallingSettings(phoneNumberId: string, accessToken: string): Promise<{
+        callingEnabled: boolean;
+        inboundCallsEnabled: boolean;
+        callbackEnabled: boolean;
+        callHoursEnabled: boolean;
+    }>;
+    initiateCall(phoneNumberId: string, accessToken: string, to: string, options?: {
+        callbackData?: string;
+        bodyText?: string;
+        buttonText?: string;
+        businessPhoneNumber?: string;
+    }): Promise<{
+        messageId: string;
+        status: string;
+    }>;
+    requestCallPermission(phoneNumberId: string, accessToken: string, to: string): Promise<{
+        permitted: boolean;
+        permissionId?: string;
+    }>;
+    subscribeToCallsWebhook(wabaId: string, accessToken: string): Promise<boolean>;
+    getCallLogs(phoneNumberId: string, accessToken: string, limit?: number): Promise<Array<{
+        callId: string;
+        direction: 'inbound' | 'outbound';
+        status: string;
+        duration?: number;
+        startTime: string;
+        endTime?: string;
+        from: string;
+        to: string;
+    }>>;
     isTokenValid(accessToken: string): Promise<boolean>;
     getTokenExpiry(accessToken: string): Promise<Date | null>;
     getGraphVersion(): string;

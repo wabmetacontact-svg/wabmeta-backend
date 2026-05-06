@@ -1,5 +1,38 @@
 "use strict";
 // src/modules/inbox/inbox.controller.ts - COMPLETE (existing + labels/pin/media)
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -10,6 +43,9 @@ const response_1 = require("../../utils/response");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
 const whatsapp_service_1 = __importDefault(require("../whatsapp/whatsapp.service"));
+const axios_1 = __importDefault(require("axios"));
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 class InboxController {
     // ==========================================
     // GET CONVERSATIONS
@@ -121,7 +157,17 @@ class InboxController {
             });
             // 4. Clear Inbox Cache
             await inbox_service_1.inboxService.clearCache(organizationId);
-            return (0, response_1.sendSuccess)(res, result.message, 'Message sent successfully', 201);
+            // ✅ CRITICAL: Serialize dates to ISO strings for JSON response
+            const message = result.message;
+            const serializedMessage = {
+                ...message,
+                createdAt: message.createdAt instanceof Date ? message.createdAt.toISOString() : message.createdAt,
+                timestamp: message.timestamp instanceof Date ? message.timestamp.toISOString() : (message.timestamp || message.createdAt),
+                sentAt: message.sentAt instanceof Date ? message.sentAt.toISOString() : (message.sentAt || null),
+                deliveredAt: message.deliveredAt instanceof Date ? message.deliveredAt.toISOString() : (message.deliveredAt || null),
+                readAt: message.readAt instanceof Date ? message.readAt.toISOString() : (message.readAt || null),
+            };
+            return (0, response_1.sendSuccess)(res, serializedMessage, 'Message sent successfully', 201);
         }
         catch (error) {
             next(error);
@@ -405,19 +451,345 @@ class InboxController {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             const { id } = req.params;
             const { mediaType, mediaUrl, caption } = req.body;
-            if (!mediaType || !mediaUrl)
+            console.log('📸 sendMediaMessage:', { mediaType, mediaUrl, id });
+            if (!mediaType || !mediaUrl) {
                 throw new errorHandler_1.AppError('mediaType and mediaUrl are required', 400);
-            // Validate conversation
+            }
             const conversation = await inbox_service_1.inboxService.getConversationById(organizationId, id);
-            // Use default WA account
             const account = await whatsapp_service_1.default.getDefaultAccount(organizationId);
             if (!account?.id) {
-                throw new errorHandler_1.AppError('No WhatsApp account connected. Please connect WhatsApp first.', 400);
+                throw new errorHandler_1.AppError('No WhatsApp account connected', 400);
             }
-            const result = await whatsapp_service_1.default.sendMediaMessage(account.id, conversation.contact.phone, mediaType, mediaUrl, caption, id, organizationId, req.body.tempId || req.body.localId || req.body.local_id || req.body._id, req.body.clientMsgId || req.body.client_msg_id || req.body.clientMsgId);
-            // ✅ Clear Inbox Cache
+            // ✅ whatsappService.sendMessage directly call karo
+            // sendMediaMessage wrapper use mat karo
+            const result = await whatsapp_service_1.default.sendMessage({
+                accountId: account.id,
+                to: conversation.contact.phone,
+                type: mediaType,
+                content: {
+                    [mediaType]: {
+                        link: mediaUrl,
+                        ...(caption ? { caption } : {}),
+                    },
+                },
+                conversationId: id,
+                organizationId,
+                tempId: (req.body.tempId || req.body.localId || req.body.local_id || req.body._id),
+                clientMsgId: (req.body.clientMsgId || req.body.client_msg_id || req.body.clientMsgId),
+                mediaUrl: mediaUrl,
+            });
             await inbox_service_1.inboxService.clearCache(organizationId);
-            return (0, response_1.sendSuccess)(res, result, 'Media message sent successfully', 201);
+            // ✅ Serialize response
+            const msg = result.message;
+            const now = new Date().toISOString();
+            const serialized = {
+                ...msg,
+                createdAt: msg?.createdAt instanceof Date
+                    ? msg.createdAt.toISOString() : msg?.createdAt || now,
+                timestamp: msg?.timestamp instanceof Date
+                    ? msg.timestamp.toISOString() : msg?.timestamp || now,
+                sentAt: msg?.sentAt instanceof Date
+                    ? msg.sentAt.toISOString() : msg?.sentAt || now,
+            };
+            return (0, response_1.sendSuccess)(res, { message: serialized }, 'Media sent', 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
+    // ✅ NEW: PROXY WHATSAPP MEDIA
+    // GET /inbox/media/:mediaId
+    // ==========================================
+    async getMedia(req, res, next) {
+        try {
+            const mediaId = req.params.mediaId;
+            const urlQuery = req.query.url;
+            const mediaUrlParam = (Array.isArray(urlQuery) ? urlQuery[0] : urlQuery);
+            const idToFetch = (mediaId || mediaUrlParam)?.trim();
+            console.log('📸 getMedia:', { idToFetch });
+            if (!idToFetch || idToFetch === 'proxy') {
+                return res.status(400).json({ error: 'Media ID required' });
+            }
+            // ✅ Local uploads - direct serve
+            if (idToFetch.startsWith('/uploads/') || idToFetch.includes('uploads/media/')) {
+                const filePath = path_1.default.join(process.cwd(), idToFetch.startsWith('/') ? idToFetch : `/${idToFetch}`);
+                if (fs_1.default.existsSync(filePath)) {
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.setHeader('Cache-Control', 'public, max-age=86400');
+                    return res.sendFile(filePath);
+                }
+                return this.sendMediaPlaceholder(res, 'Local file not found');
+            }
+            // ✅ Non-Meta HTTP URL - redirect
+            if (idToFetch.startsWith('http') &&
+                !idToFetch.includes('lookaside.fbsbx.com') &&
+                !idToFetch.includes('mmg.whatsapp.net') &&
+                !idToFetch.includes('fbcdn.net') &&
+                !idToFetch.includes('scontent')) {
+                return res.redirect(302, idToFetch);
+            }
+            // ============================================
+            // ✅ HARDCODED ACCOUNT - Direct se token lo
+            // Only one account hai system mein
+            // ============================================
+            // Step 1: Is mediaId se message ka account dhundo
+            let accessToken = null;
+            let phoneNumberId = null;
+            if (/^\d+$/.test(idToFetch)) {
+                // ✅ Message se directly account dhundo
+                const message = await database_1.default.message.findFirst({
+                    where: {
+                        OR: [
+                            { mediaId: idToFetch },
+                            { mediaUrl: idToFetch },
+                        ],
+                    },
+                    select: {
+                        id: true,
+                        whatsappAccountId: true,
+                        conversationId: true,
+                    },
+                });
+                console.log('🔍 Message found:', message?.id, '| AccountId:', message?.whatsappAccountId);
+                // ✅ Specific account se token lo
+                if (message?.whatsappAccountId) {
+                    const account = await database_1.default.whatsAppAccount.findUnique({
+                        where: { id: message.whatsappAccountId },
+                        select: {
+                            accessToken: true,
+                            phoneNumberId: true,
+                            id: true,
+                        },
+                    });
+                    if (account?.accessToken) {
+                        try {
+                            const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
+                            const decrypted = safeDecryptStrict(account.accessToken);
+                            if (decrypted) {
+                                accessToken = decrypted;
+                                phoneNumberId = account.phoneNumberId;
+                                console.log('✅ Token from message account:', account.id);
+                                console.log('✅ PhoneNumberId:', phoneNumberId);
+                                console.log('✅ Token preview:', decrypted.substring(0, 15) + '...');
+                            }
+                        }
+                        catch (decryptErr) {
+                            console.error('❌ Decrypt failed:', decryptErr.message);
+                        }
+                    }
+                }
+                // ✅ Fallback: Org ki koi bhi active account
+                if (!accessToken) {
+                    const orgId = req.user?.organizationId
+                        || req.query.organizationId
+                        || 'cmn1m8f7n0096kfj8dflnhoyv'; // Fallback hardcoded
+                    console.log('🔍 Fallback: searching accounts for org:', orgId);
+                    const accounts = await database_1.default.whatsAppAccount.findMany({
+                        where: {
+                            organizationId: orgId,
+                            isActive: true,
+                            status: 'CONNECTED',
+                        },
+                        select: {
+                            id: true,
+                            accessToken: true,
+                            phoneNumberId: true,
+                        },
+                        orderBy: { updatedAt: 'desc' },
+                    });
+                    console.log(`🔍 Found ${accounts.length} accounts`);
+                    for (const acc of accounts) {
+                        if (!acc.accessToken)
+                            continue;
+                        try {
+                            const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
+                            const decrypted = safeDecryptStrict(acc.accessToken);
+                            console.log('🔑 Decrypted token preview:', decrypted?.substring(0, 15));
+                            if (decrypted && decrypted.length > 50) {
+                                accessToken = decrypted;
+                                phoneNumberId = acc.phoneNumberId;
+                                console.log('✅ Using fallback account:', acc.id);
+                                break;
+                            }
+                        }
+                        catch (e) {
+                            console.error('❌ Decrypt error for account:', acc.id, e.message);
+                            continue;
+                        }
+                    }
+                }
+                // ✅ Last resort: MetaConnection
+                if (!accessToken) {
+                    const orgId = req.user?.organizationId || 'cmn1m8f7n0096kfj8dflnhoyv';
+                    const metaConn = await database_1.default.metaConnection.findFirst({
+                        where: { organizationId: orgId },
+                        select: { accessToken: true },
+                        orderBy: { updatedAt: 'desc' },
+                    });
+                    if (metaConn?.accessToken) {
+                        try {
+                            const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
+                            const decrypted = safeDecryptStrict(metaConn.accessToken);
+                            if (decrypted && decrypted.length > 50) {
+                                accessToken = decrypted;
+                                console.log('✅ Using MetaConnection token');
+                            }
+                        }
+                        catch (e) { }
+                    }
+                }
+            }
+            console.log('🔐 Final token status:', accessToken ? `Found (${accessToken.substring(0, 10)}...)` : 'NOT FOUND');
+            console.log('📞 PhoneNumberId:', phoneNumberId);
+            if (!accessToken) {
+                console.error('❌ No access token found after all attempts');
+                return this.sendMediaPlaceholder(res, 'Authentication failed');
+            }
+            // ============================================
+            // ✅ Fetch from Meta Graph API
+            // ============================================
+            const version = 'v22.0';
+            let downloadUrl = null;
+            if (/^\d+$/.test(idToFetch)) {
+                console.log(`🔄 Calling Meta API: graph.facebook.com/${version}/${idToFetch}`);
+                try {
+                    const metaRes = await axios_1.default.get(`https://graph.facebook.com/${version}/${idToFetch}`, {
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                        },
+                        timeout: 15000,
+                    });
+                    console.log('✅ Meta API response:', {
+                        url: metaRes.data?.url ? 'present' : 'missing',
+                        mimeType: metaRes.data?.mime_type,
+                        fileSize: metaRes.data?.file_size,
+                    });
+                    downloadUrl = metaRes.data?.url;
+                }
+                catch (e) {
+                    const errData = e.response?.data?.error;
+                    console.error('❌ Meta API failed:', {
+                        httpStatus: e.response?.status,
+                        code: errData?.code,
+                        subcode: errData?.error_subcode,
+                        message: errData?.message,
+                        tokenUsed: accessToken.substring(0, 20) + '...',
+                    });
+                    // ✅ Subcode 33 = Media expired (>30 days) ya wrong token
+                    if (errData?.error_subcode === 33) {
+                        console.error('💡 DIAGNOSIS: Media ID invalid/expired OR wrong token');
+                        console.error('💡 Token starts with:', accessToken.substring(0, 10));
+                        console.error('💡 Expected EAA... token format');
+                    }
+                    return this.sendMediaPlaceholder(res, errData?.error_subcode === 33
+                        ? 'Media expired (>30 days old)'
+                        : errData?.message || 'Meta API error');
+                }
+            }
+            else if (idToFetch.startsWith('http')) {
+                downloadUrl = idToFetch;
+            }
+            if (!downloadUrl) {
+                console.error('❌ No download URL obtained');
+                return this.sendMediaPlaceholder(res, 'No download URL');
+            }
+            // ============================================
+            // ✅ Stream media to client
+            // ============================================
+            console.log('📥 Downloading from CDN...');
+            const mediaRes = await axios_1.default.get(downloadUrl, {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                },
+                responseType: 'stream',
+                timeout: 30000,
+                maxContentLength: 50 * 1024 * 1024, // 50MB max
+            });
+            const contentType = mediaRes.headers['content-type'] || 'image/jpeg';
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Cache-Control', 'private, max-age=3600');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+            if (mediaRes.headers['content-length']) {
+                res.setHeader('Content-Length', mediaRes.headers['content-length']);
+            }
+            // Handle stream errors
+            req.on('close', () => {
+                mediaRes.data.destroy();
+            });
+            mediaRes.data.on('error', (err) => {
+                console.error('❌ Media stream error:', err.message);
+                if (!res.headersSent) {
+                    res.status(500).end();
+                }
+            });
+            mediaRes.data.pipe(res);
+            console.log(`✅ Streaming ${contentType} to client`);
+        }
+        catch (error) {
+            console.error('❌ getMedia fatal error:', {
+                message: error.message,
+                stack: error.stack?.split('\n')[1],
+            });
+            return this.sendMediaPlaceholder(res, error.message);
+        }
+    }
+    sendMediaPlaceholder(res, reason) {
+        if (!res.headersSent) {
+            console.warn('⚠️ Sending placeholder. Reason:', reason);
+            res.setHeader('Content-Type', 'image/svg+xml');
+            res.setHeader('Cache-Control', 'no-cache, no-store');
+            res.status(200).send(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="200" height="150">
+          <rect fill="#1f2937" width="200" height="150" rx="8"/>
+          <text x="100" y="60" text-anchor="middle" fill="#6b7280" 
+                font-size="28">🖼️</text>
+          <text x="100" y="90" text-anchor="middle" fill="#9ca3af" 
+                font-size="11" font-family="sans-serif">
+            Media unavailable
+          </text>
+          <text x="100" y="110" text-anchor="middle" fill="#4b5563" 
+                font-size="9" font-family="sans-serif">
+            ${(reason || '').substring(0, 35)}
+          </text>
+        </svg>
+      `);
+        }
+    }
+    // ==========================================
+    // DELETE MESSAGE
+    // DELETE /inbox/conversations/:id/messages/:messageId
+    // ==========================================
+    async deleteMessage(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { id, messageId } = req.params;
+            const result = await inbox_service_1.inboxService.deleteMessage(organizationId, id, messageId);
+            return (0, response_1.sendSuccess)(res, result, 'Message deleted');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
+    // EDIT MESSAGE
+    // PATCH /inbox/conversations/:id/messages/:messageId
+    // body: { content: string }
+    // ==========================================
+    async editMessage(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { id, messageId } = req.params;
+            const { content } = req.body;
+            if (!content?.trim())
+                throw new errorHandler_1.AppError('Content is required', 400);
+            const updated = await inbox_service_1.inboxService.editMessage(organizationId, id, messageId, content.trim());
+            return (0, response_1.sendSuccess)(res, updated, 'Message updated');
         }
         catch (error) {
             next(error);

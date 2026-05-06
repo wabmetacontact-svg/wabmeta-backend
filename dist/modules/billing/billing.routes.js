@@ -7,7 +7,12 @@ const auth_1 = require("../../middleware/auth");
 const validate_1 = require("../../middleware/validate");
 const billing_schema_1 = require("./billing.schema");
 const router = (0, express_1.Router)();
-// All routes require authentication
+// ============================================
+// PUBLIC ROUTES
+// ============================================
+// Get all available plans
+router.get('/plans', billing_controller_1.billingController.getPlans);
+// All other routes require authentication
 router.use(auth_1.authenticate);
 // ============================================
 // SUBSCRIPTION & PLANS
@@ -15,8 +20,6 @@ router.use(auth_1.authenticate);
 // Get current subscription/plan
 router.get('/subscription', billing_controller_1.billingController.getSubscription);
 router.get('/plan', billing_controller_1.billingController.getSubscription); // Alias
-// Get all available plans
-router.get('/plans', billing_controller_1.billingController.getPlans);
 // ============================================
 // USAGE
 // ============================================

@@ -1,10 +1,16 @@
 "use strict";
 // src/modules/contacts/contacts.controller.ts
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.contactsController = exports.ContactsController = void 0;
 const contacts_service_1 = require("./contacts.service");
 const response_1 = require("../../utils/response");
+const database_1 = __importDefault(require("../../config/database"));
 const errorHandler_1 = require("../../middleware/errorHandler");
+const contacts_features_1 = require("./contacts.features");
+const phoneInternational_1 = require("../../utils/phoneInternational");
 class ContactsController {
     // ==========================================
     // CREATE CONTACT
@@ -112,7 +118,7 @@ class ContactsController {
         }
     }
     // ==========================================
-    // IMPORT CONTACTS
+    // IMPORT CONTACTS (FIXED)
     // ==========================================
     async import(req, res, next) {
         try {
@@ -120,11 +126,51 @@ class ContactsController {
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             }
-            const input = req.body;
+            let input = req.body;
+            // ✅ Handle file upload (multer)
+            const file = req.file;
+            if (file) {
+                const csvData = file.buffer.toString('utf-8');
+                console.log(`📁 Received CSV file: ${file.originalname}, Size: ${file.size} bytes`);
+                input.csvData = csvData;
+            }
+            // ✅ Handle raw CSV in body
+            if (req.body.csvData && typeof req.body.csvData === 'string') {
+                input.csvData = req.body.csvData;
+            }
+            // ✅ Handle contacts array directly
+            if (req.body.contacts && Array.isArray(req.body.contacts)) {
+                input.contacts = req.body.contacts;
+            }
+            // Get tags
+            if (req.body.tags) {
+                if (typeof req.body.tags === 'string') {
+                    try {
+                        input.tags = JSON.parse(req.body.tags);
+                    }
+                    catch {
+                        input.tags = req.body.tags.split(',').map((t) => t.trim());
+                    }
+                }
+                else if (Array.isArray(req.body.tags)) {
+                    input.tags = req.body.tags;
+                }
+            }
+            // Get group info
+            input.groupId = req.body.groupId;
+            input.groupName = req.body.groupName;
+            console.log('Import input:', {
+                hasCSVData: !!input.csvData,
+                csvLength: input.csvData?.length,
+                contactsCount: input.contacts?.length,
+                tags: input.tags,
+                groupId: input.groupId,
+                groupName: input.groupName,
+            });
             const result = await contacts_service_1.contactsService.import(organizationId, input);
             const message = result.failed > 0
-                ? `Imported ${result.imported} contacts. ${result.failed} failed (only Indian numbers allowed)`
-                : `Successfully imported ${result.imported} contacts`;
+                ? `Imported ${result.imported} contacts. ${result.failed} failed (only Indian +91 numbers allowed).`
+                : `Successfully imported ${result.imported} contacts.`;
             (0, response_1.sendSuccess)(res, result, message);
         }
         catch (error) {
@@ -365,6 +411,298 @@ class ContactsController {
                 data: result.contacts,
                 meta: result.meta,
             });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // FEATURE ACCESS
+    // ============================================
+    async getFeatureAccess(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId) {
+                throw new errorHandler_1.AppError('Organization not found', 404);
+            }
+            const access = await contacts_features_1.contactFeaturesService.getFeatureAccess(organizationId);
+            return res.json({
+                success: true,
+                data: access
+            });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // GET COUNTRY CODES
+    // ============================================
+    async getCountryCodes(req, res) {
+        return res.json({
+            success: true,
+            data: phoneInternational_1.COUNTRY_CODES
+        });
+    }
+    // ============================================
+    // SIMPLE BULK PASTE (₹2,500+ Plans)
+    // ============================================
+    async simpleBulkPaste(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId) {
+                throw new errorHandler_1.AppError('Organization not found', 404);
+            }
+            // ✅ Check feature access (Quarterly+)
+            await contacts_features_1.contactFeaturesService.validateAccess(organizationId, 'simpleBulkPaste');
+            const { phoneNumbers, // Raw string with numbers
+            // ❌ No countryCode parameter - auto detect
+            tags = [], groupId } = req.body;
+            if (!phoneNumbers || typeof phoneNumbers !== 'string') {
+                throw new errorHandler_1.AppError('Phone numbers are required', 400);
+            }
+            // ✅ Parse with auto-detection
+            const { valid, invalid } = (0, phoneInternational_1.parseMultiplePhones)(phoneNumbers);
+            if (valid.length === 0) {
+                throw new errorHandler_1.AppError('No valid phone numbers found. Make sure to include country code (e.g., +91, +1)', 400);
+            }
+            // ✅ Limit check
+            const MAX_BULK = 5000;
+            if (valid.length > MAX_BULK) {
+                throw new errorHandler_1.AppError(`Maximum ${MAX_BULK} contacts per upload`, 400);
+            }
+            // ✅ Get existing contacts (check duplicates)
+            const existingContacts = await database_1.default.contact.findMany({
+                where: {
+                    organizationId,
+                    phone: { in: valid.map(p => p.fullNumber) }
+                },
+                select: { phone: true }
+            });
+            const existingPhones = new Set(existingContacts.map(c => c.phone));
+            const newContacts = valid.filter(p => !existingPhones.has(p.fullNumber));
+            // ✅ Create contacts
+            const contactsToCreate = newContacts.map((parsed, index) => ({
+                organizationId,
+                phone: parsed.fullNumber,
+                countryCode: parsed.countryCode,
+                firstName: `Contact ${index + 1}`,
+                tags: Array.isArray(tags) ? tags : [],
+                source: 'BULK_PASTE',
+                status: 'ACTIVE'
+            }));
+            let createdCount = 0;
+            if (contactsToCreate.length > 0) {
+                const result = await database_1.default.contact.createMany({
+                    data: contactsToCreate,
+                    skipDuplicates: true
+                });
+                createdCount = result.count;
+            }
+            // ✅ Add to group if specified
+            if (groupId && createdCount > 0) {
+                const newContactIds = await database_1.default.contact.findMany({
+                    where: {
+                        organizationId,
+                        phone: { in: newContacts.map(p => p.fullNumber) }
+                    },
+                    select: { id: true }
+                });
+                await database_1.default.contactGroupMember.createMany({
+                    data: newContactIds.map(c => ({
+                        groupId,
+                        contactId: c.id
+                    })),
+                    skipDuplicates: true
+                });
+            }
+            return res.json({
+                success: true,
+                data: {
+                    totalInput: valid.length + invalid.length,
+                    validNumbers: valid.length,
+                    invalidNumbers: invalid.length,
+                    created: createdCount,
+                    duplicatesSkipped: valid.length - createdCount,
+                    invalidDetails: invalid.slice(0, 10) // Return first 10 invalid
+                },
+                message: `${createdCount} contacts created successfully`
+            });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // CSV UPLOAD (₹899+ Plans)
+    // ============================================
+    async csvUpload(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId) {
+                throw new errorHandler_1.AppError('Organization not found', 404);
+            }
+            // ✅ Check feature access (Monthly+)
+            await contacts_features_1.contactFeaturesService.validateAccess(organizationId, 'csvUpload');
+            const { contacts, // Array of contact objects from CSV
+            groupId, tags = [] } = req.body;
+            if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+                throw new errorHandler_1.AppError('No contacts provided', 400);
+            }
+            // ✅ Limit check
+            const MAX_CSV = 10000;
+            if (contacts.length > MAX_CSV) {
+                throw new errorHandler_1.AppError(`Maximum ${MAX_CSV} contacts per CSV upload`, 400);
+            }
+            const results = {
+                created: 0,
+                updated: 0,
+                skipped: 0,
+                errors: []
+            };
+            // 1. Pre-process and validate phone numbers
+            const phoneToContactMap = new Map();
+            const validPhones = [];
+            for (const contact of contacts) {
+                const phoneInput = contact.phone || contact.phoneNumber || contact.mobile;
+                if (!phoneInput) {
+                    results.skipped++;
+                    continue;
+                }
+                const { valid } = (0, phoneInternational_1.parseMultiplePhones)(String(phoneInput));
+                if (valid.length === 0) {
+                    results.skipped++;
+                    results.errors.push(`Invalid: ${phoneInput}`);
+                    continue;
+                }
+                const parsed = valid[0];
+                // If multiple contacts have the same phone in the same CSV, last one wins or we can handle it
+                if (!phoneToContactMap.has(parsed.fullNumber)) {
+                    validPhones.push(parsed.fullNumber);
+                }
+                phoneToContactMap.set(parsed.fullNumber, {
+                    ...contact,
+                    fullNumber: parsed.fullNumber,
+                    countryCode: parsed.countryCode
+                });
+            }
+            if (validPhones.length === 0) {
+                return res.json({
+                    success: true,
+                    data: results,
+                    message: 'No valid contacts found to process'
+                });
+            }
+            // 2. Fetch existing contacts in one query
+            const existingContacts = await database_1.default.contact.findMany({
+                where: {
+                    organizationId,
+                    phone: { in: validPhones }
+                },
+                select: { id: true, phone: true, firstName: true, lastName: true, email: true }
+            });
+            const existingPhoneMap = new Map(existingContacts.map(c => [c.phone, c]));
+            const news = [];
+            const updates = [];
+            // 3. Categorize into news and updates
+            for (const [fullPhone, contactData] of phoneToContactMap.entries()) {
+                const existing = existingPhoneMap.get(fullPhone);
+                if (existing) {
+                    updates.push({
+                        id: existing.id,
+                        data: {
+                            firstName: contactData.firstName || contactData.first_name || existing.firstName,
+                            lastName: contactData.lastName || contactData.last_name || existing.lastName,
+                            email: contactData.email || existing.email,
+                            tags: Array.isArray(tags) && tags.length > 0 ? { push: tags } : undefined
+                        }
+                    });
+                }
+                else {
+                    news.push({
+                        organizationId,
+                        phone: fullPhone,
+                        countryCode: contactData.countryCode,
+                        firstName: contactData.firstName || contactData.first_name || 'Unknown',
+                        lastName: contactData.lastName || contactData.last_name || undefined,
+                        email: contactData.email || undefined,
+                        tags: tags,
+                        source: 'CSV_IMPORT',
+                        status: 'ACTIVE'
+                    });
+                }
+            }
+            // 4. Bulk Create
+            if (news.length > 0) {
+                const createResult = await database_1.default.contact.createMany({
+                    data: news,
+                    skipDuplicates: true
+                });
+                results.created = createResult.count;
+            }
+            // 5. Sequential or Batched Updates (Prisma doesn't have bulk unique update)
+            // We'll do them in small batches or Promise.all to speed up, 
+            // but for very large numbers we still need to be careful.
+            // 50-100 updates at a time is usually fine.
+            if (updates.length > 0) {
+                const updateBatchSize = 100;
+                for (let i = 0; i < updates.length; i += updateBatchSize) {
+                    const batch = updates.slice(i, i + updateBatchSize);
+                    await Promise.all(batch.map(u => database_1.default.contact.update({
+                        where: { id: u.id },
+                        data: u.data
+                    }).catch(err => {
+                        results.errors.push(`Update failed for ${u.id}: ${err.message}`);
+                    })));
+                }
+                results.updated = updates.length;
+            }
+            // 6. Bulk Add to Group if specified
+            if (groupId && (results.created > 0 || results.updated > 0)) {
+                // Fetch fresh IDs for new contacts
+                const allTargetContactIds = await database_1.default.contact.findMany({
+                    where: {
+                        organizationId,
+                        phone: { in: validPhones }
+                    },
+                    select: { id: true }
+                });
+                const memberData = allTargetContactIds.map(c => ({
+                    groupId,
+                    contactId: c.id
+                }));
+                await database_1.default.contactGroupMember.createMany({
+                    data: memberData,
+                    skipDuplicates: true
+                }).catch(() => { });
+            }
+            return res.json({
+                success: true,
+                data: {
+                    totalProcessed: contacts.length,
+                    created: results.created,
+                    updated: results.updated,
+                    skipped: results.skipped,
+                    errors: results.errors.slice(0, 10)
+                },
+                message: `${results.created} created, ${results.updated} updated`
+            });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
+    // GET IMPORT STATS
+    // ==========================================
+    async getImportStats(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId) {
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            }
+            const stats = await contacts_service_1.contactsService.getImportStats(organizationId);
+            (0, response_1.sendSuccess)(res, stats, 'Import stats fetched successfully');
         }
         catch (error) {
             next(error);

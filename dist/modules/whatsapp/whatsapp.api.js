@@ -408,6 +408,24 @@ class WhatsAppAPI {
     // TEMPLATES
     // ============================================
     /**
+     * Create message template with specific API version
+     */
+    async createMessageTemplateByVersion(wabaId, accessToken, payload, version = 'v22.0') {
+        try {
+            const response = await this.clientUnversioned.post(`/${version}/${wabaId}/message_templates`, payload, {
+                params: {
+                    access_token: accessToken,
+                    appsecret_proof: this.generateAppSecretProof(accessToken),
+                },
+            });
+            return response.data;
+        }
+        catch (error) {
+            console.error(`❌ Error creating template (${version}):`, this.formatError(error));
+            throw this.handleError(error, `Failed to create template with ${version}`);
+        }
+    }
+    /**
      * Create message template
      */
     async createMessageTemplate(wabaId, accessToken, payload) {
@@ -614,18 +632,21 @@ class WhatsAppAPI {
      * Handle and format errors
      */
     handleError(error, defaultMessage) {
-        if (error.response?.data?.error) {
-            const metaError = error.response.data.error;
-            let errorMessage = metaError.message || defaultMessage;
-            if (metaError.code) {
-                errorMessage += ` (Error Code: ${metaError.code})`;
-            }
-            if (metaError.error_subcode) {
-                errorMessage += ` (Subcode: ${metaError.error_subcode})`;
-            }
-            return new Error(errorMessage);
+        const err = error.response?.data?.error;
+        if (err) {
+            let msg = err.message || defaultMessage;
+            if (err.code)
+                msg += ` (Code: ${err.code})`;
+            if (err.error_subcode)
+                msg += ` (Subcode: ${err.error_subcode})`;
+            const apiErr = new Error(msg);
+            apiErr.response = error.response;
+            apiErr.metaError = err;
+            return apiErr;
         }
-        return new Error(error.message || defaultMessage);
+        const standardErr = new Error(error.message || defaultMessage);
+        standardErr.response = error.response;
+        return standardErr;
     }
 }
 exports.whatsappApi = new WhatsAppAPI();

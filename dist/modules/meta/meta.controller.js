@@ -12,6 +12,10 @@ const client_1 = require("@prisma/client");
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
 const config_1 = require("../../config");
+const templates_service_1 = require("../templates/templates.service");
+const meta_api_1 = require("./meta.api");
+const encryption_1 = require("../../utils/encryption");
+const meta_service_1 = require("./meta.service");
 // Helper to safely get organization ID from headers
 const getOrgId = (req) => {
     const header = req.headers['x-organization-id'];
@@ -219,42 +223,128 @@ class MetaController {
                 console.warn('⚠️ No phone numbers found for WABA');
             }
             console.log('📊 Step 5: Saving to database...');
-            // Save WhatsAppAccount (primary model)
+            // ============================================
+            // STEP 5: SAVE TO DATABASE - ✅ FIXED VERSION
+            // ============================================
+            console.log('📊 Step 5: Saving to database...');
             let savedAccount = null;
             if (phoneNumbers.length > 0) {
                 const primaryPhone = phoneNumbers[0];
-                savedAccount = await database_1.default.whatsAppAccount.upsert({
-                    where: {
-                        phoneNumberId: primaryPhone.id,
-                    },
-                    update: {
-                        status: 'CONNECTED',
-                        phoneNumber: primaryPhone.display_phone_number,
-                        displayName: primaryPhone.verified_name,
-                        qualityRating: primaryPhone.quality_rating,
-                        accessToken: access_token,
-                    },
-                    create: {
-                        organizationId,
-                        phoneNumberId: primaryPhone.id,
-                        wabaId,
-                        accessToken: access_token,
-                        phoneNumber: primaryPhone.display_phone_number,
-                        displayName: primaryPhone.verified_name,
-                        qualityRating: primaryPhone.quality_rating,
-                        status: 'CONNECTED',
-                        isDefault: true,
-                    },
-                });
-                console.log('   ✅ WhatsAppAccount saved');
+                // Encrypt token
+                const encryptedToken = (0, encryption_1.encrypt)(access_token);
+                console.log('   Token encrypted successfully');
+                try {
+                    // ✅ CRITICAL FIX: Check if account already exists
+                    const existingAccount = await database_1.default.whatsAppAccount.findFirst({
+                        where: {
+                            OR: [
+                                { phoneNumberId: primaryPhone.id },
+                                {
+                                    organizationId,
+                                    wabaId
+                                }
+                            ]
+                        }
+                    });
+                    if (existingAccount) {
+                        // ✅ UPDATE existing account
+                        console.log(`   Updating existing account: ${existingAccount.id}`);
+                        savedAccount = await database_1.default.whatsAppAccount.update({
+                            where: { id: existingAccount.id },
+                            data: {
+                                organizationId, // ✅ CLAIM ownership (in case it moved orgs)
+                                status: 'CONNECTED',
+                                phoneNumber: primaryPhone.display_phone_number,
+                                displayName: primaryPhone.verified_name || primaryPhone.display_phone_number,
+                                verifiedName: primaryPhone.verified_name,
+                                qualityRating: primaryPhone.quality_rating,
+                                accessToken: encryptedToken,
+                                wabaId: wabaId,
+                                isDefault: true,
+                            },
+                        });
+                        console.log('   ✅ WhatsAppAccount UPDATED:', savedAccount.id);
+                    }
+                    else {
+                        // ✅ CREATE new account
+                        console.log('   Creating new WhatsApp account...');
+                        // First, unset any existing default
+                        await database_1.default.whatsAppAccount.updateMany({
+                            where: { organizationId, isDefault: true },
+                            data: { isDefault: false }
+                        });
+                        savedAccount = await database_1.default.whatsAppAccount.create({
+                            data: {
+                                organizationId,
+                                phoneNumberId: primaryPhone.id,
+                                wabaId,
+                                accessToken: encryptedToken,
+                                phoneNumber: primaryPhone.display_phone_number,
+                                displayName: primaryPhone.verified_name || primaryPhone.display_phone_number,
+                                verifiedName: primaryPhone.verified_name,
+                                qualityRating: primaryPhone.quality_rating,
+                                status: 'CONNECTED',
+                                isDefault: true,
+                            },
+                        });
+                        console.log('   ✅ WhatsAppAccount CREATED:', savedAccount.id);
+                    }
+                    // ✅ VERIFY save was successful
+                    const verifyAccount = await database_1.default.whatsAppAccount.findUnique({
+                        where: { id: savedAccount.id }
+                    });
+                    if (!verifyAccount) {
+                        throw new Error('Account verification failed - not found after save!');
+                    }
+                    console.log('   ✅ Account verified in database:', {
+                        id: verifyAccount.id,
+                        phone: verifyAccount.phoneNumber,
+                        status: verifyAccount.status,
+                    });
+                }
+                catch (dbError) {
+                    console.error('   ❌ Database save error:', dbError);
+                    console.error('   Error details:', {
+                        code: dbError.code,
+                        message: dbError.message,
+                        meta: dbError.meta,
+                    });
+                    // ✅ If unique constraint violation, try to find and update
+                    if (dbError.code === 'P2002') {
+                        console.log('   🔄 Handling unique constraint - finding existing...');
+                        const existing = await database_1.default.whatsAppAccount.findFirst({
+                            where: { phoneNumberId: primaryPhone.id }
+                        });
+                        if (existing) {
+                            savedAccount = await database_1.default.whatsAppAccount.update({
+                                where: { id: existing.id },
+                                data: {
+                                    organizationId, // ✅ Update org ownership
+                                    status: 'CONNECTED',
+                                    accessToken: encryptedToken,
+                                    wabaId,
+                                    isDefault: true,
+                                },
+                            });
+                            console.log('   ✅ Updated existing account:', savedAccount.id);
+                        }
+                        else {
+                            throw dbError;
+                        }
+                    }
+                    else {
+                        throw dbError;
+                    }
+                }
             }
-            // Save MetaConnection (if model exists)
+            // ✅ Also save/update MetaConnection
             let savedMetaConnection = null;
             try {
+                const encryptedToken = (0, encryption_1.encrypt)(access_token);
                 savedMetaConnection = await database_1.default.metaConnection.upsert({
                     where: { organizationId },
                     update: {
-                        accessToken: access_token,
+                        accessToken: encryptedToken,
                         wabaId,
                         wabaName: wabaDetails.data.name,
                         status: 'CONNECTED',
@@ -262,51 +352,115 @@ class MetaController {
                     },
                     create: {
                         organizationId,
-                        accessToken: access_token,
+                        accessToken: encryptedToken,
                         wabaId,
                         wabaName: wabaDetails.data.name,
                         status: 'CONNECTED',
                     },
                 });
-                console.log('   ✅ MetaConnection saved');
+                console.log('   ✅ MetaConnection saved:', savedMetaConnection.id);
             }
             catch (e) {
-                console.log('   ⚠️ MetaConnection model not available (optional)');
+                console.log('   ⚠️ MetaConnection save failed:', e.message);
             }
-            // Save PhoneNumbers (if model exists)
-            const savedPhoneNumbers = [];
+            // ✅ Save PhoneNumbers
             try {
-                for (const phone of phoneNumbers) {
-                    const savedPhone = await database_1.default.phoneNumber.upsert({
-                        where: { phoneNumberId: phone.id },
-                        update: {
-                            phoneNumber: phone.display_phone_number,
-                            displayName: phone.verified_name,
-                            qualityRating: phone.quality_rating,
-                            verifiedName: phone.verified_name,
-                            isActive: true,
-                        },
-                        create: {
-                            metaConnectionId: savedMetaConnection?.id,
-                            phoneNumberId: phone.id,
-                            phoneNumber: phone.display_phone_number,
-                            displayName: phone.verified_name,
-                            qualityRating: phone.quality_rating,
-                            verifiedName: phone.verified_name,
-                            isActive: true,
-                            isPrimary: phoneNumbers[0].id === phone.id, // First is primary
-                        },
-                    });
-                    savedPhoneNumbers.push(savedPhone);
+                if (savedMetaConnection) {
+                    for (const phone of phoneNumbers) {
+                        await database_1.default.phoneNumber.upsert({
+                            where: { phoneNumberId: phone.id },
+                            update: {
+                                phoneNumber: phone.display_phone_number,
+                                displayName: phone.verified_name || phone.display_phone_number,
+                                qualityRating: phone.quality_rating,
+                                verifiedName: phone.verified_name,
+                                isActive: true,
+                            },
+                            create: {
+                                metaConnectionId: savedMetaConnection.id,
+                                phoneNumberId: phone.id,
+                                phoneNumber: phone.display_phone_number,
+                                displayName: phone.verified_name || phone.display_phone_number,
+                                qualityRating: phone.quality_rating,
+                                verifiedName: phone.verified_name,
+                                isActive: true,
+                                isPrimary: phone.id === phoneNumbers[0].id,
+                            },
+                        });
+                    }
+                    console.log('   ✅ PhoneNumbers saved');
                 }
-                console.log('   ✅ PhoneNumbers saved');
             }
             catch (e) {
-                console.log('   ⚠️ PhoneNumber model not available:', e.message);
+                console.log('   ⚠️ PhoneNumber save failed:', e.message);
+            }
+            // ✅ STEP 6: MANDATORY META ONBOARDING STEPS
+            try {
+                console.log('📊 Step 6: Completing Meta onboarding...');
+                // ✅ 1. Subscribe to ALL required webhooks
+                await meta_api_1.metaApi.subscribeToWebhooks(wabaId, access_token).catch(err => console.error('⚠️ Webhook subscription failed:', err.message));
+                // ✅ 2. Subscribe to WBA Onboarding specific webhooks
+                try {
+                    await axios_1.default.post(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/${wabaId}/subscribed_apps`, {
+                        subscribed_fields: [
+                            'messages',
+                            'message_template_status_update',
+                            'history', // ✅ NEW: Past messages
+                            'smb_app_state_sync', // ✅ NEW: Business customer contacts
+                            'smb_message_echoes', // ✅ NEW: New messages from WBA app
+                        ]
+                    }, {
+                        params: { access_token }
+                    });
+                    console.log('✅ All webhooks subscribed including WBA onboarding fields');
+                }
+                catch (webhookErr) {
+                    console.error('⚠️ Extended webhook subscription failed:', webhookErr.response?.data || webhookErr.message);
+                }
+                // ✅ 3. Register Phone Numbers
+                for (const phone of phoneNumbers) {
+                    await meta_api_1.metaApi.registerPhoneNumber(phone.id, access_token)
+                        .catch(err => console.warn(`⚠️ Registration skipped:`, err.message));
+                }
+                // ✅ 4. Sync message history (WBA Onboarding - within 24 hours!)
+                if (savedAccount) {
+                    console.log('🔄 Initiating message history sync...');
+                    syncMessageHistory(wabaId, access_token, organizationId, savedAccount.id)
+                        .catch(err => console.error('⚠️ History sync failed:', err.message));
+                }
+            }
+            catch (onboardingErr) {
+                console.error('⚠️ Post-connection steps failed:', onboardingErr.message);
             }
             // Delete used state
             await database_1.default.oAuthState.delete({ where: { state } });
             console.log('✅ Meta callback successful');
+            // After saving WhatsAppAccount, VERIFY it exists
+            if (savedAccount) {
+                // ✅ Verify save was successful
+                const verifyAccount = await database_1.default.whatsAppAccount.findUnique({
+                    where: { id: savedAccount.id },
+                });
+                if (!verifyAccount) {
+                    console.error('❌ CRITICAL: Account save verification failed!');
+                    throw new errorHandler_1.AppError('Failed to save WhatsApp account. Please try again.', 500);
+                }
+                console.log('✅ Account save verified:', verifyAccount.id);
+                // ✅ FIXED: Longer delay for template sync
+                setTimeout(async () => {
+                    try {
+                        console.log('🔄 Starting delayed template sync...');
+                        // Wait extra time for any DB replication
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        const result = await templates_service_1.templatesService.syncFromMeta(organizationId, savedAccount.id);
+                        console.log('✅ Template sync completed:', result);
+                    }
+                    catch (syncError) {
+                        console.error('❌ Template sync error:', syncError.message);
+                        // Non-critical, templates can be synced manually
+                    }
+                }, 5000); // Increased to 5 seconds
+            }
             console.log('🔄 ========== META CALLBACK END ==========\n');
             return (0, response_1.sendSuccess)(res, {
                 wabaId,
@@ -348,7 +502,7 @@ class MetaController {
                 orderBy: { createdAt: 'desc' },
             });
             console.log('   Found accounts:', accounts.length);
-            return (0, response_1.sendSuccess)(res, { accounts }, 'Accounts fetched successfully');
+            return (0, response_1.sendSuccess)(res, accounts, 'Accounts fetched successfully');
         }
         catch (error) {
             next(error);
@@ -391,7 +545,7 @@ class MetaController {
                         wabaName: metaConnection.wabaName,
                     }));
                     console.log('📤 Returning accounts from MetaConnection:', accounts.length);
-                    return (0, response_1.sendSuccess)(res, { accounts }, 'Accounts fetched successfully');
+                    return (0, response_1.sendSuccess)(res, accounts, 'Accounts fetched successfully');
                 }
             }
             catch (e) {
@@ -421,7 +575,7 @@ class MetaController {
                 }));
             }
             console.log('📤 Returning accounts:', accounts.length);
-            return (0, response_1.sendSuccess)(res, { accounts }, 'Accounts fetched successfully');
+            return (0, response_1.sendSuccess)(res, accounts, 'Accounts fetched successfully');
         }
         catch (error) {
             console.error('❌ Get WhatsApp accounts error:', error);
@@ -758,8 +912,62 @@ class MetaController {
             res.sendStatus(200);
         }
     }
+    // ============================================
+    // COMPLETE CONNECTION
+    // ============================================
+    async completeConnection(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            const userId = req.user?.id; // Note: using id instead of userId based on AuthRequest interface
+            if (!organizationId || !userId) {
+                throw new errorHandler_1.AppError('Organization not found', 404);
+            }
+            const { code, accessToken, connectionType } = req.body; // ✅ Get connectionType
+            const codeOrToken = accessToken || code;
+            if (!codeOrToken) {
+                throw new errorHandler_1.AppError('Authorization code or access token is required', 400);
+            }
+            // ✅ Pass connectionType to service
+            const result = await meta_service_1.metaService.completeConnection(codeOrToken, organizationId, userId, connectionType || 'CLOUD_API' // Default to CLOUD_API
+            );
+            if (result.success) {
+                return res.json({
+                    success: true,
+                    message: 'WhatsApp account connected successfully',
+                    data: result.account
+                });
+            }
+            else {
+                throw new errorHandler_1.AppError(result.error || 'Failed to connect', 400);
+            }
+        }
+        catch (error) {
+            next(error);
+        }
+    }
 }
 exports.MetaController = MetaController;
+// ✅ Message History Sync (WBA Onboarding requirement)
+async function syncMessageHistory(wabaId, accessToken, organizationId, accountId) {
+    try {
+        console.log('📜 Starting message history sync for WABA:', wabaId);
+        // Step 1: Request history sync
+        const syncResponse = await axios_1.default.post(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/${wabaId}/sync_history`, {}, { params: { access_token: accessToken } });
+        console.log('✅ History sync initiated:', syncResponse.data);
+        // Step 2: Update DB - mark sync as in progress
+        await database_1.default.whatsAppAccount.update({
+            where: { id: accountId },
+            data: {
+                // Store sync status in metadata or a field
+                lastSyncedAt: new Date(),
+            },
+        });
+    }
+    catch (err) {
+        // History sync failure is non-critical
+        console.warn('⚠️ History sync failed (non-critical):', err.response?.data?.error?.message || err.message);
+    }
+}
 exports.metaController = new MetaController();
 exports.default = exports.metaController;
 //# sourceMappingURL=meta.controller.js.map

@@ -60,6 +60,12 @@ router.put('/users/:id', (0, validate_1.validate)(admin_schema_1.updateUserSchem
  */
 router.patch('/users/:id/status', (0, validate_1.validate)(admin_schema_1.updateUserStatusSchema), admin_controller_1.adminController.updateUserStatus.bind(admin_controller_1.adminController));
 /**
+ * @route   PATCH /api/v1/admin/users/:id/password
+ * @desc    Update user password
+ * @access  Admin
+ */
+router.patch('/users/:id/password', (0, validate_1.validate)(admin_schema_1.updateUserPasswordSchema), admin_controller_1.adminController.updateUserPassword.bind(admin_controller_1.adminController));
+/**
  * @route   POST /api/v1/admin/users/:id/suspend
  * @desc    Suspend user
  * @access  Admin
@@ -116,6 +122,9 @@ router.delete('/organizations/:id', admin_middleware_1.requireSuperAdmin, (0, va
  * @access  Admin
  */
 router.put('/organizations/:id/subscription', (0, validate_1.validate)(admin_schema_1.updateSubscriptionSchema), admin_controller_1.adminController.updateSubscription.bind(admin_controller_1.adminController));
+// Feature Management
+router.get('/organizations/:organizationId/features', admin_controller_1.adminController.getOrganizationFeatures.bind(admin_controller_1.adminController));
+router.put('/organizations/:organizationId/features', admin_controller_1.adminController.updateOrganizationFeatures.bind(admin_controller_1.adminController));
 // ============================================
 // SUBSCRIPTION MANAGEMENT ROUTES
 // ============================================
@@ -207,5 +216,21 @@ router.get('/settings', admin_controller_1.adminController.getSystemSettings.bin
  * @access  Super Admin
  */
 router.put('/settings', admin_middleware_1.requireSuperAdmin, (0, validate_1.validate)(admin_schema_1.updateSystemSettingsSchema), admin_controller_1.adminController.updateSystemSettings.bind(admin_controller_1.adminController));
+// ============================================
+// WHATSAPP CONNECTION MANAGEMENT
+// ============================================
+router.get('/whatsapp-stats', admin_controller_1.adminController.getWhatsAppStats.bind(admin_controller_1.adminController));
+router.patch('/whatsapp-connections/:accountId/connection-type', admin_controller_1.adminController.updateConnectionType.bind(admin_controller_1.adminController));
+router.get('/whatsapp-connections', admin_controller_1.adminController.getWhatsAppConnections.bind(admin_controller_1.adminController));
+router.post('/whatsapp-connections/:accountId/disconnect', admin_controller_1.adminController.disconnectWhatsAppAccount.bind(admin_controller_1.adminController));
+// ============================================
+// WALLET MANAGEMENT ROUTES
+// ============================================
+router.get('/wallets', admin_controller_1.adminController.adminGetAllWallets.bind(admin_controller_1.adminController));
+router.get('/wallets/requests', admin_controller_1.adminController.adminGetWalletRequests.bind(admin_controller_1.adminController));
+router.patch('/wallets/requests/:requestId/review', admin_controller_1.adminController.adminReviewWalletRequest.bind(admin_controller_1.adminController));
+router.patch('/wallets/:organizationId/adjust', admin_controller_1.adminController.adminAdjustWalletBalance.bind(admin_controller_1.adminController));
+router.patch('/wallets/:organizationId/credit', admin_controller_1.adminController.adminSetWalletCredit.bind(admin_controller_1.adminController));
+router.patch('/wallets/:organizationId/flag', admin_controller_1.adminController.adminFlagWallet.bind(admin_controller_1.adminController));
 exports.default = router;
 //# sourceMappingURL=admin.routes.js.map

@@ -20,12 +20,12 @@ export declare class InboxService {
             email: string | null;
             organizationId: string;
             tags: string[];
+            status: import(".prisma/client").$Enums.ContactStatus;
             id: string;
             firstName: string | null;
             lastName: string | null;
             phone: string;
             avatar: string | null;
-            status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
             lastMessageAt: Date | null;
@@ -44,8 +44,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -63,22 +63,23 @@ export declare class InboxService {
      */
     getMessages(organizationId: string, conversationId: string, query?: any): Promise<{
         messages: {
+            timestamp: Date;
             type: import(".prisma/client").$Enums.MessageType;
-            id: string;
+            waMessageId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
-            direction: import(".prisma/client").$Enums.MessageDirection;
-            waMessageId: string | null;
+            templateName: string | null;
             whatsappAccountId: string | null;
             conversationId: string;
             wamId: string | null;
+            direction: import(".prisma/client").$Enums.MessageDirection;
             content: string | null;
             mediaUrl: string | null;
             mediaType: string | null;
             mediaMimeType: string | null;
             templateId: string | null;
-            templateName: string | null;
             templateParams: Prisma.JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -89,6 +90,9 @@ export declare class InboxService {
             metadata: Prisma.JsonValue | null;
             retryCount: number;
             statusUpdatedAt: Date | null;
+            fileName: string | null;
+            mediaId: string | null;
+            whatsappMessageId: string | null;
         }[];
         meta: {
             page: any;
@@ -106,8 +110,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -129,8 +133,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -152,8 +156,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -175,8 +179,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -198,8 +202,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -221,8 +225,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -261,12 +265,12 @@ export declare class InboxService {
                     email: string | null;
                     organizationId: string;
                     tags: string[];
+                    status: import(".prisma/client").$Enums.ContactStatus;
                     id: string;
                     firstName: string | null;
                     lastName: string | null;
                     phone: string;
                     avatar: string | null;
-                    status: import(".prisma/client").$Enums.ContactStatus;
                     createdAt: Date;
                     updatedAt: Date;
                     lastMessageAt: Date | null;
@@ -285,8 +289,8 @@ export declare class InboxService {
                 createdAt: Date;
                 updatedAt: Date;
                 lastMessageAt: Date | null;
-                contactId: string;
                 phoneNumberId: string | null;
+                contactId: string;
                 lastMessagePreview: string | null;
                 lastCustomerMessageAt: Date | null;
                 windowExpiresAt: Date | null;
@@ -301,21 +305,21 @@ export declare class InboxService {
             };
         } & {
             type: import(".prisma/client").$Enums.MessageType;
-            id: string;
+            waMessageId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
-            direction: import(".prisma/client").$Enums.MessageDirection;
-            waMessageId: string | null;
+            templateName: string | null;
             whatsappAccountId: string | null;
             conversationId: string;
             wamId: string | null;
+            direction: import(".prisma/client").$Enums.MessageDirection;
             content: string | null;
             mediaUrl: string | null;
             mediaType: string | null;
             mediaMimeType: string | null;
             templateId: string | null;
-            templateName: string | null;
             templateParams: Prisma.JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -326,6 +330,10 @@ export declare class InboxService {
             metadata: Prisma.JsonValue | null;
             retryCount: number;
             statusUpdatedAt: Date | null;
+            fileName: string | null;
+            mediaId: string | null;
+            timestamp: Date;
+            whatsappMessageId: string | null;
         })[];
         meta: {
             page: number;
@@ -356,8 +364,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -378,12 +386,12 @@ export declare class InboxService {
             email: string | null;
             organizationId: string;
             tags: string[];
+            status: import(".prisma/client").$Enums.ContactStatus;
             id: string;
             firstName: string | null;
             lastName: string | null;
             phone: string;
             avatar: string | null;
-            status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
             lastMessageAt: Date | null;
@@ -402,8 +410,8 @@ export declare class InboxService {
         createdAt: Date;
         updatedAt: Date;
         lastMessageAt: Date | null;
-        contactId: string;
         phoneNumberId: string | null;
+        contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -420,6 +428,77 @@ export declare class InboxService {
      * Send message
      */
     sendMessage(organizationId: string, userId: string, conversationId: string, input: any): Promise<any>;
+    /**
+     * Send template message
+     */
+    sendTemplateMessage(organizationId: string, conversationId: string, templateName: string, language: string, params: any[], bodyText: string): Promise<{
+        type: import(".prisma/client").$Enums.MessageType;
+        waMessageId: string | null;
+        status: import(".prisma/client").$Enums.MessageStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        templateName: string | null;
+        whatsappAccountId: string | null;
+        conversationId: string;
+        wamId: string | null;
+        direction: import(".prisma/client").$Enums.MessageDirection;
+        content: string | null;
+        mediaUrl: string | null;
+        mediaType: string | null;
+        mediaMimeType: string | null;
+        templateId: string | null;
+        templateParams: Prisma.JsonValue | null;
+        sentAt: Date | null;
+        deliveredAt: Date | null;
+        readAt: Date | null;
+        failedAt: Date | null;
+        failureReason: string | null;
+        replyToMessageId: string | null;
+        metadata: Prisma.JsonValue | null;
+        retryCount: number;
+        statusUpdatedAt: Date | null;
+        fileName: string | null;
+        mediaId: string | null;
+        timestamp: Date;
+        whatsappMessageId: string | null;
+    }>;
+    deleteMessage(organizationId: string, conversationId: string, messageId: string): Promise<{
+        success: boolean;
+        messageId: string;
+    }>;
+    editMessage(organizationId: string, conversationId: string, messageId: string, newContent: string): Promise<{
+        type: import(".prisma/client").$Enums.MessageType;
+        waMessageId: string | null;
+        status: import(".prisma/client").$Enums.MessageStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        templateName: string | null;
+        whatsappAccountId: string | null;
+        conversationId: string;
+        wamId: string | null;
+        direction: import(".prisma/client").$Enums.MessageDirection;
+        content: string | null;
+        mediaUrl: string | null;
+        mediaType: string | null;
+        mediaMimeType: string | null;
+        templateId: string | null;
+        templateParams: Prisma.JsonValue | null;
+        sentAt: Date | null;
+        deliveredAt: Date | null;
+        readAt: Date | null;
+        failedAt: Date | null;
+        failureReason: string | null;
+        replyToMessageId: string | null;
+        metadata: Prisma.JsonValue | null;
+        retryCount: number;
+        statusUpdatedAt: Date | null;
+        fileName: string | null;
+        mediaId: string | null;
+        timestamp: Date;
+        whatsappMessageId: string | null;
+    }>;
 }
 export declare const inboxService: InboxService;
 //# sourceMappingURL=inbox.service.d.ts.map

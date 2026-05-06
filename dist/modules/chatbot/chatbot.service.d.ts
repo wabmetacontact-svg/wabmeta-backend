@@ -1,28 +1,145 @@
 import { ChatbotStatus } from '@prisma/client';
-import { ChatbotInput, ChatbotResponse, ChatbotStats } from './chatbot.types';
 export declare class ChatbotService {
-    getAll(organizationId: string, params: {
+    getAll(organizationId: string, options?: {
         page?: number;
         limit?: number;
         status?: ChatbotStatus;
         search?: string;
     }): Promise<{
-        chatbots: ChatbotResponse[];
+        chatbots: {
+            name: string;
+            organizationId: string;
+            status: import(".prisma/client").$Enums.ChatbotStatus;
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            description: string | null;
+            flowData: import("@prisma/client/runtime/library").JsonValue;
+            triggerKeywords: string[];
+            isDefault: boolean;
+            welcomeMessage: string | null;
+            fallbackMessage: string | null;
+            createdById: string;
+        }[];
         total: number;
         page: number;
         limit: number;
     }>;
-    getById(organizationId: string, chatbotId: string): Promise<ChatbotResponse>;
-    create(organizationId: string, userId: string, input: ChatbotInput): Promise<ChatbotResponse>;
-    update(organizationId: string, chatbotId: string, input: Partial<ChatbotInput>): Promise<ChatbotResponse>;
-    delete(organizationId: string, chatbotId: string): Promise<void>;
-    activate(organizationId: string, chatbotId: string): Promise<ChatbotResponse>;
-    deactivate(organizationId: string, chatbotId: string): Promise<ChatbotResponse>;
-    duplicate(organizationId: string, userId: string, chatbotId: string): Promise<ChatbotResponse>;
-    getStats(organizationId: string, chatbotId: string): Promise<ChatbotStats>;
-    getActiveChatbots(organizationId: string): Promise<ChatbotResponse[]>;
-    findMatchingChatbot(organizationId: string, messageText: string, isNewConversation: boolean): Promise<ChatbotResponse | null>;
-    private formatChatbot;
+    getById(organizationId: string, chatbotId: string): Promise<{
+        name: string;
+        organizationId: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        description: string | null;
+        flowData: import("@prisma/client/runtime/library").JsonValue;
+        triggerKeywords: string[];
+        isDefault: boolean;
+        welcomeMessage: string | null;
+        fallbackMessage: string | null;
+        createdById: string;
+    }>;
+    create(organizationId: string, userId: string, data: {
+        name: string;
+        description?: string;
+        triggerKeywords?: string[];
+        isDefault?: boolean;
+        welcomeMessage?: string;
+        fallbackMessage?: string;
+        flowData?: any;
+    }): Promise<{
+        name: string;
+        organizationId: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        description: string | null;
+        flowData: import("@prisma/client/runtime/library").JsonValue;
+        triggerKeywords: string[];
+        isDefault: boolean;
+        welcomeMessage: string | null;
+        fallbackMessage: string | null;
+        createdById: string;
+    }>;
+    update(organizationId: string, chatbotId: string, data: {
+        name?: string;
+        description?: string;
+        triggerKeywords?: string[];
+        isDefault?: boolean;
+        welcomeMessage?: string;
+        fallbackMessage?: string;
+        flowData?: any;
+        status?: ChatbotStatus;
+    }): Promise<{
+        name: string;
+        organizationId: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        description: string | null;
+        flowData: import("@prisma/client/runtime/library").JsonValue;
+        triggerKeywords: string[];
+        isDefault: boolean;
+        welcomeMessage: string | null;
+        fallbackMessage: string | null;
+        createdById: string;
+    }>;
+    delete(organizationId: string, chatbotId: string): Promise<{
+        message: string;
+    }>;
+    activate(organizationId: string, chatbotId: string): Promise<{
+        name: string;
+        organizationId: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        description: string | null;
+        flowData: import("@prisma/client/runtime/library").JsonValue;
+        triggerKeywords: string[];
+        isDefault: boolean;
+        welcomeMessage: string | null;
+        fallbackMessage: string | null;
+        createdById: string;
+    }>;
+    deactivate(organizationId: string, chatbotId: string): Promise<{
+        name: string;
+        organizationId: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        description: string | null;
+        flowData: import("@prisma/client/runtime/library").JsonValue;
+        triggerKeywords: string[];
+        isDefault: boolean;
+        welcomeMessage: string | null;
+        fallbackMessage: string | null;
+        createdById: string;
+    }>;
+    duplicate(organizationId: string, chatbotId: string, userId: string, newName?: string): Promise<{
+        name: string;
+        organizationId: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        description: string | null;
+        flowData: import("@prisma/client/runtime/library").JsonValue;
+        triggerKeywords: string[];
+        isDefault: boolean;
+        welcomeMessage: string | null;
+        fallbackMessage: string | null;
+        createdById: string;
+    }>;
+    getStats(organizationId: string, chatbotId: string): Promise<{
+        totalConversations: number;
+        activeSessions: number;
+        completedFlows: number;
+    }>;
 }
 export declare const chatbotService: ChatbotService;
 //# sourceMappingURL=chatbot.service.d.ts.map

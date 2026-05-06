@@ -132,28 +132,25 @@ export function parseMultiplePhones(input: string): {
     valid: Array<{ fullNumber: string; countryCode: string; nationalNumber: string }>;
     invalid: Array<{ input: string; error: string }>;
 } {
-    // ✅ Pre-process: Normalize spaced phone formats BEFORE splitting
-    // Handles formats like: +91 98765 43210, +91 9876543210, +1 555 123 4567
-    // Pattern: + followed by 1-4 digit country code, then spaces between digit groups
-    let normalized = input.replace(
-        /(\+\d{1,4})\s+(\d[\d\s]{6,14}\d)/g,
-        (_match, countryCode: string, rest: string) => {
-            // Remove all spaces from the rest of the number
-            return countryCode + rest.replace(/\s+/g, '');
-        }
-    );
+    // Replace common separators with newlines to standardize parsing
+    // But be careful not to split inside a valid phone number.
+    
+    // 1. Remove all spaces, dashes, parens, dots that are part of a phone number
+    // We can do this by finding all phone-like sequences and cleaning them.
+    // A phone like sequence starts with + (optional), followed by digits and separators.
+    
+    // Instead of complex splitting, let's just split by newlines, commas, and semicolons.
+    // If users separate numbers by spaces on the same line, that's ambiguous.
+    // But we can try to handle it. First, remove spaces immediately following a '+' and digits.
+    let preprocessed = input.replace(/\s*[\-\(\)\.]\s*/g, ''); // Remove -, (, ), . and surrounding spaces
+    
+    // Remove spaces between digits
+    preprocessed = preprocessed.replace(/(\d)\s+(\d)/g, '$1$2');
+    preprocessed = preprocessed.replace(/(\+)\s+(\d)/g, '$1$2');
 
-    const numbers = normalized
-        .split(/[\n,;]+/)
-        .flatMap(line => {
-            // Within each line, split by whitespace but keep +XX... numbers intact
-            const trimmed = line.trim();
-            if (!trimmed) return [];
-            
-            // Split by whitespace
-            const parts = trimmed.split(/\s+/).filter(p => p.length > 0);
-            return parts;
-        })
+    const numbers = preprocessed
+        .split(/[\n,;\s]+/) // Now it's safe to split by any remaining whitespace
+        .map(n => n.trim())
         .filter(n => n.length > 0);
 
     const valid: Array<{ fullNumber: string; countryCode: string; nationalNumber: string }> = [];

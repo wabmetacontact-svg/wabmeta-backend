@@ -8,6 +8,21 @@ let io = null;
  */
 const initializeCampaignSocket = (socketServer) => {
     io = socketServer;
+    io.on('connection', (socket) => {
+        socket.on('campaign:join', (campaignId) => {
+            console.log(`🔌 [SOCKET] Client joining campaign room: ${campaignId}`);
+            socket.join(`campaign:${campaignId}`);
+        });
+        socket.on('campaign:leave', (campaignId) => {
+            console.log(`🔌 [SOCKET] Client leaving campaign room: ${campaignId}`);
+            socket.leave(`campaign:${campaignId}`);
+        });
+        socket.on('org:join', (organizationId) => {
+            console.log(`🔌 [SOCKET] Client joining organization room: ${organizationId}`);
+            socket.join(`org:${organizationId}`);
+            socket.join(`org:${organizationId}:campaigns`);
+        });
+    });
     console.log('✅ Campaign Socket Service initialized');
 };
 exports.initializeCampaignSocket = initializeCampaignSocket;
@@ -47,18 +62,31 @@ class CampaignSocketService {
             console.warn('⚠️ Socket.IO not initialized - cannot emit campaign:progress');
             return;
         }
+        const total = Math.max(data.total, 1);
+        // ✅ CRITICAL: Cap all values to never exceed total
+        const sent = Math.min(data.sent, total);
+        const failed = Math.min(data.failed, total - sent);
+        const delivered = Math.min(data.delivered || 0, sent);
+        const read = Math.min(data.read || 0, delivered);
+        const percentage = Math.min(100, Math.round(((sent + failed) / total) * 100));
         const payload = {
             campaignId,
             organizationId,
-            ...data,
+            sent,
+            failed,
+            delivered,
+            read,
+            total,
+            percentage,
+            status: data.status,
             timestamp: new Date().toISOString(),
         };
         io.to(`org:${organizationId}`).emit('campaign:progress', payload);
         io.to(`campaign:${campaignId}`).emit('campaign:progress', payload);
         io.to(`org:${organizationId}:campaigns`).emit('campaign:progress', payload);
         // Only log every 10% to reduce noise
-        if (data.percentage % 10 === 0) {
-            console.log(`📊 [SOCKET] campaign:progress → ${data.percentage}% (${data.sent}/${data.total})`);
+        if (percentage % 10 === 0) {
+            console.log(`📊 [SOCKET] campaign:progress → ${percentage}% (${sent}+${failed}/${total})`);
         }
     }
     /**

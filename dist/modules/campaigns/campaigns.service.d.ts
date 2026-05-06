@@ -1,35 +1,82 @@
-import { MessageStatus } from '@prisma/client';
-import { CreateCampaignInput, UpdateCampaignInput, CampaignsQueryInput, CampaignContactsQueryInput, CampaignResponse, CampaignDetailResponse, CampaignContactResponse, CampaignsListResponse, CampaignStats, CampaignAnalytics } from './campaigns.types';
 export declare class CampaignsService {
+    private processingCampaigns;
+    private getQuickCounts;
+    private syncCampaignCounters;
     private findWhatsAppAccount;
-    create(organizationId: string, userId: string, input: CreateCampaignInput): Promise<CampaignResponse>;
-    getList(organizationId: string, query: CampaignsQueryInput): Promise<CampaignsListResponse>;
-    getById(organizationId: string, campaignId: string): Promise<CampaignDetailResponse>;
-    update(organizationId: string, campaignId: string, input: UpdateCampaignInput): Promise<CampaignResponse>;
-    delete(organizationId: string, campaignId: string): Promise<{
-        message: string;
+    create(organizationId: string, userId: string, input: any): Promise<any>;
+    getList(organizationId: string, query: any): Promise<any>;
+    getById(organizationId: string, campaignId: string): Promise<any>;
+    update(organizationId: string, campaignId: string, input: any): Promise<any>;
+    delete(organizationId: string, campaignId: string): Promise<any>;
+    duplicate(organizationId: string, campaignId: string, newName: string): Promise<any>;
+    start(organizationId: string, campaignId: string): Promise<any>;
+    pause(organizationId: string, campaignId: string): Promise<any>;
+    resume(organizationId: string, campaignId: string): Promise<any>;
+    cancel(organizationId: string, campaignId: string): Promise<any>;
+    retry(organizationId: string, campaignId: string, options?: any): Promise<any>;
+    retryFailed(org: string, id: string, contactIds?: string[]): Promise<any>;
+    retryFailedContacts(org: string, id: string, contactIds?: string[]): Promise<any>;
+    resumePending(org: string, id: string): Promise<any>;
+    getAnalytics(organizationId: string, campaignId: string): Promise<any>;
+    getCampaignContacts(organizationId: string, campaignId: string, options: {
+        page?: number;
+        limit?: number;
+        status?: string;
+        search?: string;
+    }): Promise<{
+        contacts: {
+            id: string;
+            contactId: string;
+            phone: string;
+            name: string;
+            fullName: string;
+            status: import(".prisma/client").$Enums.MessageStatus;
+            waMessageId: string | null;
+            sentAt: Date | null;
+            deliveredAt: Date | null;
+            readAt: Date | null;
+            failedAt: Date | null;
+            failureReason: string | null;
+            retryCount: number;
+            updatedAt: Date;
+        }[];
+        recipients: {
+            id: string;
+            contactId: string;
+            phone: string;
+            name: string;
+            fullName: string;
+            status: import(".prisma/client").$Enums.MessageStatus;
+            waMessageId: string | null;
+            sentAt: Date | null;
+            deliveredAt: Date | null;
+            readAt: Date | null;
+            failedAt: Date | null;
+            failureReason: string | null;
+            retryCount: number;
+            updatedAt: Date;
+        }[];
+        meta: {
+            page: number;
+            limit: number;
+            total: number;
+            totalPages: number;
+        };
     }>;
-    start(organizationId: string, campaignId: string): Promise<CampaignResponse>;
+    getAllRecipients(organizationId: string, campaignId: string, options: any): Promise<any>;
+    getFailedContacts(organizationId: string, campaignId: string, page: number, limit: number): Promise<any>;
+    exportFailedContactsCsv(organizationId: string, campaignId: string): Promise<string>;
+    exportRecipientsCsv(organizationId: string, campaignId: string, status?: string): Promise<string>;
+    getDetailedStats(organizationId: string, campaignId: string): Promise<any>;
     private processCampaignContacts;
-    private updateCampaignStats;
-    pause(organizationId: string, campaignId: string): Promise<CampaignResponse>;
-    resume(organizationId: string, campaignId: string): Promise<CampaignResponse>;
-    cancel(organizationId: string, campaignId: string): Promise<CampaignResponse>;
-    getContacts(organizationId: string, campaignId: string, query: CampaignContactsQueryInput): Promise<{
-        contacts: CampaignContactResponse[];
-        meta: any;
-    }>;
-    retry(organizationId: string, campaignId: string, retryFailed?: boolean, retryPending?: boolean): Promise<{
-        message: string;
-        retryCount: number;
-    }>;
-    duplicate(organizationId: string, campaignId: string, newName: string): Promise<CampaignResponse>;
-    private shouldStopCampaign;
+    private flushBatchResults;
     private saveCampaignMessage;
-    getStats(organizationId: string): Promise<CampaignStats>;
-    getAnalytics(organizationId: string, campaignId: string): Promise<CampaignAnalytics>;
-    updateContactStatus(organizationId: string, campaignId: string, contactId: string, status: MessageStatus, waMessageId?: string, failureReason?: string): Promise<void>;
-    checkAndComplete(organizationId: string, campaignId: string): Promise<void>;
+    private getCampaignStats;
+    private resolveMediaId;
+    private buildTemplatePayload;
+    private extractFailureReason;
+    private getDecryptedToken;
+    getStats(organizationId: string): Promise<any>;
 }
 export declare const campaignsService: CampaignsService;
 //# sourceMappingURL=campaigns.service.d.ts.map

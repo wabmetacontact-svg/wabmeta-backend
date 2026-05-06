@@ -34,15 +34,24 @@ class MetaApiClient {
             console.log(`[Meta API] ✅ Response: ${response.status}`);
             return response;
         }, (error) => {
-            if (error.response?.data?.error) {
-                const metaError = error.response.data.error;
-                console.error('[Meta API] ❌ Error:', {
-                    message: metaError.message,
-                    code: metaError.code,
-                    subcode: metaError.error_subcode,
-                    type: metaError.type,
-                    fbtrace_id: metaError.fbtrace_id,
-                });
+            const metaError = error.response?.data?.error;
+            // Don't log as ERROR if it's a known/handled restriction
+            const isRestricted = metaError?.code === 100 && metaError?.error_subcode === 33;
+            const isSmbRestriction = metaError?.code === 100 && metaError?.message?.includes('SMB');
+            const isHandledError = isRestricted || isSmbRestriction;
+            if (metaError) {
+                if (isHandledError) {
+                    console.warn(`[Meta API] ℹ️  Note: ${metaError.message}`);
+                }
+                else {
+                    console.error('[Meta API] ❌ Error:', {
+                        message: metaError.message,
+                        code: metaError.code,
+                        subcode: metaError.error_subcode,
+                        type: metaError.type,
+                        fbtrace_id: metaError.fbtrace_id,
+                    });
+                }
             }
             else {
                 console.error('[Meta API] ❌ Error:', error.message);
@@ -744,9 +753,14 @@ class MetaApiClient {
     // ============================================
     // MEDIA
     // ============================================
-    async uploadMedia(phoneNumberId, accessToken, file, mimeType, filename) {
+    async uploadMedia(phoneNumberId, accessToken, file, mimeType, filename, wabaId) {
         try {
-            console.log(`[Meta API] Uploading media: ${filename}...`);
+            console.log(`[Meta API] Uploading media:`, {
+                filename,
+                size: file.length,
+                mimeType,
+                phoneNumberId,
+            });
             const FormData = require('form-data');
             const formData = new FormData();
             formData.append('messaging_product', 'whatsapp');
@@ -759,11 +773,47 @@ class MetaApiClient {
                     ...formData.getHeaders(),
                     Authorization: `Bearer ${accessToken}`,
                 },
+                timeout: 60000, // 1 minute
             });
-            console.log(`[Meta API] ✅ Media uploaded: ${response.data.id}`);
-            return { id: response.data.id };
+            console.log('[Meta API] Upload response:', {
+                status: response.status,
+                data: JSON.stringify(response.data),
+            });
+            // ✅ Extract media ID (handle different response formats)
+            let mediaId = null;
+            // Try different possible fields
+            if (response.data?.id) {
+                mediaId = response.data.id;
+            }
+            else if (response.data?.h) {
+                mediaId = response.data.h; // Some API versions use 'h'
+            }
+            else if (response.data?.media_id) {
+                mediaId = response.data.media_id;
+            }
+            if (!mediaId) {
+                console.error('❌ No media ID found in response:', response.data);
+                throw new Error('No media ID in Meta upload response');
+            }
+            // ✅ Validate media ID format
+            const mediaIdStr = String(mediaId);
+            // Check if it's a valid media ID (not phone number)
+            if (mediaIdStr.startsWith('92') && mediaIdStr.length === 12) {
+                console.error('❌ Received phone number instead of media ID:', mediaIdStr);
+                throw new Error('Invalid media ID - received phone number');
+            }
+            console.log(`[Meta API] ✅ Media uploaded successfully:`, {
+                mediaId: mediaIdStr,
+                length: mediaIdStr.length,
+            });
+            return { id: mediaIdStr };
         }
         catch (error) {
+            console.error('[Meta API] ❌ Upload failed:', {
+                message: error.message,
+                response: error.response?.data,
+                status: error.response?.status,
+            });
             throw this.handleError(error, 'Failed to upload media');
         }
     }
@@ -819,41 +869,251 @@ class MetaApiClient {
     // ERROR HANDLING
     // ============================================
     handleError(error, defaultMessage) {
-        if (error.response?.data?.error) {
-            const metaError = error.response.data.error;
-            let errorMessage = metaError.message || defaultMessage;
-            if (metaError.code) {
-                errorMessage += ` (Error Code: ${metaError.code})`;
-            }
-            if (metaError.error_subcode) {
-                errorMessage += ` (Subcode: ${metaError.error_subcode})`;
-            }
-            const errorCodes = {
-                1: 'Unknown error occurred',
-                2: 'Service temporarily unavailable',
-                4: 'Application request limit reached',
-                10: 'Permission denied',
-                100: 'Invalid parameter',
-                190: 'Invalid access token',
-                200: 'Permission error',
-                368: 'Temporarily blocked for policy violations',
-                2388001: 'Phone number not verified',
-                2388002: 'Message template not found',
-                131030: 'Phone number not registered',
-                131031: 'Phone number not in correct format',
-            };
-            if (metaError.code && errorCodes[metaError.code]) {
-                errorMessage = `${errorCodes[metaError.code]}: ${metaError.message}`;
-            }
-            return new Error(errorMessage);
+        const err = error.response?.data?.error;
+        if (err) {
+            const msg = err.message || defaultMessage;
+            const apiErr = new Error(msg);
+            apiErr.response = error.response;
+            apiErr.metaError = err;
+            return apiErr;
         }
         if (error.code === 'ECONNABORTED') {
-            return new Error('Request timeout - Meta API took too long to respond');
+            const timeoutErr = new Error('Request timeout - Meta API took too long to respond');
+            timeoutErr.response = error.response;
+            return timeoutErr;
         }
         if (error.code === 'ENOTFOUND') {
-            return new Error('Network error - Could not reach Meta API');
+            const networkErr = new Error('Network error - Could not reach Meta API');
+            networkErr.response = error.response;
+            return networkErr;
         }
-        return new Error(error.message || defaultMessage);
+        const standardErr = new Error(error.message || defaultMessage);
+        standardErr.response = error.response;
+        return standardErr;
+    }
+    // ============================================
+    // CALLING API METHODS
+    // ============================================
+    // ✅ 1. Enable calling feature on phone number (Full Schema)
+    async enableCalling(phoneNumberId, accessToken, options = { callingEnabled: true }) {
+        try {
+            console.log(`[Meta API] Enabling calling for ${phoneNumberId}...`);
+            // Build calling_settings payload
+            const callingSettings = {
+                status: options.callingEnabled ? 'ENABLED' : 'DISABLED',
+                callback_permission_status: options.callbackEnabled !== false ? 'ENABLED' : 'DISABLED',
+                sip: { status: 'DISABLED' }, // Use WhatsApp native calling
+            };
+            // NOTE: inbound_calls_enabled is NOT a valid key for the calling param (Meta removed it)
+            // Country restriction (e.g. ["IN"] for India only)
+            if (options.restrictToCountries && options.restrictToCountries.length > 0) {
+                callingSettings.call_icons = {
+                    restrict_to_user_countries: options.restrictToCountries,
+                };
+            }
+            // Call hours (business hours)
+            // ⚠️ When DISABLED, omit call_hours entirely — Meta rejects weekly_operating_hours: [] via schema
+            if (options.callHoursEnabled && options.weeklyHours && options.weeklyHours.length > 0) {
+                callingSettings.call_hours = {
+                    status: 'ENABLED',
+                    timezone_id: options.timezone || 'Asia/Kolkata',
+                    weekly_operating_hours: options.weeklyHours.map((h) => ({
+                        day_of_week: h.day,
+                        open_time: h.openTime,
+                        close_time: h.closeTime,
+                    })),
+                    holiday_schedule: options.holidaySchedule?.map((h) => ({
+                        date: h.date,
+                        start_time: h.startTime,
+                        end_time: h.endTime,
+                    })) || [],
+                };
+            }
+            // else: omit call_hours entirely when disabled — avoids schema validation error
+            const response = await this.client.post(`/${phoneNumberId}/settings`, { calling: callingSettings }, { headers: { Authorization: `Bearer ${accessToken}` } });
+            console.log('[Meta API] ✅ Calling settings updated');
+            return { success: true, data: response.data };
+        }
+        catch (error) {
+            console.error('[Meta API] ❌ Enable calling failed:', error.response?.data);
+            throw this.handleError(error, 'Failed to enable calling');
+        }
+    }
+    // ✅ 2. Fetch calling settings
+    async getCallingSettings(phoneNumberId, accessToken) {
+        try {
+            console.log(`[Meta API] Fetching call settings for ${phoneNumberId}...`);
+            const response = await this.client.get(`/${phoneNumberId}/settings`, {
+                params: {
+                    access_token: accessToken,
+                    fields: 'calling,calling_settings', // try both old and new field names
+                }
+            });
+            // Try new 'calling' field + fallback to old 'calling_settings'
+            const calling = response.data?.calling || response.data?.calling_settings || {};
+            return {
+                callingEnabled: calling.status === 'ENABLED' || calling.calling_enabled === true || false,
+                inboundCallsEnabled: calling.inbound_calls_enabled ?? true,
+                callbackEnabled: calling.callback_permission_status === 'ENABLED' ||
+                    calling.callback_enabled === true ||
+                    true,
+                callHoursEnabled: calling.call_hours?.status === 'ENABLED' ||
+                    calling.call_hours_enabled === true ||
+                    false,
+            };
+        }
+        catch (error) {
+            console.error('[Meta API] ❌ Get calling settings failed');
+            return {
+                callingEnabled: false,
+                inboundCallsEnabled: false,
+                callbackEnabled: false,
+                callHoursEnabled: false,
+            };
+        }
+    }
+    // ✅ 3. Business-initiated call (via interactive message with Call button)
+    //
+    // ⚠️ IMPORTANT: WhatsApp Business Calling does NOT support cold-calling.
+    //    The /calls endpoint does not exist — it throws "Missing session parameter".
+    //    Business-initiated calls work by sending an interactive message with a
+    //    "call" CTA button. The user must be within an active 24-hour messaging
+    //    session (they must have messaged you first).
+    //
+    //    Flow:
+    //      1. User sends a message → opens 24h session
+    //      2. Business sends interactive message with call CTA button
+    //      3. User taps the button → call is initiated on their device
+    async initiateCall(phoneNumberId, accessToken, to, options) {
+        try {
+            const cleanTo = to.replace(/[^0-9]/g, '');
+            console.log(`[Meta API] Sending call CTA to ${cleanTo.substring(0, 5)}...`);
+            // ── Build wa.me call URL ──────────────────────────────────────────
+            // phoneNumberId is Meta's internal 16-digit ID — NEVER use it as a phone number.
+            // Only use businessPhoneNumber if it's a real E.164 number (≤15 digits after cleaning).
+            const rawBusinessPhone = (options?.businessPhoneNumber || '').replace(/[^0-9]/g, '');
+            const isRealPhone = rawBusinessPhone.length >= 7 && rawBusinessPhone.length <= 15;
+            let callUrl;
+            let bodyText;
+            let buttonText;
+            if (isRealPhone) {
+                // ✅ Valid phone number → wa.me call link
+                callUrl = `https://wa.me/${rawBusinessPhone}?call=true`;
+                bodyText = options?.bodyText || '📞 Aap hamse WhatsApp Call ke zariye baat kar sakte hain. Niche button dabayein.';
+                buttonText = options?.buttonText || '📞 Call Now';
+            }
+            else {
+                // ⚠️ No valid phone number — send a plain text message instead of broken link
+                console.warn('[Meta API] ⚠️ No valid business phone number for wa.me URL — sending text-only call invite');
+                callUrl = 'https://wa.me/'; // fallback (will be replaced below with text-only message)
+                bodyText = options?.bodyText || '📞 Please call us back on WhatsApp to connect with our team.';
+                buttonText = options?.buttonText || '📞 Call Us';
+            }
+            // Business-initiated calls use an interactive message with a call CTA button
+            const payload = {
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: cleanTo,
+                type: 'interactive',
+                interactive: {
+                    type: 'cta_url',
+                    body: {
+                        text: bodyText,
+                    },
+                    action: {
+                        name: 'cta_url',
+                        parameters: {
+                            display_text: buttonText,
+                            url: callUrl,
+                        },
+                    },
+                },
+            };
+            if (options?.callbackData) {
+                // callback_data goes on the top-level message for session tracking
+                payload.biz_opaque_callback_data = options.callbackData;
+            }
+            const response = await this.client.post(`/${phoneNumberId}/messages`, payload, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            const messageId = response.data?.messages?.[0]?.id;
+            console.log('[Meta API] ✅ Call CTA message sent:', messageId);
+            return {
+                messageId,
+                status: response.data?.messages?.[0]?.message_status || 'sent',
+            };
+        }
+        catch (error) {
+            console.error('[Meta API] ❌ Call initiation failed:', error.response?.data);
+            throw this.handleError(error, 'Failed to initiate call');
+        }
+    }
+    // ✅ 4. Check/request call permissions
+    async requestCallPermission(phoneNumberId, accessToken, to) {
+        try {
+            const cleanTo = to.replace(/[^0-9]/g, '');
+            const response = await this.client.post(`/${phoneNumberId}/call_permissions`, {
+                messaging_product: 'whatsapp',
+                to: cleanTo,
+            }, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            return {
+                permitted: true,
+                permissionId: response.data?.id,
+            };
+        }
+        catch (error) {
+            const metaErr = error.response?.data?.error;
+            if (metaErr?.code === 131056) {
+                return { permitted: false };
+            }
+            throw this.handleError(error, 'Failed to request call permission');
+        }
+    }
+    // ✅ 5. Subscribe to calls webhook
+    async subscribeToCallsWebhook(wabaId, accessToken) {
+        try {
+            console.log('[Meta API] Subscribing to calls webhook...');
+            const response = await this.client.post(`/${wabaId}/subscribed_apps`, {
+                subscribed_fields: ['messages', 'calls', 'call_logs'],
+            }, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            console.log('[Meta API] ✅ Calls webhook subscribed');
+            return response.data?.success === true;
+        }
+        catch (error) {
+            console.error('[Meta API] ❌ Calls webhook subscription failed');
+            throw this.handleError(error, 'Failed to subscribe to calls webhook');
+        }
+    }
+    // ✅ 6. Get call logs
+    async getCallLogs(phoneNumberId, accessToken, limit = 20) {
+        try {
+            const response = await this.client.get(`/${phoneNumberId}/call_logs`, {
+                params: {
+                    access_token: accessToken,
+                    limit,
+                    fields: 'id,direction,status,duration,start_time,end_time,from,to',
+                }
+            });
+            const logs = response.data?.data || [];
+            return logs.map((log) => ({
+                callId: log.id,
+                direction: log.direction,
+                status: log.status,
+                duration: log.duration,
+                startTime: log.start_time,
+                endTime: log.end_time,
+                from: log.from,
+                to: log.to,
+            }));
+        }
+        catch (error) {
+            console.error('[Meta API] ❌ Get call logs failed');
+            return [];
+        }
     }
     // ============================================
     // UTILITY

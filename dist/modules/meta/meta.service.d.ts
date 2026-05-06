@@ -2,6 +2,7 @@ import { WhatsAppAccount } from '@prisma/client';
 import { ConnectionProgress } from './meta.types';
 export declare class MetaService {
     private sanitizeAccount;
+    private detectConnectionType;
     getOAuthUrl(state: string): string;
     getEmbeddedSignupConfig(): {
         appId: string;
@@ -17,7 +18,7 @@ export declare class MetaService {
         hasRedirectUri: boolean;
         apiVersion: string;
     };
-    completeConnection(codeOrToken: string, organizationId: string, userId: string, onProgress?: (progress: ConnectionProgress) => void): Promise<{
+    completeConnection(codeOrToken: string, organizationId: string, userId: string, connectionType?: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP', onProgress?: (progress: ConnectionProgress) => void): Promise<{
         success: boolean;
         account?: any;
         error?: string;
@@ -77,6 +78,7 @@ export declare class MetaService {
     private extractBodyText;
     private extractHeaderType;
     private extractHeaderContent;
+    private extractHeaderHandle;
     private extractFooterText;
     private extractButtons;
     private extractVariables;

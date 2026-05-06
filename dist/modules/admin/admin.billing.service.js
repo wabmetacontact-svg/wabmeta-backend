@@ -341,7 +341,7 @@ class AdminBillingService {
     // GET ALL SUBSCRIPTIONS
     // ============================================
     async getAllSubscriptions(params) {
-        const { page = 1, limit = 20, status, planType, search } = params;
+        const { page = 1, limit = 20, status, planType, excludePlanType, search } = params;
         const skip = (page - 1) * limit;
         const where = {};
         if (status) {
@@ -349,6 +349,11 @@ class AdminBillingService {
         }
         if (planType) {
             where.plan = { type: planType };
+        }
+        else if (excludePlanType) {
+            where.plan = {
+                type: { not: excludePlanType }
+            };
         }
         if (search) {
             where.organization = {

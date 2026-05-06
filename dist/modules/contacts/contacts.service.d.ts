@@ -1,24 +1,14 @@
 import { CreateContactInput, UpdateContactInput, ImportContactsInput, BulkUpdateContactsInput, ContactsQueryInput, ContactResponse, ContactWithGroups, ContactsListResponse, ImportContactsResponse, ContactStats, CreateContactGroupInput, UpdateContactGroupInput, ContactGroupResponse } from './contacts.types';
 export declare class ContactsService {
     /**
-     * Validate Indian phone number (10 digits starting with 6-9)
-     */
-    private validateIndianPhone;
-    /**
-     * Normalize phone to 10-digit format
-     */
-    private normalizeToTenDigits;
-    /**
-     * Validate and normalize phone (throws error if invalid)
+     * ✅ Validate and normalize phone (throws error if invalid)
      */
     private validateAndNormalizePhone;
     /**
-     * Update contact from webhook (auto name fetch)
+     * ✅ Try to normalize phone - returns full number if valid, returns null if invalid.
      */
+    private tryNormalizePhone;
     updateContactFromWebhook(phone: string, profileName: string, organizationId: string): Promise<ContactResponse | null>;
-    /**
-     * Refresh unknown contact names
-     */
     refreshUnknownNames(organizationId: string): Promise<{
         total: number;
         updated: number;
@@ -33,7 +23,10 @@ export declare class ContactsService {
     }>;
     import(organizationId: string, input: ImportContactsInput & {
         groupName?: string;
+        csvData?: string;
     }): Promise<ImportContactsResponse>;
+    private parseCSV;
+    private parseCSVLine;
     bulkUpdate(organizationId: string, input: BulkUpdateContactsInput): Promise<{
         message: string;
         updated: number;
@@ -66,6 +59,14 @@ export declare class ContactsService {
         removed: number;
     }>;
     getGroupContacts(organizationId: string, groupId: string, query: ContactsQueryInput): Promise<ContactsListResponse>;
+    getImportStats(organizationId: string): Promise<{
+        totalContacts: number;
+        maxContacts: number;
+        remainingSlots: number;
+        planName: string;
+        canImport: boolean;
+        maxPerImport: number;
+    }>;
 }
 export declare const contactsService: ContactsService;
 //# sourceMappingURL=contacts.service.d.ts.map

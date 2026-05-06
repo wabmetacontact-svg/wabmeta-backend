@@ -16,23 +16,26 @@ export declare const createTemplateSchema: z.ZodObject<{
         }, "strip", z.ZodTypeAny, {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }, {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }>, "many">>;
         variables: z.ZodOptional<z.ZodArray<z.ZodObject<{
             index: z.ZodNumber;
             type: z.ZodString;
+            example: z.ZodOptional<z.ZodAny>;
         }, "strip", z.ZodTypeAny, {
             type: string;
             index: number;
+            example?: any;
         }, {
             type: string;
             index: number;
+            example?: any;
         }>, "many">>;
         whatsappAccountId: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
@@ -47,12 +50,13 @@ export declare const createTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     }, {
         name: string;
@@ -66,12 +70,13 @@ export declare const createTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
@@ -87,12 +92,13 @@ export declare const createTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     };
 }, {
@@ -108,12 +114,13 @@ export declare const createTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     };
 }>;
@@ -141,23 +148,26 @@ export declare const updateTemplateSchema: z.ZodObject<{
         }, "strip", z.ZodTypeAny, {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }, {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }>, "many">>;
         variables: z.ZodOptional<z.ZodArray<z.ZodObject<{
             index: z.ZodNumber;
             type: z.ZodString;
+            example: z.ZodOptional<z.ZodAny>;
         }, "strip", z.ZodTypeAny, {
             type: string;
             index: number;
+            example?: any;
         }, {
             type: string;
             index: number;
+            example?: any;
         }>, "many">>;
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
@@ -170,12 +180,13 @@ export declare const updateTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     }, {
         name?: string | undefined;
@@ -188,12 +199,13 @@ export declare const updateTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
@@ -208,12 +220,13 @@ export declare const updateTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     };
     params: {
@@ -231,12 +244,13 @@ export declare const updateTemplateSchema: z.ZodObject<{
         buttons?: {
             type: string;
             text: string;
-            phoneNumber?: string | undefined;
             url?: string | undefined;
+            phoneNumber?: string | undefined;
         }[] | undefined;
         variables?: {
             type: string;
             index: number;
+            example?: any;
         }[] | undefined;
     };
     params: {
@@ -437,46 +451,46 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
         page: number;
         limit: number;
         status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
-        search?: string | undefined;
-        sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        search?: string | undefined;
+        sortBy?: string | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     }, {
         status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
         page?: string | undefined;
         limit?: string | undefined;
-        search?: string | undefined;
-        sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        search?: string | undefined;
+        sortBy?: string | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
     query?: {
         page: number;
         limit: number;
         status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
-        search?: string | undefined;
-        sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        search?: string | undefined;
+        sortBy?: string | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     } | undefined;
 }, {
     query?: {
         status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
         page?: string | undefined;
         limit?: string | undefined;
-        search?: string | undefined;
-        sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        search?: string | undefined;
+        sortBy?: string | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     } | undefined;
 }>;
 //# sourceMappingURL=templates.schema.d.ts.map

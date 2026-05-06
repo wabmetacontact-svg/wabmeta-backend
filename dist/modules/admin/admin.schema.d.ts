@@ -172,24 +172,24 @@ export declare const updateUserSchema: z.ZodObject<{
         status: z.ZodOptional<z.ZodEnum<["ACTIVE", "INACTIVE", "SUSPENDED", "PENDING_VERIFICATION"]>>;
         emailVerified: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
+        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
-        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     }, {
+        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
-        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
+        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
-        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     };
     params: {
@@ -197,10 +197,10 @@ export declare const updateUserSchema: z.ZodObject<{
     };
 }, {
     body: {
+        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
-        status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     };
     params: {
@@ -232,6 +232,36 @@ export declare const updateUserStatusSchema: z.ZodObject<{
 }, {
     body: {
         status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION";
+    };
+    params: {
+        id: string;
+    };
+}>;
+export declare const updateUserPasswordSchema: z.ZodObject<{
+    params: z.ZodObject<{
+        id: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        id: string;
+    }, {
+        id: string;
+    }>;
+    body: z.ZodObject<{
+        password: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        password: string;
+    }, {
+        password: string;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    body: {
+        password: string;
+    };
+    params: {
+        id: string;
+    };
+}, {
+    body: {
+        password: string;
     };
     params: {
         id: string;
@@ -727,6 +757,7 @@ export type UpdateAdminSchema = z.infer<typeof updateAdminSchema>;
 export type GetUsersSchema = z.infer<typeof getUsersSchema>;
 export type UpdateUserSchema = z.infer<typeof updateUserSchema>;
 export type UpdateUserStatusSchema = z.infer<typeof updateUserStatusSchema>;
+export type UpdateUserPasswordSchema = z.infer<typeof updateUserPasswordSchema>;
 export type GetOrganizationsSchema = z.infer<typeof getOrganizationsSchema>;
 export type UpdateOrganizationSchema = z.infer<typeof updateOrganizationSchema>;
 export type UpdateSubscriptionSchema = z.infer<typeof updateSubscriptionSchema>;

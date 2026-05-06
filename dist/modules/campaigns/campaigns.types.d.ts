@@ -9,6 +9,10 @@ export interface CreateCampaignInput {
     audienceFilter?: AudienceFilter;
     scheduledAt?: Date;
     variableMapping?: VariableMapping;
+    csvContacts?: Array<{
+        phone: string;
+        customData: Record<string, string>;
+    }>;
 }
 export interface UpdateCampaignInput {
     name?: string;
@@ -123,9 +127,13 @@ export interface CampaignStats {
     draft: number;
     scheduled: number;
     running: number;
+    active: number;
     completed: number;
     failed: number;
     paused: number;
+    totalSent: number;
+    totalDelivered: number;
+    totalRead: number;
     totalMessagesSent: number;
     totalMessagesDelivered: number;
     totalMessagesRead: number;

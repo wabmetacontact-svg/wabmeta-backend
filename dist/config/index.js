@@ -31,7 +31,6 @@ exports.config = {
     frontend: {
         url: getEnv('FRONTEND_URL', 'http://localhost:5173'),
         corsOrigins: [
-            getEnv('FRONTEND_URL', 'http://localhost:5173'),
             'https://wabmeta.com',
             'https://www.wabmeta.com',
             'http://localhost:3000',
@@ -91,6 +90,12 @@ exports.config = {
     // Redis
     redis: {
         url: getEnv('REDIS_URL'),
+    },
+    cloudinary: {
+        cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+        apiKey: process.env.CLOUDINARY_API_KEY || '',
+        apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+        folder: process.env.CLOUDINARY_FOLDER || 'wabmeta-templates',
     },
 };
 exports.default = exports.config;

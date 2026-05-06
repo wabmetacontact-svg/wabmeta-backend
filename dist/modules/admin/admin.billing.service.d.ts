@@ -39,8 +39,8 @@ export declare class AdminBillingService {
             };
         } & {
             organizationId: string;
-            id: string;
             status: import(".prisma/client").$Enums.SubscriptionStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -108,6 +108,9 @@ export declare class AdminBillingService {
                 industry: string | null;
                 timezone: string;
                 planType: import(".prisma/client").$Enums.PlanType;
+                featureCsvUpload: boolean;
+                featureOverrideByAdmin: boolean;
+                featureSimpleBulkUpload: boolean;
                 ownerId: string;
             };
             plan: {
@@ -138,8 +141,8 @@ export declare class AdminBillingService {
             };
         } & {
             organizationId: string;
-            id: string;
             status: import(".prisma/client").$Enums.SubscriptionStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -177,6 +180,9 @@ export declare class AdminBillingService {
                 industry: string | null;
                 timezone: string;
                 planType: import(".prisma/client").$Enums.PlanType;
+                featureCsvUpload: boolean;
+                featureOverrideByAdmin: boolean;
+                featureSimpleBulkUpload: boolean;
                 ownerId: string;
             };
             plan: {
@@ -207,8 +213,8 @@ export declare class AdminBillingService {
             };
         } & {
             organizationId: string;
-            id: string;
             status: import(".prisma/client").$Enums.SubscriptionStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -229,6 +235,7 @@ export declare class AdminBillingService {
         limit?: number;
         status?: SubscriptionStatus;
         planType?: PlanType;
+        excludePlanType?: PlanType;
         search?: string;
     }): Promise<{
         subscriptions: {
@@ -252,6 +259,9 @@ export declare class AdminBillingService {
                 industry: string | null;
                 timezone: string;
                 planType: import(".prisma/client").$Enums.PlanType;
+                featureCsvUpload: boolean;
+                featureOverrideByAdmin: boolean;
+                featureSimpleBulkUpload: boolean;
                 ownerId: string;
             };
             plan: {
@@ -281,8 +291,8 @@ export declare class AdminBillingService {
                 isActive: boolean;
             };
             organizationId: string;
-            id: string;
             status: import(".prisma/client").$Enums.SubscriptionStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -324,10 +334,10 @@ export declare class AdminBillingService {
             createdAt: Date;
             userAgent: string | null;
             ipAddress: string | null;
+            action: import(".prisma/client").$Enums.ActivityAction | null;
             metadata: import("@prisma/client/runtime/library").JsonValue;
             entity: string | null;
             entityId: string | null;
-            action: import(".prisma/client").$Enums.ActivityAction | null;
         })[];
     }>;
 }

@@ -99,6 +99,10 @@ declare class WhatsAppAPI {
      */
     markAsRead(phoneNumberId: string, messageId: string, accessToken: string): Promise<boolean>;
     /**
+     * Create message template with specific API version
+     */
+    createMessageTemplateByVersion(wabaId: string, accessToken: string, payload: any, version?: string): Promise<any>;
+    /**
      * Create message template
      */
     createMessageTemplate(wabaId: string, accessToken: string, payload: any): Promise<any>;

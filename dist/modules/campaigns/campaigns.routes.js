@@ -1,38 +1,5 @@
 "use strict";
 // 📁 src/modules/campaigns/campaigns.routes.ts - COMPLETE WITH CSV UPLOAD
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const campaigns_controller_1 = require("./campaigns.controller");
@@ -170,109 +137,89 @@ router.post('/:id/duplicate', (0, validate_1.validate)(campaigns_schema_1.duplic
 // QUEUE MANAGEMENT (Optional - if using message queue)
 // ============================================
 /**
- * @route   GET /api/v1/campaigns/queue/stats
- * @desc    Get message queue statistics
- * @access  Private (Admin only recommended)
+ * @route   GET /api/v1/campaigns/:id/failed
+ * @desc    Get failed contacts for a campaign
  */
-router.get('/queue/stats', async (req, res, next) => {
-    try {
-        // Optional: Check if messageQueueWorker exists
-        const messageQueueWorker = await Promise.resolve().then(() => __importStar(require('../../services/messageQueue.service'))).catch(() => null);
-        if (!messageQueueWorker) {
-            return (0, response_1.successResponse)(res, {
-                data: {
-                    enabled: false,
-                    message: 'Message queue service not configured',
-                },
-                message: 'Queue not available',
-            });
-        }
-        const stats = await messageQueueWorker.messageQueueWorker.getQueueStats();
-        return (0, response_1.successResponse)(res, { data: stats, message: 'Queue statistics' });
-    }
-    catch (error) {
-        next(error);
-    }
+router.get('/:id/failed', (0, validate_1.validate)(campaigns_schema_1.getCampaignByIdSchema), campaigns_controller_1.campaignsController.getFailedContacts.bind(campaigns_controller_1.campaignsController));
+/**
+ * @route   GET /api/v1/campaigns/:id/failed/export
+ * @desc    Export failed contacts as CSV
+ */
+router.get('/:id/failed/export', (0, validate_1.validate)(campaigns_schema_1.getCampaignByIdSchema), campaigns_controller_1.campaignsController.exportFailedContacts.bind(campaigns_controller_1.campaignsController));
+/**
+ * @route   POST /api/v1/campaigns/:id/retry-failed
+ * @desc    Retry only failed contacts
+ */
+router.post('/:id/retry-failed', (0, validate_1.validate)(campaigns_schema_1.getCampaignByIdSchema), campaigns_controller_1.campaignsController.retryFailedOnly.bind(campaigns_controller_1.campaignsController));
+/**
+ * @route   GET /api/v1/campaigns/:id/recipients
+ * @desc    Get all recipients with their status
+ */
+router.get('/:id/recipients', (0, validate_1.validate)(campaigns_schema_1.getCampaignByIdSchema), campaigns_controller_1.campaignsController.getAllRecipients.bind(campaigns_controller_1.campaignsController));
+/**
+ * @route   GET /api/v1/campaigns/:id/recipients/export
+ * @desc    Export recipients as CSV
+ */
+router.get('/:id/recipients/export', (0, validate_1.validate)(campaigns_schema_1.getCampaignByIdSchema), campaigns_controller_1.campaignsController.exportRecipients.bind(campaigns_controller_1.campaignsController));
+/**
+ * @route   GET /api/v1/campaigns/queue/stats
+ * @desc    Get message queue statistics (queue disabled - using direct send)
+ * @access  Private
+ */
+router.get('/queue/stats', async (req, res) => {
+    return (0, response_1.successResponse)(res, {
+        data: {
+            enabled: false,
+            message: 'Bull queue removed. Campaigns send directly via Meta API.',
+            waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, total: 0,
+        },
+        message: 'Queue disabled - using direct send',
+    });
 });
 /**
  * @route   POST /api/v1/campaigns/queue/retry/:campaignId?
- * @desc    Retry failed messages in queue (optional campaign filter)
- * @access  Private (Admin only recommended)
+ * @desc    Retry failed messages (use campaign retry-failed endpoint instead)
+ * @access  Private
  */
-router.post('/queue/retry/:campaignId?', async (req, res, next) => {
-    try {
-        const { campaignId } = req.params;
-        const messageQueueWorker = await Promise.resolve().then(() => __importStar(require('../../services/messageQueue.service'))).catch(() => null);
-        if (!messageQueueWorker) {
-            return res.status(404).json({
-                success: false,
-                message: 'Message queue service not configured',
-            });
-        }
-        const count = await messageQueueWorker.messageQueueWorker.retryFailedMessages(campaignId);
-        return (0, response_1.successResponse)(res, {
-            data: {
-                retriedCount: count,
-                campaignId: campaignId || 'all',
-            },
-            message: `${count} failed messages queued for retry`,
-        });
-    }
-    catch (error) {
-        next(error);
-    }
+router.post('/queue/retry/:campaignId?', async (req, res) => {
+    return (0, response_1.successResponse)(res, {
+        data: { retriedCount: 0 },
+        message: 'Bull queue removed. Use POST /campaigns/:id/retry-failed instead.',
+    });
 });
 /**
  * @route   POST /api/v1/campaigns/queue/clear
- * @desc    Clear failed messages from queue
- * @access  Private (Admin only)
+ * @desc    Clear failed messages (queue disabled)
+ * @access  Private
  */
-router.post('/queue/clear', async (req, res, next) => {
-    try {
-        const messageQueueWorker = await Promise.resolve().then(() => __importStar(require('../../services/messageQueue.service'))).catch(() => null);
-        if (!messageQueueWorker) {
-            return res.status(404).json({
-                success: false,
-                message: 'Message queue service not configured',
-            });
-        }
-        // Clear failed messages
-        const count = await messageQueueWorker.messageQueueWorker.clearFailedMessages();
-        return (0, response_1.successResponse)(res, {
-            data: {
-                clearedCount: count,
-            },
-            message: `${count} failed messages cleared from queue`,
-        });
-    }
-    catch (error) {
-        next(error);
-    }
+router.post('/queue/clear', async (req, res) => {
+    return (0, response_1.successResponse)(res, {
+        data: { clearedCount: 0 },
+        message: 'Bull queue removed. No queue to clear.',
+    });
 });
 /**
  * @route   GET /api/v1/campaigns/queue/health
- * @desc    Check queue health status
- * @access  Private (Admin only)
+ * @desc    Check queue health status (queue disabled)
+ * @access  Private
  */
-router.get('/queue/health', async (req, res, next) => {
-    try {
-        const messageQueueWorker = await Promise.resolve().then(() => __importStar(require('../../services/messageQueue.service'))).catch(() => null);
-        if (!messageQueueWorker) {
-            return res.json({
-                success: true,
-                data: {
-                    enabled: false,
-                    healthy: true,
-                    message: 'Queue not configured (using direct sending)',
-                },
-            });
-        }
-        const health = await messageQueueWorker.messageQueueWorker.getHealthStatus();
-        return (0, response_1.successResponse)(res, { data: health, message: 'Queue health status' });
-    }
-    catch (error) {
-        next(error);
-    }
+router.get('/queue/health', async (req, res) => {
+    return (0, response_1.successResponse)(res, {
+        data: {
+            enabled: false,
+            healthy: true,
+            message: 'Bull queue removed. Campaigns send directly via Meta API.',
+            timestamp: new Date(),
+        },
+        message: 'Queue disabled - system healthy',
+    });
 });
+// ============================================
+// ✅ NEW: CAMPAIGN DETAILS & ACTIONS
+// ============================================
+router.get('/:campaignId/contacts', auth_1.authenticate, campaigns_controller_1.campaignsController.getContacts.bind(campaigns_controller_1.campaignsController));
+router.get('/:campaignId/stats', auth_1.authenticate, campaigns_controller_1.campaignsController.getDetailedStats.bind(campaigns_controller_1.campaignsController));
+router.post('/:campaignId/retry', auth_1.authenticate, campaigns_controller_1.campaignsController.retryFailed.bind(campaigns_controller_1.campaignsController));
+router.post('/:campaignId/resume', auth_1.authenticate, campaigns_controller_1.campaignsController.resumePending.bind(campaigns_controller_1.campaignsController));
 exports.default = router;
 //# sourceMappingURL=campaigns.routes.js.map

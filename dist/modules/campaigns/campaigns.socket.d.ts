@@ -21,6 +21,8 @@ declare class CampaignSocketService {
     emitCampaignProgress(organizationId: string, campaignId: string, data: {
         sent: number;
         failed: number;
+        delivered?: number;
+        read?: number;
         total: number;
         percentage: number;
         status: string;

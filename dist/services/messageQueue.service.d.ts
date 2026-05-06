@@ -1,7 +1,7 @@
-import Bull from 'bull';
 import { EventEmitter } from 'events';
-export declare const messageQueue: Bull.Queue<any>;
-export declare const addMessage: (data: any) => Promise<Bull.Job<any>>;
+/**
+ * Stub: Get queue statistics (no queue = all zeros)
+ */
 export declare const getQueueStats: () => Promise<{
     waiting: number;
     active: number;
@@ -14,13 +14,13 @@ export declare const getQueueStats: () => Promise<{
     sent: number;
 }>;
 /**
- * messageQueueWorker object to maintain compatibility with server.ts and routes
+ * Stub: Message Queue Worker compatibility object
  */
 export declare const messageQueueWorker: EventEmitter<any> & {
     isRunning: boolean;
     start: () => Promise<void>;
     stop: () => Promise<void>;
-    addToQueue: (data: any) => Promise<Bull.Job<any>>;
+    addToQueue: () => Promise<null>;
     getQueueStats: () => Promise<{
         waiting: number;
         active: number;
@@ -32,11 +32,12 @@ export declare const messageQueueWorker: EventEmitter<any> & {
         processing: number;
         sent: number;
     }>;
-    retryFailedMessages: (campaignId?: string) => Promise<number>;
+    retryFailedMessages: (_campaignId?: string) => Promise<number>;
     clearFailedMessages: () => Promise<number>;
     getHealthStatus: () => Promise<{
         status: string;
         healthy: boolean;
+        message: string;
         stats: {
             waiting: number;
             active: number;
@@ -50,8 +51,10 @@ export declare const messageQueueWorker: EventEmitter<any> & {
         };
         timestamp: Date;
     }>;
-    whatsappQueue: Bull.Queue<any>;
+    whatsappQueue: null;
 };
-export declare const addToWhatsAppQueue: (data: any) => Promise<Bull.Job<any>>;
-export default messageQueue;
+export declare const addToWhatsAppQueue: () => Promise<null>;
+export declare const addMessage: () => Promise<null>;
+declare const _default: null;
+export default _default;
 //# sourceMappingURL=messageQueue.service.d.ts.map

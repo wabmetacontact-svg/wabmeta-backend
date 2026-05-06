@@ -14,13 +14,6 @@ const createPrismaClient = () => {
         if (!dbUrl.includes('pgbouncer=true')) {
             dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'pgbouncer=true';
         }
-        if (!dbUrl.includes('connection_limit=')) {
-            dbUrl += '&connection_limit=10';
-        }
-        if (!dbUrl.includes('pool_timeout=')) {
-            dbUrl += '&pool_timeout=30';
-        }
-        prismaOptions.datasources = { db: { url: dbUrl } };
         console.log('🔧 Auto-configured database pooler');
     }
     // Auto-configure for Neon pooler
@@ -28,12 +21,16 @@ const createPrismaClient = () => {
         if (!dbUrl.includes('sslmode=require')) {
             dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'sslmode=require';
         }
-        if (!dbUrl.includes('connect_timeout=')) {
-            dbUrl += '&connect_timeout=30';
-        }
-        prismaOptions.datasources = { db: { url: dbUrl } };
         console.log('🔧 Auto-configured Neon database');
     }
+    // ✅ GLOBAL DEFAULTS (Works for AWS RDS, Supabase, Neon, etc.)
+    if (dbUrl && !dbUrl.includes('connection_limit=')) {
+        dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'connection_limit=30';
+    }
+    if (dbUrl && !dbUrl.includes('pool_timeout=')) {
+        dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'pool_timeout=60';
+    }
+    prismaOptions.datasources = { db: { url: dbUrl } };
     return new client_1.PrismaClient(prismaOptions);
 };
 const prisma = globalThis.prisma ?? createPrismaClient();

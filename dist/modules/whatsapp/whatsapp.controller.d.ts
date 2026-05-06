@@ -6,7 +6,6 @@ declare class WhatsAppController {
     disconnectAccount(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     /**
      * ✅ FIXED: Send Text Message
-     * Accepts multiple field name formats for flexibility
      */
     sendText(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     /**
@@ -18,7 +17,7 @@ declare class WhatsAppController {
      * ✅ FIXED: Send Media Message
      * Accepts multiple field name formats for flexibility
      */
-    sendMedia(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    sendMedia(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>>>;
     /**
      * ✅ FIXED: Mark Message as Read
      */

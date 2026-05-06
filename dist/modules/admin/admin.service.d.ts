@@ -53,6 +53,7 @@ export declare class AdminService {
             pending: number;
             suspended: number;
             newThisMonth: number;
+            todayUsers: number;
         };
         organizations: {
             total: number;
@@ -65,13 +66,23 @@ export declare class AdminService {
             thisMonthSent: number;
         };
         revenue: {
+            totalRevenue: number;
+            monthlyRevenue: number;
+            todayRevenue: number;
             mrr: number;
             arr: number;
         };
         whatsapp: {
             connectedAccounts: number;
+            cloudApiConnected: number;
+            businessAppConnected: number;
             totalContacts: number;
             totalCampaigns: number;
+        };
+        wallet: {
+            totalActiveWallets: number;
+            pendingRequests: number;
+            totalBalanceHeld: number;
         };
     }>;
     getUsers(input: GetUsersInput): Promise<{
@@ -83,12 +94,13 @@ export declare class AdminService {
             }[];
             memberships: undefined;
             email: string;
+            status: import(".prisma/client").$Enums.UserStatus;
             id: string;
+            password: string | null;
             firstName: string;
             lastName: string | null;
             phone: string | null;
             avatar: string | null;
-            status: import(".prisma/client").$Enums.UserStatus;
             emailVerified: boolean;
             lastLoginAt: Date | null;
             createdAt: Date;
@@ -96,7 +108,6 @@ export declare class AdminService {
         total: number;
     }>;
     getUserById(id: string): Promise<{
-        password: undefined;
         organizations: {
             role: import(".prisma/client").$Enums.UserRole;
             name: string;
@@ -132,13 +143,14 @@ export declare class AdminService {
             refreshTokens: number;
         };
         email: string;
+        status: import(".prisma/client").$Enums.UserStatus;
         id: string;
+        password: string | null;
         firstName: string;
         lastName: string | null;
         phone: string | null;
         googleId: string | null;
         avatar: string | null;
-        status: import(".prisma/client").$Enums.UserStatus;
         emailVerified: boolean;
         emailVerifyToken: string | null;
         emailVerifyExpires: Date | null;
@@ -151,35 +163,39 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
     }>;
+    updateUserPassword(id: string, data: any): Promise<{
+        email: string;
+        id: string;
+    }>;
     updateUser(id: string, data: any): Promise<{
         email: string;
+        status: import(".prisma/client").$Enums.UserStatus;
         id: string;
         firstName: string;
         lastName: string | null;
         phone: string | null;
-        status: import(".prisma/client").$Enums.UserStatus;
         emailVerified: boolean;
     }>;
     updateUserStatus(id: string, status: string): Promise<{
         email: string;
+        status: import(".prisma/client").$Enums.UserStatus;
         id: string;
         firstName: string;
         lastName: string | null;
-        status: import(".prisma/client").$Enums.UserStatus;
     }>;
     suspendUser(id: string): Promise<{
         email: string;
+        status: import(".prisma/client").$Enums.UserStatus;
         id: string;
         firstName: string;
         lastName: string | null;
-        status: import(".prisma/client").$Enums.UserStatus;
     }>;
     activateUser(id: string): Promise<{
         email: string;
+        status: import(".prisma/client").$Enums.UserStatus;
         id: string;
         firstName: string;
         lastName: string | null;
-        status: import(".prisma/client").$Enums.UserStatus;
     }>;
     /**
      * Transfer organization ownership to another user
@@ -204,8 +220,8 @@ export declare class AdminService {
                 };
             } & {
                 organizationId: string;
-                id: string;
                 status: import(".prisma/client").$Enums.SubscriptionStatus;
+                id: string;
                 createdAt: Date;
                 updatedAt: Date;
                 billingCycle: string;
@@ -242,6 +258,9 @@ export declare class AdminService {
             industry: string | null;
             timezone: string;
             planType: import(".prisma/client").$Enums.PlanType;
+            featureCsvUpload: boolean;
+            featureOverrideByAdmin: boolean;
+            featureSimpleBulkUpload: boolean;
             ownerId: string;
         })[];
         total: number;
@@ -276,8 +295,8 @@ export declare class AdminService {
             };
         } & {
             organizationId: string;
-            id: string;
             status: import(".prisma/client").$Enums.SubscriptionStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -315,8 +334,8 @@ export declare class AdminService {
             joinedAt: Date | null;
         })[];
         whatsappAccounts: {
-            id: string;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
+            id: string;
             phoneNumber: string;
             displayName: string;
         }[];
@@ -337,6 +356,9 @@ export declare class AdminService {
         industry: string | null;
         timezone: string;
         planType: import(".prisma/client").$Enums.PlanType;
+        featureCsvUpload: boolean;
+        featureOverrideByAdmin: boolean;
+        featureSimpleBulkUpload: boolean;
         ownerId: string;
     }>;
     updateOrganization(id: string, data: any): Promise<{
@@ -350,6 +372,9 @@ export declare class AdminService {
         industry: string | null;
         timezone: string;
         planType: import(".prisma/client").$Enums.PlanType;
+        featureCsvUpload: boolean;
+        featureOverrideByAdmin: boolean;
+        featureSimpleBulkUpload: boolean;
         ownerId: string;
     }>;
     deleteOrganization(id: string): Promise<{
@@ -385,8 +410,8 @@ export declare class AdminService {
             };
         } & {
             organizationId: string;
-            id: string;
             status: import(".prisma/client").$Enums.SubscriptionStatus;
+            id: string;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -424,8 +449,8 @@ export declare class AdminService {
             joinedAt: Date | null;
         })[];
         whatsappAccounts: {
-            id: string;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
+            id: string;
             phoneNumber: string;
             displayName: string;
         }[];
@@ -446,6 +471,9 @@ export declare class AdminService {
         industry: string | null;
         timezone: string;
         planType: import(".prisma/client").$Enums.PlanType;
+        featureCsvUpload: boolean;
+        featureOverrideByAdmin: boolean;
+        featureSimpleBulkUpload: boolean;
         ownerId: string;
     }>;
     getPlans(): Promise<({
@@ -579,10 +607,10 @@ export declare class AdminService {
             createdAt: Date;
             userAgent: string | null;
             ipAddress: string | null;
+            action: import(".prisma/client").$Enums.ActivityAction | null;
             metadata: import("@prisma/client/runtime/library").JsonValue;
             entity: string | null;
             entityId: string | null;
-            action: import(".prisma/client").$Enums.ActivityAction | null;
         })[];
         total: number;
     }>;
@@ -600,6 +628,53 @@ export declare class AdminService {
         defaultPlanType: string;
         smtpEnabled: boolean;
     };
+    getWhatsAppConnectionStats(): Promise<{
+        cloudApi: {
+            active: number;
+            inactive: number;
+            total: number;
+        };
+        businessApp: {
+            active: number;
+            inactive: number;
+            total: number;
+        };
+        onPremise: {
+            active: number;
+            inactive: number;
+            total: number;
+        };
+    }>;
+    updateWhatsAppConnectionType(accountId: string, connectionType: string): Promise<{
+        success: boolean;
+        message: string;
+        account: {
+            organizationId: string;
+            status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            phoneNumber: string;
+            isActive: boolean;
+            accessToken: string | null;
+            verifiedName: string | null;
+            qualityRating: string | null;
+            codeVerificationStatus: string | null;
+            nameStatus: string | null;
+            wabaId: string;
+            isDefault: boolean;
+            phoneNumberId: string;
+            displayName: string;
+            tokenExpiresAt: Date | null;
+            webhookSecret: string | null;
+            messagingLimit: string | null;
+            dailyMessageLimit: number;
+            dailyMessagesUsed: number;
+            lastLimitReset: Date;
+            businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
+            connectionType: string;
+        };
+    }>;
 }
 export declare const adminService: AdminService;
 export {};

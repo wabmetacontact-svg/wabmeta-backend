@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -147,6 +180,13 @@ class WhatsAppController {
                     isDefault: false,
                 },
             });
+            // ✅ Emit socket event for real-time update
+            const { webhookEvents } = await Promise.resolve().then(() => __importStar(require('../webhooks/webhook.service')));
+            webhookEvents.emit('accountUpdated', {
+                organizationId,
+                accountId,
+                status: client_1.WhatsAppAccountStatus.DISCONNECTED,
+            });
             if (account.isDefault) {
                 const another = await database_1.default.whatsAppAccount.findFirst({
                     where: {
@@ -176,62 +216,54 @@ class WhatsAppController {
     // ============================================
     /**
      * ✅ FIXED: Send Text Message
-     * Accepts multiple field name formats for flexibility
      */
     async sendText(req, res, next) {
         try {
-            // ✅ Support multiple field name formats from frontend
-            const accountId = req.body.accountId || req.body.whatsappAccountId;
-            const to = req.body.to || req.body.recipient || req.body.phone;
-            const text = req.body.text || req.body.message || req.body.content;
-            const conversationId = req.body.conversationId;
-            // Log incoming request for debugging
-            console.log('📤 Send Text Request:', {
-                accountId: accountId ? `${accountId.substring(0, 8)}...` : null,
-                to: to ? `${to.substring(0, 6)}***` : null,
-                textLength: text?.length || 0,
-                hasConversationId: !!conversationId,
-                rawBody: {
-                    hasAccountId: !!req.body.accountId,
-                    hasWhatsappAccountId: !!req.body.whatsappAccountId,
-                    hasTo: !!req.body.to,
-                    hasRecipient: !!req.body.recipient,
-                    hasText: !!req.body.text,
-                    hasMessage: !!req.body.message,
-                }
+            const organizationId = req.user?.organizationId;
+            const { whatsappAccountId, accountId, // support both
+            to, recipient, // support both
+            phone, // support both
+            message, text, // support both
+            content, // support both
+            tempId, // ✅ Frontend se aata hai
+            localId, conversationId } = req.body;
+            const finalAccountId = whatsappAccountId || accountId;
+            const finalTo = to || recipient || phone;
+            const finalMessage = message || text || content;
+            const finalTempId = tempId || localId;
+            if (!finalAccountId || !finalTo || !finalMessage) {
+                return (0, response_1.errorResponse)(res, 'whatsappAccountId, to, and message are required', 400);
+            }
+            const result = await whatsapp_service_1.whatsappService.sendMessage({
+                accountId: finalAccountId,
+                to: finalTo,
+                type: 'text',
+                content: { text: { body: finalMessage } },
+                conversationId,
+                organizationId,
+                tempId: finalTempId, // ✅ Pass tempId
             });
-            // Validate accountId
-            if (!accountId) {
-                console.error('❌ Missing accountId. Received body keys:', Object.keys(req.body));
-                return (0, response_1.errorResponse)(res, 'Account ID is required. Send as "accountId" or "whatsappAccountId"', 400);
-            }
-            // Validate recipient
-            if (!to) {
-                console.error('❌ Missing recipient. Received body keys:', Object.keys(req.body));
-                return (0, response_1.errorResponse)(res, 'Recipient phone number is required. Send as "to", "recipient", or "phone"', 400);
-            }
-            // Validate text
-            if (!text || (typeof text === 'string' && text.trim().length === 0)) {
-                console.error('❌ Missing text. Received body keys:', Object.keys(req.body));
-                return (0, response_1.errorResponse)(res, 'Message text is required. Send as "text", "message", or "content"', 400);
-            }
-            // Clean the text
-            const cleanText = typeof text === 'string' ? text.trim() : String(text);
-            // Send message via service
-            const result = await whatsapp_service_1.whatsappService.sendTextMessage(accountId, to, cleanText, conversationId, req.user?.organizationId, req.body.tempId || req.body.localId, req.body.clientMsgId || req.body.client_msg_id);
-            console.log('✅ Text message sent successfully:', {
-                messageId: result?.messageId || 'N/A',
-            });
+            // ✅ Serialize response
+            const msg = result.message;
+            const now = new Date().toISOString();
             return (0, response_1.successResponse)(res, {
-                data: result,
-                message: 'Message sent successfully',
+                data: {
+                    ...msg,
+                    // ✅ Guarantee timestamps as strings
+                    createdAt: msg?.createdAt instanceof Date
+                        ? msg.createdAt.toISOString()
+                        : msg?.createdAt || now,
+                    sentAt: msg?.sentAt instanceof Date
+                        ? msg.sentAt.toISOString()
+                        : msg?.sentAt || now,
+                    timestamp: msg?.timestamp instanceof Date
+                        ? msg.timestamp.toISOString()
+                        : msg?.timestamp || msg?.createdAt || now,
+                },
+                message: 'Message sent'
             });
         }
         catch (error) {
-            console.error('❌ Send text error:', {
-                message: error.message,
-                stack: error.stack?.split('\n').slice(0, 3),
-            });
             next(error);
         }
     }
@@ -321,7 +353,7 @@ class WhatsAppController {
                 message: error.message,
                 stack: error.stack?.split('\n').slice(0, 3),
             });
-            next(error);
+            return (0, response_1.errorResponse)(res, error.message || 'Failed to send media', 400);
         }
     }
     /**
