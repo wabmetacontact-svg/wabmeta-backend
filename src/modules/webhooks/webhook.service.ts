@@ -537,11 +537,20 @@ export class WebhookService {
       try {
           if (wasNewlyCreated) {
               // 🆕 Brand new contact - UNKNOWN_MESSAGE trigger
-              console.log(`🤖 New contact detected → triggerUnknownMessage`);
+              console.log(`🤖 New contact detected → triggerUnknownMessage and triggerNewContact`);
               await automationEngine.triggerUnknownMessage({
                   organizationId,
                   contactId: contact.id,
                   phone: waFrom,            // ✅ Full number with country code (e.g. 917982722016)
+                  message: content,
+                  conversationId: updatedConversation.id,
+              });
+              
+              // ✅ Also trigger NEW_CONTACT since this is technically a new contact
+              await automationEngine.triggerNewContact({
+                  organizationId,
+                  contactId: contact.id,
+                  phone: waFrom,
                   message: content,
                   conversationId: updatedConversation.id,
               });

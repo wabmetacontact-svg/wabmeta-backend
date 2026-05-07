@@ -156,7 +156,7 @@ class AutomationEngine {
 
         if (matched) {
           console.log(`🤖 Keyword matched! Executing automation: ${automation.name}`);
-          await this.executeActions(automation.id, automation.actions, context);
+          await this.executeSequence(automation.id, automation.actions as any, context);
           triggered = true;
         }
       }
@@ -194,7 +194,7 @@ class AutomationEngine {
         }
 
         console.log(`🤖 Executing automation: ${automation.name}`);
-        await this.executeActions(automation.id, automation.actions, context);
+        await this.executeSequence(automation.id, automation.actions as any, context);
       }
     } catch (error) {
       console.error('🤖 NEW_CONTACT automation error:', error);
@@ -218,7 +218,7 @@ class AutomationEngine {
         return;
       }
 
-      await this.executeActions(automation.id, automation.actions as any, context);
+      await this.executeSequence(automation.id, automation.actions as any, context);
     } catch (error) {
       console.error('🤖 Webhook automation error:', error);
     }
