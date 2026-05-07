@@ -1,29 +1,28 @@
-// src/modules/contacts/contacts.schema.ts - COMPLETE FIXED
-
+// src/modules/contacts/contacts.schema.ts - COMPLETE FIX
 import { z } from 'zod';
 import { ContactStatus } from '@prisma/client';
+import { toCanonicalPhone } from '../../utils/phone';
 
-const normalizeIndianPhone = (value: unknown): string => {
-  const raw = String(value ?? '').trim();
-  let cleaned = raw.replace(/[\s\-\(\)]/g, '');
-  cleaned = cleaned.replace(/[^0-9+]/g, '');
-
-  if (cleaned.startsWith('+91')) cleaned = cleaned.slice(3);
-  else if (cleaned.startsWith('91') && cleaned.length === 12) cleaned = cleaned.slice(2);
-
-  if (cleaned.startsWith('0') && cleaned.length === 11) cleaned = cleaned.slice(1);
-
-  return cleaned;
-};
-
-const indian10DigitRegex = /^[6-9]\d{9}$/;
-
+// ✅ SINGLE PHONE VALIDATOR - toCanonicalPhone use karta hai
+// Input: koi bhi format → Output: +91XXXXXXXXXX (canonical E.164)
 const phoneSchema = z.preprocess(
-  (v) => normalizeIndianPhone(v),
-  z.string().regex(indian10DigitRegex, 'Only Indian 10-digit numbers starting with 6-9 are allowed')
+  (v) => {
+    if (v === null || v === undefined) return '';
+    const raw = String(v).trim();
+    if (!raw) return '';
+    
+    // toCanonicalPhone se canonical format milega
+    const canonical = toCanonicalPhone(raw);
+    return canonical || raw; // canonical ya original (validation fail hoga)
+  },
+  z.string()
+    .min(10, 'Phone number too short')
+    .regex(
+      /^\+[1-9]\d{9,14}$/,
+      'Invalid phone number. Must be in E.164 format (e.g., +919876543210)'
+    )
 );
 
-// ✅ email optional (blank/space ok)
 const emailSchema = z.preprocess(
   (v) => {
     if (v === null || v === undefined) return undefined;
@@ -40,7 +39,8 @@ const emailSchema = z.preprocess(
 export const createContactSchema = z.object({
   body: z.object({
     phone: phoneSchema,
-    countryCode: z.string().optional().default('+91'),
+    // ✅ countryCode auto-detect hoga phone se, but accept karo agar diya
+    countryCode: z.string().optional(),
     firstName: z.string().optional(),
     lastName: z.string().optional(),
     email: emailSchema,
@@ -67,10 +67,10 @@ export const importContactsSchema = z.object({
   body: z.object({
     contacts: z.array(
       z.object({
-        phone: phoneSchema,          // ✅ normalized + validated
+        phone: phoneSchema,
         firstName: z.string().optional(),
         lastName: z.string().optional(),
-        email: emailSchema,          // ✅ optional
+        email: emailSchema,
         tags: z.array(z.string()).optional(),
         customFields: z.record(z.any()).optional(),
       })
@@ -84,7 +84,7 @@ export const importContactsSchema = z.object({
 
 export const bulkUpdateSchema = z.object({
   body: z.object({
-    contactIds: z.array(z.string()).min(1, 'At least one contact ID is required'),
+    contactIds: z.array(z.string()).min(1),
     tags: z.array(z.string()).optional(),
     groupIds: z.array(z.string()).optional(),
     status: z.nativeEnum(ContactStatus).optional(),
@@ -93,13 +93,9 @@ export const bulkUpdateSchema = z.object({
 
 export const bulkDeleteSchema = z.object({
   body: z.object({
-    contactIds: z.array(z.string()).min(1, 'At least one contact ID is required'),
+    contactIds: z.array(z.string()).min(1),
   }),
 });
-
-// ============================================
-// CONTACT GROUP SCHEMAS
-// ============================================
 
 export const createContactGroupSchema = z.object({
   body: z.object({
@@ -119,6 +115,6 @@ export const updateContactGroupSchema = z.object({
 
 export const addContactsToGroupSchema = z.object({
   body: z.object({
-    contactIds: z.array(z.string()).min(1, 'At least one contact ID is required'),
+    contactIds: z.array(z.string()).min(1),
   }),
 });

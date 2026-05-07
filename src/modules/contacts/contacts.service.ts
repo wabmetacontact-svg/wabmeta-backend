@@ -21,7 +21,7 @@ import {
 } from './contacts.types';
 import { automationEngine } from '../automation/automation.engine';
 
-import { buildINPhoneVariants, formatFullPhone, normalizeINNational10 } from '../../utils/phone';
+import { buildPhoneVariants, formatFullPhone, toCanonicalPhone } from '../../utils/phone';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -87,35 +87,22 @@ export class ContactsService {
    * ✅ Validate and normalize phone (throws error if invalid)
    */
   private validateAndNormalizePhone(phone: string): string {
-    const { parsePhoneNumber } = require('../../utils/phoneInternational');
-    const parsed = parsePhoneNumber(phone);
-
-    if (!parsed.isValid) {
+    const canonical = toCanonicalPhone(phone);
+    if (!canonical) {
       throw new AppError(
-        `Invalid phone number: ${phone}. Must include country code (e.g., +91, +1).`,
+        `Invalid phone number: "${phone}". Include country code (e.g., +919876543210)`,
         400
       );
     }
-
-    return parsed.fullNumber;
+    return canonical; // Always returns +91XXXXXXXXXX
   }
 
   /**
    * ✅ Try to normalize phone - returns full number if valid, returns null if invalid.
    */
   private tryNormalizePhone(phone: any): string | null {
-    try {
-      if (!phone) return null;
-      const { parsePhoneNumber } = require('../../utils/phoneInternational');
-      const parsed = parsePhoneNumber(String(phone));
-      
-      if (parsed.isValid) {
-        return parsed.fullNumber;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    if (!phone) return null;
+    return toCanonicalPhone(String(phone).trim());
   }
 
   // ==========================================
@@ -131,7 +118,7 @@ export class ContactsService {
       const normalized = this.tryNormalizePhone(phone);
       if (!normalized) return null;
 
-      const variants = buildINPhoneVariants(phone);
+      const variants = buildPhoneVariants(phone);
 
       let contact = await prisma.contact.findFirst({
         where: {
@@ -241,8 +228,10 @@ export class ContactsService {
   // ==========================================
 
   async create(organizationId: string, input: CreateContactInput): Promise<ContactResponse> {
-    const national10 = this.validateAndNormalizePhone(input.phone);
-    const variants = buildINPhoneVariants(input.phone);
+    const canonical = toCanonicalPhone(input.phone);
+    if (!canonical) throw new AppError('Invalid phone number', 400);
+    
+    const variants = buildPhoneVariants(canonical);
 
     const existing = await prisma.contact.findFirst({
       where: {
@@ -269,11 +258,16 @@ export class ContactsService {
       }
     }
 
+    // ✅ Extract country code from canonical
+    const countryCode = canonical.length > 11 
+      ? '+' + canonical.slice(1, -10)  // e.g., +91
+      : '+91';
+
     const contact = await prisma.contact.create({
       data: {
         organizationId,
-        phone: national10,
-        countryCode: require('../../utils/phoneInternational').parsePhoneNumber(input.phone).countryCode || '+91',
+        phone: canonical,        // ✅ Always +91XXXXXXXXXX
+        countryCode,             // ✅ Always +91
         firstName: input.firstName || 'Unknown',
         lastName: input.lastName,
         email: input.email,
@@ -406,7 +400,7 @@ export class ContactsService {
 
     if (input.phone) {
       normalizedPhone = this.validateAndNormalizePhone(input.phone);
-      const variants = buildINPhoneVariants(input.phone);
+      const variants = buildPhoneVariants(input.phone);
 
       const duplicate = await prisma.contact.findFirst({
         where: {
@@ -626,7 +620,9 @@ export class ContactsService {
         validContacts.push({
           organizationId,
           phone: normalized,
-          countryCode: require('../../utils/phoneInternational').parsePhoneNumber(rawPhone.toString().trim()).countryCode || '+91',
+          countryCode: normalized.length > 11 
+            ? '+' + normalized.slice(1, -10) 
+            : '+91',
           firstName: firstName.toString().trim() || 'Unknown',
           lastName: lastName.toString().trim() || null,
           email: email.toString().trim() || null,

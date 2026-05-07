@@ -7,6 +7,7 @@ import { MessageType, MessageStatus } from '@prisma/client';
 import { chatbotEngine } from '../chatbot/chatbot.engine';
 import { inboxMediaService } from '../inbox/inbox.media';
 import { automationEngine } from '../automation/automation.engine';
+import { toCanonicalPhone, buildPhoneVariants } from '../../utils/phone';
 
 // ✅ Socket.ts will subscribe to this
 export const webhookEvents = new EventEmitter();
@@ -92,75 +93,76 @@ export class WebhookService {
     return { content: `[${type}]`, mediaUrl: null };
   }
 
-  // ✅ Canonical phone normalizer — always returns E.164 without '+' prefix
-  // e.g. '9340103340' → '919340103340'  |  '+919340103340' → '919340103340'
-  private normalizePhone(phone: string): string {
-    const digits = phone.replace(/[^0-9]/g, '');
-    if (digits.length === 10) return `91${digits}`;         // 10-digit Indian
-    if (digits.length === 11 && digits.startsWith('0')) return `91${digits.slice(1)}`; // 0XXXXXXXXXX
-    return digits; // already has country code
-  }
-
   private async findOrCreateContact(
-      organizationId: string, 
-      phone10: string
+    organizationId: string,
+    phone: string  // WhatsApp se aata hai: "919876543210" ya "9876543210"
   ): Promise<{ contact: any; wasNewlyCreated: boolean }> {
-      
-      // ✅ Always store in E.164 format with + prefix: +919XXXXXXXXX
-      const canonical = `+${this.normalizePhone(phone10)}`; // e.g. "+919340103340"
-      const withoutPlus = canonical.slice(1);                // e.g. "919340103340"
-      const tenDigit = withoutPlus.slice(-10);               // e.g. "9340103340"
-      const variants = [canonical, withoutPlus, tenDigit];
+    
+    // ✅ toCanonicalPhone use karo - always +91XXXXXXXXXX
+    const canonical = toCanonicalPhone(phone) || toCanonicalPhone(`+${phone}`);
+    
+    if (!canonical) {
+      console.error(`❌ Cannot normalize phone: ${phone}`);
+      throw new Error(`Invalid phone: ${phone}`);
+    }
   
-      let contact = await prisma.contact.findFirst({
-          where: {
+    const variants = buildPhoneVariants(canonical);
+  
+    let contact = await prisma.contact.findFirst({
+      where: {
+        organizationId,
+        OR: variants.map((p) => ({ phone: p })),
+      },
+    });
+  
+    let wasNewlyCreated = false;
+  
+    if (!contact) {
+      try {
+        // ✅ Extract country code
+        const ccDigits = canonical.slice(1, -10); // "91"
+        const countryCode = `+${ccDigits}`;       // "+91"
+  
+        contact = await prisma.contact.create({
+          data: {
+            organizationId,
+            phone: canonical,     // ✅ +91XXXXXXXXXX - consistent!
+            countryCode,          // ✅ +91
+            firstName: 'Unknown',
+            status: 'ACTIVE',
+            source: 'WHATSAPP_INBOUND',
+          },
+        });
+        wasNewlyCreated = true;
+        console.log(`👤 New contact: ${canonical}`);
+  
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          // Race condition - koi aur create kar diya
+          contact = await prisma.contact.findFirst({
+            where: {
               organizationId,
               OR: variants.map((p) => ({ phone: p })),
-          },
-      });
-  
-      // ✅ Track creation status
-      let wasNewlyCreated = false;
-  
-      if (!contact) {
-          try {
-              contact = await prisma.contact.create({
-                  data: {
-                      organizationId,
-                      phone: canonical,        // ✅ Always store as +919XXXXXXXXX
-                      countryCode: '+91',
-                      firstName: 'Unknown',
-                      status: 'ACTIVE',
-                      source: 'WHATSAPP_INBOUND',
-                  },
-              });
-              wasNewlyCreated = true;
-              console.log(`👤 New contact created: ${canonical}`);
-          } catch (error: any) {
-              if (error.code === 'P2002') {
-                  contact = await prisma.contact.findFirst({
-                      where: {
-                          organizationId,
-                          OR: variants.map((p) => ({ phone: p })),
-                      },
-                  });
-                  if (!contact) throw error;
-                  wasNewlyCreated = false;
-              } else {
-                  throw error;
-              }
-          }
-      } else if (contact.phone !== canonical) {
-          // ✅ Silently migrate old format to canonical
-          await prisma.contact.update({
-              where: { id: contact.id },
-              data: { phone: canonical },
-          }).catch(() => {}); // non-blocking migration
-          contact.phone = canonical;
-          console.log(`🔄 Migrated contact phone: ${contact.phone} → ${canonical}`);
+            },
+          });
+          if (!contact) throw error;
+        } else {
+          throw error;
+        }
       }
+      
+    } else if (contact.phone !== canonical) {
+      // ✅ Purane format ko migrate karo (non-blocking)
+      prisma.contact.update({
+        where: { id: contact.id },
+        data: { phone: canonical }
+      }).then(() => {
+        console.log(`🔄 Migrated: ${contact!.phone} → ${canonical}`);
+      }).catch(() => {});
+      contact.phone = canonical;
+    }
   
-      return { contact: contact!, wasNewlyCreated };
+    return { contact: contact!, wasNewlyCreated };
   }
 
   // -----------------------------
