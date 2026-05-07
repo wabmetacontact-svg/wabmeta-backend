@@ -119,6 +119,32 @@ export function parsePhoneNumber(input: string): {
         }
     }
 
+    // ✅ Validate length using COUNTRY_CODES configuration
+    const countryConfig = COUNTRY_CODES.find(c => c.code === countryCode);
+    if (countryConfig) {
+        // Strict exact-length enforcement for countries with fixed lengths
+        if ((countryCode === '+91' || countryCode === '+1') && nationalNumber.length !== countryConfig.maxLength) {
+            return {
+                isValid: false,
+                fullNumber: cleaned,
+                countryCode,
+                nationalNumber,
+                error: `Invalid length for ${countryConfig.country} (expected ${countryConfig.maxLength} digits)`
+            };
+        }
+        
+        // General max-length enforcement
+        if (nationalNumber.length > countryConfig.maxLength) {
+            return {
+                isValid: false,
+                fullNumber: cleaned,
+                countryCode,
+                nationalNumber,
+                error: `Number is too long for ${countryConfig.country} (max ${countryConfig.maxLength} digits)`
+            };
+        }
+    }
+
     return {
         isValid: true,
         fullNumber: cleaned,
@@ -142,14 +168,14 @@ export function parseMultiplePhones(input: string): {
     // Instead of complex splitting, let's just split by newlines, commas, and semicolons.
     // If users separate numbers by spaces on the same line, that's ambiguous.
     // But we can try to handle it. First, remove spaces immediately following a '+' and digits.
-    let preprocessed = input.replace(/\s*[\-\(\)\.]\s*/g, ''); // Remove -, (, ), . and surrounding spaces
+    let preprocessed = input.replace(/[ \t]*[\-\(\)\.][ \t]*/g, ''); // Remove -, (, ), . and surrounding spaces
     
     // Remove spaces between digits
-    preprocessed = preprocessed.replace(/(\d)\s+(\d)/g, '$1$2');
-    preprocessed = preprocessed.replace(/(\+)\s+(\d)/g, '$1$2');
+    preprocessed = preprocessed.replace(/(\d)[ \t]+(\d)/g, '$1$2');
+    preprocessed = preprocessed.replace(/(\+)[ \t]+(\d)/g, '$1$2');
 
     const numbers = preprocessed
-        .split(/[\n,;\s]+/) // Now it's safe to split by any remaining whitespace
+        .split(/[\n,;]+/) // Split by newlines, commas, and semicolons. We don't split by \s+ because we might have multiple numbers on one line, but it's safer to split by clear delimiters.
         .map(n => n.trim())
         .filter(n => n.length > 0);
 
@@ -157,16 +183,22 @@ export function parseMultiplePhones(input: string): {
     const invalid: Array<{ input: string; error: string }> = [];
 
     for (const num of numbers) {
-        const parsed = parsePhoneNumber(num);
+        // If there are still spaces left (e.g. they put multiple numbers on one line separated by spaces),
+        // we should split those by space as well, assuming they are fully formed numbers.
+        const subNumbers = num.split(/[ \t]+/).filter(n => n.length > 0);
+        
+        for (const subNum of subNumbers) {
+            const parsed = parsePhoneNumber(subNum);
 
-        if (parsed.isValid) {
-            valid.push({
-                fullNumber: parsed.fullNumber,
-                countryCode: parsed.countryCode,
-                nationalNumber: parsed.nationalNumber
-            });
-        } else {
-            invalid.push({ input: num, error: parsed.error || 'Invalid' });
+            if (parsed.isValid) {
+                valid.push({
+                    fullNumber: parsed.fullNumber,
+                    countryCode: parsed.countryCode,
+                    nationalNumber: parsed.nationalNumber
+                });
+            } else {
+                invalid.push({ input: subNum, error: parsed.error || 'Invalid' });
+            }
         }
     }
 
