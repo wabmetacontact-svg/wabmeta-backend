@@ -806,13 +806,22 @@ export class TemplatesService {
     // ✅ Submit to Meta if account is available
     if (canSyncToMeta && waData) {
       try {
+        const metaHeaderMediaId = (() => {
+          if (!finalMetaId) return null;
+          // Pure numeric = OK for template creation
+          if (/^\d+$/.test(finalMetaId)) return finalMetaId;
+          // Handle "4:xxx" = OK for CREATION only (header_handle field)
+          if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(finalMetaId)) return finalMetaId;
+          return null;
+        })();
+
         const metaPayload = buildMetaTemplatePayload({
           name: normalizeTemplateName(input.name),
           language: input.language,
           category: input.category,
           headerType: input.headerType || null,
-          headerContent: input.headerContent || null,
-          headerMediaId: finalMetaId, 
+          headerContent: finalCloudinaryUrl || input.headerContent || null,
+          headerMediaId: metaHeaderMediaId,
           bodyText: input.bodyText,
           footerText: input.footerText || null,
           buttons: (input.buttons || []) as any,
@@ -1015,11 +1024,30 @@ export class TemplatesService {
         const footerComponent = mt.components?.find((c: any) => c.type === 'FOOTER');
         const buttonsComponent = mt.components?.find((c: any) => c.type === 'BUTTONS');
 
-          // Extract header content properly for media templates
-          let headerContent = headerComponent?.text || null;
+          let headerContent: string | null = null;
+
+          // Text header
+          if (headerComponent?.text) {
+            headerContent = headerComponent.text;
+          }
+
+          // Media header - example se URL extract karo
           if (!headerContent && headerComponent?.example) {
-            headerContent = headerComponent.example.header_handle?.[0] || 
-                            headerComponent.example.header_text?.[0] || null;
+            const exampleHandles = headerComponent.example.header_handle || [];
+            const exampleTexts = headerComponent.example.header_text || [];
+            
+            // URL prefer karo, handle skip karo
+            for (const handle of exampleHandles) {
+              if (handle && handle.startsWith('http') && !handle.includes('scontent')) {
+                headerContent = handle; // Valid CDN URL ✅
+                break;
+              }
+              // "4:xxx" handles skip karo - expire ho jaate hain
+            }
+            
+            if (!headerContent && exampleTexts.length > 0) {
+              headerContent = exampleTexts[0];
+            }
           }
 
          const existing = await prisma.template.findFirst({

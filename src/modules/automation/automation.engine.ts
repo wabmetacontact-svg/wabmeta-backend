@@ -630,22 +630,8 @@ class AutomationEngine {
     };
 
     // ============================================
-    // ✅ MEDIA ID vs URL DETECTION - FIXED!
+    // ✅ HELPER FUNCTIONS
     // ============================================
-    /**
-     * Meta API ke liye:
-     * - Valid HTTP URL hai → { link: "https://..." }
-     * - WhatsApp Media ID hai → { id: "12345..." } ya { id: "4:V2hh..." }
-     * 
-     * WhatsApp Media ID formats:
-     *   "1234567890123456"     → Pure digits (old format)
-     *   "4:V2hhdHNBcHAg..."   → Colon-separated base64 (new format)
-     *   "eyJhbGci..."          → JWT-like base64
-     * 
-     * Valid URL:
-     *   "https://res.cloudinary.com/..."
-     *   "https://example.com/image.jpg"
-     */
     const isValidHttpUrl = (str: string): boolean => {
       try {
         const url = new URL(str);
@@ -655,91 +641,151 @@ class AutomationEngine {
       }
     };
 
-    const isWhatsAppMediaId = (str: string): boolean => {
-      if (!str) return false;
-      // Pure digits (old format): "1234567890123456"
-      if (/^\d{10,}$/.test(str)) return true;
-      // Colon format (new): "4:V2hhdHNBcHAg..."
-      if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(str)) return true;
-      // Base64-like long string without spaces/dots (no http)
-      if (str.length > 20 && !str.includes('http') && !str.includes('.') && /^[A-Za-z0-9+/=_-]+$/.test(str)) return true;
-      return false;
+    const isExpiredWhatsAppHandle = (str: string): boolean => {
+      // "4:V2hhdH..." format = upload handle (expires in ~10min)
+      return /^\d+:[A-Za-z0-9+/=:_-]+$/.test(str);
     };
 
-    const buildMediaParam = (mediaType: string, mediaIdOrUrl: string) => {
-      const type = mediaType.toLowerCase(); // 'image', 'video', 'document'
+    const isPureIntegerId = (str: string): boolean => {
+      return /^\d{10,}$/.test(str);
+    };
 
-      if (isValidHttpUrl(mediaIdOrUrl)) {
-        // ✅ Valid URL - use link
-        console.log(`🔗 [send_template] Using URL for ${type}: ${mediaIdOrUrl.substring(0, 50)}...`);
+    /**
+     * ✅ CORRECT media param builder
+     * 
+     * Meta Template Send API rules:
+     *   { link: "https://..." }  → Valid CDN/Cloudinary URL ✅
+     *   { id: 1234567890 }       → Numeric media ID (integer) ✅  
+     *   { id: "4:V2hh..." }      → INVALID - upload handle ❌
+     *   { link: "4:V2hh..." }    → INVALID - not a URL ❌
+     */
+    const buildMediaParam = (
+      mediaType: string,
+      mediaValue: string
+    ): { type: string; [key: string]: any } | null => {
+      const type = mediaType.toLowerCase();
+
+      if (isValidHttpUrl(mediaValue)) {
+        // ✅ Cloudinary/S3/CDN URL - best option
+        console.log(`🔗 [template] Using URL for ${type}: ${mediaValue.substring(0, 60)}...`);
         return {
           type,
-          [type]: { link: mediaIdOrUrl }
+          [type]: { link: mediaValue }
         };
-      } else if (isWhatsAppMediaId(mediaIdOrUrl)) {
-        // ✅ WhatsApp Media ID - use id
-        console.log(`🆔 [send_template] Using Media ID for ${type}: ${mediaIdOrUrl.substring(0, 30)}...`);
+
+      } else if (isPureIntegerId(mediaValue)) {
+        // ✅ Pure numeric ID - permanent, use as integer
+        console.log(`🔢 [template] Using numeric Media ID for ${type}: ${mediaValue}`);
         return {
           type,
-          [type]: { id: mediaIdOrUrl }
+          [type]: { id: parseInt(mediaValue, 10) }
         };
+
+      } else if (isExpiredWhatsAppHandle(mediaValue)) {
+        // ❌ Upload handle - only valid during template CREATION, not sending
+        console.error(`❌ [template] WhatsApp upload handle detected - CANNOT use for sending!`);
+        console.error(`   Handle: ${mediaValue.substring(0, 50)}...`);
+        console.error(`   These handles expire in ~10 min after upload.`);
+        return null;
+
       } else {
-        // ❌ Unknown format - try as URL (will fail at Meta, better error)
-        console.warn(`⚠️ [send_template] Unknown media format for ${type}: ${mediaIdOrUrl.substring(0, 50)}`);
+        // Unknown - try as URL
+        console.warn(`⚠️ [template] Unknown media format, attempting as link`);
         return {
           type,
-          [type]: { link: mediaIdOrUrl }
+          [type]: { link: mediaValue }
         };
       }
     };
 
     // ============================================
-    // ✅ BUILD COMPONENTS
+    // ✅ BUILD COMPONENTS - FIXED PRIORITY ORDER
     // ============================================
     let components = config.components || [];
 
     if (components.length === 0) {
-      // Auto-build from template data
 
-      // HEADER component
+      // ── HEADER COMPONENT ──────────────────────
       if (template.headerType && template.headerType !== 'NONE') {
         const hType = template.headerType.toUpperCase();
 
         if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-          // Priority: headerMediaId > headerContent
-          const mediaValue = template.headerMediaId || template.headerContent;
+          
+          /**
+           * ✅ PRIORITY ORDER (Most reliable → Least reliable):
+           * 
+           * 1. headerContent + isValidHttpUrl  → Cloudinary URL (PERMANENT) ✅
+           * 2. headerMediaId + isPureIntegerId → Numeric Meta ID (PERMANENT) ✅  
+           * 3. Skip                            → Handle expired, can't send ❌
+           * 
+           * NEVER use "4:xxx" upload handles for SENDING
+           * They are only for template CREATION (header_handle field)
+           */
+
+          const cloudinaryUrl = template.headerContent && isValidHttpUrl(template.headerContent)
+            ? template.headerContent
+            : null;
+
+          const numericId = template.headerMediaId && isPureIntegerId(template.headerMediaId)
+            ? template.headerMediaId
+            : null;
+
+          const mediaValue = cloudinaryUrl || numericId;
 
           if (mediaValue) {
             const mediaParam = buildMediaParam(hType.toLowerCase(), mediaValue);
-            components.push({
-              type: 'header',
-              parameters: [mediaParam]
-            });
-            console.log(`✅ [send_template] Header ${hType} component built`);
+
+            if (mediaParam) {
+              components.push({
+                type: 'header',
+                parameters: [mediaParam]
+              });
+              console.log(`✅ [template] Header ${hType} built using: ${cloudinaryUrl ? 'Cloudinary URL' : 'Numeric ID'}`);
+            }
           } else {
-            console.warn(`⚠️ [send_template] No media found for ${hType} header. headerMediaId=${template.headerMediaId}, headerContent=${template.headerContent}`);
+            // Both are unusable
+            console.error(`❌ [template] No valid media for ${hType} header!`);
+            console.error(`   headerContent: ${template.headerContent?.substring(0, 60) || 'null'}`);
+            console.error(`   headerMediaId: ${template.headerMediaId?.substring(0, 40) || 'null'}`);
+            console.error(`   Solution: Re-upload image in Templates page`);
+
+            // ❌ Template send nahi hoga - throw karo clear message ke saath
+            throw new Error(
+              `Template "${template.name}" has expired media. ` +
+              `Please re-upload the image/video in the Templates section.`
+            );
           }
 
         } else if (hType === 'TEXT' && template.headerContent) {
-          // Text header with variables
-          const hasVar = template.headerContent.includes('{{1}}');
-          if (hasVar) {
+          // Text header - variables fill karo
+          if (template.headerContent.includes('{{1}}')) {
+            let contactName = 'Customer';
+            if (context.contactId) {
+              const contact = await prisma.contact.findUnique({
+                where: { id: context.contactId },
+                select: { firstName: true, lastName: true }
+              });
+              if (contact?.firstName && contact.firstName !== 'Unknown') {
+                contactName = [contact.firstName, contact.lastName]
+                  .filter(Boolean).join(' ');
+              }
+            }
             components.push({
               type: 'header',
-              parameters: [{ type: 'text', text: 'Customer' }]
+              parameters: [{ type: 'text', text: contactName }]
             });
           }
-          // No variables = no parameters needed for text header
+          // No variables in text header = no parameters needed
         }
       }
 
-      // BODY component - fill variables
+      // ── BODY COMPONENT ────────────────────────
       const bodyText = template.bodyText || '';
       const bodyVarMatches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
 
       if (bodyVarMatches.length > 0) {
-        // Try to use contact info for variables
         let contactName = 'Customer';
+
         if (context.contactId) {
           const contact = await prisma.contact.findUnique({
             where: { id: context.contactId },
@@ -753,16 +799,13 @@ class AutomationEngine {
 
         const bodyParams = bodyVarMatches.map((_, i) => ({
           type: 'text',
-          text: i === 0 ? contactName : 'Customer' // First var = name
+          text: i === 0 ? contactName : 'Customer'
         }));
 
-        components.push({
-          type: 'body',
-          parameters: bodyParams
-        });
+        components.push({ type: 'body', parameters: bodyParams });
       }
 
-      // BUTTONS with URL variables
+      // ── BUTTON COMPONENTS ─────────────────────
       if (template.buttons) {
         const buttons = typeof template.buttons === 'string'
           ? JSON.parse(template.buttons)
@@ -783,7 +826,7 @@ class AutomationEngine {
       }
     }
 
-    console.log(`📋 [send_template] Final components:`, JSON.stringify(components, null, 2));
+    console.log(`📋 [template] Final components:`, JSON.stringify(components, null, 2));
 
     // ============================================
     // ✅ SEND TEMPLATE
