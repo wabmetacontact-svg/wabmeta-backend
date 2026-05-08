@@ -1346,62 +1346,90 @@ class WhatsAppService {
   ): any[] {
     const components: any[] = [];
 
-    // Header component
+    // ============================================
+    // ✅ Same helpers as automation engine
+    // ============================================
+    const isValidHttpUrl = (str: string): boolean => {
+      try {
+        const url = new URL(str);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    };
+
+    const isWhatsAppMediaId = (str: string): boolean => {
+      if (!str) return false;
+      if (/^\d{10,}$/.test(str)) return true;                          // Pure digits
+      if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(str)) return true;          // Colon format
+      if (str.length > 20 && !str.includes('http') && 
+          !str.includes('.') && /^[A-Za-z0-9+/=_-]+$/.test(str)) {   // Base64
+        return true;
+      }
+      return false;
+    };
+
+    const buildMediaParam = (mediaType: string, mediaValue: string) => {
+      const type = mediaType.toLowerCase();
+      if (isValidHttpUrl(mediaValue)) {
+        return { type, [type]: { link: mediaValue } };
+      } else if (isWhatsAppMediaId(mediaValue)) {
+        return { type, [type]: { id: mediaValue } };
+      }
+      return { type, [type]: { link: mediaValue } }; // Fallback
+    };
+
+    // ============================================
+    // HEADER
+    // ============================================
     if (template.headerType) {
-      if (template.headerType === 'TEXT' && template.headerContent) {
-        const headerVars = this.extractVariables(
-          template.headerContent,
-          variables
-        );
+      const hType = String(template.headerType).toUpperCase();
+
+      if (hType === 'TEXT' && template.headerContent) {
+        const headerVars = this.extractVariables(template.headerContent, variables);
         if (headerVars.length > 0) {
-          components.push({
-            type: 'header',
-            parameters: headerVars,
-          });
+          components.push({ type: 'header', parameters: headerVars });
         }
-      } else if (
-        ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType)
-      ) {
-        const mediaUrl = variables.header_media || template.headerMediaUrl;
-        if (mediaUrl) {
-          components.push({
-            type: 'header',
-            parameters: [
-              {
-                type: template.headerType.toLowerCase(),
-                [template.headerType.toLowerCase()]: {
-                  link: mediaUrl,
-                },
-              },
-            ],
-          });
+
+      } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
+        // ✅ Priority: variables > header_media > headerMediaId > headerMediaUrl > headerContent
+        const mediaValue =
+          variables.header_media ||
+          template.headerMediaId ||
+          template.headerMediaUrl ||
+          template.headerContent;
+
+        if (mediaValue) {
+          const mediaParam = buildMediaParam(hType.toLowerCase(), mediaValue);
+          components.push({ type: 'header', parameters: [mediaParam] });
+        } else {
+          console.warn(`⚠️ No media for ${hType} header in template: ${template.name}`);
         }
       }
     }
 
-    // Body component
-    const bodyVars = this.extractVariablesFromText(template.bodyText);
-    if (bodyVars.length > 0) {
-      const bodyParams = bodyVars.map((varName: string, index: number) => ({
+    // ============================================
+    // BODY
+    // ============================================
+    const bodyVarNames = this.extractVariablesFromText(template.bodyText);
+    if (bodyVarNames.length > 0) {
+      const bodyParams = bodyVarNames.map((_: string, index: number) => ({
         type: 'text',
         text:
-          variables[varName] ||
+          variables[`var_${index + 1}`] ||
           variables[`body_${index + 1}`] ||
-          `{{${index + 1}}}`,
+          'Customer', // ✅ Fallback instead of {{1}}
       }));
-
-      components.push({
-        type: 'body',
-        parameters: bodyParams,
-      });
+      components.push({ type: 'body', parameters: bodyParams });
     }
 
-    // Button components
+    // ============================================
+    // BUTTONS
+    // ============================================
     if (template.buttons) {
-      const buttons =
-        typeof template.buttons === 'string'
-          ? JSON.parse(template.buttons)
-          : template.buttons;
+      const buttons = typeof template.buttons === 'string'
+        ? JSON.parse(template.buttons)
+        : template.buttons;
 
       if (Array.isArray(buttons)) {
         buttons.forEach((button: any, index: number) => {
@@ -1410,12 +1438,10 @@ class WhatsAppService {
               type: 'button',
               sub_type: 'url',
               index,
-              parameters: [
-                {
-                  type: 'text',
-                  text: variables[`button_${index}`] || '',
-                },
-              ],
+              parameters: [{
+                type: 'text',
+                text: variables[`button_${index}`] || '',
+              }],
             });
           }
         });
