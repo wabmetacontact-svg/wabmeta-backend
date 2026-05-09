@@ -1278,56 +1278,201 @@ export class CampaignsService {
     accessToken: string,
     wabaId: string
   ): Promise<string> {
-    const hType = template.headerType.toUpperCase();
+    const hType = (template.headerType || '').toUpperCase();
     const mediaId = template.headerMediaId;
     const permanentUrl = template.headerContent;
 
-    // ✅ PRIORITY 1: Numeric ID - best, permanent, use directly
+    // ✅ PRIORITY 1: Numeric ID - permanent hai, directly use karo
     if (mediaId && /^\d+$/.test(mediaId)) {
       console.log(`✅ Using numeric media ID: ${mediaId}`);
       return mediaId;
     }
 
-    // ✅ PRIORITY 2: Cloudinary URL se fresh upload karo
-    // Numeric ID milega jo campaign send kare
-    if (
-      permanentUrl &&
-      permanentUrl.startsWith('http') &&
-      !permanentUrl.includes('scontent.whatsapp')
-    ) {
+    // ✅ PRIORITY 2: Cloudinary/Permanent URL se fresh upload
+    const cloudinaryUrl =
+      (permanentUrl &&
+        permanentUrl.startsWith('http') &&
+        !permanentUrl.includes('scontent.whatsapp')
+        ? permanentUrl
+        : null) ||
+      (mediaId &&
+        mediaId.startsWith('http') &&
+        !mediaId.includes('scontent.whatsapp')
+        ? mediaId
+        : null);
+
+    if (cloudinaryUrl) {
       console.log(`🔄 Re-uploading from Cloudinary for fresh numeric ID...`);
+
       try {
+        // ── STEP 1: URL se MIME pre-detect karo ──────────────────────
+        const detectMimeFromUrl = (url: string, type: string): string => {
+          const urlPath = url.split('?')[0];
+          const urlLower = urlPath.toLowerCase();
+
+          // 1. URL extension check
+          const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
+          if (extMatch) {
+            const extMap: Record<string, string> = {
+              jpg: 'image/jpeg',   jpeg: 'image/jpeg',
+              png: 'image/png',    webp: 'image/webp',
+              gif: 'image/gif',    mp4: 'video/mp4',
+              '3gp': 'video/3gpp', '3gpp': 'video/3gpp',
+              pdf: 'application/pdf',
+              doc: 'application/msword',
+              docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              xls: 'application/vnd.ms-excel',
+              xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              ppt: 'application/vnd.ms-powerpoint',
+              pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+              txt: 'text/plain',
+              ogg: 'audio/ogg',   mp3: 'audio/mpeg',
+              aac: 'audio/aac',   amr: 'audio/amr',
+              opus: 'audio/opus',
+            };
+            const mime = extMap[extMatch[1].toLowerCase()];
+            if (mime) {
+              console.log(`✅ MIME from URL extension: ${mime}`);
+              return mime;
+            }
+          }
+
+          // 2. Cloudinary f_ format param check
+          // e.g., /upload/f_jpg/ or /upload/q_auto,f_pdf/
+          const fParamMatch = urlLower.match(/[,\/]f_([a-z0-9]+)/);
+          if (fParamMatch) {
+            const fmtMap: Record<string, string> = {
+              jpg: 'image/jpeg',  jpeg: 'image/jpeg',
+              png: 'image/png',   webp: 'image/webp',
+              mp4: 'video/mp4',   pdf: 'application/pdf',
+            };
+            const mime = fmtMap[fParamMatch[1]];
+            if (mime) {
+              console.log(`✅ MIME from Cloudinary f_ param: ${mime}`);
+              return mime;
+            }
+          }
+
+          // 3. Cloudinary resource type from path
+          if (urlLower.includes('/image/upload/')) return 'image/jpeg';
+          if (urlLower.includes('/video/upload/')) return 'video/mp4';
+          if (urlLower.includes('/raw/upload/'))   return 'application/pdf';
+
+          // 4. Template headerType se default MIME
+          const typeDefaults: Record<string, string> = {
+            IMAGE:    'image/jpeg',
+            VIDEO:    'video/mp4',
+            DOCUMENT: 'application/pdf',
+            AUDIO:    'audio/mpeg',
+          };
+          const defaultMime = typeDefaults[type.toUpperCase()] || 'application/pdf';
+          console.log(`⚠️ MIME defaulting to: ${defaultMime} (headerType: ${type})`);
+          return defaultMime;
+        };
+
+        // ── STEP 2: Filename with extension ──────────────────────────
+        const buildFilename = (url: string, mimeType: string): string => {
+          const urlPath = url.split('?')[0];
+          const lastSegment = urlPath.split('/').pop() || 'media';
+
+          // Already has valid extension?
+          if (/\.[a-zA-Z0-9]{2,5}$/.test(lastSegment)) {
+            return lastSegment;
+          }
+
+          // MIME → extension map
+          const mimeToExt: Record<string, string> = {
+            'image/jpeg':    'jpg',
+            'image/png':     'png',
+            'image/webp':    'webp',
+            'video/mp4':     'mp4',
+            'video/3gpp':    '3gp',
+            'application/pdf': 'pdf',
+            'application/msword': 'doc',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+            'application/vnd.ms-excel': 'xls',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+            'application/vnd.ms-powerpoint': 'ppt',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+            'text/plain':    'txt',
+            'audio/mpeg':    'mp3',
+            'audio/aac':     'aac',
+            'audio/ogg':     'ogg',
+            'audio/amr':     'amr',
+            'audio/opus':    'opus',
+          };
+
+          const ext = mimeToExt[mimeType] || 'bin';
+          return `${lastSegment}.${ext}`;
+        };
+
+        // ── STEP 3: Pre-detect MIME download se pehle ─────────────────
+        const preMime = detectMimeFromUrl(cloudinaryUrl, hType);
+        console.log(`🔍 Pre-detected MIME: ${preMime}`);
+
+        // ── STEP 4: Cloudinary se download ───────────────────────────
         const axios = require('axios');
-        const response = await axios.default.get(permanentUrl, {
+        const response = await axios.default.get(cloudinaryUrl, {
           responseType: 'arraybuffer',
           timeout: 30000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)' },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
+            'Accept': '*/*',
+          },
         });
 
         const buffer = Buffer.from(response.data);
-        const mimeType =
-          response.headers['content-type'] ||
-          (hType === 'IMAGE'
-            ? 'image/jpeg'
-            : hType === 'VIDEO'
-            ? 'video/mp4'
-            : 'application/pdf');
-        const filename =
-          permanentUrl.split('/').pop()?.split('?')[0] || 'media';
 
+        // ── STEP 5: Response header se MIME validate karo ────────────
+        // "application/octet-stream" IGNORE karo - it's useless
+        const INVALID_MIMES = [
+          'application/octet-stream',
+          'binary/octet-stream',
+          'application/binary',
+          'application/unknown',
+        ];
+
+        const META_VALID_MIMES = [
+          'image/jpeg', 'image/png', 'image/webp',
+          'video/mp4', 'video/3gpp',
+          'audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr',
+          'audio/ogg', 'audio/opus',
+          'application/pdf', 'application/msword', 'text/plain',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+        ];
+
+        const rawCT = (response.headers['content-type'] || '').split(';')[0].trim();
+        const isValidResponseMime =
+          rawCT &&
+          !INVALID_MIMES.includes(rawCT) &&
+          META_VALID_MIMES.includes(rawCT);
+
+        // ✅ Valid response MIME use karo, warna pre-detected use karo
+        const finalMime = isValidResponseMime ? rawCT : preMime;
+        const finalFilename = buildFilename(cloudinaryUrl, finalMime);
+
+        console.log(`📤 Uploading to Meta:`, {
+          size: buffer.length,
+          mimeType: finalMime,      // ✅ Never "application/octet-stream"
+          filename: finalFilename,  // ✅ Always has extension
+        });
+
+        // ── STEP 6: Meta pe upload ────────────────────────────────────
         const result = await metaApi.uploadMedia(
           phoneNumberId,
           accessToken,
           buffer,
-          mimeType,
-          filename,
+          finalMime,       // ✅ Correct MIME
+          finalFilename,   // ✅ Correct filename with extension
           wabaId
         );
 
         console.log(`✅ Fresh numeric ID obtained: ${result.id}`);
 
-        // ✅ DB update - future campaigns ke liye cache karo
-        // Background mein save karo, campaign wait na kare
+        // ── STEP 7: DB mein cache karo future use ke liye ─────────────
         prisma.template
           .update({
             where: { id: template.id },
@@ -1338,23 +1483,11 @@ export class CampaignsService {
           );
 
         return result.id;
-      } catch (uploadErr: any) {
-        console.error(
-          '❌ Cloudinary re-upload failed:',
-          uploadErr.message
-        );
-        // Fall through to URL fallback
-      }
-    }
 
-    // ✅ PRIORITY 3: URL directly mediaId mein stored hai
-    if (
-      mediaId &&
-      mediaId.startsWith('http') &&
-      !mediaId.includes('scontent.whatsapp')
-    ) {
-      console.log(`✅ Using URL from headerMediaId directly`);
-      return mediaId; // Meta link field mein jayega
+      } catch (uploadErr: any) {
+        console.error('❌ Cloudinary re-upload failed:', uploadErr.message);
+        // Fall through to error
+      }
     }
 
     // ❌ No valid media found
