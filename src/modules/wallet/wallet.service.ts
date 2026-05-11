@@ -9,6 +9,29 @@ const PAISE_MULTIPLIER = 100; // ₹1 = 100 paise
 const toPaise = (rupees: number): number => Math.round(rupees * PAISE_MULTIPLIER);
 const toRupees = (paise: number): number => paise / PAISE_MULTIPLIER;
 
+// ─── Helper: Get Wallet-specific Razorpay Instance ────────────────────────────
+function getWalletRazorpay() {
+  const keyId = process.env.WALLET_RAZORPAY_KEY_ID;
+  const keySecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
+
+  if (!keyId || !keySecret) {
+    throw new AppError(
+      'Wallet payment gateway not configured. Contact support.',
+      500
+    );
+  }
+
+  const Razorpay = require('razorpay');
+  return {
+    instance: new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret,
+    }),
+    keyId,
+    keySecret,
+  };
+}
+
 // ─── Helper: Format Wallet Response ───────────────────────────────────────────
 function formatWallet(wallet: any) {
   return {
@@ -267,16 +290,17 @@ export async function getTransactionHistory(
   };
 }
 
-// ─── 4. Create TopUp Order (Razorpay) ─────────────────────────────────────────
+// ─── 4. Create TopUp Order (Wallet Razorpay) ──────────────────────────────────
 export async function createTopUpOrder(
   organizationId: string,
   amountRupees: number
 ) {
+  // ── Wallet fetch & validations ──────────────────────────────────────────────
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
 
-  if (!wallet) throw new AppError('Wallet not found', 404);
+  if (!wallet)   throw new AppError('Wallet not found', 404);
   if (!wallet.isActive) throw new AppError('Wallet is not active', 403);
   if (wallet.flagged) {
     throw new AppError('Wallet is flagged. Please contact support.', 403);
@@ -284,44 +308,48 @@ export async function createTopUpOrder(
 
   const amountPaise = toPaise(amountRupees);
 
-  // Validation
+  // ── Amount validations ──────────────────────────────────────────────────────
   if (amountPaise < 10000) {
-    // ₹100 minimum
     throw new AppError('Minimum top-up amount is ₹100', 400);
   }
 
   if (amountPaise > wallet.maxTopUpPaise) {
     throw new AppError(
-      `Maximum top-up per transaction is ₹${toRupees(wallet.maxTopUpPaise).toLocaleString('en-IN')}`,
+      `Maximum top-up per transaction is ₹${toRupees(
+        wallet.maxTopUpPaise
+      ).toLocaleString('en-IN')}`,
       400
     );
   }
 
-  // Reset monthly limit if needed
+  // ── Monthly limit check ─────────────────────────────────────────────────────
   const updatedWallet = await resetMonthlyIfNeeded(wallet);
 
-  if (updatedWallet.currentMonthPaise + amountPaise > updatedWallet.maxMonthlyPaise) {
+  if (
+    updatedWallet.currentMonthPaise + amountPaise >
+    updatedWallet.maxMonthlyPaise
+  ) {
     const remainingPaise =
       updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
     throw new AppError(
-      `Monthly top-up limit exceeded. Remaining this month: ₹${toRupees(remainingPaise).toLocaleString('en-IN')}`,
+      `Monthly top-up limit exceeded. Remaining this month: ₹${toRupees(
+        remainingPaise
+      ).toLocaleString('en-IN')}`,
       400
     );
   }
 
-  // Create Razorpay order - reuse existing billing pattern
-  const Razorpay = require('razorpay');
-  const rzp = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-  });
+  // ── Get WALLET-specific Razorpay instance ───────────────────────────────────
+  const { instance: rzp, keyId } = getWalletRazorpay();
 
+  // ── Create receipt ──────────────────────────────────────────────────────────
   const timestamp = Date.now().toString().slice(-8);
   const orgShort = organizationId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
   const receipt = `wlt_${orgShort}_${timestamp}`;
 
+  // ── Create Razorpay Order ───────────────────────────────────────────────────
   const order = await rzp.orders.create({
-    amount: amountPaise, // Razorpay takes paise
+    amount: amountPaise,
     currency: 'INR',
     receipt,
     payment_capture: 1,
@@ -329,6 +357,7 @@ export async function createTopUpOrder(
       organizationId,
       purpose: 'wallet_topup',
       walletId: wallet.id,
+      source: 'wallet_razorpay', // Track karo konsa account use hua
     },
   });
 
@@ -337,25 +366,34 @@ export async function createTopUpOrder(
     amount: amountRupees,
     amountPaise,
     currency: 'INR',
-    razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+    razorpayKeyId: keyId,   // ✅ Naya wallet key frontend ko bhejo
     receipt: order.receipt,
   };
 }
 
-// ─── 5. Verify & Process TopUp ────────────────────────────────────────────────
+// ─── 5. Verify & Process TopUp (Wallet Razorpay Secret) ──────────────────────
 export async function processTopUp(
   organizationId: string,
   data: {
     razorpayOrderId: string;
     razorpayPaymentId: string;
     razorpaySignature: string;
-    amount: number; // rupees from frontend
+    amount: number;
   }
 ) {
-  // Verify Razorpay signature
+  // ── Signature verification with WALLET secret ───────────────────────────────
+  const walletSecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
+
+  if (!walletSecret) {
+    throw new AppError(
+      'Wallet payment gateway not configured. Contact support.',
+      500
+    );
+  }
+
   const body = data.razorpayOrderId + '|' + data.razorpayPaymentId;
   const expectedSignature = crypto
-    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
+    .createHmac('sha256', walletSecret)   // ✅ Wallet secret use karo
     .update(body)
     .digest('hex');
 
@@ -363,7 +401,7 @@ export async function processTopUp(
     throw new AppError('Payment verification failed: Invalid signature', 400);
   }
 
-  // Check duplicate payment
+  // ── Duplicate payment check ─────────────────────────────────────────────────
   const existingTxn = await prisma.walletTransaction.findFirst({
     where: { razorpayPaymentId: data.razorpayPaymentId },
   });
@@ -372,6 +410,7 @@ export async function processTopUp(
     throw new AppError('This payment has already been processed', 400);
   }
 
+  // ── Wallet fetch ────────────────────────────────────────────────────────────
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
@@ -382,21 +421,19 @@ export async function processTopUp(
   const balanceBeforePaise = wallet.balancePaise;
   const balanceAfterPaise = balanceBeforePaise + amountPaise;
 
-  // Use Prisma transaction for atomicity
+  // ── Atomic DB transaction ───────────────────────────────────────────────────
   const [updatedWallet, transaction] = await prisma.$transaction([
-    // Update wallet balance
     prisma.wallet.update({
       where: { id: wallet.id },
       data: {
         balancePaise: balanceAfterPaise,
         totalCreditedPaise: { increment: amountPaise },
-        currentMonthPaise: { increment: amountPaise },
+        currentMonthPaise:  { increment: amountPaise },
         lastTransactionAt: new Date(),
-        lowAlertSent: false, // Reset alert on top-up
+        lowAlertSent: false,
       },
     }),
 
-    // Create transaction record
     prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -406,7 +443,7 @@ export async function processTopUp(
         balanceAfterPaise,
         description: `Wallet top-up via Razorpay`,
         status: 'completed',
-        razorpayOrderId: data.razorpayOrderId,
+        razorpayOrderId:   data.razorpayOrderId,
         razorpayPaymentId: data.razorpayPaymentId,
       },
     }),
