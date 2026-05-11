@@ -343,7 +343,7 @@ export class CampaignsService {
     if (!campaign) throw new AppError('Campaign not found', 404);
     if (campaign.status === 'RUNNING') throw new AppError('Already running', 400);
 
-    // ✅ EXISTING: Template approval check
+    // ✅ Template checks
     if (campaign.template) {
       const tpl = campaign.template as any;
       if (tpl.status === 'REJECTED') {
@@ -352,56 +352,50 @@ export class CampaignsService {
       if (tpl.status !== 'APPROVED') {
         throw new AppError(`Template "${tpl.name}" is not approved (status: ${tpl.status}).`, 400);
       }
-
-      // ✅ Media handle check (prevent campaign start with expired/missing media)
       const headerType = (tpl.headerType || '').toUpperCase();
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
         const mediaId = tpl.headerMediaId;
         const permanentUrl = tpl.headerContent;
-
-        // ⚠️ NOTE: '4:...' resumable handles are ONLY valid for template creation,
-        //       NOT for message sending. Must have numeric ID or permanent URL.
-        const hasNumericId = mediaId && /^\d+$/.test(mediaId);               // e.g. "1234567890"
-        const hasPermanentUrl =
-          permanentUrl &&
-          permanentUrl.startsWith('http') &&
-          !permanentUrl.includes('scontent.whatsapp');                        // Cloudinary URL
-        const hasUrlInMediaId =
-          mediaId &&
-          mediaId.startsWith('http') &&
-          !mediaId.includes('scontent.whatsapp');                             // HTTP URL in mediaId
-
-        const hasAnyValidMedia =
-          hasNumericId ||     // Numeric ID
-          hasPermanentUrl ||  // Cloudinary URL
-          hasUrlInMediaId;    // URL in mediaId
-
-        if (!hasAnyValidMedia) {
+        const hasNumericId = mediaId && /^\d+$/.test(mediaId);
+        const hasPermanentUrl = permanentUrl && permanentUrl.startsWith('http') && !permanentUrl.includes('scontent.whatsapp');
+        const hasUrlInMediaId = mediaId && mediaId.startsWith('http') && !mediaId.includes('scontent.whatsapp');
+        if (!hasNumericId && !hasPermanentUrl && !hasUrlInMediaId) {
           throw new AppError(
-            `Template "${tpl.name}" has missing media. ` +
-            `Please edit the template and re-upload the ${(tpl.headerType || 'media').toLowerCase()}.`,
+            `Template "${tpl.name}" has missing media. Please edit and re-upload.`,
             400
           );
         }
       }
     }
-    
-    // ✅ Wallet Balance Check (Minimum ₹20 required)
+
+    // ✅ NEW: Wallet Balance Check
     const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
+
     if (wallet && wallet.isActive) {
-      const balance = wallet.balancePaise / 100;
-      if (balance <= 20) {
-        throw new AppError(`Your wallet balance is very low (₹${balance.toFixed(2)}). You need to add balance to run this campaign. Minimum ₹20.00 required.`, 400);
+      const balanceRupees = wallet.balancePaise / 100;
+
+      if (balanceRupees <= 50) {
+        // ❌ BLOCK - Campaign run nahi hogi
+        throw new AppError(
+          `WALLET_LOW_BALANCE::${balanceRupees.toFixed(2)}`,
+          400
+        );
       }
     }
 
+    // ✅ Campaign start karo
     const updated = await prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: 'RUNNING', startedAt: campaign.startedAt || new Date() },
-      include: { template: true, whatsappAccount: true }
+      data: {
+        status: 'RUNNING',
+        startedAt: campaign.startedAt || new Date(),
+      },
+      include: { template: true, whatsappAccount: true },
     });
 
-    this.processCampaignContacts(campaignId, organizationId).catch(err => console.error('Campaign error:', err));
+    this.processCampaignContacts(campaignId, organizationId)
+      .catch(err => console.error('Campaign error:', err));
+
     return formatCampaign(updated);
   }
 
