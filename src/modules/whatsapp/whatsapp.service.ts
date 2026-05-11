@@ -1,4 +1,4 @@
-﻿// 📁 src/modules/whatsapp/whatsapp.service.ts - COMPLETE FINAL VERSION
+// 📁 src/modules/whatsapp/whatsapp.service.ts - COMPLETE FINAL VERSION
 
 import {
   PrismaClient,
@@ -512,13 +512,13 @@ class WhatsAppService {
       // ✅ ── WALLET DEDUCTION (Meta send ke BAAD, non-blocking) ─────────────────
       const orgId = organizationId || account.organizationId;
       
-      // Template category DB se fetch karo
+      // Template category & language DB se fetch karo
       const templateForCategory = await prisma.template.findFirst({
         where: {
           organizationId: orgId,
           name: templateName,
         },
-        select: { category: true },
+        select: { category: true, language: true },
       });
 
       // Fire & forget - message blocking nahi hoga
@@ -526,6 +526,7 @@ class WhatsAppService {
         organizationId: orgId,
         templateName,
         templateCategory: templateForCategory?.category,
+        templateLanguage: templateForCategory?.language,
         recipientPhone: to,
         waMessageId,
       }).then(result => {

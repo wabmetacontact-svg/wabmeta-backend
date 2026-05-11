@@ -767,38 +767,51 @@ export class CampaignsService {
         organizationId,
         templateName: template.name,
         templateCategory: template.category,
+        templateLanguage: template.language,
         totalRecipients: pendingCount,
         campaignId,
         recipientPhones: samplePhones,
       });
 
-      if (walletCheck.walletActive) {
-        console.log(`💳 Wallet check: Estimated cost ₹${walletCheck.estimatedCost.toFixed(2)}, Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
-        
-        if (!walletCheck.canProceed) {
-          // ✅ Pause campaign if balance is too low
+      // 🔍 WALLET DEBUG LOG — always print so we can diagnose
+      console.log('💳 ── WALLET PRE-CHECK RESULT ──────────────────────────────');
+      console.log(`   organizationId  : ${organizationId}`);
+      console.log(`   walletActive    : ${walletCheck.walletActive}`);
+      console.log(`   canProceed      : ${walletCheck.canProceed}`);
+      console.log(`   availableBalance: ₹${walletCheck.availableBalance.toFixed(2)}`);
+      console.log(`   estimatedCost   : ₹${walletCheck.estimatedCost.toFixed(2)}`);
+      console.log(`   shortfall       : ₹${walletCheck.shortfall.toFixed(2)}`);
+      console.log(`   pendingContacts : ${pendingCount}`);
+      console.log('💳 ─────────────────────────────────────────────────────────');
+
+      if (walletCheck.walletActive && !walletCheck.canProceed) {
+        // Hard block only when balance is ≤ ₹20 (absolute minimum)
+        if (walletCheck.availableBalance <= 20) {
           await prisma.campaign.update({
             where: { id: campaignId },
-            data: { status: 'PAUSED' }
+            data: { status: 'PAUSED' },
           });
 
-          campaignSocketService.emitCampaignUpdate(organizationId, campaignId, { 
-            status: 'PAUSED', 
-            message: walletCheck.availableBalance <= 20 
-              ? `⚠️ Campaign paused: Wallet balance very low (₹${walletCheck.availableBalance.toFixed(2)}). Please add balance.`
-              : `⚠️ Campaign paused: Insufficient balance for this campaign.`
+          campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
+            status: 'PAUSED',
+            message: `⚠️ Campaign paused: Wallet balance very low (₹${walletCheck.availableBalance.toFixed(2)}). Please add balance.`,
           });
 
           campaignSocketService.emitCampaignError(organizationId, campaignId, {
-            message: walletCheck.availableBalance <= 20
-              ? `Your wallet balance is very low (₹${walletCheck.availableBalance.toFixed(2)}). You need to add balance to resume.`
-              : `Insufficient balance! Est. cost ₹${walletCheck.estimatedCost.toFixed(2)}, available ₹${walletCheck.availableBalance.toFixed(2)}.`,
-            code: 'LOW_BALANCE_ERROR'
+            message: `Your wallet balance is very low (₹${walletCheck.availableBalance.toFixed(2)}). You need to add balance to resume.`,
+            code: 'LOW_BALANCE_ERROR',
           });
 
           this.processingCampaigns.delete(campaignId);
           return;
         }
+
+        // Balance is between ₹20 and estimated cost — warn but continue.
+        // Deduction will use whatever is available.
+        console.warn(
+          `⚠️ Wallet balance (₹${walletCheck.availableBalance.toFixed(2)}) < estimated cost ` +
+          `(₹${walletCheck.estimatedCost.toFixed(2)}) — campaign will run but wallet may empty out.`
+        );
       }
       // ───────────────────────────────────────────────────────────────────────────
 
@@ -918,8 +931,9 @@ export class CampaignsService {
               batchSent.push({ id: data.id, waMessageId: data.waMessageId, contactId: data.contactId, phone: data.phone });
               totalSentCount++;
               // ✅ Add country-wise rate for this recipient to running total
+              // prioritizing template language/country
               const recipientRatePaise = Math.round(
-                getRateForCategory(template.category || 'MARKETING', data.phone) * 100
+                getRateForCategory(template.category || 'MARKETING', data.phone, template.language) * 100
               );
               totalSentAmountPaise += recipientRatePaise;
               consecutiveFailures = 0;
@@ -1017,6 +1031,12 @@ export class CampaignsService {
 
       // ✅ ── COUNTRY-AWARE BULK WALLET DEDUCTION ──────────────────────────────
       // totalSentAmountPaise = sum of each recipient's individual country rate
+      console.log('💳 ── BULK DEDUCTION CHECK ──────────────────────────────────');
+      console.log(`   walletActive       : ${walletCheck.walletActive}`);
+      console.log(`   totalSentCount     : ${totalSentCount}`);
+      console.log(`   totalSentAmountPaise: ${totalSentAmountPaise} (₹${(totalSentAmountPaise/100).toFixed(2)})`);
+      console.log('💳 ─────────────────────────────────────────────────────────');
+
       if (walletCheck.walletActive && totalSentCount > 0 && totalSentAmountPaise > 0) {
         try {
           const totalAmountRupees = totalSentAmountPaise / 100;
@@ -1029,7 +1049,9 @@ export class CampaignsService {
 
           await prisma.$transaction(async (tx) => {
             const wallet = await tx.wallet.findUnique({ where: { organizationId } });
-            if (!wallet || !wallet.isActive || wallet.flagged) {
+            if (!wallet || wallet.flagged) {
+              // Only skip if no wallet or explicitly flagged for fraud
+              console.warn('💳 No wallet or flagged — skipping bulk deduction');
               console.warn('💳 Wallet not available for bulk deduction - skipping');
               return;
             }

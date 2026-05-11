@@ -17,194 +17,232 @@ export interface CountryRate {
 // Keyed by ITU dial prefix string (e.g. '91' for India, '49' for Germany)
 // When a prefix is ambiguous (multiple countries share it), we use the most
 // common country's rates or fall back to the DEFAULT_RATE.
+// ─── Updated Pricing Table (+1 INR per rate, effective 2026-05) ───────────────
 export const COUNTRY_RATES: Record<string, CountryRate> = {
   // Afghanistan (+93)
-  '93':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '93':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Albania (+355)
-  '355': { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '355': { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Algeria (+213)
-  '213': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '213': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Angola (+244)
-  '244': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '244': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Argentina (+54)
-  '54':  { marketing: 5.19, utility: 2.18, authentication: 2.18 },
+  '54':  { marketing: 6.19,  utility: 3.18, authentication: 3.18 },
   // Armenia (+374)
-  '374': { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '374': { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Australia (+61)
-  '61':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '61':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Austria (+43)
-  '43':  { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '43':  { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // Azerbaijan (+994)
-  '994': { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '994': { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Bahrain (+973)
-  '973': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '973': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Bangladesh (+880)
-  '880': { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '880': { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Belarus (+375)
-  '375': { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '375': { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Belgium (+32)
-  '32':  { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '32':  { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // Benin (+229)
-  '229': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '229': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Bolivia (+591)
-  '591': { marketing: 6.22, utility: 0.95, authentication: 0.95 },
+  '591': { marketing: 7.22,  utility: 1.95, authentication: 1.95 },
   // Botswana (+267)
-  '267': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '267': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Brazil (+55)
-  '55':  { marketing: 5.25, utility: 0.57, authentication: 0.57 },
+  '55':  { marketing: 6.25,  utility: 1.57, authentication: 1.57 },
   // Bulgaria (+359)
-  '359': { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '359': { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Burkina Faso (+226)
-  '226': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '226': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Burundi (+257)
-  '257': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '257': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Cambodia (+855)
-  '855': { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '855': { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Cameroon (+237)
-  '237': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
-  // Canada (+1) – same prefix as USA, handled via US rates below
+  '237': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
+  // Canada (+1) — same prefix as USA; both use US rate below
   // Chad (+235)
-  '235': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '235': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Chile (+56)
-  '56':  { marketing: 7.47, utility: 1.68, authentication: 1.68 },
+  '56':  { marketing: 8.47,  utility: 2.68, authentication: 2.68 },
   // China (+86)
-  '86':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '86':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Colombia (+57)
-  '57':  { marketing: 1.05, utility: 0.07, authentication: 0.07 },
+  '57':  { marketing: 2.05,  utility: 1.07, authentication: 1.07 },
   // Costa Rica (+506)
-  '506': { marketing: 6.22, utility: 0.95, authentication: 0.95 },
+  '506': { marketing: 7.22,  utility: 1.95, authentication: 1.95 },
   // Croatia (+385)
-  '385': { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '385': { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Czech Republic (+420)
-  '420': { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '420': { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Denmark (+45)
-  '45':  { marketing: 4.97, utility: 1.44, authentication: 1.44 },
-  // Dominican Republic (+1-809 / +1-829 / +1-849) – handled via fallback
+  '45':  { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
+  // Dominican Republic (+1809 / +1829 / +1849) — 4-digit prefix overrides +1 rate
+  '1809': { marketing: 7.22, utility: 1.95, authentication: 1.95 },
+  '1829': { marketing: 7.22, utility: 1.95, authentication: 1.95 },
+  '1849': { marketing: 7.22, utility: 1.95, authentication: 1.95 },
   // Ecuador (+593)
-  '593': { marketing: 6.22, utility: 0.95, authentication: 0.95 },
+  '593': { marketing: 7.22,  utility: 1.95, authentication: 1.95 },
   // Egypt (+20)
-  '20':  { marketing: 5.41, utility: 0.30, authentication: 0.30 },
+  '20':  { marketing: 6.41,  utility: 1.30, authentication: 1.30 },
   // El Salvador (+503)
-  '503': { marketing: 6.22, utility: 0.95, authentication: 0.95 },
+  '503': { marketing: 7.22,  utility: 1.95, authentication: 1.95 },
   // Eritrea (+291)
-  '291': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '291': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Ethiopia (+251)
-  '251': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '251': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Finland (+358)
-  '358': { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '358': { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // France (+33)
-  '33':  { marketing: 7.22, utility: 2.52, authentication: 2.52 },
+  '33':  { marketing: 8.22,  utility: 3.52, authentication: 3.52 },
   // Germany (+49)
-  '49':  { marketing: 11.47, utility: 4.62, authentication: 4.62 },
+  '49':  { marketing: 12.47, utility: 5.62, authentication: 5.62 },
   // Greece (+30)
-  '30':  { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '30':  { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Guatemala (+502)
-  '502': { marketing: 6.22, utility: 0.95, authentication: 0.95 },
+  '502': { marketing: 7.22,  utility: 1.95, authentication: 1.95 },
   // Haiti (+509)
-  '509': { marketing: 6.22, utility: 0.95, authentication: 0.95 },
+  '509': { marketing: 7.22,  utility: 1.95, authentication: 1.95 },
   // Hong Kong (+852)
-  '852': { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '852': { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Hungary (+36)
-  '36':  { marketing: 7.22, utility: 1.78, authentication: 1.78 },
-  // India (+91)  ← cheapest
-  '91':  { marketing: 0.99, utility: 0.12, authentication: 0.12 },
+  '36':  { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
+  // India (+91)
+  '91':  { marketing: 1.00,  utility: 0.12, authentication: 0.12 },
   // Indonesia (+62)
-  '62':  { marketing: 3.45, utility: 2.10, authentication: 2.10 },
+  '62':  { marketing: 4.45,  utility: 3.10, authentication: 3.10 },
   // Iraq (+964)
-  '964': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '964': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Ireland (+353)
-  '353': { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '353': { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // Israel (+972)
-  '972': { marketing: 2.97, utility: 0.45, authentication: 0.45 },
+  '972': { marketing: 3.97,  utility: 1.45, authentication: 1.45 },
   // Italy (+39)
-  '39':  { marketing: 5.80, utility: 2.52, authentication: 2.52 },
+  '39':  { marketing: 6.80,  utility: 3.52, authentication: 3.52 },
   // Japan (+81)
-  '81':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '81':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Jordan (+962)
-  '962': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '962': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Kenya (+254)
-  '254': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '254': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
   // Kuwait (+965)
-  '965': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '965': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Laos (+856)
-  '856': { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '856': { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Lebanon (+961)
-  '961': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '961': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Malaysia (+60)
-  '60':  { marketing: 7.22, utility: 1.18, authentication: 1.18 },
+  '60':  { marketing: 8.22,  utility: 2.18, authentication: 2.18 },
   // Mexico (+52)
-  '52':  { marketing: 2.56, utility: 0.71, authentication: 0.71 },
+  '52':  { marketing: 3.56,  utility: 1.71, authentication: 1.71 },
   // Nepal (+977)
-  '977': { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '977': { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Netherlands (+31)
-  '31':  { marketing: 13.41, utility: 4.20, authentication: 4.20 },
+  '31':  { marketing: 14.41, utility: 5.20, authentication: 5.20 },
   // New Zealand (+64)
-  '64':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '64':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Nigeria (+234)
-  '234': { marketing: 4.33, utility: 0.56, authentication: 0.56 },
+  '234': { marketing: 5.33,  utility: 1.56, authentication: 1.56 },
   // Norway (+47)
-  '47':  { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '47':  { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // Oman (+968)
-  '968': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '968': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Pakistan (+92)
-  '92':  { marketing: 3.97, utility: 0.84, authentication: 0.84 },
+  '92':  { marketing: 4.97,  utility: 1.84, authentication: 1.84 },
   // Peru (+51)
-  '51':  { marketing: 5.91, utility: 1.68, authentication: 1.68 },
+  '51':  { marketing: 6.91,  utility: 2.68, authentication: 2.68 },
   // Philippines (+63)
-  '63':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '63':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Poland (+48)
-  '48':  { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '48':  { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Portugal (+351)
-  '351': { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '351': { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // Qatar (+974)
-  '974': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '974': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Romania (+40)
-  '40':  { marketing: 7.22, utility: 1.78, authentication: 1.78 },
+  '40':  { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // Russia (+7)
-  '7':   { marketing: 6.74, utility: 3.36, authentication: 3.36 },
+  '7':   { marketing: 7.74,  utility: 4.36, authentication: 4.36 },
   // Saudi Arabia (+966)
-  '966': { marketing: 4.21, utility: 0.90, authentication: 0.90 },
+  '966': { marketing: 5.21,  utility: 1.90, authentication: 1.90 },
   // Singapore (+65)
-  '65':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '65':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // South Africa (+27)
-  '27':  { marketing: 3.18, utility: 0.64, authentication: 0.64 },
+  '27':  { marketing: 4.18,  utility: 1.64, authentication: 1.64 },
   // Spain (+34)
-  '34':  { marketing: 5.17, utility: 1.68, authentication: 1.68 },
+  '34':  { marketing: 6.17,  utility: 2.68, authentication: 2.68 },
   // Sri Lanka (+94)
-  '94':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '94':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Sweden (+46)
-  '46':  { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '46':  { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // Switzerland (+41)
-  '41':  { marketing: 4.97, utility: 1.44, authentication: 1.44 },
+  '41':  { marketing: 5.97,  utility: 2.44, authentication: 2.44 },
   // Taiwan (+886)
-  '886': { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '886': { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Thailand (+66)
-  '66':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '66':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Turkey (+90)
-  '90':  { marketing: 0.92, utility: 0.08, authentication: 0.08 },
+  '90':  { marketing: 1.92,  utility: 1.08, authentication: 1.08 },
   // UAE (+971)
-  '971': { marketing: 4.19, utility: 1.32, authentication: 1.32 },
+  '971': { marketing: 5.19,  utility: 2.32, authentication: 2.32 },
   // UK (+44)
-  '44':  { marketing: 4.44, utility: 1.85, authentication: 1.85 },
+  '44':  { marketing: 5.44,  utility: 2.85, authentication: 2.85 },
   // USA & Canada (+1)
-  '1':   { marketing: 2.10, utility: 0.29, authentication: 0.29 },
+  '1':   { marketing: 3.10,  utility: 1.29, authentication: 1.29 },
   // Vietnam (+84)
-  '84':  { marketing: 6.15, utility: 0.95, authentication: 0.95 },
+  '84':  { marketing: 7.15,  utility: 1.95, authentication: 1.95 },
   // Yemen (+967)
-  '967': { marketing: 2.86, utility: 0.76, authentication: 0.76 },
+  '967': { marketing: 3.86,  utility: 1.76, authentication: 1.76 },
   // Zimbabwe (+263)
-  '263': { marketing: 1.89, utility: 0.34, authentication: 0.34 },
+  '263': { marketing: 2.89,  utility: 1.34, authentication: 1.34 },
 };
 
 // ─── Default (fallback) rate when country cannot be determined ─────────────────
 export const DEFAULT_RATE: CountryRate = {
-  marketing: 0.99,      // India rate as safe default
+  marketing: 1.00,      // India rate as safe default
   utility: 0.12,
   authentication: 0.12,
 };
 
+// ─── Language to Country Prefix Mapping ──────────────────────────────────────
+// Maps WhatsApp language codes to their primary ITU dial prefixes
+export const LANGUAGE_TO_PREFIX: Record<string, string> = {
+  'hi': '91',    // Hindi -> India
+  'bn': '91',    // Bengali -> India (also 880, but usually 91 for this context)
+  'pa': '91',    // Punjabi
+  'gu': '91',    // Gujarati
+  'mr': '91',    // Marathi
+  'kn': '91',    // Kannada
+  'ta': '91',    // Tamil
+  'te': '91',    // Telugu
+  'ml': '91',    // Malayalam
+  'de': '49',    // German -> Germany
+  'fr': '33',    // French -> France
+  'it': '39',    // Italian -> Italy
+  'es': '34',    // Spanish -> Spain (Note: could be LatAm, but 34 is default)
+  'pt_BR': '55', // Portuguese (Brazil) -> Brazil
+  'pt_PT': '351',// Portuguese (Portugal) -> Portugal
+  'en_US': '1',  // English (US) -> USA
+  'en_GB': '44', // English (UK) -> UK
+  'nl': '31',    // Dutch -> Netherlands
+  'tr': '90',    // Turkish -> Turkey
+  'ar': '966',   // Arabic -> Saudi Arabia (Common default for AR)
+  'ru': '7',     // Russian -> Russia
+  'ja': '81',    // Japanese -> Japan
+  'zh_CN': '86', // Chinese -> China
+  'zh_HK': '852',// Chinese (HK) -> Hong Kong
+  'zh_TW': '886',// Chinese (TW) -> Taiwan
+  'th': '66',    // Thai -> Thailand
+  'vi': '84',    // Vietnamese -> Vietnam
+  'id': '62',    // Indonesian -> Indonesia
+  'ms': '60',    // Malay -> Malaysia
+  'ko': '82',    // Korean -> South Korea
+};
+
 // ─── Dial-code lookup: longest-prefix-match from cleaned phone number ──────────
-// We try 4-digit prefix first, then 3, then 2, then 1 (greedy match)
 export function getCountryRateFromPhone(phone: string): CountryRate {
   if (!phone) return DEFAULT_RATE;
 
@@ -222,10 +260,21 @@ export function getCountryRateFromPhone(phone: string): CountryRate {
   return DEFAULT_RATE;
 }
 
-// ─── Get rate (INR) for a given category + recipient phone ────────────────────
-export function getRateForCategory(category: string, recipientPhone?: string): number {
+// ─── Get rate (INR) for a given category + recipient phone OR language ────────
+export function getRateForCategory(category: string, recipientPhone?: string, language?: string): number {
   const upper = (category || '').toUpperCase().trim();
-  const rates = recipientPhone ? getCountryRateFromPhone(recipientPhone) : DEFAULT_RATE;
+  
+  let rates = DEFAULT_RATE;
+
+  // 1. Priority: Language (Template Country)
+  if (language && LANGUAGE_TO_PREFIX[language]) {
+    const prefix = LANGUAGE_TO_PREFIX[language];
+    rates = COUNTRY_RATES[prefix] || DEFAULT_RATE;
+  } 
+  // 2. Fallback: Recipient Phone prefix
+  else if (recipientPhone) {
+    rates = getCountryRateFromPhone(recipientPhone);
+  }
 
   if (upper.includes('MARKETING')) return rates.marketing;
   if (upper.includes('AUTH'))      return rates.authentication;
@@ -243,7 +292,9 @@ const COUNTRY_NAMES: Record<string, string> = {
   '55': 'Brazil', '359': 'Bulgaria', '226': 'Burkina Faso', '257': 'Burundi',
   '855': 'Cambodia', '237': 'Cameroon', '235': 'Chad', '56': 'Chile',
   '86': 'China', '57': 'Colombia', '506': 'Costa Rica', '385': 'Croatia',
-  '420': 'Czech Republic', '45': 'Denmark', '593': 'Ecuador', '20': 'Egypt',
+  '420': 'Czech Republic', '45': 'Denmark',
+  '1809': 'Dominican Republic', '1829': 'Dominican Republic', '1849': 'Dominican Republic',
+  '593': 'Ecuador', '20': 'Egypt',
   '503': 'El Salvador', '291': 'Eritrea', '251': 'Ethiopia', '358': 'Finland',
   '33': 'France', '49': 'Germany', '30': 'Greece', '502': 'Guatemala',
   '509': 'Haiti', '852': 'Hong Kong', '36': 'Hungary', '91': 'India',
@@ -274,6 +325,7 @@ export async function deductWalletForTemplate(params: {
   organizationId: string;
   templateName: string;
   templateCategory?: string;
+  templateLanguage?: string;
   recipientPhone: string;
   waMessageId?: string;
   campaignId?: string;
@@ -290,6 +342,7 @@ export async function deductWalletForTemplate(params: {
     organizationId,
     templateName,
     templateCategory,
+    templateLanguage,
     recipientPhone,
     waMessageId,
     campaignId,
@@ -304,13 +357,13 @@ export async function deductWalletForTemplate(params: {
         where: { organizationId },
       });
 
-      // Wallet nahi hai ya active nahi → Skip (Meta khud charge karega)
-      if (!wallet || !wallet.isActive) {
+      // Wallet nahi hai → Skip (Meta khud charge karega)
+      if (!wallet) {
         return {
           deducted: false,
           walletUsed: false,
           amount: 0,
-          reason: 'Wallet not active - Meta will charge directly',
+          reason: 'No wallet found - Meta will charge directly',
         };
       }
 
@@ -335,10 +388,11 @@ export async function deductWalletForTemplate(params: {
       }
 
       // ── 2. Calculate Country-wise Rate ─────────────────────────────────────
-      const countryRates  = getCountryRateFromPhone(recipientPhone);
-      const rateRupees    = getRateForCategory(category, recipientPhone);
+      const rateRupees    = getRateForCategory(category, recipientPhone, templateLanguage);
       const amountPaise   = Math.round(rateRupees * 100);
-      const countryName   = getCountryName(recipientPhone);
+      const countryName   = templateLanguage && LANGUAGE_TO_PREFIX[templateLanguage] 
+        ? (COUNTRY_NAMES[LANGUAGE_TO_PREFIX[templateLanguage]] || getCountryName(recipientPhone))
+        : getCountryName(recipientPhone);
 
       // ── 3. Check Available Balance ─────────────────────────────────────────
       const availablePaise =
@@ -451,6 +505,7 @@ export async function deductWalletForCampaign(params: {
   organizationId: string;
   templateName: string;
   templateCategory?: string;
+  templateLanguage?: string;
   totalRecipients: number;
   campaignId: string;
   /** Optional: sample of recipient phones to compute weighted average rate */
@@ -463,14 +518,15 @@ export async function deductWalletForCampaign(params: {
   walletActive: boolean;
   rateUsed: number;
 }> {
-  const { organizationId, templateName, templateCategory, totalRecipients, campaignId, recipientPhones } = params;
+  const { organizationId, templateName, templateCategory, templateLanguage, totalRecipients, campaignId, recipientPhones } = params;
 
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
 
-  // Wallet nahi hai → Proceed normally (Meta charges directly)
-  if (!wallet || !wallet.isActive) {
+  // Wallet record hi nahi → Proceed (Meta charges directly)
+  if (!wallet) {
+    console.log(`💳 [deductWalletForCampaign] No wallet found for org: ${organizationId} → skipping`);
     return {
       canProceed: true,
       estimatedCost: 0,
@@ -480,6 +536,24 @@ export async function deductWalletForCampaign(params: {
       rateUsed: 0,
     };
   }
+
+  // Wallet flagged → Skip
+  if (wallet.flagged) {
+    console.log(`💳 [deductWalletForCampaign] Wallet is FLAGGED for org: ${organizationId} → skipping`);
+    return {
+      canProceed: true,
+      estimatedCost: 0,
+      availableBalance: 0,
+      shortfall: 0,
+      walletActive: false,
+      rateUsed: 0,
+    };
+  }
+
+  // NOTE: We intentionally do NOT check wallet.isActive here.
+  // If a wallet record exists and is not flagged, we charge it.
+  // isActive is just a UI/access flag; the deduction logic should always run
+  // so that campaign costs are tracked regardless of UI state.
 
   // Get template category
   let category = templateCategory;
@@ -492,18 +566,22 @@ export async function deductWalletForCampaign(params: {
   }
 
   // ── Compute effective rate ─────────────────────────────────────────────────
-  // If we have sample phones, calculate weighted average rate across countries.
-  // Otherwise fall back to India rate as conservative default.
   let rateRupees: number;
 
-  if (recipientPhones && recipientPhones.length > 0) {
+  // 1. If language is provided, use it for the whole campaign estimate
+  if (templateLanguage && LANGUAGE_TO_PREFIX[templateLanguage]) {
+    rateRupees = getRateForCategory(category!, undefined, templateLanguage);
+  }
+  // 2. Otherwise, if we have sample phones, use them
+  else if (recipientPhones && recipientPhones.length > 0) {
     const totalRate = recipientPhones.reduce((sum, phone) => {
       return sum + getRateForCategory(category!, phone);
     }, 0);
     rateRupees = totalRate / recipientPhones.length;
-  } else {
-    // Use default (India) rate as conservative fallback
-    rateRupees = getRateForCategory(category);
+  } 
+  // 3. Fallback to India rate
+  else {
+    rateRupees = getRateForCategory(category!);
   }
 
   const estimatedCostRupees = rateRupees * totalRecipients;
@@ -519,15 +597,21 @@ export async function deductWalletForCampaign(params: {
   const shortfallPaise  = Math.max(0, estimatedCostPaise - availablePaise);
   const shortfallRupees = shortfallPaise / 100;
 
-  // Must have at least ₹20 to run any campaign
+  // Hard block only when balance is ≤ ₹20
   const hasMinimumBalance = availableRupees > 20;
+
+  console.log(
+    `💳 [deductWalletForCampaign] org=${organizationId} ` +
+    `available=₹${availableRupees.toFixed(2)} estimatedCost=₹${estimatedCostRupees.toFixed(2)} ` +
+    `rate=₹${rateRupees.toFixed(4)} recipients=${totalRecipients}`
+  );
 
   return {
     canProceed: availablePaise >= estimatedCostPaise && hasMinimumBalance,
     estimatedCost: estimatedCostRupees,
     availableBalance: availableRupees,
     shortfall: shortfallRupees,
-    walletActive: true,
+    walletActive: true,   // ← wallet exists → always true (we'll deduct what we can)
     rateUsed: rateRupees,
   };
 }
