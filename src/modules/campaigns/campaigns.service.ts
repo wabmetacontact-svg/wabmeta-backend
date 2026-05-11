@@ -749,13 +749,27 @@ export class CampaignsService {
       const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
       const template = campaign.template;
 
-      // ✅ ── WALLET PRE-CHECK ────────────────────────────────────────────────────
+      // ✅ ── WALLET PRE-CHECK (country-aware) ─────────────────────────────────
+      const pendingCount = await prisma.campaignContact.count({ where: { campaignId, status: 'PENDING' } });
+
+      // Sample up to 200 phones to get a representative country-rate estimate
+      const sampleContacts = await prisma.campaignContact.findMany({
+        where: { campaignId, status: 'PENDING' },
+        include: { contact: { select: { phone: true } } },
+        take: 200,
+        orderBy: { createdAt: 'asc' },
+      });
+      const samplePhones = sampleContacts
+        .map((cc) => cc.contact?.phone || '')
+        .filter(Boolean);
+
       const walletCheck = await deductWalletForCampaign({
         organizationId,
         templateName: template.name,
         templateCategory: template.category,
-        totalRecipients: await prisma.campaignContact.count({ where: { campaignId, status: 'PENDING' } }),
+        totalRecipients: pendingCount,
         campaignId,
+        recipientPhones: samplePhones,
       });
 
       if (walletCheck.walletActive) {
@@ -801,7 +815,8 @@ export class CampaignsService {
 
       let hasMore = true;
       let totalProcessed = 0;
-      let totalSentCount = 0; // ✅ Track total successfully sent for single bulk deduction
+      let totalSentCount = 0;          // Track total successfully sent
+      let totalSentAmountPaise = 0;    // ✅ Accumulate country-wise cost in paise
       let consecutiveFailures = 0;
       let rateLimitHits = 0;
 
@@ -901,7 +916,12 @@ export class CampaignsService {
 
             if (data.type === 'sent') {
               batchSent.push({ id: data.id, waMessageId: data.waMessageId, contactId: data.contactId, phone: data.phone });
-              totalSentCount++; // ✅ Increment sent counter
+              totalSentCount++;
+              // ✅ Add country-wise rate for this recipient to running total
+              const recipientRatePaise = Math.round(
+                getRateForCategory(template.category || 'MARKETING', data.phone) * 100
+              );
+              totalSentAmountPaise += recipientRatePaise;
               consecutiveFailures = 0;
             } else {
               batchFailed.push({ id: data.id, reason: data.reason, contactId: data.contactId, phone: data.phone });
@@ -995,18 +1015,17 @@ export class CampaignsService {
       // ✅ Final sync (HEAVY sync only at END)
       const finalCounters = await this.syncCampaignCounters(campaignId);
 
-      // ✅ ── SINGLE BULK WALLET DEDUCTION ──────────────────────────────────────
-      // One deduction for ALL sent messages - NOT per-recipient
-      if (walletCheck.walletActive && totalSentCount > 0) {
+      // ✅ ── COUNTRY-AWARE BULK WALLET DEDUCTION ──────────────────────────────
+      // totalSentAmountPaise = sum of each recipient's individual country rate
+      if (walletCheck.walletActive && totalSentCount > 0 && totalSentAmountPaise > 0) {
         try {
-          // ✅ INTEGER paise arithmetic - avoids floating-point errors
-          // e.g. 0.15 * 150 = 22.4999... (bug).  15 paise × 150 = 2250 paise (correct)
-          const rateRupees      = getRateForCategory(template.category || 'MARKETING');
-          const ratePaise       = Math.round(rateRupees * 100);       // e.g. 15 for UTILITY
-          const totalAmountPaise = ratePaise * totalSentCount;         // e.g. 15 × 150 = 2250
-          const totalAmountRupees = totalAmountPaise / 100;            // e.g. 22.50
+          const totalAmountRupees = totalSentAmountPaise / 100;
+          const avgRateRupees     = totalAmountRupees / totalSentCount;
 
-          console.log(`💳 Bulk deduction: ${totalSentCount} msgs × ₹${rateRupees} = ₹${totalAmountRupees} (${totalAmountPaise} paise)`);
+          console.log(
+            `💳 Country-aware bulk deduction: ${totalSentCount} msgs, total ₹${totalAmountRupees.toFixed(2)} ` +
+            `(avg ₹${avgRateRupees.toFixed(4)}/msg)`
+          );
 
           await prisma.$transaction(async (tx) => {
             const wallet = await tx.wallet.findUnique({ where: { organizationId } });
@@ -1018,13 +1037,13 @@ export class CampaignsService {
             const balanceBeforePaise = wallet.balancePaise;
 
             // Available = wallet balance + credit headroom
-            const creditHeadroom  = wallet.creditEnabled
+            const creditHeadroom = wallet.creditEnabled
               ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
               : 0;
-            const availablePaise  = wallet.balancePaise + creditHeadroom;
+            const availablePaise = wallet.balancePaise + creditHeadroom;
 
             // Deduct as much as available (never go below 0)
-            const actualDeductPaise   = Math.min(totalAmountPaise, availablePaise);
+            const actualDeductPaise   = Math.min(totalSentAmountPaise, availablePaise);
             const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
             const newBalancePaise     = Math.max(0, wallet.balancePaise - actualDeductPaise);
 
@@ -1049,22 +1068,26 @@ export class CampaignsService {
                 amountPaise: actualDeductPaise,
                 balanceBeforePaise,
                 balanceAfterPaise: newBalancePaise,
-                description: `Campaign charge - ${categoryLabel} (${template.name}) × ${totalSentCount} messages`,
+                description:
+                  `Campaign charge - ${categoryLabel} (${template.name}) × ${totalSentCount} messages` +
+                  ` [country-wise rates, avg ₹${avgRateRupees.toFixed(4)}/msg]`,
                 status: 'completed',
                 metaService: 'template_message',
                 note: `Campaign: ${campaign.name}`,
               },
             });
 
-            console.log(`✅ Campaign wallet deducted: ₹${(actualDeductPaise / 100).toFixed(2)} for ${totalSentCount} msgs ("${campaign.name}")`);
+            console.log(
+              `✅ Campaign wallet deducted: ₹${(actualDeductPaise / 100).toFixed(2)} for ${totalSentCount} msgs ("${campaign.name}")`
+            );
           });
         } catch (walletErr: any) {
           console.error('💳 Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
         }
       } else {
-        console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${totalSentCount}`);
+        console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${totalSentCount}, amountPaise=${totalSentAmountPaise}`);
       }
-      // ✅ ── END BULK DEDUCTION ─────────────────────────────────────────────────
+      // ✅ ── END COUNTRY-AWARE BULK DEDUCTION ──────────────────────────────────
 
       if (finalCounters.pendingCount === 0) {
         await prisma.campaign.update({

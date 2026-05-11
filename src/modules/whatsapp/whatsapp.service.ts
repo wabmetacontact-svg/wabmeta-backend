@@ -1,4 +1,4 @@
-// 📁 src/modules/whatsapp/whatsapp.service.ts - COMPLETE FINAL VERSION
+﻿// 📁 src/modules/whatsapp/whatsapp.service.ts - COMPLETE FINAL VERSION
 
 import {
   PrismaClient,
@@ -1063,6 +1063,10 @@ class WhatsAppService {
       errors: [],
     };
 
+    // ✅ Accumulate country-wise cost per sent message (paise)
+    let totalSentAmountPaise = 0;
+    const templateCategory = campaign.template?.category || 'MARKETING';
+
     for (const recipient of campaign.campaignContacts) {
       try {
         const formattedPhone = this.formatPhoneNumber(recipient.contact.phone);
@@ -1107,6 +1111,10 @@ class WhatsAppService {
         );
 
         results.sent++;
+        // ✅ Add country-wise rate for this recipient
+        totalSentAmountPaise += Math.round(
+          getRateForCategory(templateCategory, recipient.contact.phone) * 100
+        );
 
         console.log(
           `✅ Sent to ${recipient.contact.phone} (${messageResult.messageId})`
@@ -1156,37 +1164,33 @@ class WhatsAppService {
 
     await this.checkCampaignCompletion(campaignId);
 
-    // ✅ ── SINGLE BULK WALLET DEDUCTION ─────────────────────────────────────
-    // One deduction for ALL sent messages - NOT per-recipient
-    if (walletCheck.walletActive && results.sent > 0) {
+    // COUNTRY-AWARE BULK WALLET DEDUCTION
+    // totalSentAmountPaise = sum of each recipient's individual country rate
+    if (walletCheck.walletActive && results.sent > 0 && totalSentAmountPaise > 0) {
       try {
-        const templateCategory  = campaign.template?.category || 'MARKETING';
-        // ✅ INTEGER paise arithmetic - avoids floating-point errors
-        // e.g. 0.15 * 150 = 22.4999... (bug).  15 paise × 150 = 2250 paise (correct)
-        const rateRupees        = getRateForCategory(templateCategory);
-        const ratePaise         = Math.round(rateRupees * 100);     // e.g. 15 for UTILITY
-        const totalAmountPaise  = ratePaise * results.sent;          // e.g. 15 × 150 = 2250
-        const totalAmountRupees = totalAmountPaise / 100;            // e.g. 22.50
+        const totalAmountRupees = totalSentAmountPaise / 100;
+        const avgRateRupees     = totalAmountRupees / results.sent;
 
-        console.log(`💳 Bulk deduction: ${results.sent} msgs × ₹${rateRupees} = ₹${totalAmountRupees} (${totalAmountPaise} paise)`);
+        console.log(
+          `Wallet country-aware bulk deduction: ${results.sent} msgs, total Rs${totalAmountRupees.toFixed(2)} ` +
+          `(avg Rs${avgRateRupees.toFixed(4)}/msg)`
+        );
 
         await prisma.$transaction(async (tx) => {
           const wallet = await tx.wallet.findUnique({ where: { organizationId: orgId } });
           if (!wallet || !wallet.isActive || wallet.flagged) {
-            console.warn('💳 Wallet not available for bulk deduction - skipping');
+            console.warn('Wallet not available for bulk deduction - skipping');
             return;
           }
 
           const balanceBeforePaise = wallet.balancePaise;
 
-          // Available = wallet balance + credit headroom
-          const creditHeadroom  = wallet.creditEnabled
+          const creditHeadroom = wallet.creditEnabled
             ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
             : 0;
-          const availablePaise  = wallet.balancePaise + creditHeadroom;
+          const availablePaise = wallet.balancePaise + creditHeadroom;
 
-          // Deduct as much as available (never go below 0)
-          const actualDeductPaise   = Math.min(totalAmountPaise, availablePaise);
+          const actualDeductPaise   = Math.min(totalSentAmountPaise, availablePaise);
           const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
           const newBalancePaise     = Math.max(0, wallet.balancePaise - actualDeductPaise);
 
@@ -1209,30 +1213,32 @@ class WhatsAppService {
               amountPaise: actualDeductPaise,
               balanceBeforePaise,
               balanceAfterPaise: newBalancePaise,
-              description: `Campaign charge - ${categoryLabel} (${campaign.template.name}) × ${results.sent} messages`,
+              description:
+                `Campaign charge - ${categoryLabel} (${campaign.template.name}) x ${results.sent} messages` +
+                ` [country-wise rates, avg Rs${avgRateRupees.toFixed(4)}/msg]`,
               status: 'completed',
               metaService: 'template_message',
               note: `Campaign: ${campaign.name}`,
             },
           });
 
-          console.log(`✅ Bulk wallet deducted: ₹${(actualDeductPaise / 100).toFixed(2)} for ${results.sent} msgs ("${campaign.name}")`);
+          console.log(
+            `Wallet deducted: Rs${(actualDeductPaise / 100).toFixed(2)} for ${results.sent} msgs ("${campaign.name}")`
+          );
         });
       } catch (walletErr: any) {
-        console.error('💳 Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
+        console.error('Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
       }
     } else {
-      console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${results.sent}`);
+      console.log(`Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${results.sent}, amountPaise=${totalSentAmountPaise}`);
     }
-    // ✅ ── END BULK DEDUCTION ─────────────────────────────────────────────────
 
-    console.log(`📢 ========== CAMPAIGN END ==========`);
+    console.log(`Campaign END ==========`);
     console.log(`   Sent: ${results.sent}`);
     console.log(`   Failed: ${results.failed}\n`);
 
     return results;
   }
-
   /**
    * Update campaign contact status
    */
