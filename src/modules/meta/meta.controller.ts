@@ -239,6 +239,52 @@ export class MetaController {
       console.log('📊 Step 2: Getting WABA ID from token...');
 
       // ════════════════════════════════════════════════════════════
+      // ✅ FIRST: Diagnostic - What does the token contain?
+      // ════════════════════════════════════════════════════════════
+      console.log('\n🔬 ═══ TOKEN DIAGNOSTIC ═══');
+      try {
+        const debugTokenResponse = await axios.get(
+          `https://graph.facebook.com/${config.meta.graphApiVersion}/debug_token`,
+          {
+            params: {
+              input_token: access_token,
+              access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`,
+            },
+          }
+        );
+
+        const tokenData = debugTokenResponse.data?.data;
+        
+        console.log('   App ID:', tokenData?.app_id);
+        console.log('   User ID:', tokenData?.user_id);
+        console.log('   Is Valid:', tokenData?.is_valid);
+        console.log('   Scopes:', tokenData?.scopes);
+        console.log('   Granular Scopes:', JSON.stringify(tokenData?.granular_scopes, null, 2));
+        console.log('   Type:', tokenData?.type);
+        console.log('   Application:', tokenData?.application);
+        
+        // ⚠️ Critical Check
+        const hasWhatsAppScope = tokenData?.scopes?.includes('whatsapp_business_management');
+        const hasGranularScopes = tokenData?.granular_scopes?.length > 0;
+        
+        console.log('\n   📊 Analysis:');
+        console.log('   - Has whatsapp_business_management scope:', hasWhatsAppScope);
+        console.log('   - Has granular scopes:', hasGranularScopes);
+        
+        if (!hasWhatsAppScope && !hasGranularScopes) {
+          console.log('\n   ❌ DIAGNOSIS: User did NOT complete Embedded Signup!');
+          console.log('   ❌ They only logged in, but did not setup WhatsApp Business Account');
+          console.log('   ✅ SOLUTION: User must use Embedded Signup wizard, not regular OAuth');
+        }
+        
+      } catch (e: any) {
+        console.log('   ❌ Token diagnostic failed:', e.message);
+      }
+      console.log('🔬 ═══ END DIAGNOSTIC ═══\n');
+
+      // Continue with WABA detection...
+
+      // ════════════════════════════════════════════════════════════
       // ✅ MULTI-METHOD WABA DETECTION - TRY 4 METHODS
       // ════════════════════════════════════════════════════════════
       let wabaId: string | null = null;
@@ -380,23 +426,28 @@ export class MetaController {
       // ────────────────────────────────────────────────────────────
       if (!wabaId) {
         console.error('\n❌ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.error('   WABA NOT FOUND - ALL METHODS FAILED');
+        console.error('   WABA NOT FOUND - DIAGNOSIS:');
         console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.error('   This means user did NOT complete Embedded Signup wizard.');
+        console.error('   The user logged in but did NOT complete Embedded Signup.');
         console.error('   They likely:');
-        console.error('   1. Skipped business creation');
-        console.error('   2. Skipped WhatsApp Business Account creation');
-        console.error('   3. Skipped phone number verification');
+        console.error('   1. Used regular OAuth instead of Embedded Signup wizard');
+        console.error('   2. Skipped business creation step');
+        console.error('   3. Skipped WhatsApp Business Account creation');
+        console.error('   4. Cancelled before phone verification');
         console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
         
         throw new AppError(
-          'WhatsApp Business Account not found. Please complete the entire Meta signup wizard:\n\n' +
-          '1. Login to Facebook\n' +
-          '2. Select or CREATE a Meta Business Account\n' +
-          '3. CREATE a new WhatsApp Business Account\n' +
-          '4. ADD and VERIFY your phone number\n' +
-          '5. Grant ALL permissions\n\n' +
-          'Then try connecting again.',
+          '🚫 WhatsApp Setup Incomplete\n\n' +
+          'You logged in to Facebook successfully, but you didn\'t complete the WhatsApp Business setup wizard.\n\n' +
+          '✅ TO FIX THIS:\n' +
+          '1. Click "Connect" again\n' +
+          '2. The WhatsApp wizard should appear\n' +
+          '3. Click "Get Started" in the wizard\n' +
+          '4. Create a Business Portfolio\n' +
+          '5. Create a WhatsApp Business Account\n' +
+          '6. Add and VERIFY a phone number\n' +
+          '7. Click "FINISH" at the end\n\n' +
+          '⚠️ Important: The phone number must NOT be currently used on regular WhatsApp app!',
           400
         );
       }
