@@ -789,7 +789,7 @@ export async function adminAdjustBalance(
         amountPaise,
         balanceBeforePaise,
         balanceAfterPaise,
-        description: `Admin adjustment: ${data.note}`,
+        description: `Adjustment by Meta: ${data.note}`,
         status: 'completed',
         performedBy: adminId,
         note: data.note,

@@ -227,6 +227,9 @@ export const LANGUAGE_TO_PREFIX: Record<string, string> = {
   'pt_PT': '351',// Portuguese (Portugal) -> Portugal
   'en_US': '1',  // English (US) -> USA
   'en_GB': '44', // English (UK) -> UK
+  'en_UK': '44', // English (UK) -> UK
+  'en_uk': '44', // English (UK) -> UK
+  'en': '91',    // Default English -> India (since primary users are Indian)
   'nl': '31',    // Dutch -> Netherlands
   'tr': '90',    // Turkish -> Turkey
   'ar': '966',   // Arabic -> Saudi Arabia (Common default for AR)

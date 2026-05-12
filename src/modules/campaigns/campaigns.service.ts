@@ -368,18 +368,49 @@ export class CampaignsService {
       }
     }
 
-    // ✅ NEW: Wallet Balance Check
+    // ✅ Dynamic Wallet Balance Check
     const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
 
     if (wallet && wallet.isActive) {
       const balanceRupees = wallet.balancePaise / 100;
 
-      if (balanceRupees <= 50) {
-        // ❌ BLOCK - Campaign run nahi hogi
-        throw new AppError(
-          `WALLET_LOW_BALANCE::${balanceRupees.toFixed(2)}`,
-          400
-        );
+      // Agar balance ₹20 se kam hai toh seedha block (Minimum requirement)
+      if (balanceRupees <= 20) {
+        throw new AppError(`WALLET_LOW_BALANCE::20.00::${balanceRupees.toFixed(2)}`, 400);
+      }
+
+      // 🔍 Dynamic Estimation: PENDING contacts ke liye cost nikaalo
+      const pendingCount = await prisma.campaignContact.count({ 
+        where: { campaignId, status: 'PENDING' } 
+      });
+
+      if (pendingCount > 0) {
+        // Sample up to 50 phones to get a representative country-rate estimate
+        const sampleContacts = await prisma.campaignContact.findMany({
+          where: { campaignId, status: 'PENDING' },
+          include: { contact: { select: { phone: true } } },
+          take: 50,
+        });
+        const samplePhones = sampleContacts.map(c => c.contact?.phone || '').filter(Boolean);
+
+        const tpl = campaign.template as any;
+        const walletCheck = await deductWalletForCampaign({
+          organizationId,
+          templateName: tpl.name,
+          templateCategory: tpl.category,
+          templateLanguage: tpl.language,
+          totalRecipients: pendingCount,
+          campaignId,
+          recipientPhones: samplePhones,
+        });
+
+        if (!walletCheck.canProceed) {
+          // ❌ BLOCK - Estimated cost balance se jyada hai
+          throw new AppError(
+            `WALLET_INSUFFICIENT::${walletCheck.estimatedCost.toFixed(2)}::${walletCheck.availableBalance.toFixed(2)}`,
+            400
+          );
+        }
       }
     }
 
