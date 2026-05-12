@@ -170,6 +170,17 @@ router.get(
 // ============================================
 
 /**
+ * @route   GET /api/v1/campaigns/:id/estimate-cost
+ * @desc    Get estimated wallet cost before starting campaign
+ * @access  Private
+ */
+router.get(
+  '/:id/estimate-cost',
+  validate(getCampaignByIdSchema),
+  campaignsController.estimateCost.bind(campaignsController)
+);
+
+/**
  * @route   POST /api/v1/campaigns/:id/start
  * @desc    Start campaign (validates token before starting)
  * @access  Private

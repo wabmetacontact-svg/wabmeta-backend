@@ -744,6 +744,13 @@ export async function adminAdjustBalance(
     throw new AppError('Please provide a reason for adjustment (min 5 chars)', 400);
   }
 
+  let sanitizedNote = data.note || '';
+  if (sanitizedNote.toLowerCase().includes('manual credit by admin')) {
+    sanitizedNote = 'Credit by WabMeta';
+  } else if (sanitizedNote.toLowerCase().includes('manual debit by admin')) {
+    sanitizedNote = 'Debit by Meta';
+  }
+
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
@@ -789,10 +796,10 @@ export async function adminAdjustBalance(
         amountPaise,
         balanceBeforePaise,
         balanceAfterPaise,
-        description: `Adjustment by Meta${data.note ? ': ' + data.note : ''}`,
+        description: `Adjustment by Meta${sanitizedNote ? ': ' + sanitizedNote : ''}`,
         status: 'completed',
         performedBy: adminId,
-        note: data.note || 'Adjustment by Meta',
+        note: sanitizedNote || 'Adjustment by Meta',
       },
     }),
   ]);

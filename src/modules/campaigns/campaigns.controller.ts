@@ -732,7 +732,21 @@ export class CampaignsController {
       next(error);
     }
   }
+  async estimateCost(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization required', 400);
+
+      const campaignId = req.params.id;
+      const result = await campaignsService.estimateCost(organizationId as string, campaignId as string);
+
+      return sendSuccess(res, result, 'Cost estimation calculated');
+    } catch (error) {
+      next(error);
+    }
+  }
 }
+
 
 // ==========================================
 // EXPORT SINGLETON INSTANCE

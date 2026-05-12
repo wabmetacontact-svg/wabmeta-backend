@@ -9,7 +9,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import { inboxService } from '../inbox/inbox.service';
 import prisma from '../../config/database';
-import { deductWalletForCampaign, getRateForCategory } from '../wallet/wallet.deduction.service';
+import { 
+  deductWalletForCampaign, 
+  getRateForCategory,
+  COUNTRY_NAMES_MAP  // ← ye add karo
+} from '../wallet/wallet.deduction.service';
+
 
 // ============================================
 // HELPER FUNCTIONS
@@ -334,7 +339,185 @@ export class CampaignsService {
     return formatCampaign(duplicated);
   }
 
+  async estimateCost(
+    organizationId: string,
+    campaignId: string
+  ): Promise<{
+    hasWallet: boolean;
+    walletActive: boolean;
+    availableBalance: number;
+    estimatedCost: number;
+    estimatedCostBreakdown: {
+      totalRecipients: number;
+      ratePerMessage: number;
+      category: string;
+      language: string;
+      countryBreakdown: {
+        country: string;
+        count: number;
+        rate: number;
+        cost: number;
+      }[];
+    };
+    canProceed: boolean;
+    shortfall: number;
+    currency: string;
+  }> {
+    // Campaign fetch karo
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: campaignId, organizationId },
+      include: { template: true, whatsappAccount: true },
+    });
+
+    if (!campaign) throw new AppError('Campaign not found', 404);
+
+    // Wallet check
+    const wallet = await prisma.wallet.findUnique({
+      where: { organizationId },
+    });
+
+    // Wallet nahi hai ya active nahi
+    if (!wallet) {
+      return {
+        hasWallet: false,
+        walletActive: false,
+        availableBalance: 0,
+        estimatedCost: 0,
+        estimatedCostBreakdown: {
+          totalRecipients: 0,
+          ratePerMessage: 0,
+          category: campaign.template?.category || 'MARKETING',
+          language: campaign.template?.language || 'en',
+          countryBreakdown: [],
+        },
+        canProceed: true, // wallet nahi toh Meta direct charge karega
+        shortfall: 0,
+        currency: 'INR',
+      };
+    }
+
+    // Pending contacts count
+    const pendingCount = await prisma.campaignContact.count({
+      where: { campaignId, status: 'PENDING' },
+    });
+
+    if (pendingCount === 0) {
+      return {
+        hasWallet: true,
+        walletActive: wallet.isActive,
+        availableBalance: wallet.balancePaise / 100,
+        estimatedCost: 0,
+        estimatedCostBreakdown: {
+          totalRecipients: 0,
+          ratePerMessage: 0,
+          category: campaign.template?.category || 'MARKETING',
+          language: campaign.template?.language || 'en',
+          countryBreakdown: [],
+        },
+        canProceed: true,
+        shortfall: 0,
+        currency: 'INR',
+      };
+    }
+
+    // Sample phones for country detection (max 500)
+    const sampleContacts = await prisma.campaignContact.findMany({
+      where: { campaignId, status: 'PENDING' },
+      include: { contact: { select: { phone: true } } },
+      take: 500,
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const tpl = campaign.template as any;
+    const category = tpl?.category || 'MARKETING';
+    const language = tpl?.language || 'en';
+
+    // Country-wise breakdown calculate karo
+    const countryMap = new Map<string, { count: number; rate: number }>();
+
+    for (const cc of sampleContacts) {
+      const phone = cc.contact?.phone || '';
+      const rate = getRateForCategory(category, phone, language);
+      const digits = phone.replace(/\D/g, '');
+      
+      // Country prefix detect karo
+      let countryKey = 'Other';
+      for (const len of [4, 3, 2, 1]) {
+        const prefix = digits.slice(0, len);
+        if (COUNTRY_NAMES_MAP[prefix]) {
+          countryKey = COUNTRY_NAMES_MAP[prefix];
+          break;
+        }
+      }
+
+      const existing = countryMap.get(countryKey);
+      if (existing) {
+        existing.count++;
+      } else {
+        countryMap.set(countryKey, { count: 1, rate });
+      }
+    }
+
+    // Scale to actual total (sample se estimate)
+    const sampleSize = sampleContacts.length;
+    const scaleFactor = pendingCount / Math.max(sampleSize, 1);
+
+    const countryBreakdown: {
+      country: string;
+      count: number;
+      rate: number;
+      cost: number;
+    }[] = [];
+
+    let totalEstimatedCostRupees = 0;
+    let totalWeightedRate = 0;
+
+    for (const [country, data] of countryMap.entries()) {
+      const scaledCount = Math.round(data.count * scaleFactor);
+      const countryCost = scaledCount * data.rate;
+      totalEstimatedCostRupees += countryCost;
+      totalWeightedRate += data.rate * data.count;
+
+      countryBreakdown.push({
+        country,
+        count: scaledCount,
+        rate: data.rate,
+        cost: Number(countryCost.toFixed(2)),
+      });
+    }
+
+    // Sort by count descending
+    countryBreakdown.sort((a, b) => b.count - a.count);
+
+    const avgRate = totalWeightedRate / Math.max(sampleSize, 1);
+    const availableRupees = wallet.balancePaise / 100 + 
+      (wallet.creditEnabled 
+        ? Math.max(0, (wallet.creditLimitPaise - wallet.creditUsedPaise)) / 100 
+        : 0);
+
+    const shortfall = Math.max(0, totalEstimatedCostRupees - availableRupees);
+    const canProceed = availableRupees >= totalEstimatedCostRupees && availableRupees > 20;
+
+    return {
+      hasWallet: true,
+      walletActive: wallet.isActive,
+      availableBalance: Number(availableRupees.toFixed(2)),
+      estimatedCost: Number(totalEstimatedCostRupees.toFixed(2)),
+      estimatedCostBreakdown: {
+        totalRecipients: pendingCount,
+        ratePerMessage: Number(avgRate.toFixed(4)),
+        category,
+        language,
+        countryBreakdown,
+      },
+      canProceed,
+      shortfall: Number(shortfall.toFixed(2)),
+      currency: 'INR',
+    };
+  }
+
   async start(organizationId: string, campaignId: string): Promise<any> {
+
     const campaign = await prisma.campaign.findFirst({
       where: { id: campaignId, organizationId },
       include: { template: true, whatsappAccount: true },
@@ -437,9 +620,75 @@ export class CampaignsService {
   }
 
   async resume(organizationId: string, campaignId: string): Promise<any> {
-    const updated = await prisma.campaign.update({ where: { id: campaignId }, data: { status: 'RUNNING' } });
-    campaignSocketService.emitCampaignUpdate(organizationId, campaignId, { status: 'RUNNING', message: 'Campaign resumed' });
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: campaignId, organizationId },
+      include: { template: true },
+    });
+
+    if (!campaign) throw new AppError('Campaign not found', 404);
+
+    // ✅ Wallet check on resume
+    const wallet = await prisma.wallet.findUnique({ 
+      where: { organizationId } 
+    });
+
+    if (wallet && wallet.isActive) {
+      const availableRupees = wallet.balancePaise / 100;
+
+      if (availableRupees <= 20) {
+        throw new AppError(
+          `WALLET_LOW_BALANCE::20.00::${availableRupees.toFixed(2)}`,
+          400
+        );
+      }
+
+      // Pending contacts ke liye check
+      const pendingCount = await prisma.campaignContact.count({
+        where: { campaignId, status: 'PENDING' }
+      });
+
+      if (pendingCount > 0 && campaign.template) {
+        const tpl = campaign.template as any;
+        const sampleContacts = await prisma.campaignContact.findMany({
+          where: { campaignId, status: 'PENDING' },
+          include: { contact: { select: { phone: true } } },
+          take: 50,
+        });
+        const samplePhones = sampleContacts
+          .map(c => c.contact?.phone || '')
+          .filter(Boolean);
+
+        const walletCheck = await deductWalletForCampaign({
+          organizationId,
+          templateName: tpl.name,
+          templateCategory: tpl.category,
+          templateLanguage: tpl.language,
+          totalRecipients: pendingCount,
+          campaignId,
+          recipientPhones: samplePhones,
+        });
+
+        if (!walletCheck.canProceed) {
+          throw new AppError(
+            `WALLET_INSUFFICIENT::${walletCheck.estimatedCost.toFixed(2)}::${walletCheck.availableBalance.toFixed(2)}`,
+            400
+          );
+        }
+      }
+    }
+
+    const updated = await prisma.campaign.update({
+      where: { id: campaignId },
+      data: { status: 'RUNNING' },
+    });
+
+    campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
+      status: 'RUNNING',
+      message: 'Campaign resumed',
+    });
+
     this.processCampaignContacts(campaignId, organizationId).catch(() => {});
+
     return formatCampaign(updated);
   }
 

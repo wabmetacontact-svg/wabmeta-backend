@@ -665,3 +665,32 @@ export const TEMPLATE_RATES: Record<string, number> = {
   authentication: DEFAULT_RATE.authentication,
   auth_intl: 2.50,
 };
+
+// File ke end mein add karo (COUNTRY_NAMES ke baad)
+// Export karo taaki campaigns.service use kar sake
+export const COUNTRY_NAMES_MAP: Record<string, string> = {
+  '93': 'Afghanistan', '355': 'Albania', '213': 'Algeria', '244': 'Angola',
+  '54': 'Argentina', '374': 'Armenia', '61': 'Australia', '43': 'Austria',
+  '994': 'Azerbaijan', '973': 'Bahrain', '880': 'Bangladesh', '375': 'Belarus',
+  '32': 'Belgium', '229': 'Benin', '591': 'Bolivia', '267': 'Botswana',
+  '55': 'Brazil', '359': 'Bulgaria', '226': 'Burkina Faso', '257': 'Burundi',
+  '855': 'Cambodia', '237': 'Cameroon', '235': 'Chad', '56': 'Chile',
+  '86': 'China', '57': 'Colombia', '506': 'Costa Rica', '385': 'Croatia',
+  '420': 'Czech Republic', '45': 'Denmark',
+  '1809': 'Dominican Republic', '1829': 'Dominican Republic', '1849': 'Dominican Republic',
+  '593': 'Ecuador', '20': 'Egypt', '503': 'El Salvador',
+  '291': 'Eritrea', '251': 'Ethiopia', '358': 'Finland',
+  '33': 'France', '49': 'Germany', '30': 'Greece', '502': 'Guatemala',
+  '509': 'Haiti', '852': 'Hong Kong', '36': 'Hungary', '91': 'India',
+  '62': 'Indonesia', '964': 'Iraq', '353': 'Ireland', '972': 'Israel',
+  '39': 'Italy', '81': 'Japan', '962': 'Jordan', '254': 'Kenya',
+  '965': 'Kuwait', '856': 'Laos', '961': 'Lebanon', '60': 'Malaysia',
+  '52': 'Mexico', '977': 'Nepal', '31': 'Netherlands', '64': 'New Zealand',
+  '234': 'Nigeria', '47': 'Norway', '968': 'Oman', '92': 'Pakistan',
+  '51': 'Peru', '63': 'Philippines', '48': 'Poland', '351': 'Portugal',
+  '974': 'Qatar', '40': 'Romania', '7': 'Russia', '966': 'Saudi Arabia',
+  '65': 'Singapore', '27': 'South Africa', '34': 'Spain', '94': 'Sri Lanka',
+  '46': 'Sweden', '41': 'Switzerland', '886': 'Taiwan', '66': 'Thailand',
+  '90': 'Turkey', '971': 'UAE', '44': 'UK', '1': 'USA/Canada',
+  '84': 'Vietnam', '967': 'Yemen', '263': 'Zimbabwe',
+};
