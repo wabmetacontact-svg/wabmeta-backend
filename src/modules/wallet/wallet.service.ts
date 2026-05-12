@@ -789,10 +789,10 @@ export async function adminAdjustBalance(
         amountPaise,
         balanceBeforePaise,
         balanceAfterPaise,
-        description: `Adjustment by Meta: ${data.note}`,
+        description: `Adjustment by Meta${data.note ? ': ' + data.note : ''}`,
         status: 'completed',
         performedBy: adminId,
-        note: data.note,
+        note: data.note || 'Adjustment by Meta',
       },
     }),
   ]);
