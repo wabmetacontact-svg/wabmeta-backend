@@ -238,30 +238,171 @@ export class MetaController {
 
       console.log('📊 Step 2: Getting WABA ID from token...');
 
-      // Get WABA ID from token debug
-      const debugTokenResponse = await axios.get(
-        `https://graph.facebook.com/${config.meta.graphApiVersion}/debug_token`,
-        {
-          params: {
-            input_token: access_token,
-            access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`,
-          },
+      // ════════════════════════════════════════════════════════════
+      // ✅ MULTI-METHOD WABA DETECTION - TRY 4 METHODS
+      // ════════════════════════════════════════════════════════════
+      let wabaId: string | null = null;
+      let wabaDetectionMethod: string = '';
+
+      // ────────────────────────────────────────────────────────────
+      // METHOD 1: Debug Token - Granular Scopes
+      // ────────────────────────────────────────────────────────────
+      try {
+        console.log('   🔍 Method 1: Checking granular scopes...');
+        
+        const debugTokenResponse = await axios.get(
+          `https://graph.facebook.com/${config.meta.graphApiVersion}/debug_token`,
+          {
+            params: {
+              input_token: access_token,
+              access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`,
+            },
+          }
+        );
+
+        const granularScopes = debugTokenResponse.data?.data?.granular_scopes || [];
+        
+        console.log('   📋 Granular scopes:', JSON.stringify(granularScopes, null, 2));
+
+        for (const scope of granularScopes) {
+          if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
+            wabaId = scope.target_ids[0];
+            wabaDetectionMethod = 'granular_scopes';
+            console.log('   ✅ Method 1 SUCCESS - WABA from scopes:', wabaId);
+            break;
+          }
         }
-      );
+      } catch (e: any) {
+        console.warn('   ⚠️ Method 1 failed:', e.message);
+      }
 
-      const wabaId = debugTokenResponse.data.data.granular_scopes?.find(
-        (s: any) => s.scope === 'whatsapp_business_management'
-      )?.target_ids?.[0];
-
+      // ────────────────────────────────────────────────────────────
+      // METHOD 2: User's Businesses → Owned WABAs
+      // ────────────────────────────────────────────────────────────
       if (!wabaId) {
-        console.error('❌ WABA ID not found in token');
+        try {
+          console.log('   🔍 Method 2: Querying user businesses...');
+          
+          const businessResponse = await axios.get(
+            `https://graph.facebook.com/${config.meta.graphApiVersion}/me`,
+            {
+              params: {
+                access_token,
+                fields: 'id,name,businesses{id,name,owned_whatsapp_business_accounts{id,name,currency,timezone_id}}',
+              },
+            }
+          );
+
+          console.log('   📋 Businesses response:', JSON.stringify(businessResponse.data, null, 2));
+
+          const businesses = businessResponse.data?.businesses?.data || [];
+          
+          for (const business of businesses) {
+            const wabas = business?.owned_whatsapp_business_accounts?.data || [];
+            if (wabas.length > 0) {
+              wabaId = wabas[0].id;
+              wabaDetectionMethod = 'user_businesses';
+              console.log('   ✅ Method 2 SUCCESS - WABA from business:', wabaId);
+              console.log('   Business:', business.name);
+              break;
+            }
+          }
+        } catch (e: any) {
+          console.warn('   ⚠️ Method 2 failed:', e.message);
+        }
+      }
+
+      // ────────────────────────────────────────────────────────────
+      // METHOD 3: Client WABAs (Shared with App)
+      // ────────────────────────────────────────────────────────────
+      if (!wabaId) {
+        try {
+          console.log('   🔍 Method 3: Querying client WABAs...');
+          
+          const businessResponse = await axios.get(
+            `https://graph.facebook.com/${config.meta.graphApiVersion}/me`,
+            {
+              params: {
+                access_token,
+                fields: 'id,businesses{id,client_whatsapp_business_accounts{id,name,currency,timezone_id}}',
+              },
+            }
+          );
+
+          const businesses = businessResponse.data?.businesses?.data || [];
+          
+          for (const business of businesses) {
+            const wabas = business?.client_whatsapp_business_accounts?.data || [];
+            if (wabas.length > 0) {
+              wabaId = wabas[0].id;
+              wabaDetectionMethod = 'client_wabas';
+              console.log('   ✅ Method 3 SUCCESS - WABA from client:', wabaId);
+              break;
+            }
+          }
+        } catch (e: any) {
+          console.warn('   ⚠️ Method 3 failed:', e.message);
+        }
+      }
+
+      // ────────────────────────────────────────────────────────────
+      // METHOD 4: Direct WABA Search via /me
+      // ────────────────────────────────────────────────────────────
+      if (!wabaId) {
+        try {
+          console.log('   🔍 Method 4: Direct WABA query...');
+          
+          const directResponse = await axios.get(
+            `https://graph.facebook.com/${config.meta.graphApiVersion}/me`,
+            {
+              params: {
+                access_token,
+                fields: 'owned_whatsapp_business_accounts{id,name},client_business_id',
+              },
+            }
+          );
+
+          console.log('   📋 Direct query response:', JSON.stringify(directResponse.data, null, 2));
+
+          const ownedWabas = directResponse.data?.owned_whatsapp_business_accounts?.data || [];
+          if (ownedWabas.length > 0) {
+            wabaId = ownedWabas[0].id;
+            wabaDetectionMethod = 'direct_owned';
+            console.log('   ✅ Method 4 SUCCESS - WABA direct owned:', wabaId);
+          }
+        } catch (e: any) {
+          console.warn('   ⚠️ Method 4 failed:', e.message);
+        }
+      }
+
+      // ────────────────────────────────────────────────────────────
+      // FINAL CHECK: WABA Found?
+      // ────────────────────────────────────────────────────────────
+      if (!wabaId) {
+        console.error('\n❌ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.error('   WABA NOT FOUND - ALL METHODS FAILED');
+        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.error('   This means user did NOT complete Embedded Signup wizard.');
+        console.error('   They likely:');
+        console.error('   1. Skipped business creation');
+        console.error('   2. Skipped WhatsApp Business Account creation');
+        console.error('   3. Skipped phone number verification');
+        console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+        
         throw new AppError(
-          'WABA ID not found. Please complete the setup in Meta Business Suite.',
+          'WhatsApp Business Account not found. Please complete the entire Meta signup wizard:\n\n' +
+          '1. Login to Facebook\n' +
+          '2. Select or CREATE a Meta Business Account\n' +
+          '3. CREATE a new WhatsApp Business Account\n' +
+          '4. ADD and VERIFY your phone number\n' +
+          '5. Grant ALL permissions\n\n' +
+          'Then try connecting again.',
           400
         );
       }
 
-      console.log('   ✅ WABA ID:', wabaId);
+      console.log(`\n   ✅ WABA ID: ${wabaId}`);
+      console.log(`   ✅ Detection method: ${wabaDetectionMethod}\n`);
 
       console.log('📊 Step 3: Fetching WABA details...');
 
