@@ -740,7 +740,11 @@ class TemplatesController {
       // 5. Update template in database
       await prisma.template.update({
         where: { id },
-        data: { headerMediaId: result.id }
+        data: {
+          headerMediaId: result.id,
+          headerMediaUploadedAt: new Date(),
+          headerMediaLastVerified: new Date(),
+        } as any
       });
 
       return res.json({
@@ -846,6 +850,8 @@ class TemplatesController {
       // 5. Save both to DB
       const updateData: any = {
         headerMediaId: metaNumericId,
+        headerMediaUploadedAt: new Date(),
+        headerMediaLastVerified: new Date(),
       };
       if (cloudinaryUrl) {
         updateData.headerContent = cloudinaryUrl;

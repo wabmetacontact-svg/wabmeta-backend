@@ -367,6 +367,8 @@ model Template {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   headerMediaId     String?
+  headerMediaUploadedAt   DateTime?
+  headerMediaLastVerified DateTime?
   campaigns         Campaign[]
   messageQueue      MessageQueue[]
   organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)

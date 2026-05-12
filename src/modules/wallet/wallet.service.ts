@@ -744,11 +744,33 @@ export async function adminAdjustBalance(
     throw new AppError('Please provide a reason for adjustment (min 5 chars)', 400);
   }
 
-  let sanitizedNote = data.note || '';
-  if (sanitizedNote.toLowerCase().includes('manual credit by admin')) {
+  // ✅ FIXED: Sanitize note - remove "manual ... by admin" wording
+  let sanitizedNote = (data.note || '').trim();
+  
+  const lowerNote = sanitizedNote.toLowerCase();
+  
+  // Replace any variation of "manual debit by admin" → "Debit by WabMeta"
+  if (
+    lowerNote.includes('manual debit by admin') ||
+    lowerNote.includes('debit by admin') ||
+    lowerNote === 'manual debit'
+  ) {
+    sanitizedNote = 'Debit by WabMeta';
+  }
+  // Replace any variation of "manual credit by admin" → "Credit by WabMeta"
+  else if (
+    lowerNote.includes('manual credit by admin') ||
+    lowerNote.includes('credit by admin') ||
+    lowerNote === 'manual credit'
+  ) {
     sanitizedNote = 'Credit by WabMeta';
-  } else if (sanitizedNote.toLowerCase().includes('manual debit by admin')) {
-    sanitizedNote = 'Debit by Meta';
+  }
+  // Auto-decide based on type if note is generic
+  else if (data.type === 'admin_credit' && lowerNote === 'admin credit') {
+    sanitizedNote = 'Credit by WabMeta';
+  }
+  else if (data.type === 'admin_debit' && lowerNote === 'admin debit') {
+    sanitizedNote = 'Debit by WabMeta';
   }
 
   const wallet = await prisma.wallet.findUnique({
@@ -771,6 +793,11 @@ export async function adminAdjustBalance(
     data.type === 'admin_credit'
       ? balanceBeforePaise + amountPaise
       : balanceBeforePaise - amountPaise;
+
+  // ✅ Better description based on type
+  const description = data.type === 'admin_credit'
+    ? `Adjustment by Meta: Credit by WabMeta`
+    : `Adjustment by Meta: Debit by WabMeta`;
 
   const [updatedWallet, transaction] = await prisma.$transaction([
     prisma.wallet.update({
@@ -796,10 +823,10 @@ export async function adminAdjustBalance(
         amountPaise,
         balanceBeforePaise,
         balanceAfterPaise,
-        description: `Adjustment by Meta${sanitizedNote ? ': ' + sanitizedNote : ''}`,
+        description,                  // ✅ "Adjustment by Meta: Debit/Credit by WabMeta"
         status: 'completed',
         performedBy: adminId,
-        note: sanitizedNote || 'Adjustment by Meta',
+        note: sanitizedNote,          // ✅ "Debit by WabMeta" or "Credit by WabMeta"
       },
     }),
   ]);

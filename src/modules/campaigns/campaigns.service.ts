@@ -1600,14 +1600,42 @@ export class CampaignsService {
     const hType = (template.headerType || '').toUpperCase();
     const mediaId = template.headerMediaId;
     const permanentUrl = template.headerContent;
+    const uploadedAt = template.headerMediaUploadedAt;
 
-    // ✅ PRIORITY 1: Numeric ID - permanent hai, directly use karo
-    if (mediaId && /^\d+$/.test(mediaId)) {
-      console.log(`✅ Using numeric media ID: ${mediaId}`);
+    // ✅ Meta numeric IDs expire in 30 days. Use 25-day TTL for safety.
+    const TTL_DAYS = 25;
+    const TTL_MS = TTL_DAYS * 24 * 60 * 60 * 1000;
+
+    const isNumericIdFresh = (() => {
+      if (!mediaId || !/^\d+$/.test(mediaId)) return false;
+      if (!uploadedAt) {
+        // No timestamp = old data, treat as expired
+        console.log(`⚠️ Numeric ID ${mediaId} has no timestamp - treating as expired`);
+        return false;
+      }
+      const ageMs = Date.now() - new Date(uploadedAt).getTime();
+      const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+      const fresh = ageMs < TTL_MS;
+      console.log(`⏰ Numeric ID age: ${ageDays} days (fresh: ${fresh})`);
+      return fresh;
+    })();
+
+    // ✅ PRIORITY 1: Fresh numeric ID (< 25 days old)
+    if (isNumericIdFresh) {
+      console.log(`✅ Using cached numeric media ID: ${mediaId}`);
+      
+      // Update last verified timestamp (background, non-blocking)
+      prisma.template
+        .update({
+          where: { id: template.id },
+          data: { headerMediaLastVerified: new Date() } as any,
+        })
+        .catch(() => {});
+      
       return mediaId;
     }
 
-    // ✅ PRIORITY 2: Cloudinary/Permanent URL se fresh upload
+    // ✅ PRIORITY 2: Re-upload from permanent URL (Cloudinary or any HTTPS source)
     const cloudinaryUrl =
       (permanentUrl &&
         permanentUrl.startsWith('http') &&
@@ -1615,205 +1643,147 @@ export class CampaignsService {
         ? permanentUrl
         : null) ||
       (mediaId &&
+        typeof mediaId === 'string' &&
         mediaId.startsWith('http') &&
         !mediaId.includes('scontent.whatsapp')
         ? mediaId
         : null);
 
-    if (cloudinaryUrl) {
-      console.log(`🔄 Re-uploading from Cloudinary for fresh numeric ID...`);
-
-      try {
-        // ── STEP 1: URL se MIME pre-detect karo ──────────────────────
-        const detectMimeFromUrl = (url: string, type: string): string => {
-          const urlPath = url.split('?')[0];
-          const urlLower = urlPath.toLowerCase();
-
-          // 1. URL extension check
-          const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
-          if (extMatch) {
-            const extMap: Record<string, string> = {
-              jpg: 'image/jpeg',   jpeg: 'image/jpeg',
-              png: 'image/png',    webp: 'image/webp',
-              gif: 'image/gif',    mp4: 'video/mp4',
-              '3gp': 'video/3gpp', '3gpp': 'video/3gpp',
-              pdf: 'application/pdf',
-              doc: 'application/msword',
-              docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-              xls: 'application/vnd.ms-excel',
-              xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-              ppt: 'application/vnd.ms-powerpoint',
-              pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-              txt: 'text/plain',
-              ogg: 'audio/ogg',   mp3: 'audio/mpeg',
-              aac: 'audio/aac',   amr: 'audio/amr',
-              opus: 'audio/opus',
-            };
-            const mime = extMap[extMatch[1].toLowerCase()];
-            if (mime) {
-              console.log(`✅ MIME from URL extension: ${mime}`);
-              return mime;
-            }
-          }
-
-          // 2. Cloudinary f_ format param check
-          // e.g., /upload/f_jpg/ or /upload/q_auto,f_pdf/
-          const fParamMatch = urlLower.match(/[,\/]f_([a-z0-9]+)/);
-          if (fParamMatch) {
-            const fmtMap: Record<string, string> = {
-              jpg: 'image/jpeg',  jpeg: 'image/jpeg',
-              png: 'image/png',   webp: 'image/webp',
-              mp4: 'video/mp4',   pdf: 'application/pdf',
-            };
-            const mime = fmtMap[fParamMatch[1]];
-            if (mime) {
-              console.log(`✅ MIME from Cloudinary f_ param: ${mime}`);
-              return mime;
-            }
-          }
-
-          // 3. Cloudinary resource type from path
-          if (urlLower.includes('/image/upload/')) return 'image/jpeg';
-          if (urlLower.includes('/video/upload/')) return 'video/mp4';
-          if (urlLower.includes('/raw/upload/'))   return 'application/pdf';
-
-          // 4. Template headerType se default MIME
-          const typeDefaults: Record<string, string> = {
-            IMAGE:    'image/jpeg',
-            VIDEO:    'video/mp4',
-            DOCUMENT: 'application/pdf',
-            AUDIO:    'audio/mpeg',
-          };
-          const defaultMime = typeDefaults[type.toUpperCase()] || 'application/pdf';
-          console.log(`⚠️ MIME defaulting to: ${defaultMime} (headerType: ${type})`);
-          return defaultMime;
-        };
-
-        // ── STEP 2: Filename with extension ──────────────────────────
-        const buildFilename = (url: string, mimeType: string): string => {
-          const urlPath = url.split('?')[0];
-          const lastSegment = urlPath.split('/').pop() || 'media';
-
-          // Already has valid extension?
-          if (/\.[a-zA-Z0-9]{2,5}$/.test(lastSegment)) {
-            return lastSegment;
-          }
-
-          // MIME → extension map
-          const mimeToExt: Record<string, string> = {
-            'image/jpeg':    'jpg',
-            'image/png':     'png',
-            'image/webp':    'webp',
-            'video/mp4':     'mp4',
-            'video/3gpp':    '3gp',
-            'application/pdf': 'pdf',
-            'application/msword': 'doc',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-            'application/vnd.ms-excel': 'xls',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-            'application/vnd.ms-powerpoint': 'ppt',
-            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
-            'text/plain':    'txt',
-            'audio/mpeg':    'mp3',
-            'audio/aac':     'aac',
-            'audio/ogg':     'ogg',
-            'audio/amr':     'amr',
-            'audio/opus':    'opus',
-          };
-
-          const ext = mimeToExt[mimeType] || 'bin';
-          return `${lastSegment}.${ext}`;
-        };
-
-        // ── STEP 3: Pre-detect MIME download se pehle ─────────────────
-        const preMime = detectMimeFromUrl(cloudinaryUrl, hType);
-        console.log(`🔍 Pre-detected MIME: ${preMime}`);
-
-        // ── STEP 4: Cloudinary se download ───────────────────────────
-        const axios = require('axios');
-        const response = await axios.default.get(cloudinaryUrl, {
-          responseType: 'arraybuffer',
-          timeout: 30000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
-            'Accept': '*/*',
-          },
-        });
-
-        const buffer = Buffer.from(response.data);
-
-        // ── STEP 5: Response header se MIME validate karo ────────────
-        // "application/octet-stream" IGNORE karo - it's useless
-        const INVALID_MIMES = [
-          'application/octet-stream',
-          'binary/octet-stream',
-          'application/binary',
-          'application/unknown',
-        ];
-
-        const META_VALID_MIMES = [
-          'image/jpeg', 'image/png', 'image/webp',
-          'video/mp4', 'video/3gpp',
-          'audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr',
-          'audio/ogg', 'audio/opus',
-          'application/pdf', 'application/msword', 'text/plain',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
-        ];
-
-        const rawCT = (response.headers['content-type'] || '').split(';')[0].trim();
-        const isValidResponseMime =
-          rawCT &&
-          !INVALID_MIMES.includes(rawCT) &&
-          META_VALID_MIMES.includes(rawCT);
-
-        // ✅ Valid response MIME use karo, warna pre-detected use karo
-        const finalMime = isValidResponseMime ? rawCT : preMime;
-        const finalFilename = buildFilename(cloudinaryUrl, finalMime);
-
-        console.log(`📤 Uploading to Meta:`, {
-          size: buffer.length,
-          mimeType: finalMime,      // ✅ Never "application/octet-stream"
-          filename: finalFilename,  // ✅ Always has extension
-        });
-
-        // ── STEP 6: Meta pe upload ────────────────────────────────────
-        const result = await metaApi.uploadMedia(
-          phoneNumberId,
-          accessToken,
-          buffer,
-          finalMime,       // ✅ Correct MIME
-          finalFilename,   // ✅ Correct filename with extension
-          wabaId
-        );
-
-        console.log(`✅ Fresh numeric ID obtained: ${result.id}`);
-
-        // ── STEP 7: DB mein cache karo future use ke liye ─────────────
-        prisma.template
-          .update({
-            where: { id: template.id },
-            data: { headerMediaId: result.id },
-          })
-          .catch((e: any) =>
-            console.warn('⚠️ Could not cache numeric ID:', e.message)
-          );
-
-        return result.id;
-
-      } catch (uploadErr: any) {
-        console.error('❌ Cloudinary re-upload failed:', uploadErr.message);
-        // Fall through to error
-      }
+    if (!cloudinaryUrl) {
+      throw new Error(
+        `Template "${template.name}" has expired media and no permanent URL to re-upload. ` +
+        `Please edit the template and re-upload the ${hType.toLowerCase()}.`
+      );
     }
 
-    // ❌ No valid media found
-    throw new Error(
-      `Template "${template.name}" has invalid or expired media. ` +
-      `Please edit the template and re-upload the ${hType.toLowerCase()}.`
-    );
+    console.log(`🔄 Re-uploading from permanent URL for fresh numeric ID...`);
+
+    try {
+      // ── MIME detection (URL extension + Cloudinary hints + fallback) ──
+      const detectMimeFromUrl = (url: string, type: string): string => {
+        const urlPath = url.split('?')[0];
+        const urlLower = urlPath.toLowerCase();
+
+        const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
+        if (extMatch) {
+          const extMap: Record<string, string> = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg',
+            png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+            mp4: 'video/mp4', '3gp': 'video/3gpp', '3gpp': 'video/3gpp',
+            pdf: 'application/pdf',
+            doc: 'application/msword',
+            docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            xls: 'application/vnd.ms-excel',
+            xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ppt: 'application/vnd.ms-powerpoint',
+            pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            txt: 'text/plain',
+            ogg: 'audio/ogg', mp3: 'audio/mpeg',
+            aac: 'audio/aac', amr: 'audio/amr', opus: 'audio/opus',
+          };
+          const mime = extMap[extMatch[1].toLowerCase()];
+          if (mime) return mime;
+        }
+
+        const fParamMatch = urlLower.match(/[,\/]f_([a-z0-9]+)/);
+        if (fParamMatch) {
+          const fmtMap: Record<string, string> = {
+            jpg: 'image/jpeg', jpeg: 'image/jpeg',
+            png: 'image/png', webp: 'image/webp',
+            mp4: 'video/mp4', pdf: 'application/pdf',
+          };
+          const mime = fmtMap[fParamMatch[1]];
+          if (mime) return mime;
+        }
+
+        if (urlLower.includes('/image/upload/')) return 'image/jpeg';
+        if (urlLower.includes('/video/upload/')) return 'video/mp4';
+        if (urlLower.includes('/raw/upload/')) return 'application/pdf';
+
+        const typeDefaults: Record<string, string> = {
+          IMAGE: 'image/jpeg',
+          VIDEO: 'video/mp4',
+          DOCUMENT: 'application/pdf',
+          AUDIO: 'audio/mpeg',
+        };
+        return typeDefaults[type.toUpperCase()] || 'application/pdf';
+      };
+
+      const buildFilename = (url: string, mimeType: string): string => {
+        const urlPath = url.split('?')[0];
+        const lastSegment = urlPath.split('/').pop() || 'media';
+        if (/\.[a-zA-Z0-9]{2,5}$/.test(lastSegment)) return lastSegment;
+        const mimeToExt: Record<string, string> = {
+          'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+          'video/mp4': 'mp4', 'video/3gpp': '3gp',
+          'application/pdf': 'pdf',
+          'application/msword': 'doc',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+          'application/vnd.ms-excel': 'xls',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+          'audio/mpeg': 'mp3', 'audio/aac': 'aac', 'audio/ogg': 'ogg',
+          'text/plain': 'txt',
+        };
+        const ext = mimeToExt[mimeType] || 'bin';
+        return `${lastSegment}.${ext}`;
+      };
+
+      const preMime = detectMimeFromUrl(cloudinaryUrl, hType);
+      const axios = require('axios');
+      const response = await axios.default.get(cloudinaryUrl, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
+          Accept: '*/*',
+        },
+      });
+
+      const buffer = Buffer.from(response.data);
+      const rawCT = (response.headers['content-type'] || '').split(';')[0].trim();
+      
+      const META_VALID_MIMES = [
+        'image/jpeg', 'image/png', 'image/webp',
+        'video/mp4', 'video/3gpp',
+        'audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr',
+        'audio/ogg', 'audio/opus',
+        'application/pdf', 'application/msword', 'text/plain',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+      ];
+
+      const finalMime = rawCT && META_VALID_MIMES.includes(rawCT) ? rawCT : preMime;
+      const finalFilename = buildFilename(cloudinaryUrl, finalMime);
+
+      const result = await metaApi.uploadMedia(
+        phoneNumberId,
+        accessToken,
+        buffer,
+        finalMime,
+        finalFilename,
+        wabaId
+      );
+
+      prisma.template
+        .update({
+          where: { id: template.id },
+          data: {
+            headerMediaId: result.id,
+            headerMediaUploadedAt: new Date(),
+            headerMediaLastVerified: new Date(),
+          } as any,
+        })
+        .catch(() => {});
+
+      return result.id;
+    } catch (uploadErr: any) {
+      console.error('❌ Re-upload from permanent URL failed:', uploadErr.message);
+      throw new Error(
+        `Template "${template.name}" media re-upload failed: ${uploadErr.message}.`
+      );
+    }
   }
 
   private async buildTemplatePayload(

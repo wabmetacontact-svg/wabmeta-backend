@@ -269,7 +269,20 @@ function startCronJobs() {
     30 * 1000 // Every 30 seconds (Improved precision from 60s)
   );
 
-  console.log('✅ All cron jobs started (including scheduled campaigns)');
+  // ✅ 5. **Template Media Pre-warm** (Every 24 hours)
+  setInterval(
+    async () => {
+      try {
+        const { templateMediaPreWarmService } = await import('./services/templateMediaPreWarm.service');
+        await templateMediaPreWarmService.preWarmExpiringMedia();
+      } catch (error) {
+        console.error('❌ Error in template media pre-warm cron:', error);
+      }
+    },
+    24 * 60 * 60 * 1000
+  );
+
+  console.log('✅ All cron jobs started (including scheduled campaigns & media pre-warm)');
 }
 
 // ✅ NEW: Scheduled Campaign Processor

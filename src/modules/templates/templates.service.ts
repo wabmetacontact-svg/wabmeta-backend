@@ -924,6 +924,14 @@ export class TemplatesService {
         // "4:V2hh..." handle = EXPIRE HOGA, null save karo
         return null;
       })(),
+
+      // ✅ NEW: If numeric ID, set timestamp
+      headerMediaUploadedAt: (() => {
+        if (!finalMetaId) return null;
+        if (/^\d{10,}$/.test(finalMetaId)) return new Date();
+        return null;
+      })(),
+      headerMediaLastVerified: null,
       
       bodyText: input.bodyText,
       footerText: input.footerText || null,
