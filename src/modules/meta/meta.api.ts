@@ -800,6 +800,29 @@ class MetaApiClient {
     }
   }
 
+  async getPhoneNumberInfo(
+    phoneNumberId: string,
+    accessToken: string
+  ): Promise<any> {
+    try {
+      const response = await this.client.get(
+        `/${phoneNumberId}`,
+        {
+          params: {
+            fields:
+              'verified_name,code_verification_status,display_phone_number,quality_rating,messaging_limit_tier,platform_type,throughput',
+            access_token: accessToken,
+          },
+          timeout: 30000,
+        }
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('Failed to get phone info:', error?.response?.data);
+      throw error;
+    }
+  }
+
   /**
    * ✅ Enhanced send message with contact extraction
    */

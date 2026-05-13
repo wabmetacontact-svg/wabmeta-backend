@@ -1,5 +1,3 @@
-// src/modules/auth/auth.service.ts
-
 import prisma from '../../config/database';
 import { config } from '../../config';
 import { hashPassword, comparePassword } from '../../utils/password';
@@ -19,71 +17,114 @@ import {
   AuthUser,
   AuthTokens,
   GoogleUserPayload,
-  OTPData,
 } from './auth.types';
 import { OAuth2Client } from 'google-auth-library';
-
-// Google OAuth Client
-const googleClient = new OAuth2Client(config.google.clientId);
-
 import { getRedis } from '../../config/redis';
-const redis = getRedis();
-
-// WhatsApp API (for Welcome + OTP messages)
 import { whatsappApi } from '../whatsapp/whatsapp.api';
 
-const OTP_PREFIX = 'otp:';
-
 // ============================================
-// HELPER FUNCTIONS
+// CONSTANTS
 // ============================================
 
-const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const EMAIL_OTP_PREFIX = 'otp:';
+const PHONE_OTP_PREFIX = 'phone_otp:';
+const OTP_TTL_SECONDS = 600; // 10 minutes
+const MAX_OTP_ATTEMPTS = 5;
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // 1 minute
 
-// ✅ Non-blocking email helper (never blocks request)
-const sendEmailNonBlocking = (options: { to: string; subject: string; html: string }) => {
-  void sendEmail(options)
-    .then((ok) => {
-      if (!ok) console.warn('📧 Email failed (sendEmail returned false):', options.subject);
-    })
-    .catch((err) => {
-      console.error('📧 Email failed (promise rejected):', err);
-    });
+// ============================================
+// CLIENTS
+// ============================================
+
+const googleClient = new OAuth2Client(config.google.clientId);
+const redis = getRedis();
+
+// ============================================
+// HELPER: Phone Normalizers
+// ============================================
+
+/**
+ * WhatsApp API ke liye phone format
+ * Output: "919876543210" (no + sign)
+ */
+const toWhatsAppPhone = (phone: string): string => {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.startsWith('91') && digits.length === 12) return digits;
+  if (digits.startsWith('0') && digits.length === 11)
+    return `91${digits.slice(1)}`;
+  return digits;
 };
 
-// ✅ Non-blocking WhatsApp template sender
-// phoneNumberId & accessToken: aapka WabMeta platform number use karega
-const sendWATemplateNonBlocking = (
+/**
+ * Database store ke liye E.164 format
+ * Output: "+919876543210"
+ */
+const toE164 = (phone: string): string => {
+  const wa = toWhatsAppPhone(phone);
+  return `+${wa}`;
+};
+
+// ============================================
+// HELPER: Non-blocking email
+// ============================================
+
+const sendEmailNonBlocking = (opts: {
+  to: string;
+  subject: string;
+  html: string;
+}): void => {
+  void sendEmail(opts).catch((err) =>
+    console.error('📧 Email send failed (non-blocking):', err?.message)
+  );
+};
+
+// ============================================
+// HELPER: Non-blocking WhatsApp template
+// ============================================
+
+const sendWhatsAppTemplate = (
   phone: string,
   templateName: string,
-  components?: { body?: string[] }
-) => {
-  // Platform ke pehle WhatsApp account se bhejo
-  // NOTE: Replace these with your actual platform phoneNumberId and accessToken from DB or config
-  const platformPhoneNumberId = (config as any).meta?.platformPhoneNumberId || process.env.PLATFORM_WA_PHONE_ID;
-  const platformAccessToken   = (config as any).meta?.platformAccessToken   || process.env.PLATFORM_WA_ACCESS_TOKEN;
+  bodyParams: string[] = []
+): void => {
+  const { phoneNumberId, accessToken } = config.platform.whatsapp;
 
-  if (!platformPhoneNumberId || !platformAccessToken || !phone) {
-    console.warn('⚠️ WhatsApp not configured for platform messages. Set PLATFORM_WA_PHONE_ID and PLATFORM_WA_ACCESS_TOKEN');
+  if (!phoneNumberId || !accessToken) {
+    console.warn(
+      '⚠️  Platform WhatsApp not configured.',
+      'Add PLATFORM_WA_PHONE_ID & PLATFORM_WA_ACCESS_TOKEN to .env'
+    );
     return;
   }
 
-  // Format phone: add country code if missing
-  const formattedPhone = phone.startsWith('+') ? phone.replace('+', '') : `91${phone}`;
+  const waPhone = toWhatsAppPhone(phone);
 
-  void whatsappApi.sendTemplateMessage(
-    platformPhoneNumberId,
-    formattedPhone,
-    templateName,
-    'en',
-    components ? { body: components.body } : undefined,
-    platformAccessToken
-  )
-    .then(() => console.log(`✅ WhatsApp [${templateName}] sent to ${formattedPhone}`))
-    .catch((err) => console.warn(`⚠️ WhatsApp [${templateName}] failed (non-critical):`, err?.message));
+  void whatsappApi
+    .sendTemplateMessage(
+      phoneNumberId,
+      waPhone,
+      templateName,
+      'en',
+      bodyParams.length > 0 ? { body: bodyParams } : undefined,
+      accessToken
+    )
+    .then(() =>
+      console.log(`✅ WhatsApp [${templateName}] → +${waPhone}`)
+    )
+    .catch((err: any) =>
+      console.warn(
+        `⚠️  WhatsApp [${templateName}] → +${waPhone} failed:`,
+        err?.message
+      )
+    );
 };
 
-const formatUserResponse = (user: any): AuthUser => ({
+// ============================================
+// HELPER: Format user for response
+// ============================================
+
+const formatUser = (user: any): AuthUser => ({
   id: user.id,
   email: user.email,
   firstName: user.firstName,
@@ -94,25 +135,25 @@ const formatUserResponse = (user: any): AuthUser => ({
   createdAt: user.createdAt,
 });
 
-const generateTokens = async (
+// ============================================
+// HELPER: Generate JWT tokens
+// ============================================
+
+const generateTokenPair = async (
   userId: string,
   email: string,
   organizationId?: string
 ): Promise<AuthTokens> => {
   const payload = { userId, email, organizationId };
-
   const accessToken = generateAccessToken(payload);
   const refreshToken = generateRefreshToken(payload);
 
-  // Store refresh token in database
-  const expiresAt = new Date(Date.now() + parseExpiryTime(config.jwt.refreshExpiresIn));
+  const expiresAt = new Date(
+    Date.now() + parseExpiryTime(config.jwt.refreshExpiresIn)
+  );
 
   await prisma.refreshToken.create({
-    data: {
-      token: refreshToken,
-      userId,
-      expiresAt,
-    },
+    data: { token: refreshToken, userId, expiresAt },
   });
 
   return {
@@ -122,16 +163,19 @@ const generateTokens = async (
   };
 };
 
-const getDefaultOrganization = async (userId: string) => {
-  // First check owned organizations
-  const ownedOrg = await prisma.organization.findFirst({
+// ============================================
+// HELPER: Get user's default organization
+// ============================================
+
+const getDefaultOrg = async (userId: string) => {
+  // Pehle owned org dhundo
+  const owned = await prisma.organization.findFirst({
     where: { ownerId: userId },
     select: { id: true, name: true, slug: true, planType: true },
   });
+  if (owned) return owned;
 
-  if (ownedOrg) return ownedOrg;
-
-  // Then check memberships
+  // Phir membership dhundo
   const membership = await prisma.organizationMember.findFirst({
     where: { userId },
     include: {
@@ -140,66 +184,341 @@ const getDefaultOrganization = async (userId: string) => {
       },
     },
   });
-
   return membership?.organization || null;
 };
 
 // ============================================
-// AUTH SERVICE CLASS
+// HELPER: Create org + subscription in tx
+// ============================================
+
+const createOrgWithPlan = async (
+  tx: any,
+  userId: string,
+  orgName: string
+) => {
+  // FREE_DEMO plan fetch karo
+  const freePlan = await tx.plan.findUnique({
+    where: { type: 'FREE_DEMO' },
+  });
+
+  if (!freePlan) {
+    throw new AppError(
+      'FREE_DEMO plan not found. Please run: npm run db:seed',
+      500
+    );
+  }
+
+  // Organization create karo
+  const slug =
+    generateSlug(orgName) +
+    '-' +
+    Math.random().toString(36).substring(2, 7);
+
+  const organization = await tx.organization.create({
+    data: {
+      name: orgName,
+      slug,
+      ownerId: userId,
+      planType: 'FREE_DEMO',
+      featureSimpleBulkUpload: false,
+      featureCsvUpload: true,
+      featureOverrideByAdmin: false,
+    } as any,
+  });
+
+  // Owner as member add karo
+  await tx.organizationMember.create({
+    data: {
+      organizationId: organization.id,
+      userId,
+      role: 'OWNER',
+      joinedAt: new Date(),
+    },
+  });
+
+  // FREE_DEMO subscription create karo
+  await tx.subscription.create({
+    data: {
+      organizationId: organization.id,
+      planId: freePlan.id,
+      status: 'ACTIVE',
+      billingCycle: 'monthly',
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(
+        Date.now() + 30 * 24 * 60 * 60 * 1000
+      ),
+    },
+  });
+
+  return organization;
+};
+
+// ============================================
+// AUTH SERVICE
 // ============================================
 
 export class AuthService {
-  // ==========================================
-  // REGISTER
-  // ==========================================
-  async register(input: RegisterInput): Promise<AuthResponse> {
-    const { email, password, firstName, lastName, phone, organizationName } = input;
-    const normalizedEmail = normalizeEmail(email);
+  // ────────────────────────────────────────────
+  // SEND PHONE OTP
+  // ────────────────────────────────────────────
+  async sendPhoneOTP(phone: string): Promise<{ message: string }> {
+    if (!redis) {
+      throw new AppError('OTP service temporarily unavailable', 503);
+    }
 
-    // Check if user already exists
+    const waPhone = toWhatsAppPhone(phone);
+    const key = `${PHONE_OTP_PREFIX}${waPhone}`;
+
+    // ─── Cooldown check ─────────────────────────────────────────────────
+    const existing = await redis.get(key);
+    if (existing) {
+      const data = JSON.parse(existing);
+      const elapsed = Date.now() - (data.createdAt || 0);
+      if (elapsed < OTP_RESEND_COOLDOWN_MS) {
+        const wait = Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
+        throw new AppError(
+          `Please wait ${wait} seconds before requesting another OTP`,
+          429
+        );
+      }
+    }
+
+    // ─── OTP generate & store ────────────────────────────────────────────
+    const otp = generateOTP(6);
+
+    await redis.set(
+      key,
+      JSON.stringify({
+        otp,
+        attempts: 0,
+        createdAt: Date.now(),
+        verified: false,
+      }),
+      'EX',
+      OTP_TTL_SECONDS
+    );
+
+    // ─── Dev mode console log ────────────────────────────────────────────
+    if (config.nodeEnv === 'development') {
+      console.log('\n' + '='.repeat(40));
+      console.log(`  📱 DEV OTP for +${waPhone}`);
+      console.log(`  🔢 OTP: ${otp}`);
+      console.log('='.repeat(40) + '\n');
+    }
+
+    // ─── WhatsApp pe bhejo ───────────────────────────────────────────────
+    sendWhatsAppTemplate(
+      waPhone,
+      config.platform.whatsapp.otpTemplate,
+      [otp]
+    );
+
+    const isConfigured =
+      !!config.platform.whatsapp.phoneNumberId &&
+      !!config.platform.whatsapp.accessToken;
+
+    return {
+      message: isConfigured
+        ? 'OTP sent to your WhatsApp number'
+        : 'OTP sent (check server console in development)',
+    };
+  }
+
+  // ────────────────────────────────────────────
+  // VERIFY PHONE OTP + REGISTER
+  // ────────────────────────────────────────────
+  async verifyPhoneOTPAndRegister(
+    phone: string,
+    otp: string,
+    userData: {
+      firstName: string;
+      lastName?: string;
+      email: string;
+      password: string;
+      organizationName?: string;
+    }
+  ): Promise<AuthResponse> {
+    if (!redis) {
+      throw new AppError('OTP service temporarily unavailable', 503);
+    }
+
+    const waPhone = toWhatsAppPhone(phone);
+    const phoneE164 = toE164(phone);
+    const key = `${PHONE_OTP_PREFIX}${waPhone}`;
+
+    // ─── Redis se OTP fetch karo ─────────────────────────────────────────
+    const stored = await redis.get(key);
+
+    if (!stored) {
+      throw new AppError(
+        'OTP expired or not found. Please request a new OTP.',
+        400
+      );
+    }
+
+    const storedData = JSON.parse(stored);
+
+    // ─── Max attempts check ──────────────────────────────────────────────
+    if (storedData.attempts >= MAX_OTP_ATTEMPTS) {
+      await redis.del(key);
+      throw new AppError(
+        'Too many incorrect attempts. Please request a new OTP.',
+        429
+      );
+    }
+
+    // ─── OTP match karo ──────────────────────────────────────────────────
+    if (storedData.otp !== otp) {
+      const newAttempts = storedData.attempts + 1;
+      const remaining = MAX_OTP_ATTEMPTS - newAttempts;
+
+      await redis.set(
+        key,
+        JSON.stringify({ ...storedData, attempts: newAttempts }),
+        'KEEPTTL'
+      );
+
+      throw new AppError(
+        `Invalid OTP. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`,
+        400
+      );
+    }
+
+    // ─── OTP sahi hai - delete karo ──────────────────────────────────────
+    await redis.del(key);
+
+    // ─── Email unique check ──────────────────────────────────────────────
+    const normalizedEmail = userData.email.trim().toLowerCase();
+
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
-    // ✅ If email exists, handle verified/unverified cases
     if (existingUser) {
-      // If user exists but not verified, resend verification email
+      throw new AppError(
+        'This email is already registered. Please login instead.',
+        409
+      );
+    }
+
+    // ─── Password hash karo ──────────────────────────────────────────────
+    const hashedPassword = await hashPassword(userData.password);
+
+    // ─── DB Transaction: User + Org + Subscription ───────────────────────
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: normalizedEmail,
+          password: hashedPassword,
+          firstName: userData.firstName.trim(),
+          lastName: userData.lastName?.trim() || null,
+          phone: phoneE164,
+          emailVerified: true, // Phone OTP se verified
+          status: 'ACTIVE',
+        },
+      });
+
+      const orgName =
+        userData.organizationName?.trim() ||
+        `${userData.firstName.trim()}'s Workspace`;
+
+      const organization = await createOrgWithPlan(tx, user.id, orgName);
+
+      return { user, organization };
+    });
+
+    // ─── Tokens generate karo ────────────────────────────────────────────
+    const tokens = await generateTokenPair(
+      result.user.id,
+      result.user.email,
+      result.organization.id
+    );
+
+    // ─── Welcome messages bhejo (non-blocking) ───────────────────────────
+
+    // 1. WhatsApp welcome
+    sendWhatsAppTemplate(
+      waPhone,
+      config.platform.whatsapp.welcomeTemplate,
+      [result.user.firstName]
+    );
+
+    // 2. Welcome email
+    sendEmailNonBlocking({
+      to: normalizedEmail,
+      subject: '🎉 Welcome to WabMeta!',
+      html: emailTemplates.welcome(result.user.firstName).html,
+    });
+
+    console.log(
+      `✅ New user registered (Phone OTP): ${normalizedEmail} | Phone: ${phoneE164}`
+    );
+
+    return {
+      user: formatUser(result.user),
+      tokens,
+      organization: {
+        id: result.organization.id,
+        name: result.organization.name,
+        slug: result.organization.slug,
+        planType: result.organization.planType,
+      },
+    };
+  }
+
+  // ────────────────────────────────────────────
+  // REGISTER (Email based - existing flow)
+  // ────────────────────────────────────────────
+  async register(input: RegisterInput): Promise<AuthResponse> {
+    const {
+      email,
+      password,
+      firstName,
+      lastName,
+      phone,
+      organizationName,
+    } = input;
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Existing user check
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (existingUser) {
       if (!existingUser.emailVerified) {
-        const emailVerifyToken = generateToken();
-        const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+        // Resend verification
+        const token = generateToken();
+        const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
         await prisma.user.update({
           where: { id: existingUser.id },
-          data: { emailVerifyToken, emailVerifyExpires },
+          data: { emailVerifyToken: token, emailVerifyExpires: expires },
         });
 
-        const verifyUrl = `${config.frontendUrl}/verify-email?token=${emailVerifyToken}`;
-        const emailContent = emailTemplates.verifyEmail(existingUser.firstName, verifyUrl);
-
-        // ✅ Non-blocking email send (no await)
+        const verifyUrl = `${config.frontendUrl}/verify-email?token=${token}`;
+        const tpl = emailTemplates.verifyEmail(existingUser.firstName, verifyUrl);
         sendEmailNonBlocking({
           to: normalizedEmail,
-          subject: emailContent.subject,
-          html: emailContent.html,
+          subject: tpl.subject,
+          html: tpl.html,
         });
 
-        throw new AppError('Email already registered. Verification email resent.', 409);
+        throw new AppError(
+          'Email already registered. Verification email resent.',
+          409
+        );
       }
-
-      // If already verified, just block
       throw new AppError('Email already registered', 409);
     }
 
-    // Hash password
     const hashedPassword = await hashPassword(password);
-
-    // Generate email verification token
     const emailVerifyToken = generateToken();
-    const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const emailVerifyExpires = new Date(
+      Date.now() + 24 * 60 * 60 * 1000
+    );
 
-    // Create user and organization in transaction
     const result = await prisma.$transaction(async (tx) => {
-      // Create user
       const user = await tx.user.create({
         data: {
           email: normalizedEmail,
@@ -213,215 +532,125 @@ export class AuthService {
         },
       });
 
-      // Create organization always
-      const computedOrgName = organizationName && organizationName.trim().length > 0
-        ? organizationName.trim()
-        : `${firstName || 'User'}'s Workspace`;
-
-      const organization = await tx.organization.create({
-        data: {
-          name: computedOrgName,
-          slug: generateSlug(computedOrgName) + '-' + Math.random().toString(36).substring(2, 7),
-          ownerId: user.id,
-          planType: 'FREE_DEMO',
-          featureSimpleBulkUpload: false,
-          featureCsvUpload: true,
-          featureOverrideByAdmin: false,
-        } as any,
-      });
-
-      // Add user as organization member
-      await tx.organizationMember.create({
-        data: {
-          organizationId: organization.id,
-          userId: user.id,
-          role: 'OWNER',
-          joinedAt: new Date(),
-        },
-      });
-
-      // Wait, we can define the subscription for FREE_DEMO if needed, else it is handled
-      const freePlan = await tx.plan.findUnique({ where: { type: 'FREE_DEMO' } });
-      if (!freePlan) {
-        throw new AppError('FREE_DEMO plan not found. Please run db:seed.', 500);
-      }
-
-      await tx.subscription.create({
-        data: {
-          organizationId: organization.id,
-          planId: freePlan.id,
-          status: 'ACTIVE',
-          billingCycle: 'monthly',
-          currentPeriodStart: new Date(),
-          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        },
-      });
+      const orgName =
+        organizationName?.trim() || `${firstName}'s Workspace`;
+      const organization = await createOrgWithPlan(tx, user.id, orgName);
 
       return { user, organization };
     });
 
-    // Send verification email (✅ non-blocking)
+    // Verification email
     const verifyUrl = `${config.frontendUrl}/verify-email?token=${emailVerifyToken}`;
-    const emailContent = emailTemplates.verifyEmail(firstName, verifyUrl);
-
+    const tpl = emailTemplates.verifyEmail(firstName, verifyUrl);
     sendEmailNonBlocking({
       to: normalizedEmail,
-      subject: emailContent.subject,
-      html: emailContent.html,
+      subject: tpl.subject,
+      html: tpl.html,
     });
 
-    // ✅ Send WhatsApp welcome message (non-blocking, non-critical)
+    // WhatsApp welcome (if phone hai)
     if (phone) {
-      sendWATemplateNonBlocking(phone, 'wabmeta_welcome', {
-        body: [firstName || 'there'],  // {{1}} = user ka naam
-      });
+      sendWhatsAppTemplate(
+        phone,
+        config.platform.whatsapp.welcomeTemplate,
+        [firstName || 'there']
+      );
     }
 
-    // Generate tokens
-    const tokens = await generateTokens(result.user.id, result.user.email, result.organization?.id);
+    const tokens = await generateTokenPair(
+      result.user.id,
+      result.user.email,
+      result.organization.id
+    );
 
     return {
-      user: formatUserResponse(result.user),
+      user: formatUser(result.user),
       tokens,
-      organization: result.organization
-        ? {
-          id: result.organization.id,
-          name: result.organization.name,
-          slug: result.organization.slug,
-          planType: result.organization.planType,
-        }
-        : undefined,
+      organization: {
+        id: result.organization.id,
+        name: result.organization.name,
+        slug: result.organization.slug,
+        planType: result.organization.planType,
+      },
     };
   }
 
-  // ==========================================
-  // LOGIN - ✅ FIXED VERSION
-  // ==========================================
+  // ────────────────────────────────────────────
+  // LOGIN
+  // ────────────────────────────────────────────
   async login(input: LoginInput): Promise<AuthResponse> {
-    const normalizedEmail = normalizeEmail(input.email);
-    const { password } = input;
+    const normalizedEmail = input.email.trim().toLowerCase();
 
-    console.log(`🔐 Login attempt for: ${normalizedEmail}`);
+    console.log(`🔐 Login attempt: ${normalizedEmail}`);
 
-    // Find user
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
     if (!user) {
-      console.log('❌ User not found');
       throw new AppError('Invalid email or password', 401);
     }
 
-    console.log(`👤 User found: ${user.id}`);
-    console.log(`   Has password: ${!!user.password}`);
-    console.log(`   Has Google ID: ${!!user.googleId}`);
-    console.log(`   Email verified: ${user.emailVerified}`);
-    console.log(`   Status: ${user.status}`);
-
-    // ✅ FIXED: Check if user has password set
     if (!user.password) {
-      // User signed up with Google only and never set a password
       if (user.googleId) {
-        console.log('⚠️ User has Google login but no password');
         throw new AppError(
-          'This account was created with Google Sign-In. Please login with Google or set a password in your account settings.',
+          'This account uses Google Sign-In. Please login with Google.',
           400
         );
       }
-      // Shouldn't happen, but handle it
-      console.log('❌ User has no password and no Google ID');
-      throw new AppError('Account configuration error. Please contact support.', 500);
+      throw new AppError(
+        'Account configuration error. Please contact support.',
+        500
+      );
     }
 
-    // ✅ Verify password
-    const isValidPassword = await comparePassword(password, user.password);
-    if (!isValidPassword) {
-      console.log('❌ Invalid password');
+    const isValid = await comparePassword(input.password, user.password);
+    if (!isValid) {
       throw new AppError('Invalid email or password', 401);
     }
 
-    console.log('✅ Password verified');
-
-    // ✅ Check user status
     if (user.status === 'SUSPENDED') {
-      console.log('❌ Account suspended');
-      throw new AppError('Account suspended. Please contact support.', 403);
+      throw new AppError(
+        'Account suspended. Please contact support.',
+        403
+      );
     }
 
-    // ✅ Optional: Warn if email not verified (but still allow login)
-    if (!user.emailVerified) {
-      console.log('⚠️ Email not verified - allowing login anyway');
-      // You can choose to block here by uncommenting:
-      // throw new AppError('Please verify your email before logging in', 403);
-    }
-
-    // Get default organization
-    let organization = await getDefaultOrganization(user.id);
+    // Organization fetch/create
+    let organization = await getDefaultOrg(user.id);
 
     if (!organization) {
-      console.log('⚠️ No organization found for user, auto-creating...');
+      console.log('⚠️  No org found for user, auto-creating...');
       const orgName = `${user.firstName || 'User'}'s Workspace`;
-      organization = await prisma.organization.create({
-        data: {
-          name: orgName,
-          slug: generateSlug(orgName) + '-' + Math.random().toString(36).substring(2, 7),
-          ownerId: user.id,
-          planType: 'FREE_DEMO',
-          featureSimpleBulkUpload: false,
-          featureCsvUpload: true,
-          featureOverrideByAdmin: false,
-        } as any,
-      });
-
-      await prisma.organizationMember.create({
-        data: {
-          organizationId: organization.id,
-          userId: user.id,
-          role: 'OWNER',
-          joinedAt: new Date(),
-        },
-      });
-
-      // Assign FREE_DEMO subscription
-      const freePlan = await prisma.plan.findUnique({ where: { type: 'FREE_DEMO' } });
-      if (freePlan) {
-        await prisma.subscription.create({
-          data: {
-            organizationId: organization.id,
-            planId: freePlan.id,
-            status: 'ACTIVE',
-            billingCycle: 'monthly',
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          },
-        });
-      }
+      organization = await prisma.$transaction((tx) =>
+        createOrgWithPlan(tx, user.id, orgName)
+      );
     }
 
-    // Update last login
+    // Last login update
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        lastLoginAt: new Date(),
-      },
+      data: { lastLoginAt: new Date() },
     });
 
-    // Generate tokens
-    const tokens = await generateTokens(user.id, user.email, organization?.id);
+    const tokens = await generateTokenPair(
+      user.id,
+      user.email,
+      organization?.id
+    );
 
-    console.log('✅ Login successful');
+    console.log(`✅ Login successful: ${normalizedEmail}`);
 
     return {
-      user: formatUserResponse(user),
+      user: formatUser(user),
       tokens,
       organization: organization || undefined,
     };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // VERIFY EMAIL
-  // ==========================================
+  // ────────────────────────────────────────────
   async verifyEmail(token: string): Promise<{ message: string }> {
     const user = await prisma.user.findFirst({
       where: {
@@ -431,7 +660,10 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new AppError('Invalid or expired verification token', 400);
+      throw new AppError(
+        'Invalid or expired verification token',
+        400
+      );
     }
 
     await prisma.user.update({
@@ -447,96 +679,83 @@ export class AuthService {
     return { message: 'Email verified successfully' };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // RESEND VERIFICATION EMAIL
-  // ==========================================
-  async resendVerificationEmail(email: string): Promise<{ message: string }> {
-    const normalizedEmail = normalizeEmail(email);
-
+  // ────────────────────────────────────────────
+  async resendVerificationEmail(
+    email: string
+  ): Promise<{ message: string }> {
+    const normalizedEmail = email.trim().toLowerCase();
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
-    if (!user) {
-      // Don't reveal if user exists
-      return { message: 'If your email is registered, you will receive a verification link' };
-    }
+    const successMsg =
+      'If your email is registered, you will receive a verification link';
 
+    if (!user) return { message: successMsg };
     if (user.emailVerified) {
       throw new AppError('Email is already verified', 400);
     }
 
-    // Generate new token
-    const emailVerifyToken = generateToken();
-    const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const token = generateToken();
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        emailVerifyToken,
-        emailVerifyExpires,
-      },
+      data: { emailVerifyToken: token, emailVerifyExpires: expires },
     });
 
-    // Send email (✅ non-blocking)
-    const verifyUrl = `${config.frontendUrl}/verify-email?token=${emailVerifyToken}`;
-    const emailContent = emailTemplates.verifyEmail(user.firstName, verifyUrl);
-
+    const verifyUrl = `${config.frontendUrl}/verify-email?token=${token}`;
+    const tpl = emailTemplates.verifyEmail(user.firstName, verifyUrl);
     sendEmailNonBlocking({
       to: normalizedEmail,
-      subject: emailContent.subject,
-      html: emailContent.html,
+      subject: tpl.subject,
+      html: tpl.html,
     });
 
     return { message: 'Verification email sent' };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // FORGOT PASSWORD
-  // ==========================================
+  // ────────────────────────────────────────────
   async forgotPassword(email: string): Promise<{ message: string }> {
-    const normalizedEmail = normalizeEmail(email);
+    const normalizedEmail = email.trim().toLowerCase();
+    const successMsg =
+      'If your email is registered, you will receive a password reset link';
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
+    if (!user) return { message: successMsg };
 
-    // Always return success message (security)
-    const successMessage = 'If your email is registered, you will receive a password reset link';
-
-    if (!user) {
-      return { message: successMessage };
-    }
-
-    // Generate reset token
-    const resetToken = generateToken();
-    const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const token = generateToken();
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
 
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        passwordResetToken: resetToken,
-        passwordResetExpires: resetExpires,
-      },
+      data: { passwordResetToken: token, passwordResetExpires: expires },
     });
 
-    // Send email (✅ non-blocking)
-    const resetUrl = `${config.frontendUrl}/reset-password?token=${resetToken}`;
-    const emailContent = emailTemplates.resetPassword(user.firstName, resetUrl);
-
+    const resetUrl = `${config.frontendUrl}/reset-password?token=${token}`;
+    const tpl = emailTemplates.resetPassword(user.firstName, resetUrl);
     sendEmailNonBlocking({
       to: normalizedEmail,
-      subject: emailContent.subject,
-      html: emailContent.html,
+      subject: tpl.subject,
+      html: tpl.html,
     });
 
-    return { message: successMessage };
+    return { message: successMsg };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // RESET PASSWORD
-  // ==========================================
-  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  // ────────────────────────────────────────────
+  async resetPassword(
+    token: string,
+    newPassword: string
+  ): Promise<{ message: string }> {
     const user = await prisma.user.findFirst({
       where: {
         passwordResetToken: token,
@@ -548,150 +767,128 @@ export class AuthService {
       throw new AppError('Invalid or expired reset token', 400);
     }
 
-    // Hash new password
-    const hashedPassword = await hashPassword(newPassword);
+    const hashed = await hashPassword(newPassword);
 
-    // Update password and clear reset token
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        password: hashedPassword,
+        password: hashed,
         passwordResetToken: null,
         passwordResetExpires: null,
       },
     });
 
-    // Invalidate all refresh tokens
-    await prisma.refreshToken.deleteMany({
-      where: { userId: user.id },
-    });
+    await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
 
     return { message: 'Password reset successfully' };
   }
 
-  // ==========================================
-  // SEND OTP
-  // ==========================================
+  // ────────────────────────────────────────────
+  // SEND EMAIL OTP (existing feature)
+  // ────────────────────────────────────────────
   async sendOTP(email: string): Promise<{ message: string }> {
-    const normalizedEmail = normalizeEmail(email);
+    if (!redis) throw new AppError('Service temporarily unavailable', 503);
 
+    const normalizedEmail = email.trim().toLowerCase();
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
+    if (!user) throw new AppError('User not found', 404);
 
-    // Generate OTP
     const otp = generateOTP(6);
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Store OTP in Redis (10 minutes TTL)
-    if (redis) {
-      await redis.set(
-        `${OTP_PREFIX}${normalizedEmail}`,
-        JSON.stringify({ otp, attempts: 0 }),
-        'EX',
-        600 // 10 minutes
-      );
-    } else {
-      console.warn('⚠️ Redis not available, OTP not stored!');
-      throw new AppError('Service temporarily unavailable', 503);
-    }
+    await redis.set(
+      `${EMAIL_OTP_PREFIX}${normalizedEmail}`,
+      JSON.stringify({ otp, attempts: 0 }),
+      'EX',
+      OTP_TTL_SECONDS
+    );
 
-    // Send OTP email (✅ non-blocking)
-    const emailContent = emailTemplates.otp(user.firstName, otp);
-
+    const tpl = emailTemplates.otp(user.firstName, otp);
     sendEmailNonBlocking({
       to: normalizedEmail,
-      subject: emailContent.subject,
-      html: emailContent.html,
+      subject: tpl.subject,
+      html: tpl.html,
     });
 
-    // ✅ Send WhatsApp OTP (non-blocking, non-critical)
+    // WhatsApp pe bhi bhejo agar phone hai
     if (user.phone) {
-      sendWATemplateNonBlocking(user.phone, 'wabmeta_otp', {
-        body: [otp],  // {{1}} = OTP code
-      });
+      sendWhatsAppTemplate(
+        user.phone,
+        config.platform.whatsapp.otpTemplate,
+        [otp]
+      );
     }
 
     return { message: 'OTP sent to your email' };
   }
 
-  // ==========================================
-  // VERIFY OTP
-  // ==========================================
+  // ────────────────────────────────────────────
+  // VERIFY EMAIL OTP (existing feature)
+  // ────────────────────────────────────────────
   async verifyOTP(email: string, otp: string): Promise<AuthResponse> {
-    const normalizedEmail = normalizeEmail(email);
     if (!redis) throw new AppError('Service temporarily unavailable', 503);
 
-    const storedData = await redis.get(`${OTP_PREFIX}${normalizedEmail}`);
+    const normalizedEmail = email.trim().toLowerCase();
+    const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
+    const stored = await redis.get(key);
 
-    if (!storedData) {
+    if (!stored) {
       throw new AppError('OTP expired or not found', 400);
     }
 
-    const { otp: storedOtp, attempts } = JSON.parse(storedData);
+    const { otp: storedOtp, attempts } = JSON.parse(stored);
 
-    // Check attempts
-    if (attempts >= 5) {
-      await redis.del(`${OTP_PREFIX}${normalizedEmail}`);
-      throw new AppError('Too many attempts. Please request a new OTP', 429);
+    if (attempts >= MAX_OTP_ATTEMPTS) {
+      await redis.del(key);
+      throw new AppError(
+        'Too many attempts. Please request a new OTP',
+        429
+      );
     }
 
-    // Verify OTP
     if (storedOtp !== otp) {
-      // Increment attempts
       await redis.set(
-        `${OTP_PREFIX}${normalizedEmail}`,
+        key,
         JSON.stringify({ otp: storedOtp, attempts: attempts + 1 }),
         'KEEPTTL'
       );
       throw new AppError('Invalid OTP', 400);
     }
 
-    // Clear OTP
-    await redis.del(`${OTP_PREFIX}${normalizedEmail}`);
+    await redis.del(key);
 
-    // Get user
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
+    if (!user) throw new AppError('User not found', 404);
 
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
-
-    // Mark email as verified if not already
     if (!user.emailVerified) {
       await prisma.user.update({
         where: { id: user.id },
-        data: {
-          emailVerified: true,
-          status: 'ACTIVE',
-        },
+        data: { emailVerified: true, status: 'ACTIVE' },
       });
     }
 
-    // Get organization
-    const organization = await getDefaultOrganization(user.id);
-
-    // Generate tokens
-    const tokens = await generateTokens(user.id, user.email, organization?.id);
+    const organization = await getDefaultOrg(user.id);
+    const tokens = await generateTokenPair(
+      user.id,
+      user.email,
+      organization?.id
+    );
 
     return {
-      user: formatUserResponse(user),
+      user: formatUser(user),
       tokens,
       organization: organization || undefined,
     };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // GOOGLE AUTH
-  // ==========================================
+  // ────────────────────────────────────────────
   async googleAuth(credential: string): Promise<AuthResponse> {
-    // Verify Google token (credential should be ID token / JWT)
     let payload: GoogleUserPayload;
 
     try {
@@ -699,27 +896,22 @@ export class AuthService {
         idToken: credential,
         audience: config.google.clientId,
       });
-
-      const ticketPayload = ticket.getPayload();
-      if (!ticketPayload) {
-        throw new Error('Invalid token payload');
-      }
-
-      payload = ticketPayload as GoogleUserPayload;
-    } catch (error) {
+      const p = ticket.getPayload();
+      if (!p) throw new Error('Empty payload');
+      payload = p as GoogleUserPayload;
+    } catch {
       throw new AppError('Invalid Google token', 401);
     }
 
-    const { email, given_name, family_name, picture, sub: googleId } = payload;
-    const normalizedEmail = normalizeEmail(email);
+    const { email, given_name, family_name, picture, sub: googleId } =
+      payload;
+    const normalizedEmail = email.trim().toLowerCase();
 
-    // Find or create user
     let user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
     if (user) {
-      // Update Google ID if not set
       if (!user.googleId) {
         user = await prisma.user.update({
           where: { id: user.id },
@@ -732,238 +924,151 @@ export class AuthService {
         });
       }
     } else {
-      // Create new user
-      user = await prisma.user.create({
-        data: {
-          email: normalizedEmail,
-          googleId,
-          firstName: given_name,
-          lastName: family_name,
-          avatar: picture,
-          emailVerified: true,
-          status: 'ACTIVE',
-        },
-      });
-
-      // Create default organization
-      const organization = await prisma.organization.create({
-        data: {
-          name: `${given_name}'s Workspace`,
-          slug: generateSlug(`${given_name}-workspace`) + '-' + Math.random().toString(36).substring(2, 7),
-          ownerId: user.id,
-          planType: 'FREE_DEMO',
-          featureSimpleBulkUpload: false,
-          featureCsvUpload: true,
-          featureOverrideByAdmin: false,
-        } as any,
-      });
-
-      await prisma.organizationMember.create({
-        data: {
-          organizationId: organization.id,
-          userId: user.id,
-          role: 'OWNER',
-          joinedAt: new Date(),
-        },
-      });
-
-      // ✅ Assign FREE_DEMO subscription
-      const freePlan = await prisma.plan.findUnique({ where: { type: 'FREE_DEMO' } });
-      if (freePlan) {
-        await prisma.subscription.create({
+      const created = await prisma.$transaction(async (tx) => {
+        const newUser = await tx.user.create({
           data: {
-            organizationId: organization.id,
-            planId: freePlan.id,
+            email: normalizedEmail,
+            googleId,
+            firstName: given_name,
+            lastName: family_name,
+            avatar: picture,
+            emailVerified: true,
             status: 'ACTIVE',
-            billingCycle: 'monthly',
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           },
         });
-      }
+
+        const org = await createOrgWithPlan(
+          tx,
+          newUser.id,
+          `${given_name}'s Workspace`
+        );
+
+        return { user: newUser, org };
+      });
+
+      user = created.user;
     }
 
-    // Update last login
     await prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
 
-    // Get organization
-    let organization = await getDefaultOrganization(user.id);
+    let organization = await getDefaultOrg(user.id);
 
-    // Auto heal Google Users missing organization
     if (!organization) {
-      const orgName = `${user.firstName || 'User'}'s Workspace`;
-      organization = await prisma.organization.create({
-        data: {
-          name: orgName,
-          slug: generateSlug(orgName) + '-' + Math.random().toString(36).substring(2, 7),
-          ownerId: user.id,
-          planType: 'FREE_DEMO',
-          featureSimpleBulkUpload: false,
-          featureCsvUpload: true,
-          featureOverrideByAdmin: false,
-        } as any,
-      });
-
-      await prisma.organizationMember.create({
-        data: {
-          organizationId: organization.id,
-          userId: user.id,
-          role: 'OWNER',
-          joinedAt: new Date(),
-        },
-      });
-
-      const freePlan = await prisma.plan.findUnique({ where: { type: 'FREE_DEMO' } });
-      if (freePlan) {
-        await prisma.subscription.create({
-          data: {
-            organizationId: organization.id,
-            planId: freePlan.id,
-            status: 'ACTIVE',
-            billingCycle: 'monthly',
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          },
-        });
-      }
+      organization = await prisma.$transaction((tx) =>
+        createOrgWithPlan(
+          tx,
+          user!.id,
+          `${user!.firstName || 'User'}'s Workspace`
+        )
+      );
     }
 
-    // Generate tokens
-    const tokens = await generateTokens(user.id, user.email, organization?.id);
+    const tokens = await generateTokenPair(
+      user.id,
+      user.email,
+      organization?.id
+    );
 
     return {
-      user: formatUserResponse(user),
+      user: formatUser(user),
       tokens,
       organization: organization || undefined,
     };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // REFRESH TOKEN
-  // ==========================================
+  // ────────────────────────────────────────────
   async refreshToken(refreshToken: string): Promise<AuthTokens> {
-    // Verify refresh token
-    let payload;
     try {
-      payload = verifyRefreshToken(refreshToken);
-    } catch (error) {
+      verifyRefreshToken(refreshToken);
+    } catch {
       throw new AppError('Invalid refresh token', 401);
     }
 
-    // Check if token exists in database
-    const storedToken = await prisma.refreshToken.findUnique({
+    const stored = await prisma.refreshToken.findUnique({
       where: { token: refreshToken },
       include: { user: true },
     });
 
-    if (!storedToken) {
-      throw new AppError('Refresh token not found', 401);
-    }
+    if (!stored) throw new AppError('Refresh token not found', 401);
 
-    if (storedToken.expiresAt < new Date()) {
-      await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+    if (stored.expiresAt < new Date()) {
+      await prisma.refreshToken.delete({ where: { id: stored.id } });
       throw new AppError('Refresh token expired', 401);
     }
 
-    // Delete old refresh token
-    await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+    await prisma.refreshToken.delete({ where: { id: stored.id } });
 
-    // Get organization
-    const organization = await getDefaultOrganization(storedToken.userId);
+    const org = await getDefaultOrg(stored.userId);
 
-    // Generate new tokens
-    const tokens = await generateTokens(
-      storedToken.userId,
-      storedToken.user.email,
-      organization?.id
-    );
-
-    return tokens;
+    return generateTokenPair(stored.userId, stored.user.email, org?.id);
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // LOGOUT
-  // ==========================================
+  // ────────────────────────────────────────────
   async logout(refreshToken: string): Promise<{ message: string }> {
-    // Delete refresh token from database
     await prisma.refreshToken.deleteMany({
       where: { token: refreshToken },
     });
-
     return { message: 'Logged out successfully' };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // LOGOUT ALL DEVICES
-  // ==========================================
+  // ────────────────────────────────────────────
   async logoutAll(userId: string): Promise<{ message: string }> {
-    await prisma.refreshToken.deleteMany({
-      where: { userId },
-    });
-
+    await prisma.refreshToken.deleteMany({ where: { userId } });
     return { message: 'Logged out from all devices' };
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // GET CURRENT USER
-  // ==========================================
+  // ────────────────────────────────────────────
   async getCurrentUser(userId: string): Promise<AuthUser> {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
-
-    return formatUserResponse(user);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new AppError('User not found', 404);
+    return formatUser(user);
   }
 
-  // ==========================================
+  // ────────────────────────────────────────────
   // CHANGE PASSWORD
-  // ==========================================
+  // ────────────────────────────────────────────
   async changePassword(
     userId: string,
     currentPassword: string,
     newPassword: string
   ): Promise<{ message: string }> {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new AppError('User not found', 404);
 
     if (!user.password) {
-      throw new AppError('Cannot change password for OAuth-only accounts. Please set a password first.', 400);
+      throw new AppError(
+        'Cannot change password for OAuth-only accounts.',
+        400
+      );
     }
 
-    // Verify current password
     const isValid = await comparePassword(currentPassword, user.password);
     if (!isValid) {
       throw new AppError('Current password is incorrect', 400);
     }
 
-    // Hash and update new password
-    const hashedPassword = await hashPassword(newPassword);
+    const hashed = await hashPassword(newPassword);
 
     await prisma.user.update({
       where: { id: userId },
-      data: { password: hashedPassword },
+      data: { password: hashed },
     });
 
-    // Invalidate all refresh tokens
-    await prisma.refreshToken.deleteMany({
-      where: { userId },
-    });
+    await prisma.refreshToken.deleteMany({ where: { userId } });
 
     return { message: 'Password changed successfully' };
   }
 }
 
-// Export singleton instance
 export const authService = new AuthService();

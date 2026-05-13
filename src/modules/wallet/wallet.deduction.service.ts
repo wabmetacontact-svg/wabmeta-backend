@@ -111,7 +111,7 @@ export const COUNTRY_RATES: Record<string, CountryRate> = {
   // Hungary (+36)
   '36':  { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // India (+91)
-  '91':  { marketing: 1.00,  utility: 0.12, authentication: 0.12 },
+  '91':  { marketing: 1.00,  utility: 0.19, authentication: 0.12 },
   // Indonesia (+62)
   '62':  { marketing: 4.45,  utility: 3.10, authentication: 3.10 },
   // Iraq (+964)
@@ -203,7 +203,7 @@ export const COUNTRY_RATES: Record<string, CountryRate> = {
 // ─── Default (fallback) rate when country cannot be determined ─────────────────
 export const DEFAULT_RATE: CountryRate = {
   marketing: 1.00,      // India rate as safe default
-  utility: 0.12,
+  utility: 0.19,
   authentication: 0.12,
 };
 

@@ -801,8 +801,13 @@ class WhatsAppService {
 
         const status = contactCheck?.contacts?.[0]?.status;
 
-        if (status && status !== 'valid') { ... }
-      } catch (err) { ... }
+        if (status && status !== 'valid') {
+          contactValid = false;
+          console.warn(`⚠️ Contact ${formattedTo} is invalid or doesn't have WhatsApp`);
+        }
+      } catch (err) {
+        console.warn('⚠️ Contact check failed (non-critical), proceeding:', err.message);
+      }
       */
 
       // Prepare message payload
@@ -1556,6 +1561,125 @@ class WhatsAppService {
         reason: error.message,
       };
     }
+  }
+
+  // ============================================
+  // QUALITY RATING SYNC METHODS (NEW)
+  // ============================================
+
+  /**
+   * Single account ka quality rating Meta se fetch karke DB update karo
+   */
+  async syncAccountQuality(accountId: string): Promise<{
+    success: boolean;
+    account?: any;
+    error?: string;
+  }> {
+    try {
+      console.log(`🔄 Syncing quality for account: ${accountId}`);
+
+      const { account, accessToken } = await this.getAccountWithToken(
+        accountId
+      );
+
+      // Meta API se fresh data fetch karo
+      const phoneInfo = await metaApi.getPhoneNumberInfo(
+        account.phoneNumberId,
+        accessToken
+      );
+
+      console.log(`📊 Phone info from Meta:`, {
+        quality_rating: phoneInfo?.quality_rating,
+        messaging_limit_tier: phoneInfo?.messaging_limit_tier,
+        verified_name: phoneInfo?.verified_name,
+        platform_type: phoneInfo?.platform_type,
+      });
+
+      // ✅ DB update karo
+      const updated = await prisma.whatsAppAccount.update({
+        where: { id: accountId },
+        data: {
+          qualityRating: phoneInfo?.quality_rating || account.qualityRating,
+          messagingLimit:
+            phoneInfo?.messaging_limit_tier || account.messagingLimit,
+          verifiedName: phoneInfo?.verified_name || account.verifiedName,
+          displayName:
+            phoneInfo?.verified_name || account.displayName,
+          codeVerificationStatus:
+            phoneInfo?.code_verification_status ||
+            account.codeVerificationStatus,
+          updatedAt: new Date(),
+        },
+      });
+
+      console.log(
+        `✅ Quality synced for ${account.phoneNumber}: ${updated.qualityRating}`
+      );
+
+      return { success: true, account: updated };
+    } catch (error: any) {
+      console.error(
+        `❌ Quality sync failed for ${accountId}:`,
+        error.message
+      );
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Organization ke saare accounts sync karo (bulk)
+   */
+  async syncAllAccountsQuality(organizationId: string): Promise<{
+    total: number;
+    synced: number;
+    failed: number;
+    results: any[];
+  }> {
+    console.log(`🔄 Syncing all accounts for org: ${organizationId}`);
+
+    const accounts = await prisma.whatsAppAccount.findMany({
+      where: {
+        organizationId,
+        status: WhatsAppAccountStatus.CONNECTED,
+      },
+      select: { id: true, phoneNumber: true },
+    });
+
+    if (accounts.length === 0) {
+      console.log('ℹ️  No connected accounts to sync');
+      return { total: 0, synced: 0, failed: 0, results: [] };
+    }
+
+    const results = await Promise.allSettled(
+      accounts.map((acc) => this.syncAccountQuality(acc.id))
+    );
+
+    const synced = results.filter(
+      (r) => r.status === 'fulfilled' && r.value.success
+    ).length;
+
+    const failed = results.length - synced;
+
+    console.log(
+      `✅ Bulk sync complete: ${synced}/${accounts.length} successful`
+    );
+
+    return {
+      total: accounts.length,
+      synced,
+      failed,
+      results: results.map((r, i) => ({
+        accountId: accounts[i].id,
+        phoneNumber: accounts[i].phoneNumber,
+        success: r.status === 'fulfilled' && r.value.success,
+        error:
+          r.status === 'rejected'
+            ? r.reason?.message
+            : r.status === 'fulfilled' && !r.value.success
+            ? r.value.error
+            : undefined,
+      })),
+    };
   }
 }
 

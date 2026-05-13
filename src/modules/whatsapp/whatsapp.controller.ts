@@ -448,6 +448,103 @@ class WhatsAppController {
       next(error);
     }
   }
+
+  // ============================================
+  // QUALITY RATING SYNC ENDPOINTS (NEW)
+  // ============================================
+
+  /**
+   * POST /api/v1/whatsapp/accounts/:accountId/sync-quality
+   * Single account ka quality rating refresh karo
+   */
+  async syncAccountQuality(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) {
+    try {
+      const organizationId = getOrgId(req);
+      const accountId = req.params.accountId as string;
+
+      if (!organizationId) {
+        return errorResponse(res, 'X-Organization-Id missing', 400);
+      }
+
+      const ok = await verifyOrgAccess(req.user!.id, organizationId);
+      if (!ok) {
+        return errorResponse(res, 'Unauthorized', 403);
+      }
+
+      // Verify account belongs to org
+      const account = await prisma.whatsAppAccount.findFirst({
+        where: { id: accountId, organizationId },
+      });
+
+      if (!account) {
+        return errorResponse(res, 'Account not found', 404);
+      }
+
+      const result = await whatsappService.syncAccountQuality(accountId);
+
+      if (!result.success) {
+        return errorResponse(
+          res,
+          result.error || 'Failed to sync quality rating',
+          500
+        );
+      }
+
+      return successResponse(res, {
+        data: sanitizeAccount(result.account),
+        message: 'Quality rating synced successfully',
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+
+  /**
+   * POST /api/v1/whatsapp/accounts/sync-all
+   * Saare accounts ka quality rating refresh karo
+   */
+  async syncAllAccountsQuality(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) {
+    try {
+      const organizationId = getOrgId(req);
+
+      if (!organizationId) {
+        return errorResponse(res, 'X-Organization-Id missing', 400);
+      }
+
+      const ok = await verifyOrgAccess(req.user!.id, organizationId);
+      if (!ok) {
+        return errorResponse(res, 'Unauthorized', 403);
+      }
+
+      const result = await whatsappService.syncAllAccountsQuality(
+        organizationId
+      );
+
+      // Updated accounts return karo
+      const accounts = await prisma.whatsAppAccount.findMany({
+        where: { organizationId },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      });
+
+      return successResponse(res, {
+        data: {
+          accounts: accounts.map(sanitizeAccount),
+          syncStats: result,
+        },
+        message: `Synced ${result.synced}/${result.total} accounts`,
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
 }
 
 // ============================================
