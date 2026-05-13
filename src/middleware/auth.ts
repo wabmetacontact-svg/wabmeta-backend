@@ -1,4 +1,4 @@
-// src/middleware/auth.ts
+// src/middleware/auth.ts - FIXED VERSION
 
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types/express';
@@ -8,19 +8,56 @@ import prisma from '../config/database';
 import { getRedis } from '../config/redis';
 import { authService } from '../modules/auth/auth.service';
 
-const redis = getRedis();
+// ✅ REMOVED: const redis = getRedis(); ← YE WALI LINE HATAO
+// Module level pe Redis capture NAHI karna - stale ho jaati hai
 
 const USER_CACHE_PREFIX = 'user:auth:';
-const CACHE_TTL = 120; // 120 seconds
+const CACHE_TTL = 120;
 
-const cookieOptions = (isRefresh: boolean = false) => {
-  return {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none' as const,
-    maxAge: isRefresh ? 7 * 24 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000,
-    path: '/',
-  };
+const cookieOptions = (isRefresh: boolean = false) => ({
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none' as const,
+  maxAge: isRefresh ? 7 * 24 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000,
+  path: '/',
+});
+
+// ✅ Safe Redis cache get - kabhi throw nahi karega
+const safeRedisGet = async (key: string): Promise<string | null> => {
+  try {
+    const redis = getRedis(); // ✅ Har baar fresh call
+    if (!redis) return null;
+    return await redis.get(key);
+  } catch (err: any) {
+    // Silent fail - Redis down hone pe auth kaam karta rahe
+    return null;
+  }
+};
+
+// ✅ Safe Redis cache set - kabhi throw nahi karega
+const safeRedisSet = async (
+  key: string,
+  value: string,
+  ttl: number
+): Promise<void> => {
+  try {
+    const redis = getRedis(); // ✅ Har baar fresh call
+    if (!redis) return;
+    await redis.set(key, value, 'EX', ttl);
+  } catch (err: any) {
+    // Silent fail
+  }
+};
+
+// ✅ Safe Redis cache delete
+const safeRedisDel = async (key: string): Promise<void> => {
+  try {
+    const redis = getRedis();
+    if (!redis) return;
+    await redis.del(key);
+  } catch (err: any) {
+    // Silent fail
+  }
 };
 
 export const authenticate = async (
@@ -30,58 +67,61 @@ export const authenticate = async (
 ): Promise<void> => {
   try {
     let token = '';
-    // 1. Check Header (Authorization or authorization)
-    const authHeader = req.headers.authorization || (req.headers as any).Authorization;
+
+    // 1. Authorization Header
+    const authHeader =
+      req.headers.authorization || (req.headers as any).Authorization;
     if (authHeader && /^Bearer /i.test(authHeader)) {
       token = authHeader.split(' ')[1];
     }
-    // 2. Check Alternative Headers
+    // 2. Alternative Headers
     else if (req.headers['x-access-token']) {
       token = req.headers['x-access-token'] as string;
     }
-    // 3. Check Cookies
+    // 3. Cookies
     else if (req.cookies?.accessToken || req.cookies?.token) {
       token = req.cookies.accessToken || req.cookies.token;
     }
-    // 4. Check Query Parameter (as a last resort)
+    // 4. Query param (last resort)
     else if (req.query.token) {
       token = req.query.token as string;
     }
 
-    // 🔄 AUTO-HEALING: If no access token but refresh cookie exists
+    // 🔄 AUTO-HEALING: Refresh token se recover karo
     if (!token && req.cookies?.refreshToken) {
       try {
-        console.log('🛡️ Auto-healing: Missing access token but found refresh cookie. Attempting background refresh...');
-        const newTokens = await authService.refreshToken(req.cookies.refreshToken);
+        console.log('🛡️ Auto-healing: Attempting token refresh...');
+        const newTokens = await authService.refreshToken(
+          req.cookies.refreshToken
+        );
 
-        // Success! Set new cookies and use the new access token
         res.cookie('refreshToken', newTokens.refreshToken, cookieOptions(true));
         res.cookie('accessToken', newTokens.accessToken, cookieOptions(false));
         res.setHeader('x-new-access-token', newTokens.accessToken);
         res.setHeader('x-token-refreshed', 'true');
-        res.setHeader('Access-Control-Expose-Headers', 'x-new-access-token, x-token-refreshed');
+        res.setHeader(
+          'Access-Control-Expose-Headers',
+          'x-new-access-token, x-token-refreshed'
+        );
 
         token = newTokens.accessToken;
-        console.log('✅ Auto-healing: Session restored silently and synced.');
+        console.log('✅ Auto-healing: Session restored.');
       } catch (refreshError) {
-        console.warn('❌ Auto-healing failed:', (refreshError as Error).message);
-        // Fall through to 401 handling
+        console.warn(
+          '❌ Auto-healing failed:',
+          (refreshError as Error).message
+        );
       }
     }
 
     if (!token) {
-      console.warn(`🔒 Auth failed: No token found. Cookies received: ${JSON.stringify(Object.keys(req.cookies || {}))}`, {
-        url: req.originalUrl,
-        headers: Object.keys(req.headers),
-        query: Object.keys(req.query)
-      });
       throw new AppError('Access token required', 401);
     }
 
-    // Verify token
+    // Token verify karo
     const decoded = verifyAccessToken(token) as TokenPayload;
 
-    // ✅ Get organizationId (from token or fetch from DB)
+    // organizationId resolve karo
     let organizationId = decoded.organizationId;
 
     if (!organizationId) {
@@ -89,36 +129,45 @@ export const authenticate = async (
 
       let membership = await prisma.organizationMember.findFirst({
         where: { userId: decoded.userId },
-        include: { organization: true }
+        include: { organization: true },
       });
 
       if (!membership) {
-        // Auto create organization
-        const userToFix = await prisma.user.findUnique({ where: { id: decoded.userId } });
+        const userToFix = await prisma.user.findUnique({
+          where: { id: decoded.userId },
+        });
+
         if (userToFix) {
           const orgName = `${userToFix.firstName || 'User'}'s Workspace`;
           const organization = await prisma.organization.create({
             data: {
               name: orgName,
-              slug: orgName.toLowerCase().replace(/[^a-z0-9]/g, '') + '-' + Math.random().toString(36).substring(2, 7),
+              slug:
+                orgName.toLowerCase().replace(/[^a-z0-9]/g, '') +
+                '-' +
+                Math.random().toString(36).substring(2, 7),
               ownerId: userToFix.id,
               planType: 'FREE_DEMO',
               featureSimpleBulkUpload: false,
               featureCsvUpload: false,
               featureOverrideByAdmin: false,
-            } as any
+            } as any,
           });
+
           membership = await prisma.organizationMember.create({
             data: {
               organizationId: organization.id,
               userId: userToFix.id,
               role: 'OWNER',
-              joinedAt: new Date()
+              joinedAt: new Date(),
             },
-            include: { organization: true }
+            include: { organization: true },
           });
 
-          const freePlan = await prisma.plan.findUnique({ where: { type: 'FREE_DEMO' } });
+          const freePlan = await prisma.plan.findUnique({
+            where: { type: 'FREE_DEMO' },
+          });
+
           if (freePlan) {
             await prisma.subscription.create({
               data: {
@@ -127,7 +176,9 @@ export const authenticate = async (
                 status: 'ACTIVE',
                 billingCycle: 'monthly',
                 currentPeriodStart: new Date(),
-                currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                currentPeriodEnd: new Date(
+                  Date.now() + 30 * 24 * 60 * 60 * 1000
+                ),
               },
             });
           }
@@ -139,18 +190,23 @@ export const authenticate = async (
       }
     }
 
-    // ✅ Distributed Caching for Production
+    // ✅ User cache - Redis optional, DB fallback guaranteed
     let user: any = null;
 
-    if (redis) {
-      const cachedUser = await redis.get(`${USER_CACHE_PREFIX}${decoded.userId}`);
-      if (cachedUser) {
+    // Try Redis cache first (safe - never throws)
+    const cacheKey = `${USER_CACHE_PREFIX}${decoded.userId}`;
+    const cachedUser = await safeRedisGet(cacheKey);
+
+    if (cachedUser) {
+      try {
         user = JSON.parse(cachedUser);
+      } catch {
+        user = null; // JSON parse fail → DB se lo
       }
     }
 
+    // Cache miss ya Redis down → DB se lo
     if (!user) {
-      // Check if user exists
       user = await prisma.user.findUnique({
         where: { id: decoded.userId },
         select: {
@@ -161,14 +217,9 @@ export const authenticate = async (
         },
       });
 
-      if (user && redis) {
-        // Cache user status for 2 minutes to reduce DB hits
-        await redis.set(
-          `${USER_CACHE_PREFIX}${decoded.userId}`,
-          JSON.stringify(user),
-          'EX',
-          CACHE_TTL
-        );
+      // Cache mein store karo (safe - never throws)
+      if (user) {
+        await safeRedisSet(cacheKey, JSON.stringify(user), CACHE_TTL);
       }
     }
 
@@ -180,7 +231,6 @@ export const authenticate = async (
       throw new AppError('Account suspended', 403);
     }
 
-    // Attach user to request
     req.user = {
       id: user.id,
       email: user.email,
@@ -259,11 +309,7 @@ export const optionalAuth = async (
 
         const user = await prisma.user.findUnique({
           where: { id: decoded.userId },
-          select: {
-            id: true,
-            email: true,
-            status: true,
-          },
+          select: { id: true, email: true, status: true },
         });
 
         if (user && user.status !== 'SUSPENDED') {
@@ -274,7 +320,7 @@ export const optionalAuth = async (
           };
         }
       } catch {
-        // Token invalid, continue without user
+        // Invalid token - continue without user
       }
     }
 

@@ -15,8 +15,12 @@ class DashboardController {
       const stats = await dashboardService.getStats(organizationId);
       return sendSuccess(res, stats, 'Dashboard stats retrieved');
     } catch (error: any) {
-      console.error('Get dashboard stats error:', error);
-      return errorResponse(res, error.message || 'Failed to get stats', 500);
+      console.error('❌ Dashboard stats error:', {
+        message: error.message,
+        stack: error.stack?.split('\n')[1], // First stack line only
+        organizationId: req.user?.organizationId,
+      });
+      return errorResponse(res, 'Failed to get stats', 500);
     }
   }
 
@@ -27,12 +31,16 @@ class DashboardController {
         return errorResponse(res, 'Organization not found', 400);
       }
 
-      const days = parseInt(req.query.days as string) || 7;
+      const days = Math.min(parseInt(req.query.days as string) || 7, 90); // Max 90 days
       const widgets = await dashboardService.getWidgets(organizationId, days);
       return sendSuccess(res, widgets, 'Dashboard widgets retrieved');
     } catch (error: any) {
-      console.error('Get dashboard widgets error:', error);
-      return errorResponse(res, error.message || 'Failed to get widgets', 500);
+      console.error('❌ Dashboard widgets error:', {
+        message: error.message,
+        stack: error.stack?.split('\n')[1],
+        organizationId: req.user?.organizationId,
+      });
+      return errorResponse(res, 'Failed to get widgets', 500);
     }
   }
 

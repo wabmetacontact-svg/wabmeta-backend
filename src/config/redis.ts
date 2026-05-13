@@ -158,12 +158,13 @@ export const getRedis = (): Redis | null => {
         return null;
     }
 
-    // ✅ Only return if actually ready
-    if (redisInstance.status === 'ready' ||
-        redisInstance.status === 'connect') {
+    // ✅ CRITICAL FIX: Sirf 'ready' status pe return karo
+    // 'connect', 'reconnecting', 'wait' states mein commands fail karti hain
+    if (redisInstance.status === 'ready') {
         return redisInstance;
     }
 
+    // Koi bhi aur state = safe nahi hai
     return null;
 };
 
