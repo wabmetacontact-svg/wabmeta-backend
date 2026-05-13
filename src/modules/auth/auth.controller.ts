@@ -1,3 +1,5 @@
+// src/modules/auth/auth.controller.ts - FINAL VERSION
+
 import { Request, Response, NextFunction } from 'express';
 import { authService } from './auth.service';
 import { sendSuccess } from '../../utils/response';
@@ -21,6 +23,7 @@ interface AuthRequest extends Request {
   };
 }
 
+// ✅ Cookie options for setting cookies (with maxAge)
 const cookieOptions = (isRefresh: boolean = false) => ({
   httpOnly: true,
   secure: true,
@@ -31,15 +34,19 @@ const cookieOptions = (isRefresh: boolean = false) => ({
   path: '/',
 });
 
+// ✅ FIX: Cookie options for clearing cookies (NO maxAge)
+const clearCookieOptions = () => ({
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none' as const,
+  path: '/',
+});
+
 export class AuthController {
   // ────────────────────────────────────────────
   // SEND PHONE OTP
   // ────────────────────────────────────────────
-  async sendPhoneOTP(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) {
+  async sendPhoneOTP(req: Request, res: Response, next: NextFunction) {
     try {
       const { phone } = req.body;
 
@@ -50,12 +57,12 @@ export class AuthController {
         });
       }
 
-      // Basic sanity check
       const digits = phone.replace(/\D/g, '');
       if (digits.length < 10 || digits.length > 15) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid phone number. Please enter a valid mobile number.',
+          message:
+            'Invalid phone number. Please enter a valid mobile number.',
         });
       }
 
@@ -85,7 +92,6 @@ export class AuthController {
         organizationName,
       } = req.body;
 
-      // Required fields
       if (!phone || !otp || !firstName || !email || !password) {
         return res.status(400).json({
           success: false,
@@ -94,7 +100,6 @@ export class AuthController {
         });
       }
 
-      // OTP format check
       if (!/^\d{6}$/.test(otp)) {
         return res.status(400).json({
           success: false,
@@ -102,7 +107,6 @@ export class AuthController {
         });
       }
 
-      // Email format check
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         return res.status(400).json({
           success: false,
@@ -110,17 +114,13 @@ export class AuthController {
         });
       }
 
-      const result = await authService.verifyPhoneOTPAndRegister(
-        phone,
-        otp,
-        {
-          firstName: firstName.trim(),
-          lastName: lastName?.trim(),
-          email: email.trim().toLowerCase(),
-          password,
-          organizationName: organizationName?.trim(),
-        }
-      );
+      const result = await authService.verifyPhoneOTPAndRegister(phone, otp, {
+        firstName: firstName.trim(),
+        lastName: lastName?.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+        organizationName: organizationName?.trim(),
+      });
 
       res.cookie(
         'refreshToken',
@@ -145,7 +145,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // REGISTER (existing)
+  // REGISTER
   // ────────────────────────────────────────────
   async register(req: Request, res: Response, next: NextFunction) {
     try {
@@ -170,7 +170,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // LOGIN (existing)
+  // LOGIN
   // ────────────────────────────────────────────
   async login(req: Request, res: Response, next: NextFunction) {
     try {
@@ -195,7 +195,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // VERIFY EMAIL (existing)
+  // VERIFY EMAIL
   // ────────────────────────────────────────────
   async verifyEmail(req: Request, res: Response, next: NextFunction) {
     try {
@@ -208,7 +208,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // RESEND VERIFICATION (existing)
+  // RESEND VERIFICATION
   // ────────────────────────────────────────────
   async resendVerification(
     req: Request,
@@ -225,13 +225,9 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // FORGOT PASSWORD (existing)
+  // FORGOT PASSWORD
   // ────────────────────────────────────────────
-  async forgotPassword(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) {
+  async forgotPassword(req: Request, res: Response, next: NextFunction) {
     try {
       const { email }: ForgotPasswordInput = req.body;
       const result = await authService.forgotPassword(email);
@@ -242,13 +238,9 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // RESET PASSWORD (existing)
+  // RESET PASSWORD
   // ────────────────────────────────────────────
-  async resetPassword(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) {
+  async resetPassword(req: Request, res: Response, next: NextFunction) {
     try {
       const { token, password }: ResetPasswordInput = req.body;
       const result = await authService.resetPassword(token, password);
@@ -259,7 +251,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // SEND EMAIL OTP (existing)
+  // SEND EMAIL OTP
   // ────────────────────────────────────────────
   async sendOTP(req: Request, res: Response, next: NextFunction) {
     try {
@@ -272,7 +264,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // VERIFY EMAIL OTP (existing)
+  // VERIFY EMAIL OTP
   // ────────────────────────────────────────────
   async verifyOTP(req: Request, res: Response, next: NextFunction) {
     try {
@@ -297,7 +289,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // GOOGLE AUTH (existing)
+  // GOOGLE AUTH
   // ────────────────────────────────────────────
   async googleAuth(req: Request, res: Response, next: NextFunction) {
     try {
@@ -322,13 +314,9 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // REFRESH TOKEN (existing)
+  // REFRESH TOKEN
   // ────────────────────────────────────────────
-  async refreshToken(
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ) {
+  async refreshToken(req: Request, res: Response, next: NextFunction) {
     try {
       const refreshToken =
         req.cookies?.refreshToken ||
@@ -353,7 +341,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // LOGOUT (existing)
+  // LOGOUT - ✅ FIXED clearCookie warning
   // ────────────────────────────────────────────
   async logout(req: Request, res: Response, next: NextFunction) {
     try {
@@ -364,8 +352,9 @@ export class AuthController {
         await authService.logout(refreshToken);
       }
 
-      res.clearCookie('refreshToken', cookieOptions(true));
-      res.clearCookie('accessToken', cookieOptions(false));
+      // ✅ FIX: Use clearCookieOptions (no maxAge)
+      res.clearCookie('refreshToken', clearCookieOptions());
+      res.clearCookie('accessToken', clearCookieOptions());
 
       return sendSuccess(res, null, 'Logged out successfully');
     } catch (error) {
@@ -374,19 +363,16 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // LOGOUT ALL (existing)
+  // LOGOUT ALL - ✅ FIXED clearCookie warning
   // ────────────────────────────────────────────
-  async logoutAll(
-    req: AuthRequest,
-    res: Response,
-    next: NextFunction
-  ) {
+  async logoutAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
       const result = await authService.logoutAll(userId);
 
-      res.clearCookie('refreshToken', cookieOptions(true));
-      res.clearCookie('accessToken', cookieOptions(false));
+      // ✅ FIX: Use clearCookieOptions (no maxAge)
+      res.clearCookie('refreshToken', clearCookieOptions());
+      res.clearCookie('accessToken', clearCookieOptions());
 
       return sendSuccess(res, result, result.message);
     } catch (error) {
@@ -395,7 +381,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // ME (existing)
+  // ME
   // ────────────────────────────────────────────
   async me(req: AuthRequest, res: Response, next: NextFunction) {
     try {
@@ -408,7 +394,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // CHANGE PASSWORD (existing)
+  // CHANGE PASSWORD - ✅ FIXED clearCookie warning
   // ────────────────────────────────────────────
   async changePassword(
     req: AuthRequest,
@@ -417,15 +403,16 @@ export class AuthController {
   ) {
     try {
       const userId = req.user!.id;
-      const { currentPassword, newPassword }: ChangePasswordInput =
-        req.body;
+      const { currentPassword, newPassword }: ChangePasswordInput = req.body;
       const result = await authService.changePassword(
         userId,
         currentPassword,
         newPassword
       );
 
-      res.clearCookie('refreshToken', cookieOptions());
+      // ✅ FIX: Use clearCookieOptions (no maxAge)
+      res.clearCookie('refreshToken', clearCookieOptions());
+
       return sendSuccess(res, result, result.message);
     } catch (error) {
       next(error);

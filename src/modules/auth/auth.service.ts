@@ -1,3 +1,5 @@
+// src/modules/auth/auth.service.ts - FINAL VERSION
+
 import prisma from '../../config/database';
 import { config } from '../../config';
 import { hashPassword, comparePassword } from '../../utils/password';
@@ -37,16 +39,14 @@ const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // 1 minute
 // ============================================
 
 const googleClient = new OAuth2Client(config.google.clientId);
-const redis = getRedis();
+
+// ✅ NOTE: redis variable HATAYA gaya hai top se
+// Har function me getRedis() call hoga jab zaroorat ho
 
 // ============================================
 // HELPER: Phone Normalizers
 // ============================================
 
-/**
- * WhatsApp API ke liye phone format
- * Output: "919876543210" (no + sign)
- */
 const toWhatsAppPhone = (phone: string): string => {
   const digits = phone.replace(/\D/g, '');
   if (digits.length === 10) return `91${digits}`;
@@ -56,10 +56,6 @@ const toWhatsAppPhone = (phone: string): string => {
   return digits;
 };
 
-/**
- * Database store ke liye E.164 format
- * Output: "+919876543210"
- */
 const toE164 = (phone: string): string => {
   const wa = toWhatsAppPhone(phone);
   return `+${wa}`;
@@ -100,6 +96,17 @@ const sendWhatsAppTemplate = (
 
   const waPhone = toWhatsAppPhone(phone);
 
+  // Dev console log
+  if (config.nodeEnv === 'development') {
+    console.log('\n' + '='.repeat(45));
+    console.log(`  📱 WhatsApp Template: ${templateName}`);
+    console.log(`  📞 To: +${waPhone}`);
+    if (templateName.includes('otp') && bodyParams[0]) {
+      console.log(`  🔢 OTP: ${bodyParams[0]}`);
+    }
+    console.log('='.repeat(45) + '\n');
+  }
+
   void whatsappApi
     .sendTemplateMessage(
       phoneNumberId,
@@ -112,16 +119,21 @@ const sendWhatsAppTemplate = (
     .then(() =>
       console.log(`✅ WhatsApp [${templateName}] → +${waPhone}`)
     )
-    .catch((err: any) =>
+    .catch((err: any) => {
       console.warn(
         `⚠️  WhatsApp [${templateName}] → +${waPhone} failed:`,
         err?.message
-      )
-    );
+      );
+      if (err?.message?.includes('template')) {
+        console.warn(
+          '💡 Template not approved yet. Check business.facebook.com → Message Templates'
+        );
+      }
+    });
 };
 
 // ============================================
-// HELPER: Format user for response
+// HELPER: Format user
 // ============================================
 
 const formatUser = (user: any): AuthUser => ({
@@ -164,18 +176,16 @@ const generateTokenPair = async (
 };
 
 // ============================================
-// HELPER: Get user's default organization
+// HELPER: Get default org
 // ============================================
 
 const getDefaultOrg = async (userId: string) => {
-  // Pehle owned org dhundo
   const owned = await prisma.organization.findFirst({
     where: { ownerId: userId },
     select: { id: true, name: true, slug: true, planType: true },
   });
   if (owned) return owned;
 
-  // Phir membership dhundo
   const membership = await prisma.organizationMember.findFirst({
     where: { userId },
     include: {
@@ -188,7 +198,7 @@ const getDefaultOrg = async (userId: string) => {
 };
 
 // ============================================
-// HELPER: Create org + subscription in tx
+// HELPER: Create org with plan
 // ============================================
 
 const createOrgWithPlan = async (
@@ -196,7 +206,6 @@ const createOrgWithPlan = async (
   userId: string,
   orgName: string
 ) => {
-  // FREE_DEMO plan fetch karo
   const freePlan = await tx.plan.findUnique({
     where: { type: 'FREE_DEMO' },
   });
@@ -208,7 +217,6 @@ const createOrgWithPlan = async (
     );
   }
 
-  // Organization create karo
   const slug =
     generateSlug(orgName) +
     '-' +
@@ -226,7 +234,6 @@ const createOrgWithPlan = async (
     } as any,
   });
 
-  // Owner as member add karo
   await tx.organizationMember.create({
     data: {
       organizationId: organization.id,
@@ -236,7 +243,6 @@ const createOrgWithPlan = async (
     },
   });
 
-  // FREE_DEMO subscription create karo
   await tx.subscription.create({
     data: {
       organizationId: organization.id,
@@ -262,14 +268,18 @@ export class AuthService {
   // SEND PHONE OTP
   // ────────────────────────────────────────────
   async sendPhoneOTP(phone: string): Promise<{ message: string }> {
+    // ✅ FIX: getRedis() call function ke andar
+    const redis = getRedis();
+
     if (!redis) {
+      console.error('❌ Redis not available for OTP service');
       throw new AppError('OTP service temporarily unavailable', 503);
     }
 
     const waPhone = toWhatsAppPhone(phone);
     const key = `${PHONE_OTP_PREFIX}${waPhone}`;
 
-    // ─── Cooldown check ─────────────────────────────────────────────────
+    // Cooldown check
     const existing = await redis.get(key);
     if (existing) {
       const data = JSON.parse(existing);
@@ -283,7 +293,7 @@ export class AuthService {
       }
     }
 
-    // ─── OTP generate & store ────────────────────────────────────────────
+    // Generate & store OTP
     const otp = generateOTP(6);
 
     await redis.set(
@@ -292,21 +302,20 @@ export class AuthService {
         otp,
         attempts: 0,
         createdAt: Date.now(),
-        verified: false,
       }),
       'EX',
       OTP_TTL_SECONDS
     );
 
-    // ─── Dev mode console log ────────────────────────────────────────────
+    // Dev console log
     if (config.nodeEnv === 'development') {
-      console.log('\n' + '='.repeat(40));
+      console.log('\n' + '='.repeat(45));
       console.log(`  📱 DEV OTP for +${waPhone}`);
       console.log(`  🔢 OTP: ${otp}`);
-      console.log('='.repeat(40) + '\n');
+      console.log('='.repeat(45) + '\n');
     }
 
-    // ─── WhatsApp pe bhejo ───────────────────────────────────────────────
+    // Send via WhatsApp
     sendWhatsAppTemplate(
       waPhone,
       config.platform.whatsapp.otpTemplate,
@@ -338,7 +347,11 @@ export class AuthService {
       organizationName?: string;
     }
   ): Promise<AuthResponse> {
+    // ✅ FIX: getRedis() call function ke andar
+    const redis = getRedis();
+
     if (!redis) {
+      console.error('❌ Redis not available for OTP verification');
       throw new AppError('OTP service temporarily unavailable', 503);
     }
 
@@ -346,7 +359,7 @@ export class AuthService {
     const phoneE164 = toE164(phone);
     const key = `${PHONE_OTP_PREFIX}${waPhone}`;
 
-    // ─── Redis se OTP fetch karo ─────────────────────────────────────────
+    // Get OTP from Redis
     const stored = await redis.get(key);
 
     if (!stored) {
@@ -358,7 +371,7 @@ export class AuthService {
 
     const storedData = JSON.parse(stored);
 
-    // ─── Max attempts check ──────────────────────────────────────────────
+    // Max attempts check
     if (storedData.attempts >= MAX_OTP_ATTEMPTS) {
       await redis.del(key);
       throw new AppError(
@@ -367,7 +380,7 @@ export class AuthService {
       );
     }
 
-    // ─── OTP match karo ──────────────────────────────────────────────────
+    // OTP match
     if (storedData.otp !== otp) {
       const newAttempts = storedData.attempts + 1;
       const remaining = MAX_OTP_ATTEMPTS - newAttempts;
@@ -379,15 +392,17 @@ export class AuthService {
       );
 
       throw new AppError(
-        `Invalid OTP. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`,
+        `Invalid OTP. ${remaining} attempt${
+          remaining !== 1 ? 's' : ''
+        } remaining.`,
         400
       );
     }
 
-    // ─── OTP sahi hai - delete karo ──────────────────────────────────────
+    // OTP verified - delete from Redis
     await redis.del(key);
 
-    // ─── Email unique check ──────────────────────────────────────────────
+    // Email duplicate check
     const normalizedEmail = userData.email.trim().toLowerCase();
 
     const existingUser = await prisma.user.findUnique({
@@ -401,10 +416,10 @@ export class AuthService {
       );
     }
 
-    // ─── Password hash karo ──────────────────────────────────────────────
+    // Hash password
     const hashedPassword = await hashPassword(userData.password);
 
-    // ─── DB Transaction: User + Org + Subscription ───────────────────────
+    // Create user + org + subscription
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -413,7 +428,7 @@ export class AuthService {
           firstName: userData.firstName.trim(),
           lastName: userData.lastName?.trim() || null,
           phone: phoneE164,
-          emailVerified: true, // Phone OTP se verified
+          emailVerified: true,
           status: 'ACTIVE',
         },
       });
@@ -427,23 +442,20 @@ export class AuthService {
       return { user, organization };
     });
 
-    // ─── Tokens generate karo ────────────────────────────────────────────
+    // Generate tokens
     const tokens = await generateTokenPair(
       result.user.id,
       result.user.email,
       result.organization.id
     );
 
-    // ─── Welcome messages bhejo (non-blocking) ───────────────────────────
-
-    // 1. WhatsApp welcome
+    // Send welcome messages (non-blocking)
     sendWhatsAppTemplate(
       waPhone,
       config.platform.whatsapp.welcomeTemplate,
       [result.user.firstName]
     );
 
-    // 2. Welcome email
     sendEmailNonBlocking({
       to: normalizedEmail,
       subject: '🎉 Welcome to WabMeta!',
@@ -467,27 +479,19 @@ export class AuthService {
   }
 
   // ────────────────────────────────────────────
-  // REGISTER (Email based - existing flow)
+  // REGISTER (Email based)
   // ────────────────────────────────────────────
   async register(input: RegisterInput): Promise<AuthResponse> {
-    const {
-      email,
-      password,
-      firstName,
-      lastName,
-      phone,
-      organizationName,
-    } = input;
+    const { email, password, firstName, lastName, phone, organizationName } =
+      input;
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Existing user check
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
     if (existingUser) {
       if (!existingUser.emailVerified) {
-        // Resend verification
         const token = generateToken();
         const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -497,7 +501,10 @@ export class AuthService {
         });
 
         const verifyUrl = `${config.frontendUrl}/verify-email?token=${token}`;
-        const tpl = emailTemplates.verifyEmail(existingUser.firstName, verifyUrl);
+        const tpl = emailTemplates.verifyEmail(
+          existingUser.firstName,
+          verifyUrl
+        );
         sendEmailNonBlocking({
           to: normalizedEmail,
           subject: tpl.subject,
@@ -514,9 +521,7 @@ export class AuthService {
 
     const hashedPassword = await hashPassword(password);
     const emailVerifyToken = generateToken();
-    const emailVerifyExpires = new Date(
-      Date.now() + 24 * 60 * 60 * 1000
-    );
+    const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -539,7 +544,6 @@ export class AuthService {
       return { user, organization };
     });
 
-    // Verification email
     const verifyUrl = `${config.frontendUrl}/verify-email?token=${emailVerifyToken}`;
     const tpl = emailTemplates.verifyEmail(firstName, verifyUrl);
     sendEmailNonBlocking({
@@ -548,7 +552,6 @@ export class AuthService {
       html: tpl.html,
     });
 
-    // WhatsApp welcome (if phone hai)
     if (phone) {
       sendWhatsAppTemplate(
         phone,
@@ -616,7 +619,6 @@ export class AuthService {
       );
     }
 
-    // Organization fetch/create
     let organization = await getDefaultOrg(user.id);
 
     if (!organization) {
@@ -627,7 +629,6 @@ export class AuthService {
       );
     }
 
-    // Last login update
     await prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
@@ -660,10 +661,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new AppError(
-        'Invalid or expired verification token',
-        400
-      );
+      throw new AppError('Invalid or expired verification token', 400);
     }
 
     await prisma.user.update({
@@ -784,9 +782,11 @@ export class AuthService {
   }
 
   // ────────────────────────────────────────────
-  // SEND EMAIL OTP (existing feature)
+  // SEND EMAIL OTP
   // ────────────────────────────────────────────
   async sendOTP(email: string): Promise<{ message: string }> {
+    // ✅ FIX: getRedis() inside function
+    const redis = getRedis();
     if (!redis) throw new AppError('Service temporarily unavailable', 503);
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -812,7 +812,6 @@ export class AuthService {
       html: tpl.html,
     });
 
-    // WhatsApp pe bhi bhejo agar phone hai
     if (user.phone) {
       sendWhatsAppTemplate(
         user.phone,
@@ -825,9 +824,11 @@ export class AuthService {
   }
 
   // ────────────────────────────────────────────
-  // VERIFY EMAIL OTP (existing feature)
+  // VERIFY EMAIL OTP
   // ────────────────────────────────────────────
   async verifyOTP(email: string, otp: string): Promise<AuthResponse> {
+    // ✅ FIX: getRedis() inside function
+    const redis = getRedis();
     if (!redis) throw new AppError('Service temporarily unavailable', 503);
 
     const normalizedEmail = email.trim().toLowerCase();
