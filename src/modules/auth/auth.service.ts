@@ -23,6 +23,7 @@ import {
 import { OAuth2Client } from 'google-auth-library';
 import { getRedis } from '../../config/redis';
 import { whatsappApi } from '../whatsapp/whatsapp.api';
+import Redis from 'ioredis';
 
 // ============================================
 // CONSTANTS
@@ -130,6 +131,133 @@ const sendWhatsAppTemplate = (
         );
       }
     });
+};
+// ============================================
+// HELPER: Safe Redis operation wrapper
+// ============================================
+
+// ✅ NEW: Redis operations ko safely execute karo
+const safeRedisOp = async <T>(
+  operation: (redis: Redis) => Promise<T>,
+  fallback: T,
+  operationName = 'Redis op'
+): Promise<T> => {
+  const redis = getRedis();
+  if (!redis) {
+    console.warn(`⚠️  ${operationName}: Redis not available, using fallback`);
+    return fallback;
+  }
+
+  try {
+    return await operation(redis);
+  } catch (err: any) {
+    console.warn(`⚠️  ${operationName} failed: ${err.message}`);
+    return fallback;
+  }
+};
+
+// ============================================
+// IN-MEMORY OTP FALLBACK (jab Redis nahi ho)
+// ============================================
+
+interface OtpData {
+  otp: string;
+  attempts: number;
+  createdAt: number;
+  expiresAt: number;
+}
+
+// ✅ In-memory store - Redis down hone pe kaam aayega
+// Note: Multi-instance pe kaam nahi karega, but single Render instance pe theek hai
+const memoryOtpStore = new Map<string, OtpData>();
+
+// Expired OTPs cleanup (memory leak prevent karo)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, data] of memoryOtpStore.entries()) {
+    if (now > data.expiresAt) {
+      memoryOtpStore.delete(key);
+    }
+  }
+}, 5 * 60 * 1000); // Har 5 min pe cleanup
+
+// ─── OTP Store (Redis + Memory Fallback) ─────────────────────────
+
+const storeOTP = async (key: string, data: OtpData): Promise<void> => {
+  const redis = getRedis();
+
+  if (redis) {
+    try {
+      const ttl = Math.ceil((data.expiresAt - Date.now()) / 1000);
+      await redis.set(key, JSON.stringify(data), 'EX', ttl);
+      return;
+    } catch (err: any) {
+      console.warn('⚠️  Redis store failed, using memory:', err.message);
+    }
+  }
+
+  // ✅ Memory fallback
+  memoryOtpStore.set(key, data);
+};
+
+const getOTP = async (key: string): Promise<OtpData | null> => {
+  const redis = getRedis();
+
+  if (redis) {
+    try {
+      const stored = await redis.get(key);
+      if (stored) return JSON.parse(stored);
+    } catch (err: any) {
+      console.warn('⚠️  Redis get failed, checking memory:', err.message);
+    }
+  }
+
+  // ✅ Memory fallback
+  const memData = memoryOtpStore.get(key);
+  if (!memData) return null;
+
+  // Expiry check
+  if (Date.now() > memData.expiresAt) {
+    memoryOtpStore.delete(key);
+    return null;
+  }
+
+  return memData;
+};
+
+const deleteOTP = async (key: string): Promise<void> => {
+  const redis = getRedis();
+
+  if (redis) {
+    try {
+      await redis.del(key);
+    } catch (err: any) {
+      console.warn('⚠️  Redis del failed:', err.message);
+    }
+  }
+
+  // Memory se bhi delete karo
+  memoryOtpStore.delete(key);
+};
+
+const updateOTPAttempts = async (
+  key: string,
+  data: OtpData,
+  newAttempts: number
+): Promise<void> => {
+  const updated = { ...data, attempts: newAttempts };
+  const redis = getRedis();
+
+  if (redis) {
+    try {
+      await redis.set(key, JSON.stringify(updated), 'KEEPTTL');
+      return;
+    } catch (err: any) {
+      console.warn('⚠️  Redis update failed, using memory:', err.message);
+    }
+  }
+
+  memoryOtpStore.set(key, updated);
 };
 
 // ============================================
@@ -268,22 +396,13 @@ export class AuthService {
   // SEND PHONE OTP
   // ────────────────────────────────────────────
   async sendPhoneOTP(phone: string): Promise<{ message: string }> {
-    // ✅ FIX: getRedis() call function ke andar
-    const redis = getRedis();
-
-    if (!redis) {
-      console.error('❌ Redis not available for OTP service');
-      throw new AppError('OTP service temporarily unavailable', 503);
-    }
-
     const waPhone = toWhatsAppPhone(phone);
     const key = `${PHONE_OTP_PREFIX}${waPhone}`;
 
-    // Cooldown check
-    const existing = await redis.get(key);
+    // Cooldown check (Redis ya memory se)
+    const existing = await getOTP(key);
     if (existing) {
-      const data = JSON.parse(existing);
-      const elapsed = Date.now() - (data.createdAt || 0);
+      const elapsed = Date.now() - (existing.createdAt || 0);
       if (elapsed < OTP_RESEND_COOLDOWN_MS) {
         const wait = Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000);
         throw new AppError(
@@ -293,21 +412,17 @@ export class AuthService {
       }
     }
 
-    // Generate & store OTP
     const otp = generateOTP(6);
+    const otpData: OtpData = {
+      otp,
+      attempts: 0,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
+    };
 
-    await redis.set(
-      key,
-      JSON.stringify({
-        otp,
-        attempts: 0,
-        createdAt: Date.now(),
-      }),
-      'EX',
-      OTP_TTL_SECONDS
-    );
+    // ✅ Redis ya memory me store karo - koi bhi down ho chalega
+    await storeOTP(key, otpData);
 
-    // Dev console log
     if (config.nodeEnv === 'development') {
       console.log('\n' + '='.repeat(45));
       console.log(`  📱 DEV OTP for +${waPhone}`);
@@ -315,7 +430,6 @@ export class AuthService {
       console.log('='.repeat(45) + '\n');
     }
 
-    // Send via WhatsApp
     sendWhatsAppTemplate(
       waPhone,
       config.platform.whatsapp.otpTemplate,
@@ -347,49 +461,33 @@ export class AuthService {
       organizationName?: string;
     }
   ): Promise<AuthResponse> {
-    // ✅ FIX: getRedis() call function ke andar
-    const redis = getRedis();
-
-    if (!redis) {
-      console.error('❌ Redis not available for OTP verification');
-      throw new AppError('OTP service temporarily unavailable', 503);
-    }
-
     const waPhone = toWhatsAppPhone(phone);
     const phoneE164 = toE164(phone);
     const key = `${PHONE_OTP_PREFIX}${waPhone}`;
 
-    // Get OTP from Redis
-    const stored = await redis.get(key);
+    // ✅ Redis ya memory se OTP lo
+    const storedData = await getOTP(key);
 
-    if (!stored) {
+    if (!storedData) {
       throw new AppError(
         'OTP expired or not found. Please request a new OTP.',
         400
       );
     }
 
-    const storedData = JSON.parse(stored);
-
-    // Max attempts check
     if (storedData.attempts >= MAX_OTP_ATTEMPTS) {
-      await redis.del(key);
+      await deleteOTP(key);
       throw new AppError(
         'Too many incorrect attempts. Please request a new OTP.',
         429
       );
     }
 
-    // OTP match
     if (storedData.otp !== otp) {
       const newAttempts = storedData.attempts + 1;
       const remaining = MAX_OTP_ATTEMPTS - newAttempts;
 
-      await redis.set(
-        key,
-        JSON.stringify({ ...storedData, attempts: newAttempts }),
-        'KEEPTTL'
-      );
+      await updateOTPAttempts(key, storedData, newAttempts);
 
       throw new AppError(
         `Invalid OTP. ${remaining} attempt${
@@ -400,7 +498,7 @@ export class AuthService {
     }
 
     // OTP verified - delete from Redis
-    await redis.del(key);
+    await deleteOTP(key);
 
     // Email duplicate check
     const normalizedEmail = userData.email.trim().toLowerCase();
@@ -785,10 +883,6 @@ export class AuthService {
   // SEND EMAIL OTP
   // ────────────────────────────────────────────
   async sendOTP(email: string): Promise<{ message: string }> {
-    // ✅ FIX: getRedis() inside function
-    const redis = getRedis();
-    if (!redis) throw new AppError('Service temporarily unavailable', 503);
-
     const normalizedEmail = email.trim().toLowerCase();
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -797,13 +891,17 @@ export class AuthService {
     if (!user) throw new AppError('User not found', 404);
 
     const otp = generateOTP(6);
+    const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
 
-    await redis.set(
-      `${EMAIL_OTP_PREFIX}${normalizedEmail}`,
-      JSON.stringify({ otp, attempts: 0 }),
-      'EX',
-      OTP_TTL_SECONDS
-    );
+    const otpData: OtpData = {
+      otp,
+      attempts: 0,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
+    };
+
+    // ✅ Fallback ke saath store karo
+    await storeOTP(key, otpData);
 
     const tpl = emailTemplates.otp(user.firstName, otp);
     sendEmailNonBlocking({
@@ -827,38 +925,27 @@ export class AuthService {
   // VERIFY EMAIL OTP
   // ────────────────────────────────────────────
   async verifyOTP(email: string, otp: string): Promise<AuthResponse> {
-    // ✅ FIX: getRedis() inside function
-    const redis = getRedis();
-    if (!redis) throw new AppError('Service temporarily unavailable', 503);
-
     const normalizedEmail = email.trim().toLowerCase();
     const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
-    const stored = await redis.get(key);
 
-    if (!stored) {
+    // ✅ Fallback ke saath get karo
+    const storedData = await getOTP(key);
+
+    if (!storedData) {
       throw new AppError('OTP expired or not found', 400);
     }
 
-    const { otp: storedOtp, attempts } = JSON.parse(stored);
-
-    if (attempts >= MAX_OTP_ATTEMPTS) {
-      await redis.del(key);
-      throw new AppError(
-        'Too many attempts. Please request a new OTP',
-        429
-      );
+    if (storedData.attempts >= MAX_OTP_ATTEMPTS) {
+      await deleteOTP(key);
+      throw new AppError('Too many attempts. Please request a new OTP', 429);
     }
 
-    if (storedOtp !== otp) {
-      await redis.set(
-        key,
-        JSON.stringify({ otp: storedOtp, attempts: attempts + 1 }),
-        'KEEPTTL'
-      );
+    if (storedData.otp !== otp) {
+      await updateOTPAttempts(key, storedData, storedData.attempts + 1);
       throw new AppError('Invalid OTP', 400);
     }
 
-    await redis.del(key);
+    await deleteOTP(key);
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },

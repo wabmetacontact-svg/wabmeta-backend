@@ -1,13 +1,22 @@
-// src/config/redis.ts - UPSTASH OPTIMIZED VERSION
+// src/config/redis.ts - PRODUCTION FIXED VERSION
 
 import Redis from 'ioredis';
 import { config } from './index';
 
 let redisInstance: Redis | null = null;
 let isInitializing = false;
+let permanentlyFailed = false; // ✅ NEW: Track permanent failure
 
 export const initRedis = (): Redis | null => {
-    if (redisInstance) {
+
+    // ✅ Agar permanently fail ho chuka hai toh dobara try mat karo
+    if (permanentlyFailed) {
+        return null;
+    }
+
+    if (redisInstance && 
+        redisInstance.status !== 'end' && 
+        redisInstance.status !== 'close') {
         return redisInstance;
     }
 
@@ -16,68 +25,81 @@ export const initRedis = (): Redis | null => {
     }
 
     if (!config.redis.url) {
-        console.warn(
-            '⚠️  REDIS_URL not configured. OTP & cache features will not work.'
-        );
+        console.warn('⚠️  REDIS_URL not configured. OTP features disabled.');
+        permanentlyFailed = true;
         return null;
     }
 
     isInitializing = true;
 
     try {
-        console.log('🔄 Initializing Redis connection...');
+        const isSecure = config.redis.url.startsWith('rediss://') ||
+            config.redis.url.includes('upstash.io');
 
-        // ✅ Parse URL to detect TLS
-        const isSecure = config.redis.url.startsWith('rediss://');
+        const redisUrl = isSecure && config.redis.url.startsWith('redis://')
+            ? config.redis.url.replace('redis://', 'rediss://')
+            : config.redis.url;
 
-        redisInstance = new Redis(config.redis.url, {
-            // ✅ Connection settings
-            maxRetriesPerRequest: null,           // ← FIX: Disable max retries
+        let retryCount = 0;
+        const MAX_RETRIES = 10; // ✅ Hard limit
+
+        redisInstance = new Redis(redisUrl, {
+            maxRetriesPerRequest: 3,      // ✅ Har request pe max 3 retry
             enableReadyCheck: true,
             lazyConnect: false,
+            family: 4,
+            connectTimeout: 20000,
+            keepAlive: 30000,
 
-            // ✅ Connection timeout
-            connectTimeout: 30000,                // 30s timeout
+            // ✅ CRITICAL: false karo - queued commands crash karti hain
+            enableOfflineQueue: false,
 
-            // ✅ Keep alive (Upstash requires this)
-            keepAlive: 30000,                     // 30s keep alive
-
-            // ✅ TLS configuration for Upstash
             tls: isSecure ? {
                 rejectUnauthorized: false,
-                servername: new URL(config.redis.url).hostname,
+                servername: new URL(redisUrl).hostname,
             } : undefined,
 
-            // ✅ Retry strategy with longer delays
+            // ✅ FIXED: Retry strategy jo actually STOP karta hai
             retryStrategy(times) {
-                if (times > 10) {
-                    console.error('❌ Redis: Max retries (10) reached. Giving up.');
-                    return null; // Stop retrying
+                retryCount = times;
+
+                if (times > MAX_RETRIES) {
+                    console.error(
+                        `❌ Redis: Max retries (${MAX_RETRIES}) reached. Giving up permanently.`
+                    );
+                    permanentlyFailed = true;
+                    redisInstance = null;
+                    // ✅ null return karo = ioredis retry BAND kar deta hai
+                    return null;
                 }
-                const delay = Math.min(times * 1000, 5000);
-                console.log(`⏳ Redis retry ${times}/10 in ${delay}ms`);
+
+                const delay = Math.min(times * 500, 10000);
+
+                if (times % 3 === 0) {
+                    console.warn(
+                        `⏳ Redis reconnect attempt ${times}/${MAX_RETRIES}... retry in ${delay}ms`
+                    );
+                }
+
                 return delay;
             },
 
-            // ✅ Reconnect on specific errors
             reconnectOnError(err) {
-                const targetErrors = ['READONLY', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
-                const shouldReconnect = targetErrors.some((e) =>
-                    err.message.includes(e)
-                );
-                if (shouldReconnect) {
-                    console.log('🔄 Reconnecting due to:', err.message);
-                }
-                return shouldReconnect;
+                const targetErrors = [
+                    'READONLY',
+                    'ECONNRESET',
+                    'ETIMEDOUT',
+                    'EPIPE'
+                ];
+                return targetErrors.some((e) => err.message.includes(e));
             },
-
-            // ✅ Enable offline queue (commands queued during disconnect)
-            enableOfflineQueue: true,
         });
 
-        // ─── Event Handlers ────────────────────────────────────────────────
+        // ─── Event Handlers ──────────────────────────────────────────
 
         redisInstance.on('connect', () => {
+            retryCount = 0;
+            permanentlyFailed = false; // ✅ Reset on successful connect
             console.log('✅ Redis connected successfully');
         });
 
@@ -86,32 +108,38 @@ export const initRedis = (): Redis | null => {
         });
 
         redisInstance.on('error', (err) => {
-            // Don't log every error to avoid spam
-            if (err.message.includes('ECONNRESET') ||
+            // ✅ Sabhi errors yahan catch hongi - unhandledRejection nahi banegi
+            const isNetworkNoise =
+                err.message.includes('ECONNRESET') ||
                 err.message.includes('ENOTFOUND') ||
-                err.message.includes('ETIMEDOUT')) {
-                // Silent network errors
-                return;
+                err.message.includes('ETIMEDOUT') ||
+                err.message.includes('EAI_AGAIN') ||
+                err.message.includes('Connection is closed') ||
+                err.message.includes('ECONNREFUSED');
+
+            if (!isNetworkNoise) {
+                console.error('❌ Redis error:', err.message);
             }
-            console.error('❌ Redis error:', err.message);
-        });
-
-        redisInstance.on('close', () => {
-            // Silent close - reconnection will handle it
-        });
-
-        redisInstance.on('reconnecting', (delay: number) => {
-            // Silent reconnecting
+            // ✅ Error swallow - crash nahi hoga
         });
 
         redisInstance.on('end', () => {
             console.warn('⚠️  Redis connection ended permanently');
+            redisInstance = null;
+            // permanentlyFailed = true ← ye mat karo
+            // Taaki agli request pe reinitialize ho sake
+        });
+
+        redisInstance.on('close', () => {
+            console.warn('⚠️  Redis connection closed');
         });
 
         return redisInstance;
+
     } catch (error: any) {
         console.error('❌ Failed to initialize Redis:', error.message);
         redisInstance = null;
+        permanentlyFailed = false; // Retry allow karo
         return null;
     } finally {
         isInitializing = false;
@@ -119,14 +147,37 @@ export const initRedis = (): Redis | null => {
 };
 
 export const getRedis = (): Redis | null => {
-    if (!redisInstance && !isInitializing) {
-        return initRedis();
+    if (permanentlyFailed) return null;
+
+    if (!redisInstance ||
+        redisInstance.status === 'end' ||
+        redisInstance.status === 'close') {
+        if (!isInitializing) {
+            return initRedis();
+        }
+        return null;
     }
-    return redisInstance;
+
+    // ✅ Only return if actually ready
+    if (redisInstance.status === 'ready' ||
+        redisInstance.status === 'connect') {
+        return redisInstance;
+    }
+
+    return null;
 };
 
 export const isRedisReady = (): boolean => {
-    return !!redisInstance && redisInstance.status === 'ready';
+    return !!redisInstance &&
+        redisInstance.status === 'ready' &&
+        !permanentlyFailed;
+};
+
+// ✅ NEW: Reset karo (admin/manual recovery ke liye)
+export const resetRedisFailure = (): void => {
+    permanentlyFailed = false;
+    redisInstance = null;
+    console.log('🔄 Redis failure state reset. Will retry on next request.');
 };
 
 export const closeRedis = async (): Promise<void> => {
@@ -142,4 +193,4 @@ export const closeRedis = async (): Promise<void> => {
     }
 };
 
-export default { initRedis, getRedis, isRedisReady, closeRedis };
+export default { initRedis, getRedis, isRedisReady, closeRedis, resetRedisFailure };

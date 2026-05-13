@@ -192,13 +192,26 @@ async function bootstrap() {
       console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     });
 
-    process.on('unhandledRejection', (reason, promise) => {
+    process.on('unhandledRejection', (reason: any) => {
+      const msg = reason?.message || String(reason);
+
+      // ✅ Redis related rejections - silently handle karo
+      if (
+        msg.includes('Connection is closed') ||
+        msg.includes('Redis') ||
+        msg.includes('ECONNRESET') ||
+        msg.includes('ECONNREFUSED') ||
+        msg.includes('enableOfflineQueue')
+      ) {
+        console.warn(`⚠️  Redis rejection handled: ${msg}`);
+        return; // Server crash nahi hoga
+      }
+
       console.error('');
       console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.error('❌ UNHANDLED REJECTION');
       console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.error('Promise:', promise);
-      console.error('Reason:', reason);
+      console.error('Reason:', msg);
       console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     });
   } catch (error) {
