@@ -23,7 +23,6 @@ import {
 import { OAuth2Client } from 'google-auth-library';
 import { getRedis } from '../../config/redis';
 import { whatsappApi } from '../whatsapp/whatsapp.api';
-import Redis from 'ioredis';
 
 // ============================================
 // CONSTANTS
@@ -138,7 +137,7 @@ const sendWhatsAppTemplate = (
 
 // ✅ NEW: Redis operations ko safely execute karo
 const safeRedisOp = async <T>(
-  operation: (redis: Redis) => Promise<T>,
+  operation: (redis: any) => Promise<T>,
   fallback: T,
   operationName = 'Redis op'
 ): Promise<T> => {
