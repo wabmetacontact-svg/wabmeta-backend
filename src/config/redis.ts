@@ -78,6 +78,10 @@ class InMemoryStore {
         return 'OK';
     }
 
+    async setex(key: string, seconds: number, value: string): Promise<'OK'> {
+        return this.set(key, value, 'EX', seconds);
+    }
+
     async del(...keys: string[]): Promise<number> {
         let deleted = 0;
         for (const key of keys) {
