@@ -152,18 +152,15 @@ export class AuthController {
       const input: RegisterInput = req.body;
       const result = await authService.register(input);
 
-      res.cookie(
-        'refreshToken',
-        result.tokens.refreshToken,
-        cookieOptions(true)
-      );
-      res.cookie(
-        'accessToken',
-        result.tokens.accessToken,
-        cookieOptions(false)
-      );
+      // ❌ Cookies mat set karo - user verified nahi hai abhi
+      // ✅ Sirf success message return karo
 
-      return sendSuccess(res, result, 'Registration successful', 201);
+      return sendSuccess(
+        res,
+        result,
+        result.message,
+        201
+      );
     } catch (error) {
       next(error);
     }

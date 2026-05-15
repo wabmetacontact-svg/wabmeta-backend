@@ -589,100 +589,103 @@ export class AuthService {
   // ────────────────────────────────────────────
   // REGISTER (Email based)
   // ────────────────────────────────────────────
-  async register(input: RegisterInput): Promise<AuthResponse> {
-    const { email, password, firstName, lastName, phone, organizationName } =
-      input;
+  async register(input: RegisterInput): Promise<{ 
+    message: string; 
+    email: string;
+    requiresVerification: boolean;
+  }> {
+    const { email, password, firstName, lastName, phone, organizationName } = input;
     const normalizedEmail = email.trim().toLowerCase();
 
+    // Email duplicate check
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
     if (existingUser) {
       if (!existingUser.emailVerified) {
-        const token = generateToken();
-        const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        // User exists but not verified - resend OTP
+        const otp = generateOTP(6);
+        const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
 
-        await prisma.user.update({
-          where: { id: existingUser.id },
-          data: { emailVerifyToken: token, emailVerifyExpires: expires },
-        });
+        const otpData: OtpData = {
+          otp,
+          attempts: 0,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
+        };
 
-        const verifyUrl = `${config.frontendUrl}/verify-email?token=${token}`;
-        const tpl = emailTemplates.verifyEmail(
-          existingUser.firstName,
-          verifyUrl
-        );
+        await storeOTP(key, otpData);
+
+        const tpl = emailTemplates.otp(existingUser.firstName, otp);
         sendEmailNonBlocking({
           to: normalizedEmail,
           subject: tpl.subject,
           html: tpl.html,
         });
 
-        throw new AppError(
-          'Email already registered. Verification email resent.',
-          409
-        );
+        return {
+          message: 'Account already exists but not verified. New OTP sent to your email.',
+          email: normalizedEmail,
+          requiresVerification: true,
+        };
       }
-      throw new AppError('Email already registered', 409);
+      throw new AppError('Email already registered. Please login instead.', 409);
     }
 
+    // Hash password
     const hashedPassword = await hashPassword(password);
-    const emailVerifyToken = generateToken();
-    const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
+    // Create user + organization in transaction
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           email: normalizedEmail,
           password: hashedPassword,
-          firstName,
-          lastName,
-          phone,
-          emailVerifyToken,
-          emailVerifyExpires,
+          firstName: firstName.trim(),
+          lastName: lastName?.trim() || null,
+          phone: phone || null,
+          emailVerified: false,
           status: 'PENDING_VERIFICATION',
         },
       });
 
-      const orgName =
-        organizationName?.trim() || `${firstName}'s Workspace`;
+      const orgName = organizationName?.trim() || `${firstName.trim()}'s Workspace`;
       const organization = await createOrgWithPlan(tx, user.id, orgName);
 
       return { user, organization };
     });
 
-    const verifyUrl = `${config.frontendUrl}/verify-email?token=${emailVerifyToken}`;
-    const tpl = emailTemplates.verifyEmail(firstName, verifyUrl);
+    // ✅ Generate OTP & send to EMAIL
+    const otp = generateOTP(6);
+    const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
+
+    const otpData: OtpData = {
+      otp,
+      attempts: 0,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
+    };
+
+    await storeOTP(key, otpData);
+
+    // ✅ Send OTP Email
+    const tpl = emailTemplates.otp(result.user.firstName, otp);
     sendEmailNonBlocking({
       to: normalizedEmail,
       subject: tpl.subject,
       html: tpl.html,
     });
 
-    if (phone) {
-      sendWhatsAppTemplate(
-        phone,
-        config.platform.whatsapp.welcomeTemplate,
-        [firstName || 'there']
-      );
-    }
+    console.log(`📧 Signup OTP sent to: ${normalizedEmail}`);
 
-    const tokens = await generateTokenPair(
-      result.user.id,
-      result.user.email,
-      result.organization.id
-    );
+    // ❌ NO WhatsApp message yet
+    // ❌ NO tokens yet (user not verified)
 
     return {
-      user: formatUser(result.user),
-      tokens,
-      organization: {
-        id: result.organization.id,
-        name: result.organization.name,
-        slug: result.organization.slug,
-        planType: result.organization.planType,
-      },
+      message: 'Account created! Please check your email for verification OTP.',
+      email: normalizedEmail,
+      requiresVerification: true,
     };
   }
 
@@ -937,7 +940,6 @@ export class AuthService {
       expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
     };
 
-    // ✅ Fallback ke saath store karo
     await storeOTP(key, otpData);
 
     const tpl = emailTemplates.otp(user.firstName, otp);
@@ -947,13 +949,10 @@ export class AuthService {
       html: tpl.html,
     });
 
-    if (user.phone) {
-      sendWhatsAppTemplate(
-        user.phone,
-        config.platform.whatsapp.otpTemplate,
-        [otp]
-      );
-    }
+    // ❌ Resend pe WhatsApp mat bhejo - sirf email
+    // (Phone OTP wala alag flow था पहले)
+
+    console.log(`📧 OTP resent to: ${normalizedEmail}`);
 
     return { message: 'OTP sent to your email' };
   }
@@ -961,7 +960,6 @@ export class AuthService {
   // ────────────────────────────────────────────
   // VERIFY EMAIL OTP
   // ────────────────────────────────────────────
-  // ✅ FIXED verifyOTP - welcome messages add kiye
   async verifyOTP(email: string, otp: string): Promise<AuthResponse> {
     const normalizedEmail = email.trim().toLowerCase();
     const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
@@ -969,26 +967,25 @@ export class AuthService {
     const storedData = await getOTP(key);
 
     if (!storedData) {
-      throw new AppError('OTP expired or not found', 400);
+      throw new AppError('OTP expired or not found. Please request a new one.', 400);
     }
 
     if (storedData.attempts >= MAX_OTP_ATTEMPTS) {
       await deleteOTP(key);
-      throw new AppError(
-        'Too many attempts. Please request a new OTP',
-        429
-      );
+      throw new AppError('Too many incorrect attempts. Please request a new OTP.', 429);
     }
 
     if (storedData.otp !== otp) {
-      await updateOTPAttempts(
-        key,
-        storedData,
-        storedData.attempts + 1
+      const newAttempts = storedData.attempts + 1;
+      const remaining = MAX_OTP_ATTEMPTS - newAttempts;
+      await updateOTPAttempts(key, storedData, newAttempts);
+      throw new AppError(
+        `Invalid OTP. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`,
+        400
       );
-      throw new AppError('Invalid OTP', 400);
     }
 
+    // OTP verified
     await deleteOTP(key);
 
     const user = await prisma.user.findUnique({
@@ -996,61 +993,62 @@ export class AuthService {
     });
     if (!user) throw new AppError('User not found', 404);
 
-    // ✅ Track first-time verification
+    // ✅ Check if first verification
     const isFirstVerification = !user.emailVerified;
 
-    if (isFirstVerification) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          emailVerified: true,
-          status: 'ACTIVE',
-          lastLoginAt: new Date(),
-        },
-      });
-    } else {
-      // Returning user - sirf login time update karo
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
-    }
+    // Update user as verified + active
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        status: 'ACTIVE',
+        lastLoginAt: new Date(),
+      },
+    });
 
+    // Get organization
     const organization = await getDefaultOrg(user.id);
+    
+    // Generate tokens
     const tokens = await generateTokenPair(
       user.id,
       user.email,
       organization?.id
     );
 
-    // ✅ Sirf pehli verification pe welcome messages
+    // ✅ FIRST TIME VERIFICATION - send welcome messages
     if (isFirstVerification) {
-      // Welcome Email
+      
+      // ✅ Welcome Email
       sendEmailNonBlocking({
         to: normalizedEmail,
         subject: '🎉 Welcome to WabMeta!',
         html: emailTemplates.welcome(user.firstName).html,
       });
+      console.log(`📧 Welcome email sent → ${normalizedEmail}`);
 
-      // Welcome WhatsApp (agar phone ho)
+      // ✅ Welcome WhatsApp (jo phone signup me diya tha)
       if (user.phone) {
         sendWhatsAppTemplate(
           user.phone,
           config.platform.whatsapp.welcomeTemplate,
           [user.firstName]
         );
+        console.log(`📱 Welcome WhatsApp sent → ${user.phone}`);
+      } else {
+        console.log(`ℹ️ No phone on file - WhatsApp welcome skipped`);
       }
 
-      console.log(
-        `✅ First verification: ${normalizedEmail}` +
-        (user.phone
-          ? ` | WhatsApp welcome → ${user.phone}`
-          : ' | No phone on file')
-      );
+      console.log(`✅ Account activated: ${normalizedEmail}`);
     }
 
+    // Get fresh user data after update
+    const updatedUser = await prisma.user.findUnique({
+      where: { id: user.id },
+    });
+
     return {
-      user: formatUser(user),
+      user: formatUser(updatedUser!),
       tokens,
       organization: organization || undefined,
     };
