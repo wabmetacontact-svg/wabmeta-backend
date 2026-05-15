@@ -9,6 +9,7 @@ import {
   updateAvatarSchema,
   deleteAccountSchema,
 } from './users.schema';
+import { rateLimit } from '../../middleware/rateLimit';
 
 const router = Router();
 
@@ -86,6 +87,17 @@ router.delete(
 router.delete(
   '/sessions',
   usersController.revokeAllSessions.bind(usersController)
+);
+
+/**
+ * @route   POST /api/v1/users/add-phone
+ * @desc    Add phone number (for Google login users)
+ * @access  Private
+ */
+router.post(
+  '/add-phone',
+  rateLimit({ windowMs: 60 * 1000, max: 3 }),
+  usersController.addPhoneNumber.bind(usersController)
 );
 
 /**

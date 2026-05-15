@@ -10,6 +10,8 @@ import {
   UserStats,
   SessionInfo,
 } from './users.types';
+import { whatsappApi } from '../whatsapp/whatsapp.api';
+import { config } from '../../config';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -27,6 +29,68 @@ const formatUserProfile = (user: any): UserProfile => ({
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
+
+// ============================================
+// HELPERS - WhatsApp Messaging
+// ============================================
+
+const toWhatsAppPhone = (phone: string): string => {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.startsWith('91') && digits.length === 12) return digits;
+  if (digits.startsWith('0') && digits.length === 11)
+    return `91${digits.slice(1)}`;
+  return digits;
+};
+
+const toE164 = (phone: string): string => {
+  const wa = toWhatsAppPhone(phone);
+  return `+${wa}`;
+};
+
+const sendWhatsAppTemplate = (
+  phone: string,
+  templateName: string,
+  bodyParams: string[] = []
+): void => {
+  const { phoneNumberId, accessToken } = config.platform.whatsapp;
+
+  if (!phoneNumberId || !accessToken) {
+    console.warn('⚠️ Platform WhatsApp not configured');
+    return;
+  }
+
+  const waPhone = toWhatsAppPhone(phone);
+
+  const templateComponents =
+    bodyParams.length > 0
+      ? {
+          body: bodyParams.map((param) => ({
+            type: 'text' as const,
+            text: param,
+          })),
+        }
+      : undefined;
+
+  void whatsappApi
+    .sendTemplateMessage(
+      phoneNumberId,
+      waPhone,
+      templateName,
+      'en',
+      templateComponents,
+      accessToken
+    )
+    .then(() =>
+      console.log(`✅ WhatsApp [${templateName}] → +${waPhone}`)
+    )
+    .catch((err: any) => {
+      console.warn(
+        `⚠️ WhatsApp [${templateName}] → +${waPhone} failed:`,
+        err?.message
+      );
+    });
+};
 
 // ============================================
 // USERS SERVICE CLASS
@@ -335,6 +399,77 @@ export class UsersService {
     }
 
     return formatUserProfile(user);
+  }
+
+  // ==========================================
+  // ADD PHONE NUMBER (For Google login users)
+  // ==========================================
+  async addPhoneNumber(
+    userId: string,
+    phone: string
+  ): Promise<{
+    message: string;
+    phone: string;
+    whatsappSent: boolean;
+  }> {
+    // Validate
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10 || digits.length > 15) {
+      throw new AppError('Invalid phone number', 400);
+    }
+
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    const phoneE164 = toE164(phone);
+
+    // Check duplicate
+    const existingPhoneUser = await prisma.user.findFirst({
+      where: {
+        phone: phoneE164,
+        id: { not: userId },
+      },
+    });
+
+    if (existingPhoneUser) {
+      throw new AppError(
+        'This phone number is already registered with another account',
+        409
+      );
+    }
+
+    // Update user
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { phone: phoneE164 },
+    });
+
+    console.log(`📱 Phone added: ${user.email} → ${phoneE164}`);
+
+    // Send Welcome WhatsApp (non-blocking)
+    let whatsappSent = false;
+    try {
+      sendWhatsAppTemplate(
+        phoneE164,
+        config.platform.whatsapp.welcomeTemplate,
+        [user.firstName]
+      );
+      whatsappSent = true;
+    } catch (err: any) {
+      console.warn('⚠️ WhatsApp send failed:', err.message);
+    }
+
+    return {
+      message: 'Phone number added successfully',
+      phone: updatedUser.phone!,
+      whatsappSent,
+    };
   }
 }
 
