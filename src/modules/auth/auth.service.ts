@@ -88,7 +88,7 @@ const sendWhatsAppTemplate = (
 
   if (!phoneNumberId || !accessToken) {
     console.warn(
-      '⚠️  Platform WhatsApp not configured.',
+      '⚠️  Platform WhatsApp not configured. ' +
       'Add PLATFORM_WA_PHONE_ID & PLATFORM_WA_ACCESS_TOKEN to .env'
     );
     return;
@@ -96,16 +96,26 @@ const sendWhatsAppTemplate = (
 
   const waPhone = toWhatsAppPhone(phone);
 
-  // Dev console log
   if (config.nodeEnv === 'development') {
     console.log('\n' + '='.repeat(45));
     console.log(`  📱 WhatsApp Template: ${templateName}`);
     console.log(`  📞 To: +${waPhone}`);
-    if (templateName.includes('otp') && bodyParams[0]) {
-      console.log(`  🔢 OTP: ${bodyParams[0]}`);
+    if (bodyParams.length > 0) {
+      console.log(`  📝 Params: ${bodyParams.join(', ')}`);
     }
     console.log('='.repeat(45) + '\n');
   }
+
+  // ✅ Correct format: string[] → { type, text }[]
+  const templateComponents =
+    bodyParams.length > 0
+      ? {
+          body: bodyParams.map((param) => ({
+            type: 'text' as const,
+            text: param,
+          })),
+        }
+      : undefined;
 
   void whatsappApi
     .sendTemplateMessage(
@@ -113,7 +123,7 @@ const sendWhatsAppTemplate = (
       waPhone,
       templateName,
       'en',
-      bodyParams.length > 0 ? { body: bodyParams } : undefined,
+      templateComponents,
       accessToken
     )
     .then(() =>
@@ -124,9 +134,10 @@ const sendWhatsAppTemplate = (
         `⚠️  WhatsApp [${templateName}] → +${waPhone} failed:`,
         err?.message
       );
-      if (err?.message?.includes('template')) {
+      if (err?.message?.toLowerCase().includes('template')) {
         console.warn(
-          '💡 Template not approved yet. Check business.facebook.com → Message Templates'
+          '💡 Template not approved. ' +
+          'Check: business.facebook.com → Message Templates'
         );
       }
     });
@@ -749,6 +760,7 @@ export class AuthService {
   // ────────────────────────────────────────────
   // VERIFY EMAIL
   // ────────────────────────────────────────────
+  // ✅ FIXED verifyEmail - welcome messages add kiye
   async verifyEmail(token: string): Promise<{ message: string }> {
     const user = await prisma.user.findFirst({
       where: {
@@ -758,7 +770,10 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new AppError('Invalid or expired verification token', 400);
+      throw new AppError(
+        'Invalid or expired verification token',
+        400
+      );
     }
 
     await prisma.user.update({
@@ -771,7 +786,30 @@ export class AuthService {
       },
     });
 
-    return { message: 'Email verified successfully' };
+    // ✅ Welcome Email
+    sendEmailNonBlocking({
+      to: user.email,
+      subject: '🎉 Welcome to WabMeta!',
+      html: emailTemplates.welcome(user.firstName).html,
+    });
+
+    // ✅ Welcome WhatsApp (agar phone ho)
+    if (user.phone) {
+      sendWhatsAppTemplate(
+        user.phone,
+        config.platform.whatsapp.welcomeTemplate,
+        [user.firstName]
+      );
+      console.log(
+        `📱 Welcome WhatsApp sent → ${user.phone}`
+      );
+    }
+
+    console.log(`✅ Email verified: ${user.email}`);
+
+    return {
+      message: 'Email verified successfully! Welcome to WabMeta 🎉',
+    };
   }
 
   // ────────────────────────────────────────────
@@ -923,11 +961,11 @@ export class AuthService {
   // ────────────────────────────────────────────
   // VERIFY EMAIL OTP
   // ────────────────────────────────────────────
+  // ✅ FIXED verifyOTP - welcome messages add kiye
   async verifyOTP(email: string, otp: string): Promise<AuthResponse> {
     const normalizedEmail = email.trim().toLowerCase();
     const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
 
-    // ✅ Fallback ke saath get karo
     const storedData = await getOTP(key);
 
     if (!storedData) {
@@ -936,11 +974,18 @@ export class AuthService {
 
     if (storedData.attempts >= MAX_OTP_ATTEMPTS) {
       await deleteOTP(key);
-      throw new AppError('Too many attempts. Please request a new OTP', 429);
+      throw new AppError(
+        'Too many attempts. Please request a new OTP',
+        429
+      );
     }
 
     if (storedData.otp !== otp) {
-      await updateOTPAttempts(key, storedData, storedData.attempts + 1);
+      await updateOTPAttempts(
+        key,
+        storedData,
+        storedData.attempts + 1
+      );
       throw new AppError('Invalid OTP', 400);
     }
 
@@ -951,10 +996,23 @@ export class AuthService {
     });
     if (!user) throw new AppError('User not found', 404);
 
-    if (!user.emailVerified) {
+    // ✅ Track first-time verification
+    const isFirstVerification = !user.emailVerified;
+
+    if (isFirstVerification) {
       await prisma.user.update({
         where: { id: user.id },
-        data: { emailVerified: true, status: 'ACTIVE' },
+        data: {
+          emailVerified: true,
+          status: 'ACTIVE',
+          lastLoginAt: new Date(),
+        },
+      });
+    } else {
+      // Returning user - sirf login time update karo
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
       });
     }
 
@@ -964,6 +1022,32 @@ export class AuthService {
       user.email,
       organization?.id
     );
+
+    // ✅ Sirf pehli verification pe welcome messages
+    if (isFirstVerification) {
+      // Welcome Email
+      sendEmailNonBlocking({
+        to: normalizedEmail,
+        subject: '🎉 Welcome to WabMeta!',
+        html: emailTemplates.welcome(user.firstName).html,
+      });
+
+      // Welcome WhatsApp (agar phone ho)
+      if (user.phone) {
+        sendWhatsAppTemplate(
+          user.phone,
+          config.platform.whatsapp.welcomeTemplate,
+          [user.firstName]
+        );
+      }
+
+      console.log(
+        `✅ First verification: ${normalizedEmail}` +
+        (user.phone
+          ? ` | WhatsApp welcome → ${user.phone}`
+          : ' | No phone on file')
+      );
+    }
 
     return {
       user: formatUser(user),
