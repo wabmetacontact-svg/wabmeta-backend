@@ -505,6 +505,27 @@ export class MetaController {
         const encryptedToken = encrypt(access_token);
         console.log('   Token encrypted successfully');
 
+        // ✅ ADD: Organization level check - sirf ek connected account
+        const existingConnectedInOrg = await prisma.whatsAppAccount.findFirst({
+          where: {
+            organizationId,
+            status: 'CONNECTED',
+            phoneNumberId: { not: primaryPhone.id }, // Same phone reconnect allow karo
+          },
+        });
+
+        if (existingConnectedInOrg) {
+          // State cleanup karo
+          await (prisma as any).oAuthState.delete({ where: { state } }).catch(() => {});
+          
+          throw new AppError(
+            `Your organization already has a connected WhatsApp account ` +
+            `(${existingConnectedInOrg.phoneNumber}). ` +
+            `Please disconnect it first from Settings → WhatsApp.`,
+            400
+          );
+        }
+
         try {
           // ✅ CRITICAL FIX: Check if account already exists
           const existingAccount = await prisma.whatsAppAccount.findFirst({

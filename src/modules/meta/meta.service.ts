@@ -294,6 +294,24 @@ export class MetaService {
         message: 'Saving account...',
       });
 
+      // ✅ ADD: Organization level - sirf ek connected account allowed
+      const existingConnectedInOrg = await prisma.whatsAppAccount.findFirst({
+        where: {
+          organizationId,
+          status: WhatsAppAccountStatus.CONNECTED,
+          // Same phone number se reconnect allow karo
+          phoneNumberId: { not: primaryPhone.id },
+        },
+      });
+
+      if (existingConnectedInOrg) {
+        throw new AppError(
+          `Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
+          `Please disconnect it first before connecting a new one.`,
+          400
+        );
+      }
+
       // ✅ Check existing by phoneNumberId ONLY
       const existingAccount = await prisma.whatsAppAccount.findFirst({
         where: {

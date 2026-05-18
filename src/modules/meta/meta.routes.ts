@@ -210,8 +210,44 @@ router.post('/webhook', async (req, res) => {
 // PUBLIC OAUTH CALLBACKS
 // These use state token verification instead of JWT
 // ============================================
-router.post('/callback', metaController.handleCallback.bind(metaController));
-router.post('/connect', metaController.handleCallback.bind(metaController));
+
+const checkSingleAccountLimit = async (req: any, res: any, next: any) => {
+  try {
+    const state = req.body.state;
+    if (!state) return next(); // Let controller handle missing state
+
+    const oauthState = await (prisma as any).oAuthState.findUnique({
+      where: { state },
+    });
+
+    if (!oauthState) return next();
+
+    const organizationId = oauthState.organizationId;
+    
+    const existingConnected = await prisma.whatsAppAccount.findFirst({
+      where: {
+        organizationId,
+        status: 'CONNECTED',
+      },
+    });
+
+    if (existingConnected) {
+      await (prisma as any).oAuthState.delete({ where: { state } }).catch(() => {});
+      
+      throw new AppError(
+        `Your organization already has a connected WhatsApp account. Please disconnect it first.`,
+        400
+      );
+    }
+    
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+router.post('/callback', checkSingleAccountLimit, metaController.handleCallback.bind(metaController));
+router.post('/connect', checkSingleAccountLimit, metaController.handleCallback.bind(metaController));
 
 // ============================================
 // PROTECTED ROUTES
