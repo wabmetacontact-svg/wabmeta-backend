@@ -8,6 +8,8 @@ exports.usersService = exports.UsersService = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const errorHandler_1 = require("../../middleware/errorHandler");
 const password_1 = require("../../utils/password");
+const whatsapp_api_1 = require("../whatsapp/whatsapp.api");
+const config_1 = require("../../config");
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -23,6 +25,73 @@ const formatUserProfile = (user) => ({
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
 });
+// ============================================
+// HELPERS - WhatsApp Messaging
+// ============================================
+const toWhatsAppPhone = (phone) => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 10)
+        return `91${digits}`;
+    if (digits.startsWith('91') && digits.length === 12)
+        return digits;
+    if (digits.startsWith('0') && digits.length === 11)
+        return `91${digits.slice(1)}`;
+    return digits;
+};
+const toE164 = (phone) => {
+    const wa = toWhatsAppPhone(phone);
+    return `+${wa}`;
+};
+const sendWhatsAppTemplate = (phone, templateName, bodyParams = []) => {
+    const { phoneNumberId, accessToken } = config_1.config.platform.whatsapp;
+    if (!phoneNumberId || !accessToken) {
+        console.warn('⚠️ Platform WhatsApp not configured');
+        return;
+    }
+    const waPhone = toWhatsAppPhone(phone);
+    // Fetch the template from DB to check for header configuration dynamically
+    database_1.default.template
+        .findFirst({
+        where: {
+            name: templateName,
+            whatsappAccount: {
+                phoneNumberId: phoneNumberId,
+            },
+        },
+        select: {
+            headerType: true,
+            headerContent: true,
+        },
+    })
+        .then((tpl) => {
+        const templateComponents = {};
+        if (bodyParams.length > 0) {
+            templateComponents.body = bodyParams.map((param) => ({
+                type: 'text',
+                text: param,
+            }));
+        }
+        if (tpl?.headerContent) {
+            const typeLower = tpl.headerType?.toLowerCase();
+            if (typeLower === 'image' || typeLower === 'video' || typeLower === 'document') {
+                templateComponents.header = [
+                    {
+                        type: typeLower,
+                        [typeLower]: {
+                            link: tpl.headerContent,
+                            ...(typeLower === 'document' ? { filename: 'Document' } : {}),
+                        },
+                    },
+                ];
+            }
+        }
+        return whatsapp_api_1.whatsappApi.sendTemplateMessage(phoneNumberId, waPhone, templateName, 'en', templateComponents, accessToken);
+    })
+        .then(() => console.log(`✅ WhatsApp [${templateName}] → +${waPhone}`))
+        .catch((err) => {
+        console.warn(`⚠️ WhatsApp [${templateName}] → +${waPhone} failed:`, err?.message);
+    });
+};
 // ============================================
 // USERS SERVICE CLASS
 // ============================================
@@ -285,6 +354,54 @@ class UsersService {
             throw new errorHandler_1.AppError('User not found', 404);
         }
         return formatUserProfile(user);
+    }
+    // ==========================================
+    // ADD PHONE NUMBER (For Google login users)
+    // ==========================================
+    async addPhoneNumber(userId, phone) {
+        // Validate
+        const digits = phone.replace(/\D/g, '');
+        if (digits.length < 10 || digits.length > 15) {
+            throw new errorHandler_1.AppError('Invalid phone number', 400);
+        }
+        // Get user
+        const user = await database_1.default.user.findUnique({
+            where: { id: userId },
+        });
+        if (!user) {
+            throw new errorHandler_1.AppError('User not found', 404);
+        }
+        const phoneE164 = toE164(phone);
+        // Check duplicate
+        const existingPhoneUser = await database_1.default.user.findFirst({
+            where: {
+                phone: phoneE164,
+                id: { not: userId },
+            },
+        });
+        if (existingPhoneUser) {
+            throw new errorHandler_1.AppError('This phone number is already registered with another account', 409);
+        }
+        // Update user
+        const updatedUser = await database_1.default.user.update({
+            where: { id: userId },
+            data: { phone: phoneE164 },
+        });
+        console.log(`📱 Phone added: ${user.email} → ${phoneE164}`);
+        // Send Welcome WhatsApp (non-blocking)
+        let whatsappSent = false;
+        try {
+            sendWhatsAppTemplate(phoneE164, config_1.config.platform.whatsapp.welcomeTemplate, [user.firstName]);
+            whatsappSent = true;
+        }
+        catch (err) {
+            console.warn('⚠️ WhatsApp send failed:', err.message);
+        }
+        return {
+            message: 'Phone number added successfully',
+            phone: updatedUser.phone,
+            whatsappSent,
+        };
     }
 }
 exports.UsersService = UsersService;

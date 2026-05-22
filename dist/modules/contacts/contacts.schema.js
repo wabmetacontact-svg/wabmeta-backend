@@ -1,24 +1,24 @@
 "use strict";
-// src/modules/contacts/contacts.schema.ts - COMPLETE FIXED
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.addContactsToGroupSchema = exports.updateContactGroupSchema = exports.createContactGroupSchema = exports.bulkDeleteSchema = exports.bulkUpdateSchema = exports.importContactsSchema = exports.updateContactSchema = exports.createContactSchema = void 0;
+// src/modules/contacts/contacts.schema.ts - COMPLETE FIX
 const zod_1 = require("zod");
 const client_1 = require("@prisma/client");
-const normalizeIndianPhone = (value) => {
-    const raw = String(value ?? '').trim();
-    let cleaned = raw.replace(/[\s\-\(\)]/g, '');
-    cleaned = cleaned.replace(/[^0-9+]/g, '');
-    if (cleaned.startsWith('+91'))
-        cleaned = cleaned.slice(3);
-    else if (cleaned.startsWith('91') && cleaned.length === 12)
-        cleaned = cleaned.slice(2);
-    if (cleaned.startsWith('0') && cleaned.length === 11)
-        cleaned = cleaned.slice(1);
-    return cleaned;
-};
-const indian10DigitRegex = /^[6-9]\d{9}$/;
-const phoneSchema = zod_1.z.preprocess((v) => normalizeIndianPhone(v), zod_1.z.string().regex(indian10DigitRegex, 'Only Indian 10-digit numbers starting with 6-9 are allowed'));
-// ✅ email optional (blank/space ok)
+const phone_1 = require("../../utils/phone");
+// ✅ SINGLE PHONE VALIDATOR - toCanonicalPhone use karta hai
+// Input: koi bhi format → Output: +91XXXXXXXXXX (canonical E.164)
+const phoneSchema = zod_1.z.preprocess((v) => {
+    if (v === null || v === undefined)
+        return '';
+    const raw = String(v).trim();
+    if (!raw)
+        return '';
+    // toCanonicalPhone se canonical format milega
+    const canonical = (0, phone_1.toCanonicalPhone)(raw);
+    return canonical || raw; // canonical ya original (validation fail hoga)
+}, zod_1.z.string()
+    .min(10, 'Phone number too short')
+    .regex(/^\+[1-9]\d{9,14}$/, 'Invalid phone number. Must be in E.164 format (e.g., +919876543210)'));
 const emailSchema = zod_1.z.preprocess((v) => {
     if (v === null || v === undefined)
         return undefined;
@@ -31,7 +31,8 @@ const emailSchema = zod_1.z.preprocess((v) => {
 exports.createContactSchema = zod_1.z.object({
     body: zod_1.z.object({
         phone: phoneSchema,
-        countryCode: zod_1.z.string().optional().default('+91'),
+        // ✅ countryCode auto-detect hoga phone se, but accept karo agar diya
+        countryCode: zod_1.z.string().optional(),
         firstName: zod_1.z.string().optional(),
         lastName: zod_1.z.string().optional(),
         email: emailSchema,
@@ -55,10 +56,10 @@ exports.updateContactSchema = zod_1.z.object({
 exports.importContactsSchema = zod_1.z.object({
     body: zod_1.z.object({
         contacts: zod_1.z.array(zod_1.z.object({
-            phone: phoneSchema, // ✅ normalized + validated
+            phone: phoneSchema,
             firstName: zod_1.z.string().optional(),
             lastName: zod_1.z.string().optional(),
-            email: emailSchema, // ✅ optional
+            email: emailSchema,
             tags: zod_1.z.array(zod_1.z.string()).optional(),
             customFields: zod_1.z.record(zod_1.z.any()).optional(),
         })).min(1, 'At least one contact is required'),
@@ -70,7 +71,7 @@ exports.importContactsSchema = zod_1.z.object({
 });
 exports.bulkUpdateSchema = zod_1.z.object({
     body: zod_1.z.object({
-        contactIds: zod_1.z.array(zod_1.z.string()).min(1, 'At least one contact ID is required'),
+        contactIds: zod_1.z.array(zod_1.z.string()).min(1),
         tags: zod_1.z.array(zod_1.z.string()).optional(),
         groupIds: zod_1.z.array(zod_1.z.string()).optional(),
         status: zod_1.z.nativeEnum(client_1.ContactStatus).optional(),
@@ -78,12 +79,9 @@ exports.bulkUpdateSchema = zod_1.z.object({
 });
 exports.bulkDeleteSchema = zod_1.z.object({
     body: zod_1.z.object({
-        contactIds: zod_1.z.array(zod_1.z.string()).min(1, 'At least one contact ID is required'),
+        contactIds: zod_1.z.array(zod_1.z.string()).min(1),
     }),
 });
-// ============================================
-// CONTACT GROUP SCHEMAS
-// ============================================
 exports.createContactGroupSchema = zod_1.z.object({
     body: zod_1.z.object({
         name: zod_1.z.string().min(1, 'Group name is required'),
@@ -100,7 +98,7 @@ exports.updateContactGroupSchema = zod_1.z.object({
 });
 exports.addContactsToGroupSchema = zod_1.z.object({
     body: zod_1.z.object({
-        contactIds: zod_1.z.array(zod_1.z.string()).min(1, 'At least one contact ID is required'),
+        contactIds: zod_1.z.array(zod_1.z.string()).min(1),
     }),
 });
 //# sourceMappingURL=contacts.schema.js.map

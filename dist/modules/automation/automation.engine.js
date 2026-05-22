@@ -108,7 +108,7 @@ class AutomationEngine {
                 });
                 if (matched) {
                     console.log(`🤖 Keyword matched! Executing automation: ${automation.name}`);
-                    await this.executeActions(automation.id, automation.actions, context);
+                    await this.executeSequence(automation.id, automation.actions, context);
                     triggered = true;
                 }
             }
@@ -136,7 +136,7 @@ class AutomationEngine {
                     }
                 }
                 console.log(`🤖 Executing automation: ${automation.name}`);
-                await this.executeActions(automation.id, automation.actions, context);
+                await this.executeSequence(automation.id, automation.actions, context);
             }
         }
         catch (error) {
@@ -154,7 +154,7 @@ class AutomationEngine {
                 console.log('🤖 Automation not active or not webhook type');
                 return;
             }
-            await this.executeActions(automation.id, automation.actions, context);
+            await this.executeSequence(automation.id, automation.actions, context);
         }
         catch (error) {
             console.error('🤖 Webhook automation error:', error);
@@ -438,99 +438,241 @@ class AutomationEngine {
     // ✅ ACTION: SEND TEMPLATE
     // ==========================================
     async actionSendTemplate(context, config) {
-        // ✅ Step 1: Config validation with proper logging
         if (!config.templateId) {
-            console.error('❌ [send_template] templateId missing in action config:', config);
+            console.error('❌ [send_template] templateId missing:', config);
             return;
         }
         if (!context.phone) {
-            console.error('❌ [send_template] phone missing in context:', context);
+            console.error('❌ [send_template] phone missing:', context);
             return;
         }
-        // ✅ Step 2: WhatsApp account fetch
         const account = await this.getDefaultAccount(context.organizationId);
         if (!account) {
-            console.error(`❌ [send_template] No connected WhatsApp account for org: ${context.organizationId}`);
+            console.error(`❌ [send_template] No WhatsApp account for org: ${context.organizationId}`);
             return;
         }
-        // ✅ Step 3: Template fetch with better error logging
         const template = await database_1.default.template.findUnique({
             where: { id: config.templateId },
         });
         if (!template) {
-            console.error(`❌ [send_template] Template not found in DB: ${config.templateId}`);
+            console.error(`❌ [send_template] Template not found: ${config.templateId}`);
             return;
         }
         if (template.status !== 'APPROVED') {
-            console.error(`❌ [send_template] Template "${template.name}" status is "${template.status}". ` +
-                `Only APPROVED templates can be sent.`);
+            console.error(`❌ [send_template] Template "${template.name}" is "${template.status}" - not APPROVED`);
             return;
         }
-        console.log(`📋 Sending template: ${template.name} → ${context.phone}`);
-        // Convert language
+        console.log(`📋 [send_template] Sending: ${template.name} → ${context.phone}`);
+        console.log(`📋 [send_template] Template details:`, {
+            headerType: template.headerType,
+            headerMediaId: template.headerMediaId,
+            headerContent: template.headerContent,
+        });
+        // ============================================
+        // ✅ LANGUAGE MAPPING
+        // ============================================
         const toMetaLang = (lang) => {
             const l = String(lang || '').trim();
             if (!l)
                 return 'en_US';
-            if (l.length >= 2 && l.length <= 6 && !l.includes(' '))
-                return l;
+            if (l.includes('_') || l.length <= 3)
+                return l; // Already formatted
             const mapping = {
-                english: 'en_US', hindi: 'hi', spanish: 'es_ES',
-                portuguese: 'pt_BR', french: 'fr_FR', german: 'de_DE', italian: 'it_IT',
+                english: 'en_US', hindi: 'hi',
+                spanish: 'es_ES', portuguese: 'pt_BR',
+                french: 'fr_FR', german: 'de_DE',
+                italian: 'it_IT', arabic: 'ar',
             };
             return mapping[l.toLowerCase()] || l;
         };
-        // Auto-build components if missing
+        // ============================================
+        // ✅ HELPER FUNCTIONS
+        // ============================================
+        const isValidHttpUrl = (str) => {
+            try {
+                const url = new URL(str);
+                return url.protocol === 'http:' || url.protocol === 'https:';
+            }
+            catch {
+                return false;
+            }
+        };
+        const isExpiredWhatsAppHandle = (str) => {
+            // "4:V2hhdH..." format = upload handle (expires in ~10min)
+            return /^\d+:[A-Za-z0-9+/=:_-]+$/.test(str);
+        };
+        const isPureIntegerId = (str) => {
+            return /^\d{10,}$/.test(str);
+        };
+        /**
+         * ✅ CORRECT media param builder
+         *
+         * Meta Template Send API rules:
+         *   { link: "https://..." }  → Valid CDN/Cloudinary URL ✅
+         *   { id: 1234567890 }       → Numeric media ID (integer) ✅
+         *   { id: "4:V2hh..." }      → INVALID - upload handle ❌
+         *   { link: "4:V2hh..." }    → INVALID - not a URL ❌
+         */
+        const buildMediaParam = (mediaType, mediaValue) => {
+            const type = mediaType.toLowerCase();
+            if (isValidHttpUrl(mediaValue)) {
+                // ✅ Cloudinary/S3/CDN URL - best option
+                console.log(`🔗 [template] Using URL for ${type}: ${mediaValue.substring(0, 60)}...`);
+                return {
+                    type,
+                    [type]: { link: mediaValue }
+                };
+            }
+            else if (isPureIntegerId(mediaValue)) {
+                // ✅ Pure numeric ID - permanent, use as integer
+                console.log(`🔢 [template] Using numeric Media ID for ${type}: ${mediaValue}`);
+                return {
+                    type,
+                    [type]: { id: parseInt(mediaValue, 10) }
+                };
+            }
+            else if (isExpiredWhatsAppHandle(mediaValue)) {
+                // ❌ Upload handle - only valid during template CREATION, not sending
+                console.error(`❌ [template] WhatsApp upload handle detected - CANNOT use for sending!`);
+                console.error(`   Handle: ${mediaValue.substring(0, 50)}...`);
+                console.error(`   These handles expire in ~10 min after upload.`);
+                return null;
+            }
+            else {
+                // Unknown - try as URL
+                console.warn(`⚠️ [template] Unknown media format, attempting as link`);
+                return {
+                    type,
+                    [type]: { link: mediaValue }
+                };
+            }
+        };
+        // ============================================
+        // ✅ BUILD COMPONENTS - FIXED PRIORITY ORDER
+        // ============================================
         let components = config.components || [];
         if (components.length === 0) {
+            // ── HEADER COMPONENT ──────────────────────
             if (template.headerType && template.headerType !== 'NONE') {
                 const hType = template.headerType.toUpperCase();
                 if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-                    const mediaIdOrUrl = template.headerMediaId || template.headerContent;
-                    if (mediaIdOrUrl) {
-                        const isId = /^\d+$/.test(mediaIdOrUrl);
-                        components.push({
-                            type: 'header',
-                            parameters: [{
-                                    type: hType.toLowerCase(),
-                                    [hType.toLowerCase()]: isId ? { id: mediaIdOrUrl } : { link: mediaIdOrUrl }
-                                }]
-                        });
+                    /**
+                     * ✅ PRIORITY ORDER (Most reliable → Least reliable):
+                     *
+                     * 1. headerContent + isValidHttpUrl  → Cloudinary URL (PERMANENT) ✅
+                     * 2. headerMediaId + isPureIntegerId → Numeric Meta ID (PERMANENT) ✅
+                     * 3. Skip                            → Handle expired, can't send ❌
+                     *
+                     * NEVER use "4:xxx" upload handles for SENDING
+                     * They are only for template CREATION (header_handle field)
+                     */
+                    const cloudinaryUrl = template.headerContent && isValidHttpUrl(template.headerContent)
+                        ? template.headerContent
+                        : null;
+                    const numericId = template.headerMediaId && isPureIntegerId(template.headerMediaId)
+                        ? template.headerMediaId
+                        : null;
+                    const mediaValue = cloudinaryUrl || numericId;
+                    if (mediaValue) {
+                        const mediaParam = buildMediaParam(hType.toLowerCase(), mediaValue);
+                        if (mediaParam) {
+                            components.push({
+                                type: 'header',
+                                parameters: [mediaParam]
+                            });
+                            console.log(`✅ [template] Header ${hType} built using: ${cloudinaryUrl ? 'Cloudinary URL' : 'Numeric ID'}`);
+                        }
+                    }
+                    else {
+                        // Both are unusable
+                        console.error(`❌ [template] No valid media for ${hType} header!`);
+                        console.error(`   headerContent: ${template.headerContent?.substring(0, 60) || 'null'}`);
+                        console.error(`   headerMediaId: ${template.headerMediaId?.substring(0, 40) || 'null'}`);
+                        console.error(`   Solution: Re-upload image in Templates page`);
+                        // ❌ Template send nahi hoga - throw karo clear message ke saath
+                        throw new Error(`Template "${template.name}" has expired media. ` +
+                            `Please re-upload the image/video in the Templates section.`);
                     }
                 }
-                else if (hType === 'TEXT' && template.headerContent && template.headerContent.includes('{{1}}')) {
-                    // Dummy variable for header text if needed
-                    components.push({
-                        type: 'header',
-                        parameters: [{ type: 'text', text: 'User' }]
+                else if (hType === 'TEXT' && template.headerContent) {
+                    // Text header - variables fill karo
+                    if (template.headerContent.includes('{{1}}')) {
+                        let contactName = 'Customer';
+                        if (context.contactId) {
+                            const contact = await database_1.default.contact.findUnique({
+                                where: { id: context.contactId },
+                                select: { firstName: true, lastName: true }
+                            });
+                            if (contact?.firstName && contact.firstName !== 'Unknown') {
+                                contactName = [contact.firstName, contact.lastName]
+                                    .filter(Boolean).join(' ');
+                            }
+                        }
+                        components.push({
+                            type: 'header',
+                            parameters: [{ type: 'text', text: contactName }]
+                        });
+                    }
+                    // No variables in text header = no parameters needed
+                }
+            }
+            // ── BODY COMPONENT ────────────────────────
+            const bodyText = template.bodyText || '';
+            const bodyVarMatches = bodyText.match(/\{\{(\d+)\}\}/g) || [];
+            if (bodyVarMatches.length > 0) {
+                let contactName = 'Customer';
+                if (context.contactId) {
+                    const contact = await database_1.default.contact.findUnique({
+                        where: { id: context.contactId },
+                        select: { firstName: true, lastName: true }
+                    });
+                    if (contact?.firstName && contact.firstName !== 'Unknown') {
+                        contactName = [contact.firstName, contact.lastName]
+                            .filter(Boolean).join(' ');
+                    }
+                }
+                const bodyParams = bodyVarMatches.map((_, i) => ({
+                    type: 'text',
+                    text: i === 0 ? contactName : 'Customer'
+                }));
+                components.push({ type: 'body', parameters: bodyParams });
+            }
+            // ── BUTTON COMPONENTS ─────────────────────
+            if (template.buttons) {
+                const buttons = typeof template.buttons === 'string'
+                    ? JSON.parse(template.buttons)
+                    : template.buttons;
+                if (Array.isArray(buttons)) {
+                    buttons.forEach((btn, index) => {
+                        if (btn.type === 'URL' && btn.url?.includes('{{')) {
+                            components.push({
+                                type: 'button',
+                                sub_type: 'url',
+                                index,
+                                parameters: [{ type: 'text', text: '' }]
+                            });
+                        }
                     });
                 }
             }
-            // Auto-fill body variables if needed
-            const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
-            if (bodyMatches.length > 0) {
-                const bodyParams = bodyMatches.map(() => ({ type: 'text', text: 'Customer' }));
-                components.push({
-                    type: 'body',
-                    parameters: bodyParams
-                });
-            }
         }
+        console.log(`📋 [template] Final components:`, JSON.stringify(components, null, 2));
+        // ============================================
+        // ✅ SEND TEMPLATE
+        // ============================================
         try {
-            // ✅ Step 4: Correct sendTemplateMessage call
             const result = await whatsapp_service_1.whatsappService.sendTemplateMessage({
                 accountId: account.id,
                 to: context.phone,
                 templateName: template.name,
                 templateLanguage: toMetaLang(template.language),
-                components: components,
+                components,
                 conversationId: context.conversationId,
                 organizationId: context.organizationId,
             });
-            console.log(`✅ [send_template] Template sent successfully!`);
-            console.log(`   waMessageId: ${result.waMessageId}`);
-            // ✅ Step 5: Wallet Deduction (non-blocking)
-            const deductionResult = await (0, wallet_deduction_service_1.deductWalletForTemplate)({
+            console.log(`✅ [send_template] Sent! waMessageId: ${result.waMessageId}`);
+            // ✅ Wallet deduction (non-blocking)
+            (0, wallet_deduction_service_1.deductWalletForTemplate)({
                 organizationId: context.organizationId,
                 templateName: template.name,
                 templateCategory: template.category,
@@ -538,21 +680,20 @@ class AutomationEngine {
                 waMessageId: result.waMessageId,
                 automationId: config._automationId,
                 automationName: `Automation → ${template.name}`,
+            }).then(r => {
+                if (r.deducted)
+                    console.log(`💳 Wallet: -₹${r.amount} for automation template`);
+            }).catch(e => {
+                console.error('💳 Wallet deduction error (non-blocking):', e.message);
             });
-            if (deductionResult.deducted) {
-                console.log(`💳 [send_template] Wallet deducted ₹${deductionResult.amount} for automation template → ${context.phone}`);
-            }
-            else if (deductionResult.walletUsed === false && deductionResult.reason) {
-                console.log(`💳 [send_template] Wallet skip: ${deductionResult.reason}`);
-            }
         }
         catch (error) {
-            console.error(`❌ [send_template] Failed to send template "${template.name}":`, {
+            console.error(`❌ [send_template] Failed "${template.name}":`, {
                 error: error.message,
                 phone: context.phone,
                 templateId: config.templateId,
             });
-            throw error; // Re-throw so executeSequence can catch it
+            throw error;
         }
     }
     // ==========================================

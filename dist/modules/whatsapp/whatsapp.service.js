@@ -409,19 +409,20 @@ class WhatsAppService {
                 throw new Error('No message ID returned');
             // ✅ ── WALLET DEDUCTION (Meta send ke BAAD, non-blocking) ─────────────────
             const orgId = organizationId || account.organizationId;
-            // Template category DB se fetch karo
+            // Template category & language DB se fetch karo
             const templateForCategory = await database_1.default.template.findFirst({
                 where: {
                     organizationId: orgId,
                     name: templateName,
                 },
-                select: { category: true },
+                select: { category: true, language: true },
             });
             // Fire & forget - message blocking nahi hoga
             (0, wallet_deduction_service_1.deductWalletForTemplate)({
                 organizationId: orgId,
                 templateName,
                 templateCategory: templateForCategory?.category,
+                templateLanguage: templateForCategory?.language,
                 recipientPhone: to,
                 waMessageId,
             }).then(result => {
@@ -666,8 +667,13 @@ class WhatsAppService {
       
               const status = contactCheck?.contacts?.[0]?.status;
       
-              if (status && status !== 'valid') { ... }
-            } catch (err) { ... }
+              if (status && status !== 'valid') {
+                contactValid = false;
+                console.warn(`⚠️ Contact ${formattedTo} is invalid or doesn't have WhatsApp`);
+              }
+            } catch (err) {
+              console.warn('⚠️ Contact check failed (non-critical), proceeding:', err.message);
+            }
             */
             // Prepare message payload
             const messagePayload = {
@@ -874,6 +880,9 @@ class WhatsAppService {
             failed: 0,
             errors: [],
         };
+        // ✅ Accumulate country-wise cost per sent message (paise)
+        let totalSentAmountPaise = 0;
+        const templateCategory = campaign.template?.category || 'MARKETING';
         for (const recipient of campaign.campaignContacts) {
             try {
                 const formattedPhone = this.formatPhoneNumber(recipient.contact.phone);
@@ -902,6 +911,8 @@ class WhatsAppService {
                 // Update contact status
                 await this.updateContactStatus(campaignId, recipient.contactId, client_1.MessageStatus.SENT, messageResult.messageId);
                 results.sent++;
+                // ✅ Add country-wise rate for this recipient
+                totalSentAmountPaise += Math.round((0, wallet_deduction_service_1.getRateForCategory)(templateCategory, recipient.contact.phone) * 100);
                 console.log(`✅ Sent to ${recipient.contact.phone} (${messageResult.messageId})`);
                 // Delay between messages
                 if (delayMs > 0) {
@@ -936,32 +947,26 @@ class WhatsAppService {
             }
         }
         await this.checkCampaignCompletion(campaignId);
-        // ✅ ── SINGLE BULK WALLET DEDUCTION ─────────────────────────────────────
-        // One deduction for ALL sent messages - NOT per-recipient
-        if (walletCheck.walletActive && results.sent > 0) {
+        // COUNTRY-AWARE BULK WALLET DEDUCTION
+        // totalSentAmountPaise = sum of each recipient's individual country rate
+        if (walletCheck.walletActive && results.sent > 0 && totalSentAmountPaise > 0) {
             try {
-                const templateCategory = campaign.template?.category || 'MARKETING';
-                // ✅ INTEGER paise arithmetic - avoids floating-point errors
-                // e.g. 0.15 * 150 = 22.4999... (bug).  15 paise × 150 = 2250 paise (correct)
-                const rateRupees = (0, wallet_deduction_service_1.getRateForCategory)(templateCategory);
-                const ratePaise = Math.round(rateRupees * 100); // e.g. 15 for UTILITY
-                const totalAmountPaise = ratePaise * results.sent; // e.g. 15 × 150 = 2250
-                const totalAmountRupees = totalAmountPaise / 100; // e.g. 22.50
-                console.log(`💳 Bulk deduction: ${results.sent} msgs × ₹${rateRupees} = ₹${totalAmountRupees} (${totalAmountPaise} paise)`);
+                const totalAmountRupees = totalSentAmountPaise / 100;
+                const avgRateRupees = totalAmountRupees / results.sent;
+                console.log(`Wallet country-aware bulk deduction: ${results.sent} msgs, total Rs${totalAmountRupees.toFixed(2)} ` +
+                    `(avg Rs${avgRateRupees.toFixed(4)}/msg)`);
                 await database_1.default.$transaction(async (tx) => {
                     const wallet = await tx.wallet.findUnique({ where: { organizationId: orgId } });
                     if (!wallet || !wallet.isActive || wallet.flagged) {
-                        console.warn('💳 Wallet not available for bulk deduction - skipping');
+                        console.warn('Wallet not available for bulk deduction - skipping');
                         return;
                     }
                     const balanceBeforePaise = wallet.balancePaise;
-                    // Available = wallet balance + credit headroom
                     const creditHeadroom = wallet.creditEnabled
                         ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
                         : 0;
                     const availablePaise = wallet.balancePaise + creditHeadroom;
-                    // Deduct as much as available (never go below 0)
-                    const actualDeductPaise = Math.min(totalAmountPaise, availablePaise);
+                    const actualDeductPaise = Math.min(totalSentAmountPaise, availablePaise);
                     const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
                     const newBalancePaise = Math.max(0, wallet.balancePaise - actualDeductPaise);
                     await tx.wallet.update({
@@ -981,24 +986,24 @@ class WhatsAppService {
                             amountPaise: actualDeductPaise,
                             balanceBeforePaise,
                             balanceAfterPaise: newBalancePaise,
-                            description: `Campaign charge - ${categoryLabel} (${campaign.template.name}) × ${results.sent} messages`,
+                            description: `Campaign charge - ${categoryLabel} (${campaign.template.name}) x ${results.sent} messages` +
+                                ` [country-wise rates, avg Rs${avgRateRupees.toFixed(4)}/msg]`,
                             status: 'completed',
                             metaService: 'template_message',
                             note: `Campaign: ${campaign.name}`,
                         },
                     });
-                    console.log(`✅ Bulk wallet deducted: ₹${(actualDeductPaise / 100).toFixed(2)} for ${results.sent} msgs ("${campaign.name}")`);
+                    console.log(`Wallet deducted: Rs${(actualDeductPaise / 100).toFixed(2)} for ${results.sent} msgs ("${campaign.name}")`);
                 });
             }
             catch (walletErr) {
-                console.error('💳 Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
+                console.error('Campaign bulk wallet deduction failed (non-blocking):', walletErr.message);
             }
         }
         else {
-            console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${results.sent}`);
+            console.log(`Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${results.sent}, amountPaise=${totalSentAmountPaise}`);
         }
-        // ✅ ── END BULK DEDUCTION ─────────────────────────────────────────────────
-        console.log(`📢 ========== CAMPAIGN END ==========`);
+        console.log(`Campaign END ==========`);
         console.log(`   Sent: ${results.sent}`);
         console.log(`   Failed: ${results.failed}\n`);
         return results;
@@ -1090,49 +1095,83 @@ class WhatsAppService {
      */
     buildTemplateComponents(template, variables) {
         const components = [];
-        // Header component
+        // ============================================
+        // ✅ Same helpers as automation engine
+        // ============================================
+        const isValidHttpUrl = (str) => {
+            try {
+                const url = new URL(str);
+                return url.protocol === 'http:' || url.protocol === 'https:';
+            }
+            catch {
+                return false;
+            }
+        };
+        const isWhatsAppMediaId = (str) => {
+            if (!str)
+                return false;
+            if (/^\d{10,}$/.test(str))
+                return true; // Pure digits
+            if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(str))
+                return true; // Colon format
+            if (str.length > 20 && !str.includes('http') &&
+                !str.includes('.') && /^[A-Za-z0-9+/=_-]+$/.test(str)) { // Base64
+                return true;
+            }
+            return false;
+        };
+        const buildMediaParam = (mediaType, mediaValue) => {
+            const type = mediaType.toLowerCase();
+            if (isValidHttpUrl(mediaValue)) {
+                return { type, [type]: { link: mediaValue } };
+            }
+            else if (isWhatsAppMediaId(mediaValue)) {
+                return { type, [type]: { id: mediaValue } };
+            }
+            return { type, [type]: { link: mediaValue } }; // Fallback
+        };
+        // ============================================
+        // HEADER
+        // ============================================
         if (template.headerType) {
-            if (template.headerType === 'TEXT' && template.headerContent) {
+            const hType = String(template.headerType).toUpperCase();
+            if (hType === 'TEXT' && template.headerContent) {
                 const headerVars = this.extractVariables(template.headerContent, variables);
                 if (headerVars.length > 0) {
-                    components.push({
-                        type: 'header',
-                        parameters: headerVars,
-                    });
+                    components.push({ type: 'header', parameters: headerVars });
                 }
             }
-            else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType)) {
-                const mediaUrl = variables.header_media || template.headerMediaUrl;
-                if (mediaUrl) {
-                    components.push({
-                        type: 'header',
-                        parameters: [
-                            {
-                                type: template.headerType.toLowerCase(),
-                                [template.headerType.toLowerCase()]: {
-                                    link: mediaUrl,
-                                },
-                            },
-                        ],
-                    });
+            else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
+                // ✅ Priority: variables > header_media > headerMediaId > headerMediaUrl > headerContent
+                const mediaValue = variables.header_media ||
+                    template.headerMediaId ||
+                    template.headerMediaUrl ||
+                    template.headerContent;
+                if (mediaValue) {
+                    const mediaParam = buildMediaParam(hType.toLowerCase(), mediaValue);
+                    components.push({ type: 'header', parameters: [mediaParam] });
+                }
+                else {
+                    console.warn(`⚠️ No media for ${hType} header in template: ${template.name}`);
                 }
             }
         }
-        // Body component
-        const bodyVars = this.extractVariablesFromText(template.bodyText);
-        if (bodyVars.length > 0) {
-            const bodyParams = bodyVars.map((varName, index) => ({
+        // ============================================
+        // BODY
+        // ============================================
+        const bodyVarNames = this.extractVariablesFromText(template.bodyText);
+        if (bodyVarNames.length > 0) {
+            const bodyParams = bodyVarNames.map((_, index) => ({
                 type: 'text',
-                text: variables[varName] ||
+                text: variables[`var_${index + 1}`] ||
                     variables[`body_${index + 1}`] ||
-                    `{{${index + 1}}}`,
+                    'Customer', // ✅ Fallback instead of {{1}}
             }));
-            components.push({
-                type: 'body',
-                parameters: bodyParams,
-            });
+            components.push({ type: 'body', parameters: bodyParams });
         }
-        // Button components
+        // ============================================
+        // BUTTONS
+        // ============================================
         if (template.buttons) {
             const buttons = typeof template.buttons === 'string'
                 ? JSON.parse(template.buttons)
@@ -1144,12 +1183,10 @@ class WhatsAppService {
                             type: 'button',
                             sub_type: 'url',
                             index,
-                            parameters: [
-                                {
+                            parameters: [{
                                     type: 'text',
                                     text: variables[`button_${index}`] || '',
-                                },
-                            ],
+                                }],
                         });
                     }
                 });
@@ -1235,6 +1272,81 @@ class WhatsAppService {
                 reason: error.message,
             };
         }
+    }
+    // ============================================
+    // QUALITY RATING SYNC METHODS (NEW)
+    // ============================================
+    /**
+     * Single account ka quality rating Meta se fetch karke DB update karo
+     */
+    async syncAccountQuality(accountId) {
+        try {
+            console.log(`🔄 Syncing quality for account: ${accountId}`);
+            const { account, accessToken } = await this.getAccountWithToken(accountId);
+            // Meta API se fresh data fetch karo
+            const phoneInfo = await meta_api_1.metaApi.getPhoneNumberInfo(account.phoneNumberId, accessToken);
+            console.log(`📊 Phone info from Meta:`, {
+                quality_rating: phoneInfo?.quality_rating,
+                messaging_limit_tier: phoneInfo?.messaging_limit_tier,
+                verified_name: phoneInfo?.verified_name,
+                platform_type: phoneInfo?.platform_type,
+            });
+            // ✅ DB update karo
+            const updated = await database_1.default.whatsAppAccount.update({
+                where: { id: accountId },
+                data: {
+                    qualityRating: phoneInfo?.quality_rating || account.qualityRating,
+                    messagingLimit: phoneInfo?.messaging_limit_tier || account.messagingLimit,
+                    verifiedName: phoneInfo?.verified_name || account.verifiedName,
+                    displayName: phoneInfo?.verified_name || account.displayName,
+                    codeVerificationStatus: phoneInfo?.code_verification_status ||
+                        account.codeVerificationStatus,
+                    updatedAt: new Date(),
+                },
+            });
+            console.log(`✅ Quality synced for ${account.phoneNumber}: ${updated.qualityRating}`);
+            return { success: true, account: updated };
+        }
+        catch (error) {
+            console.error(`❌ Quality sync failed for ${accountId}:`, error.message);
+            return { success: false, error: error.message };
+        }
+    }
+    /**
+     * Organization ke saare accounts sync karo (bulk)
+     */
+    async syncAllAccountsQuality(organizationId) {
+        console.log(`🔄 Syncing all accounts for org: ${organizationId}`);
+        const accounts = await database_1.default.whatsAppAccount.findMany({
+            where: {
+                organizationId,
+                status: client_1.WhatsAppAccountStatus.CONNECTED,
+            },
+            select: { id: true, phoneNumber: true },
+        });
+        if (accounts.length === 0) {
+            console.log('ℹ️  No connected accounts to sync');
+            return { total: 0, synced: 0, failed: 0, results: [] };
+        }
+        const results = await Promise.allSettled(accounts.map((acc) => this.syncAccountQuality(acc.id)));
+        const synced = results.filter((r) => r.status === 'fulfilled' && r.value.success).length;
+        const failed = results.length - synced;
+        console.log(`✅ Bulk sync complete: ${synced}/${accounts.length} successful`);
+        return {
+            total: accounts.length,
+            synced,
+            failed,
+            results: results.map((r, i) => ({
+                accountId: accounts[i].id,
+                phoneNumber: accounts[i].phoneNumber,
+                success: r.status === 'fulfilled' && r.value.success,
+                error: r.status === 'rejected'
+                    ? r.reason?.message
+                    : r.status === 'fulfilled' && !r.value.success
+                        ? r.value.error
+                        : undefined,
+            })),
+        };
     }
 }
 exports.whatsappService = new WhatsAppService();

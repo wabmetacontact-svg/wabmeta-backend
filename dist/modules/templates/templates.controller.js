@@ -604,7 +604,11 @@ class TemplatesController {
             // 5. Update template in database
             await database_1.default.template.update({
                 where: { id },
-                data: { headerMediaId: result.id }
+                data: {
+                    headerMediaId: result.id,
+                    headerMediaUploadedAt: new Date(),
+                    headerMediaLastVerified: new Date(),
+                }
             });
             return res.json({
                 success: true,
@@ -691,6 +695,8 @@ class TemplatesController {
             // 5. Save both to DB
             const updateData = {
                 headerMediaId: metaNumericId,
+                headerMediaUploadedAt: new Date(),
+                headerMediaLastVerified: new Date(),
             };
             if (cloudinaryUrl) {
                 updateData.headerContent = cloudinaryUrl;

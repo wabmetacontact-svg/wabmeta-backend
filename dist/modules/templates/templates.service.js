@@ -36,36 +36,185 @@ const formatTemplate = (template) => ({
     whatsappAccountId: template.whatsappAccountId || null,
 });
 /**
- * ✅ NEW: Helper to upload media to Meta during template creation
+ * ✅ FIXED: Upload media to Meta with proper MIME detection
  */
 const uploadMediaToMeta = async (cloudinaryUrl, headerType, waData) => {
     try {
         console.log('📤 Uploading media to Meta:', { cloudinaryUrl, headerType });
-        // Download from Cloudinary
+        // ============================================
+        // ✅ STEP 1: URL se MIME type pre-detect karo
+        // ============================================
+        const detectMimeFromUrl = (url, type) => {
+            const urlLower = url.toLowerCase();
+            const urlPath = url.split('?')[0]; // Query params remove karo
+            // 1. Cloudinary format parameter check: /upload/f_jpg/ ya /upload/q_auto,f_png/
+            const fParamMatch = urlLower.match(/[,\/]f_([a-z0-9]+)/);
+            if (fParamMatch) {
+                const fmtMap = {
+                    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                    'png': 'image/png', 'webp': 'image/webp',
+                    'gif': 'image/gif', 'mp4': 'video/mp4',
+                    'pdf': 'application/pdf',
+                };
+                if (fmtMap[fParamMatch[1]]) {
+                    console.log(`✅ MIME from Cloudinary f_ param: ${fmtMap[fParamMatch[1]]}`);
+                    return fmtMap[fParamMatch[1]];
+                }
+            }
+            // 2. URL extension check (.jpg, .png, .mp4 etc)
+            const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
+            if (extMatch) {
+                const extMap = {
+                    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                    'png': 'image/png', 'webp': 'image/webp',
+                    'gif': 'image/gif', 'mp4': 'video/mp4',
+                    '3gp': 'video/3gpp', '3gpp': 'video/3gpp',
+                    'pdf': 'application/pdf',
+                    'doc': 'application/msword',
+                    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'xls': 'application/vnd.ms-excel',
+                    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'ppt': 'application/vnd.ms-powerpoint',
+                    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                    'txt': 'text/plain',
+                    'ogg': 'audio/ogg', 'mp3': 'audio/mpeg',
+                    'aac': 'audio/aac', 'amr': 'audio/amr',
+                };
+                if (extMap[extMatch[1].toLowerCase()]) {
+                    console.log(`✅ MIME from URL extension .${extMatch[1]}: ${extMap[extMatch[1].toLowerCase()]}`);
+                    return extMap[extMatch[1].toLowerCase()];
+                }
+            }
+            // 3. Cloudinary resource type from URL path
+            // e.g. /image/upload/ → image, /video/upload/ → video, /raw/upload/ → document
+            if (urlLower.includes('/image/upload/')) {
+                console.log(`✅ MIME from Cloudinary /image/upload/ path: image/jpeg`);
+                return 'image/jpeg';
+            }
+            if (urlLower.includes('/video/upload/')) {
+                console.log(`✅ MIME from Cloudinary /video/upload/ path: video/mp4`);
+                return 'video/mp4';
+            }
+            if (urlLower.includes('/raw/upload/')) {
+                console.log(`✅ MIME from Cloudinary /raw/upload/ path (document): application/pdf`);
+                return 'application/pdf';
+            }
+            // 4. headerType se default MIME
+            const typeDefaults = {
+                'IMAGE': 'image/jpeg',
+                'VIDEO': 'video/mp4',
+                'DOCUMENT': 'application/pdf',
+                'AUDIO': 'audio/mpeg',
+            };
+            const defaultMime = typeDefaults[type.toUpperCase()] || 'image/jpeg';
+            console.log(`⚠️ MIME defaulting to: ${defaultMime} (headerType: ${type})`);
+            return defaultMime;
+        };
+        // ============================================
+        // ✅ STEP 2: Filename detect karo
+        // ============================================
+        const detectFilename = (url, mimeType) => {
+            const urlPath = url.split('?')[0];
+            const lastSegment = urlPath.split('/').pop() || 'media';
+            // Already has valid extension?
+            if (/\.[a-z0-9]{2,5}$/i.test(lastSegment)) {
+                return lastSegment;
+            }
+            // Add extension based on mimeType
+            const mimeToExt = {
+                'image/jpeg': '.jpg',
+                'image/png': '.png',
+                'image/webp': '.webp',
+                'image/gif': '.gif',
+                'video/mp4': '.mp4',
+                'video/3gpp': '.3gp',
+                'application/pdf': '.pdf',
+                'application/msword': '.doc',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+                'application/vnd.ms-excel': '.xls',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+                'audio/mpeg': '.mp3',
+                'audio/aac': '.aac',
+                'audio/ogg': '.ogg',
+                'audio/amr': '.amr',
+            };
+            const ext = mimeToExt[mimeType] || '.jpg';
+            return `${lastSegment}${ext}`;
+        };
+        // ============================================
+        // ✅ STEP 3: Pre-detect karo DOWNLOAD se pehle
+        // ============================================
+        const preMime = detectMimeFromUrl(cloudinaryUrl, headerType);
+        const preFilename = detectFilename(cloudinaryUrl, preMime);
+        console.log('🔍 Pre-detected:', { mimeType: preMime, filename: preFilename });
+        // ============================================
+        // ✅ STEP 4: Download from Cloudinary
+        // ============================================
         const response = await axios_1.default.get(cloudinaryUrl, {
             responseType: 'arraybuffer',
-            timeout: 30000,
+            timeout: 60000,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
                 'Accept': '*/*'
             }
         });
         const buffer = Buffer.from(response.data);
-        const mimeType = response.headers['content-type'] ||
-            (headerType === 'IMAGE' ? 'image/jpeg' :
-                headerType === 'VIDEO' ? 'video/mp4' :
-                    'application/pdf');
-        const filename = cloudinaryUrl.split('/').pop()?.split('?')[0] ||
-            `media.${mimeType.split('/')[1]}`;
-        console.log('📥 Downloaded:', { size: buffer.length, mimeType, filename });
-        // Upload to Meta
-        const result = await meta_api_1.metaApi.uploadMedia(waData.phoneNumberId, waData.accessToken, buffer, mimeType, filename, waData.wabaId);
+        // ============================================
+        // ✅ STEP 5: Response Content-Type validate karo
+        // Response se sirf valid MIME lo, octet-stream ignore karo
+        // ============================================
+        const INVALID_MIME_TYPES = [
+            'application/octet-stream',
+            'binary/octet-stream',
+            'application/binary',
+            'application/unknown',
+        ];
+        const META_ACCEPTED_MIMES = [
+            'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+            'video/mp4', 'video/3gpp',
+            'audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr',
+            'audio/ogg', 'audio/opus',
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-excel',
+            'application/vnd.ms-powerpoint',
+            'text/plain',
+        ];
+        const rawContentType = (response.headers['content-type'] || '').split(';')[0].trim();
+        const isValidResponseMime = rawContentType &&
+            !INVALID_MIME_TYPES.includes(rawContentType) &&
+            META_ACCEPTED_MIMES.includes(rawContentType);
+        // Final MIME: valid response header > pre-detected
+        const finalMime = isValidResponseMime ? rawContentType : preMime;
+        const finalFilename = detectFilename(cloudinaryUrl, finalMime);
+        console.log('📥 Downloaded:', {
+            size: buffer.length,
+            rawContentType,
+            isValidResponseMime,
+            finalMime, // ← Ye Meta ko jayega
+            finalFilename,
+        });
+        // ============================================
+        // ✅ STEP 6: Upload to Meta
+        // ============================================
+        console.log('📤 Uploading to Meta:', {
+            size: buffer.length,
+            mimeType: finalMime,
+            filename: finalFilename
+        });
+        const result = await meta_api_1.metaApi.uploadMedia(waData.phoneNumberId, waData.accessToken, buffer, finalMime, // ✅ Correct MIME - never octet-stream
+        finalFilename, // ✅ Correct filename with extension
+        waData.wabaId);
         console.log('✅ Meta upload successful:', result.id);
         return result.id;
     }
     catch (error) {
         console.error('❌ Meta upload failed:', error.message);
-        throw new errorHandler_1.AppError(`Failed to upload ${headerType.toLowerCase()} to WhatsApp: ${error.response?.data?.error?.message || error.message}`, 400);
+        throw new errorHandler_1.AppError(`Failed to upload ${headerType.toLowerCase()} to WhatsApp: ` +
+            `${error.response?.data?.error?.message || error.message}`, 400);
     }
 };
 const extractVariables = (text) => {
@@ -158,52 +307,22 @@ const buildMetaTemplatePayload = (t) => {
         }
         // ✅ FIXED: MEDIA Headers (IMAGE, VIDEO, DOCUMENT)
         else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-            let mediaId = t.headerMediaId || t.headerContent;
-            if (!mediaId) {
+            // ✅ Template CREATION ke liye priority:
+            // 1. headerMediaId (handle "4:V2hh..." ya numeric) → header_handle
+            // 2. headerContent (Cloudinary URL) → header_handle (Meta bhi accept karta hai URLs)
+            const mediaForCreation = t.headerMediaId || t.headerContent;
+            if (!mediaForCreation) {
                 throw new errorHandler_1.AppError(`${headerType} template requires uploaded media. Please upload a file first.`, 400);
-            }
-            // ✅ Clean up smuggled URLs if present
-            if (mediaId.includes(':::')) {
-                mediaId = mediaId.split(':::')[0];
             }
             const headerComp = {
                 type: 'HEADER',
                 format: headerType,
+                example: {
+                    header_handle: [mediaForCreation], // Meta accepts both handles and URLs
+                }
             };
-            // ✅ CRITICAL: Detect media ID type and use correct field
-            if (mediaId.startsWith('4:')) {
-                // ✅ TYPE 1: Resumable Upload Handle (e.g., "4:dGVtcGxh...")
-                // Meta Template API accepts this in header_handle
-                console.log(`✅ Using resumable upload handle for ${headerType}`);
-                headerComp.example = {
-                    header_handle: [mediaId],
-                };
-            }
-            else if (/^\d+$/.test(mediaId)) {
-                // ✅ TYPE 2: Numeric Media ID (e.g., "1234567890")
-                // Also valid for template creation via header_handle
-                console.log(`✅ Using numeric media ID for ${headerType}:`, mediaId);
-                headerComp.example = {
-                    header_handle: [mediaId],
-                };
-            }
-            else if (mediaId.startsWith('http')) {
-                // ✅ TYPE 3: URL (Cloudinary or other hosted URL)
-                // Meta also accepts URLs in some cases
-                console.log(`✅ Using media URL for ${headerType}`);
-                headerComp.example = {
-                    header_handle: [mediaId],
-                };
-            }
-            else {
-                // ✅ TYPE 4: Unknown format - try as handle anyway
-                console.warn(`⚠️ Unknown media ID format, attempting as handle: ${mediaId.substring(0, 30)}...`);
-                headerComp.example = {
-                    header_handle: [mediaId],
-                };
-            }
             components.push(headerComp);
-            console.log(`✅ ${headerType} header added`);
+            console.log(`✅ ${headerType} header with: ${mediaForCreation.substring(0, 40)}...`);
         }
     }
     // ============================================
@@ -598,8 +717,28 @@ class TemplatesService {
             language: input.language,
             category: input.category,
             headerType: input.headerType || null,
-            headerContent: mediaHeaderContent, // ✅ Permanent URL
-            headerMediaId: finalMetaId, // ✅ Numeric ID ya handle
+            // ✅ CRITICAL: DB mein SIRF Cloudinary URL save karo
+            headerContent: mediaHeaderContent, // = finalCloudinaryUrl (PERMANENT)
+            // ✅ headerMediaId: null save karo! Handle expire ho jaata hai
+            // Sirf numeric ID save karo agar available ho
+            headerMediaId: (() => {
+                if (!finalMetaId)
+                    return null;
+                // Pure numeric = permanent, save karo
+                if (/^\d{10,}$/.test(finalMetaId))
+                    return finalMetaId;
+                // "4:V2hh..." handle = EXPIRE HOGA, null save karo
+                return null;
+            })(),
+            // ✅ NEW: If numeric ID, set timestamp
+            headerMediaUploadedAt: (() => {
+                if (!finalMetaId)
+                    return null;
+                if (/^\d{10,}$/.test(finalMetaId))
+                    return new Date();
+                return null;
+            })(),
+            headerMediaLastVerified: null,
             bodyText: input.bodyText,
             footerText: input.footerText || null,
             buttons: toJsonValue(input.buttons || []),
@@ -625,13 +764,24 @@ class TemplatesService {
         // ✅ Submit to Meta if account is available
         if (canSyncToMeta && waData) {
             try {
+                const metaHeaderMediaId = (() => {
+                    if (!finalMetaId)
+                        return null;
+                    // Pure numeric = OK for template creation
+                    if (/^\d+$/.test(finalMetaId))
+                        return finalMetaId;
+                    // Handle "4:xxx" = OK for CREATION only (header_handle field)
+                    if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(finalMetaId))
+                        return finalMetaId;
+                    return null;
+                })();
                 const metaPayload = buildMetaTemplatePayload({
                     name: normalizeTemplateName(input.name),
                     language: input.language,
                     category: input.category,
                     headerType: input.headerType || null,
-                    headerContent: input.headerContent || null,
-                    headerMediaId: finalMetaId,
+                    headerContent: finalCloudinaryUrl || input.headerContent || null,
+                    headerMediaId: metaHeaderMediaId,
                     bodyText: input.bodyText,
                     footerText: input.footerText || null,
                     buttons: (input.buttons || []),
@@ -776,11 +926,26 @@ class TemplatesService {
                 const headerComponent = mt.components?.find((c) => c.type === 'HEADER');
                 const footerComponent = mt.components?.find((c) => c.type === 'FOOTER');
                 const buttonsComponent = mt.components?.find((c) => c.type === 'BUTTONS');
-                // Extract header content properly for media templates
-                let headerContent = headerComponent?.text || null;
+                let headerContent = null;
+                // Text header
+                if (headerComponent?.text) {
+                    headerContent = headerComponent.text;
+                }
+                // Media header - example se URL extract karo
                 if (!headerContent && headerComponent?.example) {
-                    headerContent = headerComponent.example.header_handle?.[0] ||
-                        headerComponent.example.header_text?.[0] || null;
+                    const exampleHandles = headerComponent.example.header_handle || [];
+                    const exampleTexts = headerComponent.example.header_text || [];
+                    // URL prefer karo, handle skip karo
+                    for (const handle of exampleHandles) {
+                        if (handle && handle.startsWith('http') && !handle.includes('scontent')) {
+                            headerContent = handle; // Valid CDN URL ✅
+                            break;
+                        }
+                        // "4:xxx" handles skip karo - expire ho jaate hain
+                    }
+                    if (!headerContent && exampleTexts.length > 0) {
+                        headerContent = exampleTexts[0];
+                    }
                 }
                 const existing = await database_1.default.template.findFirst({
                     where: {

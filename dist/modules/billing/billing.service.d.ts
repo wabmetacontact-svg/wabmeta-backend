@@ -55,6 +55,7 @@ declare class BillingService {
             createdAt: Date;
             updatedAt: Date;
             slug: string;
+            isActive: boolean;
             description: string | null;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -72,7 +73,6 @@ declare class BillingService {
             validityDays: number;
             isRecommended: boolean;
             features: import("@prisma/client/runtime/library").JsonValue;
-            isActive: boolean;
         };
         organizationId: string;
         status: import(".prisma/client").$Enums.SubscriptionStatus;
@@ -122,6 +122,7 @@ declare class BillingService {
         createdAt: Date;
         updatedAt: Date;
         slug: string;
+        isActive: boolean;
         description: string | null;
         maxContacts: number;
         maxMessages: number;
@@ -136,7 +137,6 @@ declare class BillingService {
         maxApiCalls: number;
         validityDays: number;
         isRecommended: boolean;
-        isActive: boolean;
     }[]>;
     private getDefaultPlans;
     getUsage(organizationId: string): Promise<{
@@ -206,6 +206,7 @@ declare class BillingService {
             createdAt: Date;
             updatedAt: Date;
             slug: string;
+            isActive: boolean;
             description: string | null;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -223,7 +224,6 @@ declare class BillingService {
             validityDays: number;
             isRecommended: boolean;
             features: import("@prisma/client/runtime/library").JsonValue;
-            isActive: boolean;
         };
         validUntil: Date;
         message: string;
@@ -304,6 +304,7 @@ declare class BillingService {
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -321,7 +322,6 @@ declare class BillingService {
                 validityDays: number;
                 isRecommended: boolean;
                 features: import("@prisma/client/runtime/library").JsonValue;
-                isActive: boolean;
             };
         } & {
             organizationId: string;

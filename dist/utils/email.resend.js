@@ -300,6 +300,87 @@ exports.emailTemplates = {
       </html>
     `,
     }),
+    welcome: (name) => ({
+        subject: '🎉 Welcome to WabMeta!',
+        html: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              line-height: 1.6; 
+              color: #333; 
+              margin: 0;
+              padding: 0;
+              background-color: #f4f4f7;
+            }
+            .container { 
+              max-width: 600px; 
+              margin: 40px auto; 
+              background: white;
+              border-radius: 12px;
+              overflow: hidden;
+              box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            .header { 
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+              color: white; 
+              padding: 40px 30px; 
+              text-align: center; 
+            }
+            .content { 
+              padding: 40px 30px; 
+            }
+            .button { 
+              display: inline-block; 
+              background: #667eea; 
+              color: white !important; 
+              padding: 14px 32px; 
+              text-decoration: none; 
+              border-radius: 8px; 
+              margin: 24px 0;
+              font-weight: 600;
+            }
+            .footer { 
+              text-align: center; 
+              padding: 20px;
+              background: #f8f9fa;
+              color: #666; 
+              font-size: 13px; 
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Welcome to WabMeta! 🎉</h1>
+            </div>
+            <div class="content">
+              <p style="font-size: 16px;">Hi <strong>${name}</strong>,</p>
+              <p style="color: #666;">
+                Welcome to WabMeta! We're excited to have you on board.
+              </p>
+              <p style="color: #666;">
+                WabMeta helps you scale your business with WhatsApp Marketing, Automation, and CRM.
+              </p>
+              <div style="text-align: center;">
+                <a href="${config_1.config.frontendUrl}/dashboard" class="button">Go to Dashboard</a>
+              </div>
+              <p style="color: #999; font-size: 13px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                Need help? Reply to this email or visit our help center.
+              </p>
+            </div>
+            <div class="footer">
+              <p style="margin: 0;">© ${new Date().getFullYear()} WabMeta. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `,
+    }),
 };
 const sendEmail = async (options) => {
     // Check if Resend is configured

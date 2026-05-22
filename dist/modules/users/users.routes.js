@@ -6,6 +6,7 @@ const users_controller_1 = require("./users.controller");
 const validate_1 = require("../../middleware/validate");
 const auth_1 = require("../../middleware/auth");
 const users_schema_1 = require("./users.schema");
+const rateLimit_1 = require("../../middleware/rateLimit");
 const router = (0, express_1.Router)();
 // All routes require authentication
 router.use(auth_1.authenticate);
@@ -57,6 +58,12 @@ router.delete('/sessions/:sessionId', users_controller_1.usersController.revokeS
  * @access  Private
  */
 router.delete('/sessions', users_controller_1.usersController.revokeAllSessions.bind(users_controller_1.usersController));
+/**
+ * @route   POST /api/v1/users/add-phone
+ * @desc    Add phone number (for Google login users)
+ * @access  Private
+ */
+router.post('/add-phone', (0, rateLimit_1.rateLimit)({ windowMs: 60 * 1000, max: 3 }), users_controller_1.usersController.addPhoneNumber.bind(users_controller_1.usersController));
 /**
  * @route   DELETE /api/v1/users/account
  * @desc    Delete user account

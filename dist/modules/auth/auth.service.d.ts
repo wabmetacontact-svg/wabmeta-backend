@@ -1,6 +1,20 @@
 import { RegisterInput, LoginInput, AuthResponse, AuthUser, AuthTokens } from './auth.types';
 export declare class AuthService {
-    register(input: RegisterInput): Promise<AuthResponse>;
+    sendPhoneOTP(phone: string): Promise<{
+        message: string;
+    }>;
+    verifyPhoneOTPAndRegister(phone: string, otp: string, userData: {
+        firstName: string;
+        lastName?: string;
+        email: string;
+        password: string;
+        organizationName?: string;
+    }): Promise<AuthResponse>;
+    register(input: RegisterInput): Promise<{
+        message: string;
+        email: string;
+        requiresVerification: boolean;
+    }>;
     login(input: LoginInput): Promise<AuthResponse>;
     verifyEmail(token: string): Promise<{
         message: string;

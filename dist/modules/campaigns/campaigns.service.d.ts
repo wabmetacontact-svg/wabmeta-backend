@@ -9,6 +9,27 @@ export declare class CampaignsService {
     update(organizationId: string, campaignId: string, input: any): Promise<any>;
     delete(organizationId: string, campaignId: string): Promise<any>;
     duplicate(organizationId: string, campaignId: string, newName: string): Promise<any>;
+    estimateCost(organizationId: string, campaignId: string): Promise<{
+        hasWallet: boolean;
+        walletActive: boolean;
+        availableBalance: number;
+        estimatedCost: number;
+        estimatedCostBreakdown: {
+            totalRecipients: number;
+            ratePerMessage: number;
+            category: string;
+            language: string;
+            countryBreakdown: {
+                country: string;
+                count: number;
+                rate: number;
+                cost: number;
+            }[];
+        };
+        canProceed: boolean;
+        shortfall: number;
+        currency: string;
+    }>;
     start(organizationId: string, campaignId: string): Promise<any>;
     pause(organizationId: string, campaignId: string): Promise<any>;
     resume(organizationId: string, campaignId: string): Promise<any>;

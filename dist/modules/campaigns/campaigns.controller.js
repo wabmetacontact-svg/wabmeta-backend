@@ -590,6 +590,19 @@ class CampaignsController {
             next(error);
         }
     }
+    async estimateCost(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization required', 400);
+            const campaignId = req.params.id;
+            const result = await campaigns_service_1.campaignsService.estimateCost(organizationId, campaignId);
+            return (0, response_1.sendSuccess)(res, result, 'Cost estimation calculated');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
 }
 exports.CampaignsController = CampaignsController;
 // ==========================================

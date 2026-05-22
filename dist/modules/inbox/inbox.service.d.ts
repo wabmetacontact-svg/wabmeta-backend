@@ -43,8 +43,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -70,8 +70,8 @@ export declare class InboxService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            templateName: string | null;
             whatsappAccountId: string | null;
+            templateName: string | null;
             conversationId: string;
             wamId: string | null;
             direction: import(".prisma/client").$Enums.MessageDirection;
@@ -109,8 +109,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -132,8 +132,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -155,8 +155,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -178,8 +178,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -201,8 +201,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -224,8 +224,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -288,8 +288,8 @@ export declare class InboxService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                lastMessageAt: Date | null;
                 phoneNumberId: string | null;
+                lastMessageAt: Date | null;
                 contactId: string;
                 lastMessagePreview: string | null;
                 lastCustomerMessageAt: Date | null;
@@ -310,8 +310,8 @@ export declare class InboxService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            templateName: string | null;
             whatsappAccountId: string | null;
+            templateName: string | null;
             conversationId: string;
             wamId: string | null;
             direction: import(".prisma/client").$Enums.MessageDirection;
@@ -363,8 +363,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -409,8 +409,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        lastMessageAt: Date | null;
         phoneNumberId: string | null;
+        lastMessageAt: Date | null;
         contactId: string;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
@@ -438,8 +438,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        templateName: string | null;
         whatsappAccountId: string | null;
+        templateName: string | null;
         conversationId: string;
         wamId: string | null;
         direction: import(".prisma/client").$Enums.MessageDirection;
@@ -474,8 +474,8 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        templateName: string | null;
         whatsappAccountId: string | null;
+        templateName: string | null;
         conversationId: string;
         wamId: string | null;
         direction: import(".prisma/client").$Enums.MessageDirection;

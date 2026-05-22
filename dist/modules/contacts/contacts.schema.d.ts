@@ -2,7 +2,7 @@ import { z } from 'zod';
 export declare const createContactSchema: z.ZodObject<{
     body: z.ZodObject<{
         phone: z.ZodEffects<z.ZodString, string, unknown>;
-        countryCode: z.ZodDefault<z.ZodOptional<z.ZodString>>;
+        countryCode: z.ZodOptional<z.ZodString>;
         firstName: z.ZodOptional<z.ZodString>;
         lastName: z.ZodOptional<z.ZodString>;
         email: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
@@ -12,11 +12,11 @@ export declare const createContactSchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         tags: string[];
         phone: string;
-        countryCode: string;
         customFields: Record<string, any>;
         email?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
+        countryCode?: string | undefined;
         groupIds?: string[] | undefined;
     }, {
         email?: unknown;
@@ -32,11 +32,11 @@ export declare const createContactSchema: z.ZodObject<{
     body: {
         tags: string[];
         phone: string;
-        countryCode: string;
         customFields: Record<string, any>;
         email?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
+        countryCode?: string | undefined;
         groupIds?: string[] | undefined;
     };
 }, {

@@ -43,6 +43,7 @@ const contacts_service_1 = require("../contacts/contacts.service");
 const events_1 = require("events");
 const chatbot_engine_1 = require("../chatbot/chatbot.engine");
 const automation_engine_1 = require("../automation/automation.engine");
+const phone_1 = require("../../utils/phone");
 // ✅ Socket.ts will subscribe to this
 exports.webhookEvents = new events_1.EventEmitter();
 exports.webhookEvents.setMaxListeners(100);
@@ -128,47 +129,43 @@ class WebhookService {
         }
         return { content: `[${type}]`, mediaUrl: null };
     }
-    // ✅ Canonical phone normalizer — always returns E.164 without '+' prefix
-    // e.g. '9340103340' → '919340103340'  |  '+919340103340' → '919340103340'
-    normalizePhone(phone) {
-        const digits = phone.replace(/[^0-9]/g, '');
-        if (digits.length === 10)
-            return `91${digits}`; // 10-digit Indian
-        if (digits.length === 11 && digits.startsWith('0'))
-            return `91${digits.slice(1)}`; // 0XXXXXXXXXX
-        return digits; // already has country code
-    }
-    async findOrCreateContact(organizationId, phone10) {
-        // ✅ Always store in E.164 format with + prefix: +919XXXXXXXXX
-        const canonical = `+${this.normalizePhone(phone10)}`; // e.g. "+919340103340"
-        const withoutPlus = canonical.slice(1); // e.g. "919340103340"
-        const tenDigit = withoutPlus.slice(-10); // e.g. "9340103340"
-        const variants = [canonical, withoutPlus, tenDigit];
+    async findOrCreateContact(organizationId, phone // WhatsApp se aata hai: "919876543210" ya "9876543210"
+    ) {
+        // ✅ toCanonicalPhone use karo - always +91XXXXXXXXXX
+        const canonical = (0, phone_1.toCanonicalPhone)(phone) || (0, phone_1.toCanonicalPhone)(`+${phone}`);
+        if (!canonical) {
+            console.error(`❌ Cannot normalize phone: ${phone}`);
+            throw new Error(`Invalid phone: ${phone}`);
+        }
+        const variants = (0, phone_1.buildPhoneVariants)(canonical);
         let contact = await database_1.default.contact.findFirst({
             where: {
                 organizationId,
                 OR: variants.map((p) => ({ phone: p })),
             },
         });
-        // ✅ Track creation status
         let wasNewlyCreated = false;
         if (!contact) {
             try {
+                // ✅ Extract country code
+                const ccDigits = canonical.slice(1, -10); // "91"
+                const countryCode = `+${ccDigits}`; // "+91"
                 contact = await database_1.default.contact.create({
                     data: {
                         organizationId,
-                        phone: canonical, // ✅ Always store as +919XXXXXXXXX
-                        countryCode: '+91',
+                        phone: canonical, // ✅ +91XXXXXXXXXX - consistent!
+                        countryCode, // ✅ +91
                         firstName: 'Unknown',
                         status: 'ACTIVE',
                         source: 'WHATSAPP_INBOUND',
                     },
                 });
                 wasNewlyCreated = true;
-                console.log(`👤 New contact created: ${canonical}`);
+                console.log(`👤 New contact: ${canonical}`);
             }
             catch (error) {
                 if (error.code === 'P2002') {
+                    // Race condition - koi aur create kar diya
                     contact = await database_1.default.contact.findFirst({
                         where: {
                             organizationId,
@@ -177,7 +174,6 @@ class WebhookService {
                     });
                     if (!contact)
                         throw error;
-                    wasNewlyCreated = false;
                 }
                 else {
                     throw error;
@@ -185,13 +181,14 @@ class WebhookService {
             }
         }
         else if (contact.phone !== canonical) {
-            // ✅ Silently migrate old format to canonical
-            await database_1.default.contact.update({
+            // ✅ Purane format ko migrate karo (non-blocking)
+            database_1.default.contact.update({
                 where: { id: contact.id },
-                data: { phone: canonical },
-            }).catch(() => { }); // non-blocking migration
+                data: { phone: canonical }
+            }).then(() => {
+                console.log(`🔄 Migrated: ${contact.phone} → ${canonical}`);
+            }).catch(() => { });
             contact.phone = canonical;
-            console.log(`🔄 Migrated contact phone: ${contact.phone} → ${canonical}`);
         }
         return { contact: contact, wasNewlyCreated };
     }
@@ -534,11 +531,19 @@ class WebhookService {
             try {
                 if (wasNewlyCreated) {
                     // 🆕 Brand new contact - UNKNOWN_MESSAGE trigger
-                    console.log(`🤖 New contact detected → triggerUnknownMessage`);
+                    console.log(`🤖 New contact detected → triggerUnknownMessage and triggerNewContact`);
                     await automation_engine_1.automationEngine.triggerUnknownMessage({
                         organizationId,
                         contactId: contact.id,
                         phone: waFrom, // ✅ Full number with country code (e.g. 917982722016)
+                        message: content,
+                        conversationId: updatedConversation.id,
+                    });
+                    // ✅ Also trigger NEW_CONTACT since this is technically a new contact
+                    await automation_engine_1.automationEngine.triggerNewContact({
+                        organizationId,
+                        contactId: contact.id,
+                        phone: waFrom,
                         message: content,
                         conversationId: updatedConversation.id,
                     });

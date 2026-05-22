@@ -15,8 +15,12 @@ class DashboardController {
             return (0, response_1.sendSuccess)(res, stats, 'Dashboard stats retrieved');
         }
         catch (error) {
-            console.error('Get dashboard stats error:', error);
-            return (0, response_1.errorResponse)(res, error.message || 'Failed to get stats', 500);
+            console.error('❌ Dashboard stats error:', {
+                message: error.message,
+                stack: error.stack?.split('\n')[1], // First stack line only
+                organizationId: req.user?.organizationId,
+            });
+            return (0, response_1.errorResponse)(res, 'Failed to get stats', 500);
         }
     }
     async getWidgets(req, res) {
@@ -25,13 +29,17 @@ class DashboardController {
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'Organization not found', 400);
             }
-            const days = parseInt(req.query.days) || 7;
+            const days = Math.min(parseInt(req.query.days) || 7, 90); // Max 90 days
             const widgets = await dashboard_service_1.dashboardService.getWidgets(organizationId, days);
             return (0, response_1.sendSuccess)(res, widgets, 'Dashboard widgets retrieved');
         }
         catch (error) {
-            console.error('Get dashboard widgets error:', error);
-            return (0, response_1.errorResponse)(res, error.message || 'Failed to get widgets', 500);
+            console.error('❌ Dashboard widgets error:', {
+                message: error.message,
+                stack: error.stack?.split('\n')[1],
+                organizationId: req.user?.organizationId,
+            });
+            return (0, response_1.errorResponse)(res, 'Failed to get widgets', 500);
         }
     }
     async getActivity(req, res) {

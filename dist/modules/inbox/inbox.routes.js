@@ -46,6 +46,8 @@ router.post('/conversations/:id/messages/media', (req, res, next) => inbox_contr
 // ==========================================
 // PATCH /inbox/conversations/:id/pin
 router.patch('/conversations/:id/pin', (req, res, next) => inbox_controller_1.inboxController.togglePin(req, res, next));
+// ✅ Template media resolve
+router.post('/template/resolve-media', (req, res, next) => inbox_controller_1.inboxController.resolveTemplateMedia(req, res, next));
 // ==========================================
 // CONVERSATIONS
 // ==========================================

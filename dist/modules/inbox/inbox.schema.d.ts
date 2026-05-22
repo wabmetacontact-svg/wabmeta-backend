@@ -209,6 +209,7 @@ export declare const sendMessageSchema: z.ZodObject<{
         }>>;
     }, "strip", z.ZodTypeAny, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
+        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -229,9 +230,9 @@ export declare const sendMessageSchema: z.ZodObject<{
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
-        filename?: string | undefined;
     }, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
+        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -252,9 +253,9 @@ export declare const sendMessageSchema: z.ZodObject<{
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
-        filename?: string | undefined;
     }>, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
+        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -275,9 +276,9 @@ export declare const sendMessageSchema: z.ZodObject<{
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
-        filename?: string | undefined;
     }, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
+        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -298,11 +299,11 @@ export declare const sendMessageSchema: z.ZodObject<{
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
-        filename?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
+        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -323,7 +324,6 @@ export declare const sendMessageSchema: z.ZodObject<{
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
-        filename?: string | undefined;
     };
     params: {
         id: string;
@@ -331,6 +331,7 @@ export declare const sendMessageSchema: z.ZodObject<{
 }, {
     body: {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
+        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -351,7 +352,6 @@ export declare const sendMessageSchema: z.ZodObject<{
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
-        filename?: string | undefined;
     };
     params: {
         id: string;

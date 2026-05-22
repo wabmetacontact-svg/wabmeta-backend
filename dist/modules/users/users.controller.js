@@ -130,6 +130,26 @@ class UsersController {
             next(error);
         }
     }
+    // ==========================================
+    // ADD PHONE NUMBER
+    // ==========================================
+    async addPhoneNumber(req, res, next) {
+        try {
+            const userId = req.user.id;
+            const { phone } = req.body;
+            if (!phone) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Phone number is required',
+                });
+            }
+            const result = await users_service_1.usersService.addPhoneNumber(userId, phone);
+            return (0, response_1.sendSuccess)(res, result, result.message);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
 }
 exports.UsersController = UsersController;
 // Export singleton instance

@@ -32,6 +32,7 @@ export declare class InboxController {
     private sendMediaPlaceholder;
     deleteMessage(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     editMessage(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    resolveTemplateMedia(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 }
 export declare const inboxController: InboxController;
 export {};

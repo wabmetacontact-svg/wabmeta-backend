@@ -2179,8 +2179,8 @@ export declare const createChatbotSchema: z.ZodObject<{
         }, z.ZodTypeAny, "passthrough">>>;
     }, "strip", z.ZodTypeAny, {
         name: string;
-        triggerKeywords: string[];
         isDefault: boolean;
+        triggerKeywords: string[];
         description?: string | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -2910,6 +2910,7 @@ export declare const createChatbotSchema: z.ZodObject<{
         fallbackMessage?: string | undefined;
     }, {
         name: string;
+        isDefault?: boolean | undefined;
         description?: string | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -3636,15 +3637,14 @@ export declare const createChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
-        isDefault?: boolean | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         name: string;
-        triggerKeywords: string[];
         isDefault: boolean;
+        triggerKeywords: string[];
         description?: string | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -4376,6 +4376,7 @@ export declare const createChatbotSchema: z.ZodObject<{
 }, {
     body: {
         name: string;
+        isDefault?: boolean | undefined;
         description?: string | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -5102,7 +5103,6 @@ export declare const createChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
-        isDefault?: boolean | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     };
@@ -7300,6 +7300,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -8026,12 +8027,12 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
-        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     }, {
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -8758,7 +8759,6 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
-        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     }>;
@@ -8766,6 +8766,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
     body: {
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -9492,7 +9493,6 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
-        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     };
@@ -9503,6 +9503,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
     body: {
         name?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
@@ -10229,7 +10230,6 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
-        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     };

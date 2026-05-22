@@ -16,6 +16,11 @@ export declare class UsersService {
         message: string;
     }>;
     getUserById(userId: string): Promise<UserProfile>;
+    addPhoneNumber(userId: string, phone: string): Promise<{
+        message: string;
+        phone: string;
+        whatsappSent: boolean;
+    }>;
 }
 export declare const usersService: UsersService;
 //# sourceMappingURL=users.service.d.ts.map

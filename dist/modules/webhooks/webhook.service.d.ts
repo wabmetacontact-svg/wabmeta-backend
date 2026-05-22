@@ -8,7 +8,6 @@ export declare class WebhookService {
     private isIndianNumber;
     private mapMessageType;
     private buildContentAndMedia;
-    private normalizePhone;
     private findOrCreateContact;
     handleWebhook(payload: any): Promise<{
         status: string;

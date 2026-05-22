@@ -70,6 +70,11 @@ export interface GoogleUserPayload {
     sub: string;
     email_verified?: boolean;
 }
+export interface RegisterResponse {
+    message: string;
+    email: string;
+    requiresVerification: boolean;
+}
 export interface OTPData {
     otp: string;
     expiresAt: number;

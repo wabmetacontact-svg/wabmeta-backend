@@ -795,6 +795,171 @@ class InboxController {
             next(error);
         }
     }
+    // ==========================================
+    // ✅ NEW: RESOLVE TEMPLATE MEDIA
+    // POST /inbox/template/resolve-media
+    // body: { templateId, phoneNumberId, accessToken }
+    // ==========================================
+    async resolveTemplateMedia(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { templateId } = req.body;
+            if (!templateId)
+                throw new errorHandler_1.AppError('templateId is required', 400);
+            // ── Template fetch karo ───────────────────────────────────────
+            const template = await database_1.default.template.findFirst({
+                where: { id: templateId, organizationId },
+            });
+            if (!template)
+                throw new errorHandler_1.AppError('Template not found', 404);
+            const headerType = (template.headerType || '').toUpperCase();
+            // Media template nahi hai
+            if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+                return (0, response_1.sendSuccess)(res, { mediaId: null, mediaUrl: null }, 'No media header');
+            }
+            const mediaId = template.headerMediaId;
+            const mediaUrl = template.headerContent;
+            // ── Priority 1: Numeric ID already hai ───────────────────────
+            if (mediaId && /^\d+$/.test(mediaId)) {
+                console.log('✅ Template has valid numeric mediaId:', mediaId);
+                return (0, response_1.sendSuccess)(res, {
+                    mediaId,
+                    mediaUrl,
+                    source: 'cached_numeric_id',
+                }, 'Media resolved');
+            }
+            // ── Priority 2: Cloudinary URL se re-upload karo ─────────────
+            const cloudinaryUrl = (mediaUrl && mediaUrl.startsWith('http') && !mediaUrl.includes('scontent')
+                ? mediaUrl : null) ||
+                (mediaId && mediaId.startsWith('http') && !mediaId.includes('scontent')
+                    ? mediaId : null);
+            if (!cloudinaryUrl) {
+                throw new errorHandler_1.AppError(`Template "${template.name}" has no valid media. ` +
+                    `Please re-upload the ${headerType.toLowerCase()} in Templates.`, 400);
+            }
+            // ── WhatsApp account dhundo ───────────────────────────────────
+            const waAccount = await database_1.default.whatsAppAccount.findFirst({
+                where: { organizationId, status: 'CONNECTED' },
+                orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+            });
+            if (!waAccount)
+                throw new errorHandler_1.AppError('No connected WhatsApp account', 400);
+            const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
+            const accessToken = waAccount.accessToken ? safeDecryptStrict(waAccount.accessToken) : null;
+            if (!accessToken)
+                throw new errorHandler_1.AppError('Invalid access token', 400);
+            const phoneNumberId = waAccount.phoneNumberId;
+            if (!phoneNumberId)
+                throw new errorHandler_1.AppError('Phone number ID missing in WhatsApp account', 400);
+            // ── MIME detect karo ─────────────────────────────────────────
+            const detectMime = (url, type) => {
+                const urlPath = url.split('?')[0].toLowerCase();
+                // Extension check
+                const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
+                if (extMatch) {
+                    const extMap = {
+                        jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                        png: 'image/png', webp: 'image/webp',
+                        mp4: 'video/mp4', '3gp': 'video/3gpp',
+                        pdf: 'application/pdf',
+                        doc: 'application/msword',
+                        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        xls: 'application/vnd.ms-excel',
+                        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        ppt: 'application/vnd.ms-powerpoint',
+                        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                        txt: 'text/plain', mp3: 'audio/mpeg',
+                        ogg: 'audio/ogg', aac: 'audio/aac',
+                    };
+                    if (extMap[extMatch[1]])
+                        return extMap[extMatch[1]];
+                }
+                // Cloudinary path check
+                if (urlPath.includes('/image/upload/'))
+                    return 'image/jpeg';
+                if (urlPath.includes('/video/upload/'))
+                    return 'video/mp4';
+                if (urlPath.includes('/raw/upload/'))
+                    return 'application/pdf';
+                // Header type fallback
+                const defaults = {
+                    IMAGE: 'image/jpeg', VIDEO: 'video/mp4',
+                    DOCUMENT: 'application/pdf', AUDIO: 'audio/mpeg',
+                };
+                return defaults[type] || 'application/pdf';
+            };
+            const buildFilename = (url, mime) => {
+                const seg = url.split('?')[0].split('/').pop() || 'media';
+                if (/\.[a-zA-Z0-9]{2,5}$/.test(seg))
+                    return seg;
+                const mimeExt = {
+                    'image/jpeg': 'jpg', 'image/png': 'png',
+                    'image/webp': 'webp', 'video/mp4': 'mp4',
+                    'video/3gpp': '3gp', 'application/pdf': 'pdf',
+                    'application/msword': 'doc',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+                    'application/vnd.ms-excel': 'xls',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+                    'audio/mpeg': 'mp3', 'audio/ogg': 'ogg',
+                    'audio/aac': 'aac',
+                };
+                return `${seg}.${mimeExt[mime] || 'bin'}`;
+            };
+            // ── Download from Cloudinary ──────────────────────────────────
+            console.log('⬇️ Downloading from Cloudinary:', cloudinaryUrl.substring(0, 60));
+            const preMime = detectMime(cloudinaryUrl, headerType);
+            const preFilename = buildFilename(cloudinaryUrl, preMime);
+            const dlResponse = await axios_1.default.get(cloudinaryUrl, {
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                headers: { 'User-Agent': 'WabMeta/1.0', 'Accept': '*/*' },
+            });
+            const buffer = Buffer.from(dlResponse.data);
+            // Validate response MIME
+            const INVALID_MIMES = [
+                'application/octet-stream', 'binary/octet-stream',
+                'application/binary', 'application/unknown',
+            ];
+            const META_VALID_MIMES = [
+                'image/jpeg', 'image/png', 'image/webp',
+                'video/mp4', 'video/3gpp',
+                'audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr',
+                'audio/ogg', 'audio/opus', 'application/pdf',
+                'application/msword', 'text/plain',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+            ];
+            const rawCT = (dlResponse.headers['content-type'] || '').split(';')[0].trim();
+            const finalMime = (rawCT && !INVALID_MIMES.includes(rawCT) && META_VALID_MIMES.includes(rawCT))
+                ? rawCT
+                : preMime;
+            const finalFilename = buildFilename(cloudinaryUrl, finalMime);
+            console.log('📤 Uploading to Meta:', { mimeType: finalMime, filename: finalFilename, size: buffer.length });
+            // ── Upload to Meta ────────────────────────────────────────────
+            const { metaApi } = await Promise.resolve().then(() => __importStar(require('../meta/meta.api')));
+            const uploadResult = await metaApi.uploadMedia(phoneNumberId, accessToken, buffer, finalMime, finalFilename);
+            const freshMediaId = uploadResult.id;
+            console.log('✅ Fresh mediaId:', freshMediaId);
+            // ── Cache in DB ───────────────────────────────────────────────
+            await database_1.default.template.update({
+                where: { id: template.id },
+                data: { headerMediaId: freshMediaId },
+            }).catch((e) => console.warn('⚠️ Cache update failed:', e.message));
+            return (0, response_1.sendSuccess)(res, {
+                mediaId: freshMediaId,
+                mediaUrl: cloudinaryUrl,
+                source: 'fresh_upload',
+            }, 'Media resolved and uploaded');
+        }
+        catch (error) {
+            console.error('❌ resolveTemplateMedia error:', error.message);
+            next(error);
+        }
+    }
 }
 exports.InboxController = InboxController;
 exports.inboxController = new InboxController();

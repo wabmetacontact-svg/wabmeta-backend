@@ -145,11 +145,11 @@ export declare class AdminService {
         email: string;
         status: import(".prisma/client").$Enums.UserStatus;
         id: string;
+        googleId: string | null;
         password: string | null;
         firstName: string;
         lastName: string | null;
         phone: string | null;
-        googleId: string | null;
         avatar: string | null;
         emailVerified: boolean;
         emailVerifyToken: string | null;
@@ -253,15 +253,15 @@ export declare class AdminService {
             createdAt: Date;
             updatedAt: Date;
             slug: string;
+            planType: import(".prisma/client").$Enums.PlanType;
             logo: string | null;
             website: string | null;
             industry: string | null;
             timezone: string;
-            planType: import(".prisma/client").$Enums.PlanType;
+            ownerId: string;
             featureCsvUpload: boolean;
             featureOverrideByAdmin: boolean;
             featureSimpleBulkUpload: boolean;
-            ownerId: string;
         })[];
         total: number;
     }>;
@@ -274,6 +274,7 @@ export declare class AdminService {
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -291,7 +292,6 @@ export declare class AdminService {
                 validityDays: number;
                 isRecommended: boolean;
                 features: import("@prisma/client/runtime/library").JsonValue;
-                isActive: boolean;
             };
         } & {
             organizationId: string;
@@ -351,15 +351,15 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
         slug: string;
+        planType: import(".prisma/client").$Enums.PlanType;
         logo: string | null;
         website: string | null;
         industry: string | null;
         timezone: string;
-        planType: import(".prisma/client").$Enums.PlanType;
+        ownerId: string;
         featureCsvUpload: boolean;
         featureOverrideByAdmin: boolean;
         featureSimpleBulkUpload: boolean;
-        ownerId: string;
     }>;
     updateOrganization(id: string, data: any): Promise<{
         name: string;
@@ -367,15 +367,15 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
         slug: string;
+        planType: import(".prisma/client").$Enums.PlanType;
         logo: string | null;
         website: string | null;
         industry: string | null;
         timezone: string;
-        planType: import(".prisma/client").$Enums.PlanType;
+        ownerId: string;
         featureCsvUpload: boolean;
         featureOverrideByAdmin: boolean;
         featureSimpleBulkUpload: boolean;
-        ownerId: string;
     }>;
     deleteOrganization(id: string): Promise<{
         message: string;
@@ -389,6 +389,7 @@ export declare class AdminService {
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -406,7 +407,6 @@ export declare class AdminService {
                 validityDays: number;
                 isRecommended: boolean;
                 features: import("@prisma/client/runtime/library").JsonValue;
-                isActive: boolean;
             };
         } & {
             organizationId: string;
@@ -466,15 +466,15 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
         slug: string;
+        planType: import(".prisma/client").$Enums.PlanType;
         logo: string | null;
         website: string | null;
         industry: string | null;
         timezone: string;
-        planType: import(".prisma/client").$Enums.PlanType;
+        ownerId: string;
         featureCsvUpload: boolean;
         featureOverrideByAdmin: boolean;
         featureSimpleBulkUpload: boolean;
-        ownerId: string;
     }>;
     getPlans(): Promise<({
         _count: {
@@ -487,6 +487,7 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
         slug: string;
+        isActive: boolean;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -504,7 +505,6 @@ export declare class AdminService {
         validityDays: number;
         isRecommended: boolean;
         features: import("@prisma/client/runtime/library").JsonValue;
-        isActive: boolean;
     })[]>;
     createPlan(data: any): Promise<{
         name: string;
@@ -513,6 +513,7 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
         slug: string;
+        isActive: boolean;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -530,7 +531,6 @@ export declare class AdminService {
         validityDays: number;
         isRecommended: boolean;
         features: import("@prisma/client/runtime/library").JsonValue;
-        isActive: boolean;
     }>;
     updatePlan(id: string, data: any): Promise<{
         name: string;
@@ -539,6 +539,7 @@ export declare class AdminService {
         createdAt: Date;
         updatedAt: Date;
         slug: string;
+        isActive: boolean;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -556,7 +557,6 @@ export declare class AdminService {
         validityDays: number;
         isRecommended: boolean;
         features: import("@prisma/client/runtime/library").JsonValue;
-        isActive: boolean;
     }>;
     deletePlan(id: string): Promise<{
         message: string;
@@ -655,23 +655,23 @@ export declare class AdminService {
             createdAt: Date;
             updatedAt: Date;
             phoneNumber: string;
-            isActive: boolean;
-            accessToken: string | null;
-            verifiedName: string | null;
-            qualityRating: string | null;
-            codeVerificationStatus: string | null;
-            nameStatus: string | null;
-            wabaId: string;
-            isDefault: boolean;
             phoneNumberId: string;
+            accessToken: string | null;
+            wabaId: string;
             displayName: string;
+            qualityRating: string | null;
             tokenExpiresAt: Date | null;
             webhookSecret: string | null;
+            codeVerificationStatus: string | null;
+            nameStatus: string | null;
+            verifiedName: string | null;
             messagingLimit: string | null;
             dailyMessageLimit: number;
             dailyMessagesUsed: number;
             lastLimitReset: Date;
             businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
+            isDefault: boolean;
+            isActive: boolean;
             connectionType: string;
         };
     }>;

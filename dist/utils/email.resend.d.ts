@@ -11,6 +11,10 @@ export declare const emailTemplates: {
         subject: string;
         html: string;
     };
+    welcome: (name: string) => {
+        subject: string;
+        html: string;
+    };
 };
 interface SendEmailOptions {
     to: string;

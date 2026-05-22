@@ -7,6 +7,8 @@ interface AuthRequest extends Request {
     };
 }
 export declare class AuthController {
+    sendPhoneOTP(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    verifyPhoneOTPAndRegister(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     register(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     login(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     verifyEmail(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;

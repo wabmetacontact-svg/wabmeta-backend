@@ -1,146 +1,111 @@
 "use strict";
+// src/utils/phoneInternational.ts
+// ✅ Sirf COUNTRY_CODES list rakho, parsePhoneNumber phone.ts se use karo
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.COUNTRY_CODES = void 0;
 exports.parsePhoneNumber = parsePhoneNumber;
 exports.parseMultiplePhones = parseMultiplePhones;
-// ✅ INTERNATIONAL COUNTRY CODES
+const phone_1 = require("./phone");
+// Keep the old list or a simplified one
 exports.COUNTRY_CODES = [
-    { code: '+91', country: 'India', flag: '🇮🇳', maxLength: 10 },
-    { code: '+1', country: 'USA/Canada', flag: '🇺🇸', maxLength: 10 },
-    { code: '+44', country: 'United Kingdom', flag: '🇬🇧', maxLength: 10 },
-    { code: '+971', country: 'UAE', flag: '🇦🇪', maxLength: 9 },
-    { code: '+966', country: 'Saudi Arabia', flag: '🇸🇦', maxLength: 9 },
-    { code: '+65', country: 'Singapore', flag: '🇸🇬', maxLength: 8 },
-    { code: '+60', country: 'Malaysia', flag: '🇲🇾', maxLength: 10 },
-    { code: '+61', country: 'Australia', flag: '🇦🇺', maxLength: 9 },
-    { code: '+49', country: 'Germany', flag: '🇩🇪', maxLength: 11 },
-    { code: '+33', country: 'France', flag: '🇫🇷', maxLength: 9 },
-    { code: '+39', country: 'Italy', flag: '🇮🇹', maxLength: 10 },
-    { code: '+34', country: 'Spain', flag: '🇪🇸', maxLength: 9 },
-    { code: '+81', country: 'Japan', flag: '🇯🇵', maxLength: 10 },
-    { code: '+82', country: 'South Korea', flag: '🇰🇷', maxLength: 10 },
-    { code: '+86', country: 'China', flag: '🇨🇳', maxLength: 11 },
-    { code: '+852', country: 'Hong Kong', flag: '🇭🇰', maxLength: 8 },
-    { code: '+63', country: 'Philippines', flag: '🇵🇭', maxLength: 10 },
-    { code: '+62', country: 'Indonesia', flag: '🇮🇩', maxLength: 11 },
-    { code: '+66', country: 'Thailand', flag: '🇹🇭', maxLength: 9 },
-    { code: '+84', country: 'Vietnam', flag: '🇻🇳', maxLength: 10 },
-    { code: '+27', country: 'South Africa', flag: '🇿🇦', maxLength: 9 },
-    { code: '+234', country: 'Nigeria', flag: '🇳🇬', maxLength: 10 },
-    { code: '+254', country: 'Kenya', flag: '🇰🇪', maxLength: 9 },
-    { code: '+55', country: 'Brazil', flag: '🇧🇷', maxLength: 11 },
-    { code: '+52', country: 'Mexico', flag: '🇲🇽', maxLength: 10 },
-    { code: '+7', country: 'Russia', flag: '🇷🇺', maxLength: 10 },
-    { code: '+90', country: 'Turkey', flag: '🇹🇷', maxLength: 10 },
-    { code: '+20', country: 'Egypt', flag: '🇪🇬', maxLength: 10 },
-    { code: '+92', country: 'Pakistan', flag: '🇵🇰', maxLength: 10 },
-    { code: '+880', country: 'Bangladesh', flag: '🇧🇩', maxLength: 10 },
-    { code: '+94', country: 'Sri Lanka', flag: '🇱🇰', maxLength: 9 },
-    { code: '+977', country: 'Nepal', flag: '🇳🇵', maxLength: 10 },
+    { code: '+1', name: 'USA/Canada' },
+    { code: '+44', name: 'UK' },
+    { code: '+91', name: 'India' },
+    { code: '+61', name: 'Australia' },
+    { code: '+971', name: 'UAE' },
+    // ... any other codes needed by frontend/backend if imported directly
 ];
 /**
- * Parse and validate international phone number
+ * ✅ FIXED - phone.ts ka toCanonicalPhone use karta hai
+ * Consistent format guaranteed
  */
-// ✅ Auto-detect country code from phone number
 function parsePhoneNumber(input) {
-    // Clean input
-    let cleaned = String(input || '').replace(/[\s\-\(\)\.]/g, '').trim();
-    if (!cleaned) {
-        return { isValid: false, fullNumber: '', countryCode: '', nationalNumber: '', error: 'Empty number' };
-    }
-    // ✅ Must start with + for international
-    if (!cleaned.startsWith('+')) {
-        // Try adding + if it looks like international
-        if (cleaned.length >= 10 && /^\d+$/.test(cleaned)) {
-            cleaned = '+' + cleaned;
-        }
-        else {
-            return {
-                isValid: false,
-                fullNumber: cleaned,
-                countryCode: '',
-                nationalNumber: cleaned,
-                error: 'Missing country code (e.g., +91, +1)'
-            };
-        }
-    }
-    // ✅ Validate format: + followed by 10-15 digits
-    const digitsOnly = cleaned.replace('+', '');
-    if (!/^\d{10,15}$/.test(digitsOnly)) {
+    if (!input || !String(input).trim()) {
         return {
-            isValid: false,
-            fullNumber: cleaned,
-            countryCode: '',
-            nationalNumber: digitsOnly,
-            error: 'Invalid phone number length (10-15 digits required)'
+            isValid: false, fullNumber: '',
+            countryCode: '', nationalNumber: '',
+            error: 'Empty number'
         };
     }
-    // ✅ Extract country code (assume first 1-4 digits)
-    // Common patterns: +1 (US), +91 (India), +44 (UK), +971 (UAE)
+    const canonical = (0, phone_1.toCanonicalPhone)(input);
+    if (!canonical) {
+        return {
+            isValid: false,
+            fullNumber: String(input).trim(),
+            countryCode: '',
+            nationalNumber: String(input).trim(),
+            error: 'Invalid phone number. Include country code (e.g., +91XXXXXXXXXX)'
+        };
+    }
+    const digits = (0, phone_1.digitsOnly)(canonical); // "919876543210"
+    // Detect country code from canonical
+    const allCodes = [
+        '+1', '+7', '+20', '+27', '+30', '+31', '+32', '+33', '+34',
+        '+36', '+39', '+40', '+41', '+43', '+44', '+45', '+46', '+47',
+        '+48', '+49', '+51', '+52', '+53', '+54', '+55', '+56', '+57',
+        '+58', '+60', '+61', '+62', '+63', '+64', '+65', '+66', '+81',
+        '+82', '+84', '+86', '+90', '+91', '+92', '+93', '+94', '+95',
+        '+98', '+212', '+213', '+216', '+218', '+234', '+254', '+880',
+        '+852', '+966', '+971', '+977', '+998',
+    ].sort((a, b) => b.length - a.length); // Longer first
     let countryCode = '';
     let nationalNumber = '';
-    // Check common country codes
-    const commonCodes = ['+1', '+7', '+20', '+27', '+30', '+31', '+32', '+33', '+34', '+36', '+39', '+40', '+41', '+43', '+44', '+45', '+46', '+47', '+48', '+49', '+51', '+52', '+53', '+54', '+55', '+56', '+57', '+58', '+60', '+61', '+62', '+63', '+64', '+65', '+66', '+81', '+82', '+84', '+86', '+90', '+91', '+92', '+93', '+94', '+95', '+98', '+212', '+213', '+216', '+218', '+220', '+221', '+222', '+223', '+224', '+225', '+226', '+227', '+228', '+229', '+230', '+231', '+232', '+233', '+234', '+235', '+236', '+237', '+238', '+239', '+240', '+241', '+242', '+243', '+244', '+245', '+246', '+247', '+248', '+249', '+250', '+251', '+252', '+253', '+254', '+255', '+256', '+257', '+258', '+260', '+261', '+262', '+263', '+264', '+265', '+266', '+267', '+268', '+269', '+290', '+291', '+297', '+298', '+299', '+350', '+351', '+352', '+353', '+354', '+355', '+356', '+357', '+358', '+359', '+370', '+371', '+372', '+373', '+374', '+375', '+376', '+377', '+378', '+380', '+381', '+382', '+383', '+385', '+386', '+387', '+389', '+420', '+421', '+423', '+500', '+501', '+502', '+503', '+504', '+505', '+506', '+507', '+508', '+509', '+590', '+591', '+592', '+593', '+594', '+595', '+596', '+597', '+598', '+599', '+670', '+672', '+673', '+674', '+675', '+676', '+677', '+678', '+679', '+680', '+681', '+682', '+683', '+685', '+686', '+687', '+688', '+689', '+690', '+691', '+692', '+850', '+852', '+853', '+855', '+856', '+880', '+886', '+960', '+961', '+962', '+963', '+964', '+965', '+966', '+967', '+968', '+970', '+971', '+972', '+973', '+974', '+975', '+976', '+977', '+992', '+993', '+994', '+995', '+996', '+998'];
-    // Sort by length (longer first) to match +971 before +97
-    const sortedCodes = commonCodes.sort((a, b) => b.length - a.length);
-    for (const code of sortedCodes) {
-        if (cleaned.startsWith(code)) {
+    for (const code of allCodes) {
+        if (canonical.startsWith(code)) {
             countryCode = code;
-            nationalNumber = cleaned.substring(code.length);
+            nationalNumber = canonical.substring(code.length);
             break;
         }
     }
-    // Fallback: assume first 2-3 digits are country code
+    // Fallback
     if (!countryCode) {
-        if (digitsOnly.length >= 11) {
-            countryCode = '+' + digitsOnly.substring(0, digitsOnly.length - 10);
-            nationalNumber = digitsOnly.substring(digitsOnly.length - 10);
-        }
-        else {
-            countryCode = '+' + digitsOnly.substring(0, 2);
-            nationalNumber = digitsOnly.substring(2);
+        // Assume last 10 are national
+        countryCode = '+' + digits.slice(0, digits.length - 10);
+        nationalNumber = digits.slice(-10);
+    }
+    // ✅ Indian number extra validation
+    if (countryCode === '+91') {
+        if (!/^[6-9]\d{9}$/.test(nationalNumber)) {
+            return {
+                isValid: false,
+                fullNumber: canonical,
+                countryCode,
+                nationalNumber,
+                error: 'Invalid Indian mobile number (must start with 6-9)'
+            };
         }
     }
     return {
         isValid: true,
-        fullNumber: cleaned,
+        fullNumber: canonical, // Always E.164: +919876543210
         countryCode,
         nationalNumber
     };
 }
-// ✅ Parse multiple phone numbers
 function parseMultiplePhones(input) {
-    // ✅ Pre-process: Normalize spaced phone formats BEFORE splitting
-    // Handles formats like: +91 98765 43210, +91 9876543210, +1 555 123 4567
-    // Pattern: + followed by 1-4 digit country code, then spaces between digit groups
-    let normalized = input.replace(/(\+\d{1,4})\s+(\d[\d\s]{6,14}\d)/g, (_match, countryCode, rest) => {
-        // Remove all spaces from the rest of the number
-        return countryCode + rest.replace(/\s+/g, '');
-    });
-    const numbers = normalized
-        .split(/[\n,;]+/)
-        .flatMap(line => {
-        // Within each line, split by whitespace but keep +XX... numbers intact
-        const trimmed = line.trim();
-        if (!trimmed)
-            return [];
-        // Split by whitespace
-        const parts = trimmed.split(/\s+/).filter(p => p.length > 0);
-        return parts;
-    })
-        .filter(n => n.length > 0);
+    // Clean separators
+    let preprocessed = input
+        .replace(/[ \t]*[\-\(\)\.@][ \t]*/g, '')
+        .replace(/(\d)[ \t]+(\d)/g, '$1$2')
+        .replace(/(\+)[ \t]+(\d)/g, '$1$2');
+    const numbers = preprocessed
+        .split(/[\n,;\s]+/)
+        .map(n => n.trim())
+        .filter(n => n.length >= 7);
     const valid = [];
     const invalid = [];
+    const seen = new Set();
     for (const num of numbers) {
         const parsed = parsePhoneNumber(num);
-        if (parsed.isValid) {
+        if (parsed.isValid && !seen.has(parsed.fullNumber)) {
+            seen.add(parsed.fullNumber);
             valid.push({
                 fullNumber: parsed.fullNumber,
                 countryCode: parsed.countryCode,
                 nationalNumber: parsed.nationalNumber
             });
         }
-        else {
+        else if (!parsed.isValid) {
             invalid.push({ input: num, error: parsed.error || 'Invalid' });
         }
     }

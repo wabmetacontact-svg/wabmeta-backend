@@ -25,6 +25,23 @@ const PAISE_MULTIPLIER = 100; // ₹1 = 100 paise
 // ─── Helper: Rupees ↔ Paise ───────────────────────────────────────────────────
 const toPaise = (rupees) => Math.round(rupees * PAISE_MULTIPLIER);
 const toRupees = (paise) => paise / PAISE_MULTIPLIER;
+// ─── Helper: Get Wallet-specific Razorpay Instance ────────────────────────────
+function getWalletRazorpay() {
+    const keyId = process.env.WALLET_RAZORPAY_KEY_ID;
+    const keySecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
+    if (!keyId || !keySecret) {
+        throw new errorHandler_1.AppError('Wallet payment gateway not configured. Contact support.', 500);
+    }
+    const Razorpay = require('razorpay');
+    return {
+        instance: new Razorpay({
+            key_id: keyId,
+            key_secret: keySecret,
+        }),
+        keyId,
+        keySecret,
+    };
+}
 // ─── Helper: Format Wallet Response ───────────────────────────────────────────
 function formatWallet(wallet) {
     return {
@@ -231,8 +248,9 @@ async function getTransactionHistory(organizationId, options) {
         },
     };
 }
-// ─── 4. Create TopUp Order (Razorpay) ─────────────────────────────────────────
+// ─── 4. Create TopUp Order (Wallet Razorpay) ──────────────────────────────────
 async function createTopUpOrder(organizationId, amountRupees) {
+    // ── Wallet fetch & validations ──────────────────────────────────────────────
     const wallet = await database_1.default.wallet.findUnique({
         where: { organizationId },
     });
@@ -244,31 +262,29 @@ async function createTopUpOrder(organizationId, amountRupees) {
         throw new errorHandler_1.AppError('Wallet is flagged. Please contact support.', 403);
     }
     const amountPaise = toPaise(amountRupees);
-    // Validation
+    // ── Amount validations ──────────────────────────────────────────────────────
     if (amountPaise < 10000) {
-        // ₹100 minimum
         throw new errorHandler_1.AppError('Minimum top-up amount is ₹100', 400);
     }
     if (amountPaise > wallet.maxTopUpPaise) {
         throw new errorHandler_1.AppError(`Maximum top-up per transaction is ₹${toRupees(wallet.maxTopUpPaise).toLocaleString('en-IN')}`, 400);
     }
-    // Reset monthly limit if needed
+    // ── Monthly limit check ─────────────────────────────────────────────────────
     const updatedWallet = await resetMonthlyIfNeeded(wallet);
-    if (updatedWallet.currentMonthPaise + amountPaise > updatedWallet.maxMonthlyPaise) {
+    if (updatedWallet.currentMonthPaise + amountPaise >
+        updatedWallet.maxMonthlyPaise) {
         const remainingPaise = updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
         throw new errorHandler_1.AppError(`Monthly top-up limit exceeded. Remaining this month: ₹${toRupees(remainingPaise).toLocaleString('en-IN')}`, 400);
     }
-    // Create Razorpay order - reuse existing billing pattern
-    const Razorpay = require('razorpay');
-    const rzp = new Razorpay({
-        key_id: process.env.RAZORPAY_KEY_ID,
-        key_secret: process.env.RAZORPAY_KEY_SECRET,
-    });
+    // ── Get WALLET-specific Razorpay instance ───────────────────────────────────
+    const { instance: rzp, keyId } = getWalletRazorpay();
+    // ── Create receipt ──────────────────────────────────────────────────────────
     const timestamp = Date.now().toString().slice(-8);
     const orgShort = organizationId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
     const receipt = `wlt_${orgShort}_${timestamp}`;
+    // ── Create Razorpay Order ───────────────────────────────────────────────────
     const order = await rzp.orders.create({
-        amount: amountPaise, // Razorpay takes paise
+        amount: amountPaise,
         currency: 'INR',
         receipt,
         payment_capture: 1,
@@ -276,6 +292,7 @@ async function createTopUpOrder(organizationId, amountRupees) {
             organizationId,
             purpose: 'wallet_topup',
             walletId: wallet.id,
+            source: 'wallet_razorpay', // Track karo konsa account use hua
         },
     });
     return {
@@ -283,28 +300,33 @@ async function createTopUpOrder(organizationId, amountRupees) {
         amount: amountRupees,
         amountPaise,
         currency: 'INR',
-        razorpayKeyId: process.env.RAZORPAY_KEY_ID,
+        razorpayKeyId: keyId, // ✅ Naya wallet key frontend ko bhejo
         receipt: order.receipt,
     };
 }
-// ─── 5. Verify & Process TopUp ────────────────────────────────────────────────
+// ─── 5. Verify & Process TopUp (Wallet Razorpay Secret) ──────────────────────
 async function processTopUp(organizationId, data) {
-    // Verify Razorpay signature
+    // ── Signature verification with WALLET secret ───────────────────────────────
+    const walletSecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
+    if (!walletSecret) {
+        throw new errorHandler_1.AppError('Wallet payment gateway not configured. Contact support.', 500);
+    }
     const body = data.razorpayOrderId + '|' + data.razorpayPaymentId;
     const expectedSignature = crypto_1.default
-        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .createHmac('sha256', walletSecret) // ✅ Wallet secret use karo
         .update(body)
         .digest('hex');
     if (expectedSignature !== data.razorpaySignature) {
         throw new errorHandler_1.AppError('Payment verification failed: Invalid signature', 400);
     }
-    // Check duplicate payment
+    // ── Duplicate payment check ─────────────────────────────────────────────────
     const existingTxn = await database_1.default.walletTransaction.findFirst({
         where: { razorpayPaymentId: data.razorpayPaymentId },
     });
     if (existingTxn) {
         throw new errorHandler_1.AppError('This payment has already been processed', 400);
     }
+    // ── Wallet fetch ────────────────────────────────────────────────────────────
     const wallet = await database_1.default.wallet.findUnique({
         where: { organizationId },
     });
@@ -313,9 +335,8 @@ async function processTopUp(organizationId, data) {
     const amountPaise = toPaise(data.amount);
     const balanceBeforePaise = wallet.balancePaise;
     const balanceAfterPaise = balanceBeforePaise + amountPaise;
-    // Use Prisma transaction for atomicity
+    // ── Atomic DB transaction ───────────────────────────────────────────────────
     const [updatedWallet, transaction] = await database_1.default.$transaction([
-        // Update wallet balance
         database_1.default.wallet.update({
             where: { id: wallet.id },
             data: {
@@ -323,10 +344,9 @@ async function processTopUp(organizationId, data) {
                 totalCreditedPaise: { increment: amountPaise },
                 currentMonthPaise: { increment: amountPaise },
                 lastTransactionAt: new Date(),
-                lowAlertSent: false, // Reset alert on top-up
+                lowAlertSent: false,
             },
         }),
-        // Create transaction record
         database_1.default.walletTransaction.create({
             data: {
                 walletId: wallet.id,
@@ -570,6 +590,28 @@ async function adminAdjustBalance(organizationId, adminId, data) {
     if (!data.note || data.note.trim().length < 5) {
         throw new errorHandler_1.AppError('Please provide a reason for adjustment (min 5 chars)', 400);
     }
+    // ✅ FIXED: Sanitize note - remove "manual ... by admin" wording
+    let sanitizedNote = (data.note || '').trim();
+    const lowerNote = sanitizedNote.toLowerCase();
+    // Replace any variation of "manual debit by admin" → "Debit by WabMeta"
+    if (lowerNote.includes('manual debit by admin') ||
+        lowerNote.includes('debit by admin') ||
+        lowerNote === 'manual debit') {
+        sanitizedNote = 'Debit by WabMeta';
+    }
+    // Replace any variation of "manual credit by admin" → "Credit by WabMeta"
+    else if (lowerNote.includes('manual credit by admin') ||
+        lowerNote.includes('credit by admin') ||
+        lowerNote === 'manual credit') {
+        sanitizedNote = 'Credit by WabMeta';
+    }
+    // Auto-decide based on type if note is generic
+    else if (data.type === 'admin_credit' && lowerNote === 'admin credit') {
+        sanitizedNote = 'Credit by WabMeta';
+    }
+    else if (data.type === 'admin_debit' && lowerNote === 'admin debit') {
+        sanitizedNote = 'Debit by WabMeta';
+    }
     const wallet = await database_1.default.wallet.findUnique({
         where: { organizationId },
     });
@@ -583,6 +625,10 @@ async function adminAdjustBalance(organizationId, adminId, data) {
     const balanceAfterPaise = data.type === 'admin_credit'
         ? balanceBeforePaise + amountPaise
         : balanceBeforePaise - amountPaise;
+    // ✅ Better description based on type
+    const description = data.type === 'admin_credit'
+        ? `Adjustment by Meta: Credit by WabMeta`
+        : `Adjustment by Meta: Debit by WabMeta`;
     const [updatedWallet, transaction] = await database_1.default.$transaction([
         database_1.default.wallet.update({
             where: { id: wallet.id },
@@ -604,10 +650,10 @@ async function adminAdjustBalance(organizationId, adminId, data) {
                 amountPaise,
                 balanceBeforePaise,
                 balanceAfterPaise,
-                description: `Admin adjustment: ${data.note}`,
+                description, // ✅ "Adjustment by Meta: Debit/Credit by WabMeta"
                 status: 'completed',
                 performedBy: adminId,
-                note: data.note,
+                note: sanitizedNote, // ✅ "Debit by WabMeta" or "Credit by WabMeta"
             },
         }),
     ]);

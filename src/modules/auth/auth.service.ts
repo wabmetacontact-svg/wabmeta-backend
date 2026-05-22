@@ -96,39 +96,68 @@ const sendWhatsAppTemplate = (
 
   const waPhone = toWhatsAppPhone(phone);
 
-  if (config.nodeEnv === 'development') {
-    console.log('\n' + '='.repeat(45));
-    console.log(`  📱 WhatsApp Template: ${templateName}`);
-    console.log(`  📞 To: +${waPhone}`);
-    if (bodyParams.length > 0) {
-      console.log(`  📝 Params: ${bodyParams.join(', ')}`);
-    }
-    console.log('='.repeat(45) + '\n');
-  }
+  // Fetch the template from DB to check for header configuration dynamically
+  prisma.template
+    .findFirst({
+      where: {
+        name: templateName,
+        whatsappAccount: {
+          phoneNumberId: phoneNumberId,
+        },
+      },
+      select: {
+        headerType: true,
+        headerContent: true,
+      },
+    })
+    .then((tpl) => {
+      const templateComponents: any = {};
 
-  // ✅ Correct format: string[] → { type, text }[]
-  const templateComponents =
-    bodyParams.length > 0
-      ? {
-          body: bodyParams.map((param) => ({
-            type: 'text' as const,
-            text: param,
-          })),
+      if (bodyParams.length > 0) {
+        templateComponents.body = bodyParams.map((param) => ({
+          type: 'text' as const,
+          text: param,
+        }));
+      }
+
+      if (tpl?.headerContent) {
+        const typeLower = tpl.headerType?.toLowerCase();
+        if (typeLower === 'image' || typeLower === 'video' || typeLower === 'document') {
+          templateComponents.header = [
+            {
+              type: typeLower,
+              [typeLower]: {
+                link: tpl.headerContent,
+                ...(typeLower === 'document' ? { filename: 'Document' } : {}),
+              },
+            },
+          ];
         }
-      : undefined;
+      }
 
-  void whatsappApi
-    .sendTemplateMessage(
-      phoneNumberId,
-      waPhone,
-      templateName,
-      'en',
-      templateComponents,
-      accessToken
-    )
-    .then(() =>
-      console.log(`✅ WhatsApp [${templateName}] → +${waPhone}`)
-    )
+      if (config.nodeEnv === 'development') {
+        console.log('\n' + '='.repeat(45));
+        console.log(`  📱 WhatsApp Template: ${templateName}`);
+        console.log(`  📞 To: +${waPhone}`);
+        if (bodyParams.length > 0) {
+          console.log(`  📝 Params: ${bodyParams.join(', ')}`);
+        }
+        if (tpl?.headerType) {
+          console.log(`  🖼️  Header: ${tpl.headerType} (${tpl.headerContent})`);
+        }
+        console.log('='.repeat(45) + '\n');
+      }
+
+      return whatsappApi.sendTemplateMessage(
+        phoneNumberId,
+        waPhone,
+        templateName,
+        'en',
+        templateComponents,
+        accessToken
+      );
+    })
+    .then(() => console.log(`✅ WhatsApp [${templateName}] → +${waPhone}`))
     .catch((err: any) => {
       console.warn(
         `⚠️  WhatsApp [${templateName}] → +${waPhone} failed:`,
@@ -136,7 +165,7 @@ const sendWhatsAppTemplate = (
       );
       if (err?.message?.toLowerCase().includes('template')) {
         console.warn(
-          '💡 Template not approved. ' +
+          '💡 Template not approved or parameter mismatch. ' +
           'Check: business.facebook.com → Message Templates'
         );
       }

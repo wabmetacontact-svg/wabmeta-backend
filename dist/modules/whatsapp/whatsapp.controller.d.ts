@@ -22,6 +22,16 @@ declare class WhatsAppController {
      * ✅ FIXED: Mark Message as Read
      */
     markAsRead(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * POST /api/v1/whatsapp/accounts/:accountId/sync-quality
+     * Single account ka quality rating refresh karo
+     */
+    syncAccountQuality(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * POST /api/v1/whatsapp/accounts/sync-all
+     * Saare accounts ka quality rating refresh karo
+     */
+    syncAllAccountsQuality(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 }
 export declare const whatsappController: WhatsAppController;
 export default whatsappController;

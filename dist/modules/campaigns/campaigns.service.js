@@ -309,6 +309,136 @@ class CampaignsService {
         }, { timeout: 30000 });
         return formatCampaign(duplicated);
     }
+    async estimateCost(organizationId, campaignId) {
+        // Campaign fetch karo
+        const campaign = await database_1.default.campaign.findFirst({
+            where: { id: campaignId, organizationId },
+            include: { template: true, whatsappAccount: true },
+        });
+        if (!campaign)
+            throw new errorHandler_1.AppError('Campaign not found', 404);
+        // Wallet check
+        const wallet = await database_1.default.wallet.findUnique({
+            where: { organizationId },
+        });
+        // Wallet nahi hai ya active nahi
+        if (!wallet) {
+            return {
+                hasWallet: false,
+                walletActive: false,
+                availableBalance: 0,
+                estimatedCost: 0,
+                estimatedCostBreakdown: {
+                    totalRecipients: 0,
+                    ratePerMessage: 0,
+                    category: campaign.template?.category || 'MARKETING',
+                    language: campaign.template?.language || 'en',
+                    countryBreakdown: [],
+                },
+                canProceed: true, // wallet nahi toh Meta direct charge karega
+                shortfall: 0,
+                currency: 'INR',
+            };
+        }
+        // Pending contacts count
+        const pendingCount = await database_1.default.campaignContact.count({
+            where: { campaignId, status: 'PENDING' },
+        });
+        if (pendingCount === 0) {
+            return {
+                hasWallet: true,
+                walletActive: wallet.isActive,
+                availableBalance: wallet.balancePaise / 100,
+                estimatedCost: 0,
+                estimatedCostBreakdown: {
+                    totalRecipients: 0,
+                    ratePerMessage: 0,
+                    category: campaign.template?.category || 'MARKETING',
+                    language: campaign.template?.language || 'en',
+                    countryBreakdown: [],
+                },
+                canProceed: true,
+                shortfall: 0,
+                currency: 'INR',
+            };
+        }
+        // Sample phones for country detection (max 500)
+        const sampleContacts = await database_1.default.campaignContact.findMany({
+            where: { campaignId, status: 'PENDING' },
+            include: { contact: { select: { phone: true } } },
+            take: 500,
+            orderBy: { createdAt: 'asc' },
+        });
+        const tpl = campaign.template;
+        const category = tpl?.category || 'MARKETING';
+        const language = tpl?.language || 'en';
+        // Country-wise breakdown calculate karo
+        const countryMap = new Map();
+        for (const cc of sampleContacts) {
+            const phone = cc.contact?.phone || '';
+            const rate = (0, wallet_deduction_service_1.getRateForCategory)(category, phone, language);
+            const digits = phone.replace(/\D/g, '');
+            // Country prefix detect karo
+            let countryKey = 'Other';
+            for (const len of [4, 3, 2, 1]) {
+                const prefix = digits.slice(0, len);
+                if (wallet_deduction_service_1.COUNTRY_NAMES_MAP[prefix]) {
+                    countryKey = wallet_deduction_service_1.COUNTRY_NAMES_MAP[prefix];
+                    break;
+                }
+            }
+            const existing = countryMap.get(countryKey);
+            if (existing) {
+                existing.count++;
+            }
+            else {
+                countryMap.set(countryKey, { count: 1, rate });
+            }
+        }
+        // Scale to actual total (sample se estimate)
+        const sampleSize = sampleContacts.length;
+        const scaleFactor = pendingCount / Math.max(sampleSize, 1);
+        const countryBreakdown = [];
+        let totalEstimatedCostRupees = 0;
+        let totalWeightedRate = 0;
+        for (const [country, data] of countryMap.entries()) {
+            const scaledCount = Math.round(data.count * scaleFactor);
+            const countryCost = scaledCount * data.rate;
+            totalEstimatedCostRupees += countryCost;
+            totalWeightedRate += data.rate * data.count;
+            countryBreakdown.push({
+                country,
+                count: scaledCount,
+                rate: data.rate,
+                cost: Number(countryCost.toFixed(2)),
+            });
+        }
+        // Sort by count descending
+        countryBreakdown.sort((a, b) => b.count - a.count);
+        const avgRate = totalWeightedRate / Math.max(sampleSize, 1);
+        const availableRupees = wallet.balancePaise / 100 +
+            (wallet.creditEnabled
+                ? Math.max(0, (wallet.creditLimitPaise - wallet.creditUsedPaise)) / 100
+                : 0);
+        const shortfall = Math.max(0, totalEstimatedCostRupees - availableRupees);
+        const canProceed = availableRupees >= totalEstimatedCostRupees && availableRupees > 20;
+        return {
+            hasWallet: true,
+            walletActive: wallet.isActive,
+            availableBalance: Number(availableRupees.toFixed(2)),
+            estimatedCost: Number(totalEstimatedCostRupees.toFixed(2)),
+            estimatedCostBreakdown: {
+                totalRecipients: pendingCount,
+                ratePerMessage: Number(avgRate.toFixed(4)),
+                category,
+                language,
+                countryBreakdown,
+            },
+            canProceed,
+            shortfall: Number(shortfall.toFixed(2)),
+            currency: 'INR',
+        };
+    }
     async start(organizationId, campaignId) {
         const campaign = await database_1.default.campaign.findFirst({
             where: { id: campaignId, organizationId },
@@ -318,7 +448,7 @@ class CampaignsService {
             throw new errorHandler_1.AppError('Campaign not found', 404);
         if (campaign.status === 'RUNNING')
             throw new errorHandler_1.AppError('Already running', 400);
-        // ✅ EXISTING: Template approval check
+        // ✅ Template checks
         if (campaign.template) {
             const tpl = campaign.template;
             if (tpl.status === 'REJECTED') {
@@ -327,43 +457,65 @@ class CampaignsService {
             if (tpl.status !== 'APPROVED') {
                 throw new errorHandler_1.AppError(`Template "${tpl.name}" is not approved (status: ${tpl.status}).`, 400);
             }
-            // ✅ Media handle check (prevent campaign start with expired/missing media)
             const headerType = (tpl.headerType || '').toUpperCase();
             if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
                 const mediaId = tpl.headerMediaId;
                 const permanentUrl = tpl.headerContent;
-                // ⚠️ NOTE: '4:...' resumable handles are ONLY valid for template creation,
-                //       NOT for message sending. Must have numeric ID or permanent URL.
-                const hasNumericId = mediaId && /^\d+$/.test(mediaId); // e.g. "1234567890"
-                const hasPermanentUrl = permanentUrl &&
-                    permanentUrl.startsWith('http') &&
-                    !permanentUrl.includes('scontent.whatsapp'); // Cloudinary URL
-                const hasUrlInMediaId = mediaId &&
-                    mediaId.startsWith('http') &&
-                    !mediaId.includes('scontent.whatsapp'); // HTTP URL in mediaId
-                const hasAnyValidMedia = hasNumericId || // Numeric ID
-                    hasPermanentUrl || // Cloudinary URL
-                    hasUrlInMediaId; // URL in mediaId
-                if (!hasAnyValidMedia) {
-                    throw new errorHandler_1.AppError(`Template "${tpl.name}" has missing media. ` +
-                        `Please edit the template and re-upload the ${(tpl.headerType || 'media').toLowerCase()}.`, 400);
+                const hasNumericId = mediaId && /^\d+$/.test(mediaId);
+                const hasPermanentUrl = permanentUrl && permanentUrl.startsWith('http') && !permanentUrl.includes('scontent.whatsapp');
+                const hasUrlInMediaId = mediaId && mediaId.startsWith('http') && !mediaId.includes('scontent.whatsapp');
+                if (!hasNumericId && !hasPermanentUrl && !hasUrlInMediaId) {
+                    throw new errorHandler_1.AppError(`Template "${tpl.name}" has missing media. Please edit and re-upload.`, 400);
                 }
             }
         }
-        // ✅ Wallet Balance Check (Minimum ₹20 required)
+        // ✅ Dynamic Wallet Balance Check
         const wallet = await database_1.default.wallet.findUnique({ where: { organizationId } });
         if (wallet && wallet.isActive) {
-            const balance = wallet.balancePaise / 100;
-            if (balance <= 20) {
-                throw new errorHandler_1.AppError(`Your wallet balance is very low (₹${balance.toFixed(2)}). You need to add balance to run this campaign. Minimum ₹20.00 required.`, 400);
+            const balanceRupees = wallet.balancePaise / 100;
+            // Agar balance ₹20 se kam hai toh seedha block (Minimum requirement)
+            if (balanceRupees <= 20) {
+                throw new errorHandler_1.AppError(`WALLET_LOW_BALANCE::20.00::${balanceRupees.toFixed(2)}`, 400);
+            }
+            // 🔍 Dynamic Estimation: PENDING contacts ke liye cost nikaalo
+            const pendingCount = await database_1.default.campaignContact.count({
+                where: { campaignId, status: 'PENDING' }
+            });
+            if (pendingCount > 0) {
+                // Sample up to 50 phones to get a representative country-rate estimate
+                const sampleContacts = await database_1.default.campaignContact.findMany({
+                    where: { campaignId, status: 'PENDING' },
+                    include: { contact: { select: { phone: true } } },
+                    take: 50,
+                });
+                const samplePhones = sampleContacts.map(c => c.contact?.phone || '').filter(Boolean);
+                const tpl = campaign.template;
+                const walletCheck = await (0, wallet_deduction_service_1.deductWalletForCampaign)({
+                    organizationId,
+                    templateName: tpl.name,
+                    templateCategory: tpl.category,
+                    templateLanguage: tpl.language,
+                    totalRecipients: pendingCount,
+                    campaignId,
+                    recipientPhones: samplePhones,
+                });
+                if (!walletCheck.canProceed) {
+                    // ❌ BLOCK - Estimated cost balance se jyada hai
+                    throw new errorHandler_1.AppError(`WALLET_INSUFFICIENT::${walletCheck.estimatedCost.toFixed(2)}::${walletCheck.availableBalance.toFixed(2)}`, 400);
+                }
             }
         }
+        // ✅ Campaign start karo
         const updated = await database_1.default.campaign.update({
             where: { id: campaignId },
-            data: { status: 'RUNNING', startedAt: campaign.startedAt || new Date() },
-            include: { template: true, whatsappAccount: true }
+            data: {
+                status: 'RUNNING',
+                startedAt: campaign.startedAt || new Date(),
+            },
+            include: { template: true, whatsappAccount: true },
         });
-        this.processCampaignContacts(campaignId, organizationId).catch(err => console.error('Campaign error:', err));
+        this.processCampaignContacts(campaignId, organizationId)
+            .catch(err => console.error('Campaign error:', err));
         return formatCampaign(updated);
     }
     async pause(organizationId, campaignId) {
@@ -372,8 +524,57 @@ class CampaignsService {
         return formatCampaign(updated);
     }
     async resume(organizationId, campaignId) {
-        const updated = await database_1.default.campaign.update({ where: { id: campaignId }, data: { status: 'RUNNING' } });
-        campaigns_socket_1.campaignSocketService.emitCampaignUpdate(organizationId, campaignId, { status: 'RUNNING', message: 'Campaign resumed' });
+        const campaign = await database_1.default.campaign.findFirst({
+            where: { id: campaignId, organizationId },
+            include: { template: true },
+        });
+        if (!campaign)
+            throw new errorHandler_1.AppError('Campaign not found', 404);
+        // ✅ Wallet check on resume
+        const wallet = await database_1.default.wallet.findUnique({
+            where: { organizationId }
+        });
+        if (wallet && wallet.isActive) {
+            const availableRupees = wallet.balancePaise / 100;
+            if (availableRupees <= 20) {
+                throw new errorHandler_1.AppError(`WALLET_LOW_BALANCE::20.00::${availableRupees.toFixed(2)}`, 400);
+            }
+            // Pending contacts ke liye check
+            const pendingCount = await database_1.default.campaignContact.count({
+                where: { campaignId, status: 'PENDING' }
+            });
+            if (pendingCount > 0 && campaign.template) {
+                const tpl = campaign.template;
+                const sampleContacts = await database_1.default.campaignContact.findMany({
+                    where: { campaignId, status: 'PENDING' },
+                    include: { contact: { select: { phone: true } } },
+                    take: 50,
+                });
+                const samplePhones = sampleContacts
+                    .map(c => c.contact?.phone || '')
+                    .filter(Boolean);
+                const walletCheck = await (0, wallet_deduction_service_1.deductWalletForCampaign)({
+                    organizationId,
+                    templateName: tpl.name,
+                    templateCategory: tpl.category,
+                    templateLanguage: tpl.language,
+                    totalRecipients: pendingCount,
+                    campaignId,
+                    recipientPhones: samplePhones,
+                });
+                if (!walletCheck.canProceed) {
+                    throw new errorHandler_1.AppError(`WALLET_INSUFFICIENT::${walletCheck.estimatedCost.toFixed(2)}::${walletCheck.availableBalance.toFixed(2)}`, 400);
+                }
+            }
+        }
+        const updated = await database_1.default.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'RUNNING' },
+        });
+        campaigns_socket_1.campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
+            status: 'RUNNING',
+            message: 'Campaign resumed',
+        });
         this.processCampaignContacts(campaignId, organizationId).catch(() => { });
         return formatCampaign(updated);
     }
@@ -658,37 +859,59 @@ class CampaignsService {
             }
             const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
             const template = campaign.template;
-            // ✅ ── WALLET PRE-CHECK ────────────────────────────────────────────────────
+            // ✅ ── WALLET PRE-CHECK (country-aware) ─────────────────────────────────
+            const pendingCount = await database_1.default.campaignContact.count({ where: { campaignId, status: 'PENDING' } });
+            // Sample up to 200 phones to get a representative country-rate estimate
+            const sampleContacts = await database_1.default.campaignContact.findMany({
+                where: { campaignId, status: 'PENDING' },
+                include: { contact: { select: { phone: true } } },
+                take: 200,
+                orderBy: { createdAt: 'asc' },
+            });
+            const samplePhones = sampleContacts
+                .map((cc) => cc.contact?.phone || '')
+                .filter(Boolean);
             const walletCheck = await (0, wallet_deduction_service_1.deductWalletForCampaign)({
                 organizationId,
                 templateName: template.name,
                 templateCategory: template.category,
-                totalRecipients: await database_1.default.campaignContact.count({ where: { campaignId, status: 'PENDING' } }),
+                templateLanguage: template.language,
+                totalRecipients: pendingCount,
                 campaignId,
+                recipientPhones: samplePhones,
             });
-            if (walletCheck.walletActive) {
-                console.log(`💳 Wallet check: Estimated cost ₹${walletCheck.estimatedCost.toFixed(2)}, Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
-                if (!walletCheck.canProceed) {
-                    // ✅ Pause campaign if balance is too low
+            // 🔍 WALLET DEBUG LOG — always print so we can diagnose
+            console.log('💳 ── WALLET PRE-CHECK RESULT ──────────────────────────────');
+            console.log(`   organizationId  : ${organizationId}`);
+            console.log(`   walletActive    : ${walletCheck.walletActive}`);
+            console.log(`   canProceed      : ${walletCheck.canProceed}`);
+            console.log(`   availableBalance: ₹${walletCheck.availableBalance.toFixed(2)}`);
+            console.log(`   estimatedCost   : ₹${walletCheck.estimatedCost.toFixed(2)}`);
+            console.log(`   shortfall       : ₹${walletCheck.shortfall.toFixed(2)}`);
+            console.log(`   pendingContacts : ${pendingCount}`);
+            console.log('💳 ─────────────────────────────────────────────────────────');
+            if (walletCheck.walletActive && !walletCheck.canProceed) {
+                // Hard block only when balance is ≤ ₹20 (absolute minimum)
+                if (walletCheck.availableBalance <= 20) {
                     await database_1.default.campaign.update({
                         where: { id: campaignId },
-                        data: { status: 'PAUSED' }
+                        data: { status: 'PAUSED' },
                     });
                     campaigns_socket_1.campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
                         status: 'PAUSED',
-                        message: walletCheck.availableBalance <= 20
-                            ? `⚠️ Campaign paused: Wallet balance very low (₹${walletCheck.availableBalance.toFixed(2)}). Please add balance.`
-                            : `⚠️ Campaign paused: Insufficient balance for this campaign.`
+                        message: `⚠️ Campaign paused: Wallet balance very low (₹${walletCheck.availableBalance.toFixed(2)}). Please add balance.`,
                     });
                     campaigns_socket_1.campaignSocketService.emitCampaignError(organizationId, campaignId, {
-                        message: walletCheck.availableBalance <= 20
-                            ? `Your wallet balance is very low (₹${walletCheck.availableBalance.toFixed(2)}). You need to add balance to resume.`
-                            : `Insufficient balance! Est. cost ₹${walletCheck.estimatedCost.toFixed(2)}, available ₹${walletCheck.availableBalance.toFixed(2)}.`,
-                        code: 'LOW_BALANCE_ERROR'
+                        message: `Your wallet balance is very low (₹${walletCheck.availableBalance.toFixed(2)}). You need to add balance to resume.`,
+                        code: 'LOW_BALANCE_ERROR',
                     });
                     this.processingCampaigns.delete(campaignId);
                     return;
                 }
+                // Balance is between ₹20 and estimated cost — warn but continue.
+                // Deduction will use whatever is available.
+                console.warn(`⚠️ Wallet balance (₹${walletCheck.availableBalance.toFixed(2)}) < estimated cost ` +
+                    `(₹${walletCheck.estimatedCost.toFixed(2)}) — campaign will run but wallet may empty out.`);
             }
             // ───────────────────────────────────────────────────────────────────────────
             // ============================================
@@ -703,7 +926,8 @@ class CampaignsService {
             const RATE_LIMIT_PAUSE_MS = 3000;
             let hasMore = true;
             let totalProcessed = 0;
-            let totalSentCount = 0; // ✅ Track total successfully sent for single bulk deduction
+            let totalSentCount = 0; // Track total successfully sent
+            let totalSentAmountPaise = 0; // ✅ Accumulate country-wise cost in paise
             let consecutiveFailures = 0;
             let rateLimitHits = 0;
             // ✅ In-memory batch buffers
@@ -783,7 +1007,11 @@ class CampaignsService {
                         const data = result.value;
                         if (data.type === 'sent') {
                             batchSent.push({ id: data.id, waMessageId: data.waMessageId, contactId: data.contactId, phone: data.phone });
-                            totalSentCount++; // ✅ Increment sent counter
+                            totalSentCount++;
+                            // ✅ Add country-wise rate for this recipient to running total
+                            // prioritizing template language/country
+                            const recipientRatePaise = Math.round((0, wallet_deduction_service_1.getRateForCategory)(template.category || 'MARKETING', data.phone, template.language) * 100);
+                            totalSentAmountPaise += recipientRatePaise;
                             consecutiveFailures = 0;
                         }
                         else {
@@ -859,20 +1087,24 @@ class CampaignsService {
             }
             // ✅ Final sync (HEAVY sync only at END)
             const finalCounters = await this.syncCampaignCounters(campaignId);
-            // ✅ ── SINGLE BULK WALLET DEDUCTION ──────────────────────────────────────
-            // One deduction for ALL sent messages - NOT per-recipient
-            if (walletCheck.walletActive && totalSentCount > 0) {
+            // ✅ ── COUNTRY-AWARE BULK WALLET DEDUCTION ──────────────────────────────
+            // totalSentAmountPaise = sum of each recipient's individual country rate
+            console.log('💳 ── BULK DEDUCTION CHECK ──────────────────────────────────');
+            console.log(`   walletActive       : ${walletCheck.walletActive}`);
+            console.log(`   totalSentCount     : ${totalSentCount}`);
+            console.log(`   totalSentAmountPaise: ${totalSentAmountPaise} (₹${(totalSentAmountPaise / 100).toFixed(2)})`);
+            console.log('💳 ─────────────────────────────────────────────────────────');
+            if (walletCheck.walletActive && totalSentCount > 0 && totalSentAmountPaise > 0) {
                 try {
-                    // ✅ INTEGER paise arithmetic - avoids floating-point errors
-                    // e.g. 0.15 * 150 = 22.4999... (bug).  15 paise × 150 = 2250 paise (correct)
-                    const rateRupees = (0, wallet_deduction_service_1.getRateForCategory)(template.category || 'MARKETING');
-                    const ratePaise = Math.round(rateRupees * 100); // e.g. 15 for UTILITY
-                    const totalAmountPaise = ratePaise * totalSentCount; // e.g. 15 × 150 = 2250
-                    const totalAmountRupees = totalAmountPaise / 100; // e.g. 22.50
-                    console.log(`💳 Bulk deduction: ${totalSentCount} msgs × ₹${rateRupees} = ₹${totalAmountRupees} (${totalAmountPaise} paise)`);
+                    const totalAmountRupees = totalSentAmountPaise / 100;
+                    const avgRateRupees = totalAmountRupees / totalSentCount;
+                    console.log(`💳 Country-aware bulk deduction: ${totalSentCount} msgs, total ₹${totalAmountRupees.toFixed(2)} ` +
+                        `(avg ₹${avgRateRupees.toFixed(4)}/msg)`);
                     await database_1.default.$transaction(async (tx) => {
                         const wallet = await tx.wallet.findUnique({ where: { organizationId } });
-                        if (!wallet || !wallet.isActive || wallet.flagged) {
+                        if (!wallet || wallet.flagged) {
+                            // Only skip if no wallet or explicitly flagged for fraud
+                            console.warn('💳 No wallet or flagged — skipping bulk deduction');
                             console.warn('💳 Wallet not available for bulk deduction - skipping');
                             return;
                         }
@@ -883,7 +1115,7 @@ class CampaignsService {
                             : 0;
                         const availablePaise = wallet.balancePaise + creditHeadroom;
                         // Deduct as much as available (never go below 0)
-                        const actualDeductPaise = Math.min(totalAmountPaise, availablePaise);
+                        const actualDeductPaise = Math.min(totalSentAmountPaise, availablePaise);
                         const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
                         const newBalancePaise = Math.max(0, wallet.balancePaise - actualDeductPaise);
                         await tx.wallet.update({
@@ -905,7 +1137,8 @@ class CampaignsService {
                                 amountPaise: actualDeductPaise,
                                 balanceBeforePaise,
                                 balanceAfterPaise: newBalancePaise,
-                                description: `Campaign charge - ${categoryLabel} (${template.name}) × ${totalSentCount} messages`,
+                                description: `Campaign charge - ${categoryLabel} (${template.name}) × ${totalSentCount} messages` +
+                                    ` [country-wise rates, avg ₹${avgRateRupees.toFixed(4)}/msg]`,
                                 status: 'completed',
                                 metaService: 'template_message',
                                 note: `Campaign: ${campaign.name}`,
@@ -919,9 +1152,9 @@ class CampaignsService {
                 }
             }
             else {
-                console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${totalSentCount}`);
+                console.log(`💳 Deduction skipped: walletActive=${walletCheck.walletActive}, sent=${totalSentCount}, amountPaise=${totalSentAmountPaise}`);
             }
-            // ✅ ── END BULK DEDUCTION ─────────────────────────────────────────────────
+            // ✅ ── END COUNTRY-AWARE BULK DEDUCTION ──────────────────────────────────
             if (finalCounters.pendingCount === 0) {
                 await database_1.default.campaign.update({
                     where: { id: campaignId },
@@ -1090,62 +1323,168 @@ class CampaignsService {
         return (await database_1.default.campaign.findUnique({ where: { id: campaignId }, select: { sentCount: true, failedCount: true, deliveredCount: true, readCount: true, totalContacts: true } })) || { sentCount: 0, failedCount: 0, deliveredCount: 0, readCount: 0, totalContacts: 0 };
     }
     async resolveMediaId(template, phoneNumberId, accessToken, wabaId) {
-        const hType = template.headerType.toUpperCase();
+        const hType = (template.headerType || '').toUpperCase();
         const mediaId = template.headerMediaId;
         const permanentUrl = template.headerContent;
-        // ✅ PRIORITY 1: Numeric ID - best, permanent, use directly
-        if (mediaId && /^\d+$/.test(mediaId)) {
-            console.log(`✅ Using numeric media ID: ${mediaId}`);
+        const uploadedAt = template.headerMediaUploadedAt;
+        // ✅ Meta numeric IDs expire in 30 days. Use 25-day TTL for safety.
+        const TTL_DAYS = 25;
+        const TTL_MS = TTL_DAYS * 24 * 60 * 60 * 1000;
+        const isNumericIdFresh = (() => {
+            if (!mediaId || !/^\d+$/.test(mediaId))
+                return false;
+            if (!uploadedAt) {
+                // No timestamp = old data, treat as expired
+                console.log(`⚠️ Numeric ID ${mediaId} has no timestamp - treating as expired`);
+                return false;
+            }
+            const ageMs = Date.now() - new Date(uploadedAt).getTime();
+            const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+            const fresh = ageMs < TTL_MS;
+            console.log(`⏰ Numeric ID age: ${ageDays} days (fresh: ${fresh})`);
+            return fresh;
+        })();
+        // ✅ PRIORITY 1: Fresh numeric ID (< 25 days old)
+        if (isNumericIdFresh) {
+            console.log(`✅ Using cached numeric media ID: ${mediaId}`);
+            // Update last verified timestamp (background, non-blocking)
+            database_1.default.template
+                .update({
+                where: { id: template.id },
+                data: { headerMediaLastVerified: new Date() },
+            })
+                .catch(() => { });
             return mediaId;
         }
-        // ✅ PRIORITY 2: Cloudinary URL se fresh upload karo
-        // Numeric ID milega jo campaign send kare
-        if (permanentUrl &&
+        // ✅ PRIORITY 2: Re-upload from permanent URL (Cloudinary or any HTTPS source)
+        const cloudinaryUrl = (permanentUrl &&
             permanentUrl.startsWith('http') &&
-            !permanentUrl.includes('scontent.whatsapp')) {
-            console.log(`🔄 Re-uploading from Cloudinary for fresh numeric ID...`);
-            try {
-                const axios = require('axios');
-                const response = await axios.default.get(permanentUrl, {
-                    responseType: 'arraybuffer',
-                    timeout: 30000,
-                    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)' },
-                });
-                const buffer = Buffer.from(response.data);
-                const mimeType = response.headers['content-type'] ||
-                    (hType === 'IMAGE'
-                        ? 'image/jpeg'
-                        : hType === 'VIDEO'
-                            ? 'video/mp4'
-                            : 'application/pdf');
-                const filename = permanentUrl.split('/').pop()?.split('?')[0] || 'media';
-                const result = await meta_api_1.metaApi.uploadMedia(phoneNumberId, accessToken, buffer, mimeType, filename, wabaId);
-                console.log(`✅ Fresh numeric ID obtained: ${result.id}`);
-                // ✅ DB update - future campaigns ke liye cache karo
-                // Background mein save karo, campaign wait na kare
-                database_1.default.template
-                    .update({
-                    where: { id: template.id },
-                    data: { headerMediaId: result.id },
-                })
-                    .catch((e) => console.warn('⚠️ Could not cache numeric ID:', e.message));
-                return result.id;
-            }
-            catch (uploadErr) {
-                console.error('❌ Cloudinary re-upload failed:', uploadErr.message);
-                // Fall through to URL fallback
-            }
+            !permanentUrl.includes('scontent.whatsapp')
+            ? permanentUrl
+            : null) ||
+            (mediaId &&
+                typeof mediaId === 'string' &&
+                mediaId.startsWith('http') &&
+                !mediaId.includes('scontent.whatsapp')
+                ? mediaId
+                : null);
+        if (!cloudinaryUrl) {
+            throw new Error(`Template "${template.name}" has expired media and no permanent URL to re-upload. ` +
+                `Please edit the template and re-upload the ${hType.toLowerCase()}.`);
         }
-        // ✅ PRIORITY 3: URL directly mediaId mein stored hai
-        if (mediaId &&
-            mediaId.startsWith('http') &&
-            !mediaId.includes('scontent.whatsapp')) {
-            console.log(`✅ Using URL from headerMediaId directly`);
-            return mediaId; // Meta link field mein jayega
+        console.log(`🔄 Re-uploading from permanent URL for fresh numeric ID...`);
+        try {
+            // ── MIME detection (URL extension + Cloudinary hints + fallback) ──
+            const detectMimeFromUrl = (url, type) => {
+                const urlPath = url.split('?')[0];
+                const urlLower = urlPath.toLowerCase();
+                const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
+                if (extMatch) {
+                    const extMap = {
+                        jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                        png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+                        mp4: 'video/mp4', '3gp': 'video/3gpp', '3gpp': 'video/3gpp',
+                        pdf: 'application/pdf',
+                        doc: 'application/msword',
+                        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        xls: 'application/vnd.ms-excel',
+                        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        ppt: 'application/vnd.ms-powerpoint',
+                        pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                        txt: 'text/plain',
+                        ogg: 'audio/ogg', mp3: 'audio/mpeg',
+                        aac: 'audio/aac', amr: 'audio/amr', opus: 'audio/opus',
+                    };
+                    const mime = extMap[extMatch[1].toLowerCase()];
+                    if (mime)
+                        return mime;
+                }
+                const fParamMatch = urlLower.match(/[,\/]f_([a-z0-9]+)/);
+                if (fParamMatch) {
+                    const fmtMap = {
+                        jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                        png: 'image/png', webp: 'image/webp',
+                        mp4: 'video/mp4', pdf: 'application/pdf',
+                    };
+                    const mime = fmtMap[fParamMatch[1]];
+                    if (mime)
+                        return mime;
+                }
+                if (urlLower.includes('/image/upload/'))
+                    return 'image/jpeg';
+                if (urlLower.includes('/video/upload/'))
+                    return 'video/mp4';
+                if (urlLower.includes('/raw/upload/'))
+                    return 'application/pdf';
+                const typeDefaults = {
+                    IMAGE: 'image/jpeg',
+                    VIDEO: 'video/mp4',
+                    DOCUMENT: 'application/pdf',
+                    AUDIO: 'audio/mpeg',
+                };
+                return typeDefaults[type.toUpperCase()] || 'application/pdf';
+            };
+            const buildFilename = (url, mimeType) => {
+                const urlPath = url.split('?')[0];
+                const lastSegment = urlPath.split('/').pop() || 'media';
+                if (/\.[a-zA-Z0-9]{2,5}$/.test(lastSegment))
+                    return lastSegment;
+                const mimeToExt = {
+                    'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+                    'video/mp4': 'mp4', 'video/3gpp': '3gp',
+                    'application/pdf': 'pdf',
+                    'application/msword': 'doc',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+                    'application/vnd.ms-excel': 'xls',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+                    'audio/mpeg': 'mp3', 'audio/aac': 'aac', 'audio/ogg': 'ogg',
+                    'text/plain': 'txt',
+                };
+                const ext = mimeToExt[mimeType] || 'bin';
+                return `${lastSegment}.${ext}`;
+            };
+            const preMime = detectMimeFromUrl(cloudinaryUrl, hType);
+            const axios = require('axios');
+            const response = await axios.default.get(cloudinaryUrl, {
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
+                    Accept: '*/*',
+                },
+            });
+            const buffer = Buffer.from(response.data);
+            const rawCT = (response.headers['content-type'] || '').split(';')[0].trim();
+            const META_VALID_MIMES = [
+                'image/jpeg', 'image/png', 'image/webp',
+                'video/mp4', 'video/3gpp',
+                'audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr',
+                'audio/ogg', 'audio/opus',
+                'application/pdf', 'application/msword', 'text/plain',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+            ];
+            const finalMime = rawCT && META_VALID_MIMES.includes(rawCT) ? rawCT : preMime;
+            const finalFilename = buildFilename(cloudinaryUrl, finalMime);
+            const result = await meta_api_1.metaApi.uploadMedia(phoneNumberId, accessToken, buffer, finalMime, finalFilename, wabaId);
+            database_1.default.template
+                .update({
+                where: { id: template.id },
+                data: {
+                    headerMediaId: result.id,
+                    headerMediaUploadedAt: new Date(),
+                    headerMediaLastVerified: new Date(),
+                },
+            })
+                .catch(() => { });
+            return result.id;
         }
-        // ❌ No valid media found
-        throw new Error(`Template "${template.name}" has invalid or expired media. ` +
-            `Please edit the template and re-upload the ${hType.toLowerCase()}.`);
+        catch (uploadErr) {
+            console.error('❌ Re-upload from permanent URL failed:', uploadErr.message);
+            throw new Error(`Template "${template.name}" media re-upload failed: ${uploadErr.message}.`);
+        }
     }
     async buildTemplatePayload(template, cc, phone, phoneNumberId, accessToken, wabaId) {
         const components = [];

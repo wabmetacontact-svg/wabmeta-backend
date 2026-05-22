@@ -207,13 +207,22 @@ async function bootstrap() {
             console.error(error);
             console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         });
-        process.on('unhandledRejection', (reason, promise) => {
+        process.on('unhandledRejection', (reason) => {
+            const msg = reason?.message || String(reason);
+            // ✅ Redis related rejections - silently handle karo
+            if (msg.includes('Connection is closed') ||
+                msg.includes('Redis') ||
+                msg.includes('ECONNRESET') ||
+                msg.includes('ECONNREFUSED') ||
+                msg.includes('enableOfflineQueue')) {
+                console.warn(`⚠️  Redis rejection handled: ${msg}`);
+                return; // Server crash nahi hoga
+            }
             console.error('');
             console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
             console.error('❌ UNHANDLED REJECTION');
             console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            console.error('Promise:', promise);
-            console.error('Reason:', reason);
+            console.error('Reason:', msg);
             console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         });
     }
@@ -272,7 +281,17 @@ function startCronJobs() {
         }
     }, 30 * 1000 // Every 30 seconds (Improved precision from 60s)
     );
-    console.log('✅ All cron jobs started (including scheduled campaigns)');
+    // ✅ 5. **Template Media Pre-warm** (Every 24 hours)
+    setInterval(async () => {
+        try {
+            const { templateMediaPreWarmService } = await Promise.resolve().then(() => __importStar(require('./services/templateMediaPreWarm.service')));
+            await templateMediaPreWarmService.preWarmExpiringMedia();
+        }
+        catch (error) {
+            console.error('❌ Error in template media pre-warm cron:', error);
+        }
+    }, 24 * 60 * 60 * 1000);
+    console.log('✅ All cron jobs started (including scheduled campaigns & media pre-warm)');
 }
 // ✅ NEW: Scheduled Campaign Processor
 async function processScheduledCampaigns() {

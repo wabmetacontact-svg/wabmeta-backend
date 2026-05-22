@@ -240,6 +240,19 @@ class MetaService {
                 status: 'in_progress',
                 message: 'Saving account...',
             });
+            // ✅ ADD: Organization level - sirf ek connected account allowed
+            const existingConnectedInOrg = await database_1.default.whatsAppAccount.findFirst({
+                where: {
+                    organizationId,
+                    status: client_1.WhatsAppAccountStatus.CONNECTED,
+                    // Same phone number se reconnect allow karo
+                    phoneNumberId: { not: primaryPhone.id },
+                },
+            });
+            if (existingConnectedInOrg) {
+                throw new errorHandler_1.AppError(`Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
+                    `Please disconnect it first before connecting a new one.`, 400);
+            }
             // ✅ Check existing by phoneNumberId ONLY
             const existingAccount = await database_1.default.whatsAppAccount.findFirst({
                 where: {

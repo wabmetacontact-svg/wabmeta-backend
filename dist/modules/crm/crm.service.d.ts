@@ -19,9 +19,9 @@ export declare class CRMService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
-        isActive: boolean;
         isDefault: boolean;
+        isActive: boolean;
+        description: string | null;
     }>;
     getPipelines(organizationId: string): Promise<({
         stages: {
@@ -42,9 +42,9 @@ export declare class CRMService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
-        isActive: boolean;
         isDefault: boolean;
+        isActive: boolean;
+        description: string | null;
     })[]>;
     createPipeline(organizationId: string, data: {
         name: string;
@@ -73,9 +73,9 @@ export declare class CRMService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
-        isActive: boolean;
         isDefault: boolean;
+        isActive: boolean;
+        description: string | null;
     }>;
     getLeads(organizationId: string, options: {
         page?: number | string;
@@ -177,9 +177,9 @@ export declare class CRMService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            description: string | null;
-            isActive: boolean;
             isDefault: boolean;
+            isActive: boolean;
+            description: string | null;
         }) | null;
         notes: {
             userId: string | null;
@@ -282,9 +282,9 @@ export declare class CRMService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            description: string | null;
-            isActive: boolean;
             isDefault: boolean;
+            isActive: boolean;
+            description: string | null;
         } | null;
         stage: {
             name: string;
@@ -354,9 +354,9 @@ export declare class CRMService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            description: string | null;
-            isActive: boolean;
             isDefault: boolean;
+            isActive: boolean;
+            description: string | null;
         } | null;
         stage: {
             name: string;

@@ -66,30 +66,19 @@ class ContactsService {
      * ✅ Validate and normalize phone (throws error if invalid)
      */
     validateAndNormalizePhone(phone) {
-        const { parsePhoneNumber } = require('../../utils/phoneInternational');
-        const parsed = parsePhoneNumber(phone);
-        if (!parsed.isValid) {
-            throw new errorHandler_1.AppError(`Invalid phone number: ${phone}. Must include country code (e.g., +91, +1).`, 400);
+        const canonical = (0, phone_1.toCanonicalPhone)(phone);
+        if (!canonical) {
+            throw new errorHandler_1.AppError(`Invalid phone number: "${phone}". Include country code (e.g., +919876543210)`, 400);
         }
-        return parsed.fullNumber;
+        return canonical; // Always returns +91XXXXXXXXXX
     }
     /**
      * ✅ Try to normalize phone - returns full number if valid, returns null if invalid.
      */
     tryNormalizePhone(phone) {
-        try {
-            if (!phone)
-                return null;
-            const { parsePhoneNumber } = require('../../utils/phoneInternational');
-            const parsed = parsePhoneNumber(String(phone));
-            if (parsed.isValid) {
-                return parsed.fullNumber;
-            }
+        if (!phone)
             return null;
-        }
-        catch {
-            return null;
-        }
+        return (0, phone_1.toCanonicalPhone)(String(phone).trim());
     }
     // ==========================================
     // WHATSAPP NAME FETCHING
@@ -99,7 +88,7 @@ class ContactsService {
             const normalized = this.tryNormalizePhone(phone);
             if (!normalized)
                 return null;
-            const variants = (0, phone_1.buildINPhoneVariants)(phone);
+            const variants = (0, phone_1.buildPhoneVariants)(phone);
             let contact = await database_1.default.contact.findFirst({
                 where: {
                     organizationId,
@@ -199,8 +188,10 @@ class ContactsService {
     // CREATE CONTACT
     // ==========================================
     async create(organizationId, input) {
-        const national10 = this.validateAndNormalizePhone(input.phone);
-        const variants = (0, phone_1.buildINPhoneVariants)(input.phone);
+        const canonical = (0, phone_1.toCanonicalPhone)(input.phone);
+        if (!canonical)
+            throw new errorHandler_1.AppError('Invalid phone number', 400);
+        const variants = (0, phone_1.buildPhoneVariants)(canonical);
         const existing = await database_1.default.contact.findFirst({
             where: {
                 organizationId,
@@ -222,11 +213,15 @@ class ContactsService {
                 throw new errorHandler_1.AppError('Contact limit reached. Please upgrade your plan.', 400);
             }
         }
+        // ✅ Extract country code from canonical
+        const countryCode = canonical.length > 11
+            ? '+' + canonical.slice(1, -10) // e.g., +91
+            : '+91';
         const contact = await database_1.default.contact.create({
             data: {
                 organizationId,
-                phone: national10,
-                countryCode: require('../../utils/phoneInternational').parsePhoneNumber(input.phone).countryCode || '+91',
+                phone: canonical, // ✅ Always +91XXXXXXXXXX
+                countryCode, // ✅ Always +91
                 firstName: input.firstName || 'Unknown',
                 lastName: input.lastName,
                 email: input.email,
@@ -333,7 +328,7 @@ class ContactsService {
         let normalizedPhone;
         if (input.phone) {
             normalizedPhone = this.validateAndNormalizePhone(input.phone);
-            const variants = (0, phone_1.buildINPhoneVariants)(input.phone);
+            const variants = (0, phone_1.buildPhoneVariants)(input.phone);
             const duplicate = await database_1.default.contact.findFirst({
                 where: {
                     organizationId,
@@ -510,7 +505,9 @@ class ContactsService {
                 validContacts.push({
                     organizationId,
                     phone: normalized,
-                    countryCode: require('../../utils/phoneInternational').parsePhoneNumber(rawPhone.toString().trim()).countryCode || '+91',
+                    countryCode: normalized.length > 11
+                        ? '+' + normalized.slice(1, -10)
+                        : '+91',
                     firstName: firstName.toString().trim() || 'Unknown',
                     lastName: lastName.toString().trim() || null,
                     email: email.toString().trim() || null,

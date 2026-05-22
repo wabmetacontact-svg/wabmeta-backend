@@ -194,8 +194,35 @@ router.post('/webhook', async (req, res) => {
 // PUBLIC OAUTH CALLBACKS
 // These use state token verification instead of JWT
 // ============================================
-router.post('/callback', meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
-router.post('/connect', meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
+const checkSingleAccountLimit = async (req, res, next) => {
+    try {
+        const state = req.body.state;
+        if (!state)
+            return next(); // Let controller handle missing state
+        const oauthState = await database_1.default.oAuthState.findUnique({
+            where: { state },
+        });
+        if (!oauthState)
+            return next();
+        const organizationId = oauthState.organizationId;
+        const existingConnected = await database_1.default.whatsAppAccount.findFirst({
+            where: {
+                organizationId,
+                status: 'CONNECTED',
+            },
+        });
+        if (existingConnected) {
+            await database_1.default.oAuthState.delete({ where: { state } }).catch(() => { });
+            throw new errorHandler_1.AppError(`Your organization already has a connected WhatsApp account. Please disconnect it first.`, 400);
+        }
+        next();
+    }
+    catch (error) {
+        next(error);
+    }
+};
+router.post('/callback', checkSingleAccountLimit, meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
+router.post('/connect', checkSingleAccountLimit, meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
 // ============================================
 // PROTECTED ROUTES
 // ============================================

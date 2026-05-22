@@ -385,6 +385,76 @@ class WhatsAppController {
             next(error);
         }
     }
+    // ============================================
+    // QUALITY RATING SYNC ENDPOINTS (NEW)
+    // ============================================
+    /**
+     * POST /api/v1/whatsapp/accounts/:accountId/sync-quality
+     * Single account ka quality rating refresh karo
+     */
+    async syncAccountQuality(req, res, next) {
+        try {
+            const organizationId = getOrgId(req);
+            const accountId = req.params.accountId;
+            if (!organizationId) {
+                return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
+            }
+            const ok = await verifyOrgAccess(req.user.id, organizationId);
+            if (!ok) {
+                return (0, response_1.errorResponse)(res, 'Unauthorized', 403);
+            }
+            // Verify account belongs to org
+            const account = await database_1.default.whatsAppAccount.findFirst({
+                where: { id: accountId, organizationId },
+            });
+            if (!account) {
+                return (0, response_1.errorResponse)(res, 'Account not found', 404);
+            }
+            const result = await whatsapp_service_1.whatsappService.syncAccountQuality(accountId);
+            if (!result.success) {
+                return (0, response_1.errorResponse)(res, result.error || 'Failed to sync quality rating', 500);
+            }
+            return (0, response_1.successResponse)(res, {
+                data: sanitizeAccount(result.account),
+                message: 'Quality rating synced successfully',
+            });
+        }
+        catch (e) {
+            next(e);
+        }
+    }
+    /**
+     * POST /api/v1/whatsapp/accounts/sync-all
+     * Saare accounts ka quality rating refresh karo
+     */
+    async syncAllAccountsQuality(req, res, next) {
+        try {
+            const organizationId = getOrgId(req);
+            if (!organizationId) {
+                return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
+            }
+            const ok = await verifyOrgAccess(req.user.id, organizationId);
+            if (!ok) {
+                return (0, response_1.errorResponse)(res, 'Unauthorized', 403);
+            }
+            const result = await whatsapp_service_1.whatsappService.syncAllAccountsQuality(organizationId);
+            // Updated accounts return karo
+            const accounts = await database_1.default.whatsAppAccount.findMany({
+                where: { organizationId },
+                orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+            });
+            return (0, response_1.successResponse)(res, {
+                data: {
+                    accounts: accounts.map(sanitizeAccount),
+                    syncStats: result,
+                },
+                message: `Synced ${result.synced}/${result.total} accounts`,
+            });
+        }
+        catch (e) {
+            next(e);
+        }
+    }
 }
 // ============================================
 // EXPORT

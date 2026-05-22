@@ -450,7 +450,7 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         page: number;
         limit: number;
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
@@ -458,12 +458,12 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
-        page?: string | undefined;
-        limit?: string | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        page?: string | undefined;
+        limit?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
@@ -472,7 +472,7 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     query?: {
         page: number;
         limit: number;
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
@@ -482,12 +482,12 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     } | undefined;
 }, {
     query?: {
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
-        page?: string | undefined;
-        limit?: string | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        page?: string | undefined;
+        limit?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;

@@ -33,8 +33,8 @@ export declare class AutomationService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         isActive: boolean;
+        description: string | null;
         trigger: import(".prisma/client").$Enums.AutomationTrigger;
         executionCount: number;
         lastExecutedAt: Date | null;
@@ -49,8 +49,8 @@ export declare class AutomationService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         isActive: boolean;
+        description: string | null;
         trigger: import(".prisma/client").$Enums.AutomationTrigger;
         executionCount: number;
         lastExecutedAt: Date | null;
@@ -65,8 +65,8 @@ export declare class AutomationService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         isActive: boolean;
+        description: string | null;
         trigger: import(".prisma/client").$Enums.AutomationTrigger;
         executionCount: number;
         lastExecutedAt: Date | null;
@@ -81,8 +81,8 @@ export declare class AutomationService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         isActive: boolean;
+        description: string | null;
         trigger: import(".prisma/client").$Enums.AutomationTrigger;
         executionCount: number;
         lastExecutedAt: Date | null;
@@ -100,8 +100,8 @@ export declare class AutomationService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        description: string | null;
         isActive: boolean;
+        description: string | null;
         trigger: import(".prisma/client").$Enums.AutomationTrigger;
         executionCount: number;
         lastExecutedAt: Date | null;

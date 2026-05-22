@@ -98,6 +98,12 @@ router.get('/:id/contacts', (0, validate_1.validate)(campaigns_schema_1.getCampa
 // CAMPAIGN CONTROL ROUTES
 // ============================================
 /**
+ * @route   GET /api/v1/campaigns/:id/estimate-cost
+ * @desc    Get estimated wallet cost before starting campaign
+ * @access  Private
+ */
+router.get('/:id/estimate-cost', (0, validate_1.validate)(campaigns_schema_1.getCampaignByIdSchema), campaigns_controller_1.campaignsController.estimateCost.bind(campaigns_controller_1.campaignsController));
+/**
  * @route   POST /api/v1/campaigns/:id/start
  * @desc    Start campaign (validates token before starting)
  * @access  Private

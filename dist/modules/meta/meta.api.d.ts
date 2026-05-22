@@ -82,6 +82,7 @@ declare class MetaApiClient {
         messageId: string;
         contacts?: any[];
     }>;
+    getPhoneNumberInfo(phoneNumberId: string, accessToken: string): Promise<any>;
     /**
      * ✅ Enhanced send message with contact extraction
      */

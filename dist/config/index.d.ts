@@ -70,6 +70,14 @@ export declare const config: {
         readonly apiSecret: string;
         readonly folder: string;
     };
+    readonly platform: {
+        readonly whatsapp: {
+            readonly phoneNumberId: string;
+            readonly accessToken: string;
+            readonly otpTemplate: string;
+            readonly welcomeTemplate: string;
+        };
+    };
 };
 export default config;
 //# sourceMappingURL=index.d.ts.map

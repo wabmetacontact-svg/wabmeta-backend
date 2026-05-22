@@ -359,24 +359,24 @@ export declare const updateOrganizationSchema: z.ZodObject<{
         planType: z.ZodOptional<z.ZodEnum<["FREE", "STARTER", "PRO", "ENTERPRISE"]>>;
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
+        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
         website?: string | null | undefined;
         industry?: string | undefined;
         timezone?: string | undefined;
-        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
     }, {
         name?: string | undefined;
+        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
         website?: string | null | undefined;
         industry?: string | undefined;
         timezone?: string | undefined;
-        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         name?: string | undefined;
+        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
         website?: string | null | undefined;
         industry?: string | undefined;
         timezone?: string | undefined;
-        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
     };
     params: {
         id: string;
@@ -384,10 +384,10 @@ export declare const updateOrganizationSchema: z.ZodObject<{
 }, {
     body: {
         name?: string | undefined;
+        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
         website?: string | null | undefined;
         industry?: string | undefined;
         timezone?: string | undefined;
-        planType?: "FREE" | "STARTER" | "PRO" | "ENTERPRISE" | undefined;
     };
     params: {
         id: string;
@@ -488,9 +488,9 @@ export declare const createPlanSchema: z.ZodObject<{
         maxCampaignsPerMonth: number;
         maxAutomations: number;
         maxApiCalls: number;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     }, {
         name: string;
         type: "FREE" | "STARTER" | "PRO" | "ENTERPRISE";
@@ -508,9 +508,9 @@ export declare const createPlanSchema: z.ZodObject<{
         maxCampaignsPerMonth: number;
         maxAutomations: number;
         maxApiCalls: number;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
@@ -530,9 +530,9 @@ export declare const createPlanSchema: z.ZodObject<{
         maxCampaignsPerMonth: number;
         maxAutomations: number;
         maxApiCalls: number;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     };
 }, {
     body: {
@@ -552,9 +552,9 @@ export declare const createPlanSchema: z.ZodObject<{
         maxCampaignsPerMonth: number;
         maxAutomations: number;
         maxApiCalls: number;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     };
 }>;
 export declare const updatePlanSchema: z.ZodObject<{
@@ -585,6 +585,7 @@ export declare const updatePlanSchema: z.ZodObject<{
         isActive: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         monthlyPrice?: number | undefined;
         yearlyPrice?: number | undefined;
@@ -600,9 +601,9 @@ export declare const updatePlanSchema: z.ZodObject<{
         maxAutomations?: number | undefined;
         maxApiCalls?: number | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     }, {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         monthlyPrice?: number | undefined;
         yearlyPrice?: number | undefined;
@@ -618,11 +619,11 @@ export declare const updatePlanSchema: z.ZodObject<{
         maxAutomations?: number | undefined;
         maxApiCalls?: number | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         monthlyPrice?: number | undefined;
         yearlyPrice?: number | undefined;
@@ -638,7 +639,6 @@ export declare const updatePlanSchema: z.ZodObject<{
         maxAutomations?: number | undefined;
         maxApiCalls?: number | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     };
     params: {
         id: string;
@@ -646,6 +646,7 @@ export declare const updatePlanSchema: z.ZodObject<{
 }, {
     body: {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         description?: string | undefined;
         monthlyPrice?: number | undefined;
         yearlyPrice?: number | undefined;
@@ -661,7 +662,6 @@ export declare const updatePlanSchema: z.ZodObject<{
         maxAutomations?: number | undefined;
         maxApiCalls?: number | undefined;
         features?: string[] | undefined;
-        isActive?: boolean | undefined;
     };
     params: {
         id: string;

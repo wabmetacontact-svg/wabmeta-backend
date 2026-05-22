@@ -1,8 +1,6 @@
 export declare const COUNTRY_CODES: {
     code: string;
-    country: string;
-    flag: string;
-    maxLength: number;
+    name: string;
 }[];
 export interface ParsedPhone {
     isValid: boolean;
@@ -12,15 +10,10 @@ export interface ParsedPhone {
     error?: string;
 }
 /**
- * Parse and validate international phone number
+ * ✅ FIXED - phone.ts ka toCanonicalPhone use karta hai
+ * Consistent format guaranteed
  */
-export declare function parsePhoneNumber(input: string): {
-    isValid: boolean;
-    fullNumber: string;
-    countryCode: string;
-    nationalNumber: string;
-    error?: string;
-};
+export declare function parsePhoneNumber(input: string): ParsedPhone;
 export declare function parseMultiplePhones(input: string): {
     valid: Array<{
         fullNumber: string;

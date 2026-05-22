@@ -188,19 +188,180 @@ class MetaController {
             const { access_token } = tokenResponse.data;
             console.log('   ✅ Access token obtained');
             console.log('📊 Step 2: Getting WABA ID from token...');
-            // Get WABA ID from token debug
-            const debugTokenResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/debug_token`, {
-                params: {
-                    input_token: access_token,
-                    access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`,
-                },
-            });
-            const wabaId = debugTokenResponse.data.data.granular_scopes?.find((s) => s.scope === 'whatsapp_business_management')?.target_ids?.[0];
-            if (!wabaId) {
-                console.error('❌ WABA ID not found in token');
-                throw new errorHandler_1.AppError('WABA ID not found. Please complete the setup in Meta Business Suite.', 400);
+            // ════════════════════════════════════════════════════════════
+            // ✅ FIRST: Diagnostic - What does the token contain?
+            // ════════════════════════════════════════════════════════════
+            console.log('\n🔬 ═══ TOKEN DIAGNOSTIC ═══');
+            try {
+                const debugTokenResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/debug_token`, {
+                    params: {
+                        input_token: access_token,
+                        access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`,
+                    },
+                });
+                const tokenData = debugTokenResponse.data?.data;
+                console.log('   App ID:', tokenData?.app_id);
+                console.log('   User ID:', tokenData?.user_id);
+                console.log('   Is Valid:', tokenData?.is_valid);
+                console.log('   Scopes:', tokenData?.scopes);
+                console.log('   Granular Scopes:', JSON.stringify(tokenData?.granular_scopes, null, 2));
+                console.log('   Type:', tokenData?.type);
+                console.log('   Application:', tokenData?.application);
+                // ⚠️ Critical Check
+                const hasWhatsAppScope = tokenData?.scopes?.includes('whatsapp_business_management');
+                const hasGranularScopes = tokenData?.granular_scopes?.length > 0;
+                console.log('\n   📊 Analysis:');
+                console.log('   - Has whatsapp_business_management scope:', hasWhatsAppScope);
+                console.log('   - Has granular scopes:', hasGranularScopes);
+                if (!hasWhatsAppScope && !hasGranularScopes) {
+                    console.log('\n   ❌ DIAGNOSIS: User did NOT complete Embedded Signup!');
+                    console.log('   ❌ They only logged in, but did not setup WhatsApp Business Account');
+                    console.log('   ✅ SOLUTION: User must use Embedded Signup wizard, not regular OAuth');
+                }
             }
-            console.log('   ✅ WABA ID:', wabaId);
+            catch (e) {
+                console.log('   ❌ Token diagnostic failed:', e.message);
+            }
+            console.log('🔬 ═══ END DIAGNOSTIC ═══\n');
+            // Continue with WABA detection...
+            // ════════════════════════════════════════════════════════════
+            // ✅ MULTI-METHOD WABA DETECTION - TRY 4 METHODS
+            // ════════════════════════════════════════════════════════════
+            let wabaId = null;
+            let wabaDetectionMethod = '';
+            // ────────────────────────────────────────────────────────────
+            // METHOD 1: Debug Token - Granular Scopes
+            // ────────────────────────────────────────────────────────────
+            try {
+                console.log('   🔍 Method 1: Checking granular scopes...');
+                const debugTokenResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/debug_token`, {
+                    params: {
+                        input_token: access_token,
+                        access_token: `${process.env.META_APP_ID}|${process.env.META_APP_SECRET}`,
+                    },
+                });
+                const granularScopes = debugTokenResponse.data?.data?.granular_scopes || [];
+                console.log('   📋 Granular scopes:', JSON.stringify(granularScopes, null, 2));
+                for (const scope of granularScopes) {
+                    if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
+                        wabaId = scope.target_ids[0];
+                        wabaDetectionMethod = 'granular_scopes';
+                        console.log('   ✅ Method 1 SUCCESS - WABA from scopes:', wabaId);
+                        break;
+                    }
+                }
+            }
+            catch (e) {
+                console.warn('   ⚠️ Method 1 failed:', e.message);
+            }
+            // ────────────────────────────────────────────────────────────
+            // METHOD 2: User's Businesses → Owned WABAs
+            // ────────────────────────────────────────────────────────────
+            if (!wabaId) {
+                try {
+                    console.log('   🔍 Method 2: Querying user businesses...');
+                    const businessResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/me`, {
+                        params: {
+                            access_token,
+                            fields: 'id,name,businesses{id,name,owned_whatsapp_business_accounts{id,name,currency,timezone_id}}',
+                        },
+                    });
+                    console.log('   📋 Businesses response:', JSON.stringify(businessResponse.data, null, 2));
+                    const businesses = businessResponse.data?.businesses?.data || [];
+                    for (const business of businesses) {
+                        const wabas = business?.owned_whatsapp_business_accounts?.data || [];
+                        if (wabas.length > 0) {
+                            wabaId = wabas[0].id;
+                            wabaDetectionMethod = 'user_businesses';
+                            console.log('   ✅ Method 2 SUCCESS - WABA from business:', wabaId);
+                            console.log('   Business:', business.name);
+                            break;
+                        }
+                    }
+                }
+                catch (e) {
+                    console.warn('   ⚠️ Method 2 failed:', e.message);
+                }
+            }
+            // ────────────────────────────────────────────────────────────
+            // METHOD 3: Client WABAs (Shared with App)
+            // ────────────────────────────────────────────────────────────
+            if (!wabaId) {
+                try {
+                    console.log('   🔍 Method 3: Querying client WABAs...');
+                    const businessResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/me`, {
+                        params: {
+                            access_token,
+                            fields: 'id,businesses{id,client_whatsapp_business_accounts{id,name,currency,timezone_id}}',
+                        },
+                    });
+                    const businesses = businessResponse.data?.businesses?.data || [];
+                    for (const business of businesses) {
+                        const wabas = business?.client_whatsapp_business_accounts?.data || [];
+                        if (wabas.length > 0) {
+                            wabaId = wabas[0].id;
+                            wabaDetectionMethod = 'client_wabas';
+                            console.log('   ✅ Method 3 SUCCESS - WABA from client:', wabaId);
+                            break;
+                        }
+                    }
+                }
+                catch (e) {
+                    console.warn('   ⚠️ Method 3 failed:', e.message);
+                }
+            }
+            // ────────────────────────────────────────────────────────────
+            // METHOD 4: Direct WABA Search via /me
+            // ────────────────────────────────────────────────────────────
+            if (!wabaId) {
+                try {
+                    console.log('   🔍 Method 4: Direct WABA query...');
+                    const directResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/me`, {
+                        params: {
+                            access_token,
+                            fields: 'owned_whatsapp_business_accounts{id,name},client_business_id',
+                        },
+                    });
+                    console.log('   📋 Direct query response:', JSON.stringify(directResponse.data, null, 2));
+                    const ownedWabas = directResponse.data?.owned_whatsapp_business_accounts?.data || [];
+                    if (ownedWabas.length > 0) {
+                        wabaId = ownedWabas[0].id;
+                        wabaDetectionMethod = 'direct_owned';
+                        console.log('   ✅ Method 4 SUCCESS - WABA direct owned:', wabaId);
+                    }
+                }
+                catch (e) {
+                    console.warn('   ⚠️ Method 4 failed:', e.message);
+                }
+            }
+            // ────────────────────────────────────────────────────────────
+            // FINAL CHECK: WABA Found?
+            // ────────────────────────────────────────────────────────────
+            if (!wabaId) {
+                console.error('\n❌ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.error('   WABA NOT FOUND - DIAGNOSIS:');
+                console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                console.error('   The user logged in but did NOT complete Embedded Signup.');
+                console.error('   They likely:');
+                console.error('   1. Used regular OAuth instead of Embedded Signup wizard');
+                console.error('   2. Skipped business creation step');
+                console.error('   3. Skipped WhatsApp Business Account creation');
+                console.error('   4. Cancelled before phone verification');
+                console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+                throw new errorHandler_1.AppError('🚫 WhatsApp Setup Incomplete\n\n' +
+                    'You logged in to Facebook successfully, but you didn\'t complete the WhatsApp Business setup wizard.\n\n' +
+                    '✅ TO FIX THIS:\n' +
+                    '1. Click "Connect" again\n' +
+                    '2. The WhatsApp wizard should appear\n' +
+                    '3. Click "Get Started" in the wizard\n' +
+                    '4. Create a Business Portfolio\n' +
+                    '5. Create a WhatsApp Business Account\n' +
+                    '6. Add and VERIFY a phone number\n' +
+                    '7. Click "FINISH" at the end\n\n' +
+                    '⚠️ Important: The phone number must NOT be currently used on regular WhatsApp app!', 400);
+            }
+            console.log(`\n   ✅ WABA ID: ${wabaId}`);
+            console.log(`   ✅ Detection method: ${wabaDetectionMethod}\n`);
             console.log('📊 Step 3: Fetching WABA details...');
             // Get WABA details
             const wabaDetails = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/${wabaId}`, {
@@ -233,6 +394,21 @@ class MetaController {
                 // Encrypt token
                 const encryptedToken = (0, encryption_1.encrypt)(access_token);
                 console.log('   Token encrypted successfully');
+                // ✅ ADD: Organization level check - sirf ek connected account
+                const existingConnectedInOrg = await database_1.default.whatsAppAccount.findFirst({
+                    where: {
+                        organizationId,
+                        status: 'CONNECTED',
+                        phoneNumberId: { not: primaryPhone.id }, // Same phone reconnect allow karo
+                    },
+                });
+                if (existingConnectedInOrg) {
+                    // State cleanup karo
+                    await database_1.default.oAuthState.delete({ where: { state } }).catch(() => { });
+                    throw new errorHandler_1.AppError(`Your organization already has a connected WhatsApp account ` +
+                        `(${existingConnectedInOrg.phoneNumber}). ` +
+                        `Please disconnect it first from Settings → WhatsApp.`, 400);
+                }
                 try {
                     // ✅ CRITICAL FIX: Check if account already exists
                     const existingAccount = await database_1.default.whatsAppAccount.findFirst({

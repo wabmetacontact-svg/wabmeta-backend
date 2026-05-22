@@ -190,8 +190,8 @@ export declare const sendTemplateMessageSchema: z.ZodObject<{
         }>, "many">>;
     }, "strip", z.ZodTypeAny, {
         to: string;
-        templateName: string;
         whatsappAccountId: string;
+        templateName: string;
         languageCode: string;
         components?: {
             type: "body" | "header" | "button";
@@ -214,8 +214,8 @@ export declare const sendTemplateMessageSchema: z.ZodObject<{
         }[] | undefined;
     }, {
         to: string;
-        templateName: string;
         whatsappAccountId: string;
+        templateName: string;
         components?: {
             type: "body" | "header" | "button";
             parameters: {
@@ -240,8 +240,8 @@ export declare const sendTemplateMessageSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     body: {
         to: string;
-        templateName: string;
         whatsappAccountId: string;
+        templateName: string;
         languageCode: string;
         components?: {
             type: "body" | "header" | "button";
@@ -266,8 +266,8 @@ export declare const sendTemplateMessageSchema: z.ZodObject<{
 }, {
     body: {
         to: string;
-        templateName: string;
         whatsappAccountId: string;
+        templateName: string;
         components?: {
             type: "body" | "header" | "button";
             parameters: {

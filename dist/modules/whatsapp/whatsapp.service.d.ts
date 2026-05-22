@@ -102,8 +102,8 @@ declare class WhatsAppService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                lastMessageAt: Date | null;
                 phoneNumberId: string | null;
+                lastMessageAt: Date | null;
                 contactId: string;
                 lastMessagePreview: string | null;
                 lastCustomerMessageAt: Date | null;
@@ -123,8 +123,8 @@ declare class WhatsAppService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            templateName: string | null;
             whatsappAccountId: string | null;
+            templateName: string | null;
             conversationId: string;
             wamId: string | null;
             direction: import(".prisma/client").$Enums.MessageDirection;
@@ -196,8 +196,8 @@ declare class WhatsAppService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                lastMessageAt: Date | null;
                 phoneNumberId: string | null;
+                lastMessageAt: Date | null;
                 contactId: string;
                 lastMessagePreview: string | null;
                 lastCustomerMessageAt: Date | null;
@@ -217,8 +217,8 @@ declare class WhatsAppService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            templateName: string | null;
             whatsappAccountId: string | null;
+            templateName: string | null;
             conversationId: string;
             wamId: string | null;
             direction: import(".prisma/client").$Enums.MessageDirection;
@@ -280,8 +280,8 @@ declare class WhatsAppService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                lastMessageAt: Date | null;
                 phoneNumberId: string | null;
+                lastMessageAt: Date | null;
                 contactId: string;
                 lastMessagePreview: string | null;
                 lastCustomerMessageAt: Date | null;
@@ -301,8 +301,8 @@ declare class WhatsAppService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            templateName: string | null;
             whatsappAccountId: string | null;
+            templateName: string | null;
             conversationId: string;
             wamId: string | null;
             direction: import(".prisma/client").$Enums.MessageDirection;
@@ -362,28 +362,45 @@ declare class WhatsAppService {
         createdAt: Date;
         updatedAt: Date;
         phoneNumber: string;
-        isActive: boolean;
-        accessToken: string | null;
-        verifiedName: string | null;
-        qualityRating: string | null;
-        codeVerificationStatus: string | null;
-        nameStatus: string | null;
-        wabaId: string;
-        isDefault: boolean;
         phoneNumberId: string;
+        accessToken: string | null;
+        wabaId: string;
         displayName: string;
+        qualityRating: string | null;
         tokenExpiresAt: Date | null;
         webhookSecret: string | null;
+        codeVerificationStatus: string | null;
+        nameStatus: string | null;
+        verifiedName: string | null;
         messagingLimit: string | null;
         dailyMessageLimit: number;
         dailyMessagesUsed: number;
         lastLimitReset: Date;
         businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
+        isDefault: boolean;
+        isActive: boolean;
         connectionType: string;
     } | null>;
     validateAccount(accountId: string): Promise<{
         valid: boolean;
         reason?: string;
+    }>;
+    /**
+     * Single account ka quality rating Meta se fetch karke DB update karo
+     */
+    syncAccountQuality(accountId: string): Promise<{
+        success: boolean;
+        account?: any;
+        error?: string;
+    }>;
+    /**
+     * Organization ke saare accounts sync karo (bulk)
+     */
+    syncAllAccountsQuality(organizationId: string): Promise<{
+        total: number;
+        synced: number;
+        failed: number;
+        results: any[];
     }>;
 }
 export declare const whatsappService: WhatsAppService;
