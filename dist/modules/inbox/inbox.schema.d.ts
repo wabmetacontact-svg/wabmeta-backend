@@ -11,8 +11,8 @@ export declare const getConversationsSchema: z.ZodObject<{
         sortBy: z.ZodDefault<z.ZodOptional<z.ZodEnum<["lastMessageAt", "createdAt", "unreadCount"]>>>;
         sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<["asc", "desc"]>>>;
     }, "strip", z.ZodTypeAny, {
-        page: number;
         limit: number;
+        page: number;
         sortBy: "createdAt" | "lastMessageAt" | "unreadCount";
         sortOrder: "asc" | "desc";
         isArchived?: boolean | undefined;
@@ -21,8 +21,8 @@ export declare const getConversationsSchema: z.ZodObject<{
         labels?: string | undefined;
         search?: string | undefined;
     }, {
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         isArchived?: string | undefined;
         isRead?: string | undefined;
         assignedTo?: string | undefined;
@@ -33,8 +33,8 @@ export declare const getConversationsSchema: z.ZodObject<{
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        page: number;
         limit: number;
+        page: number;
         sortBy: "createdAt" | "lastMessageAt" | "unreadCount";
         sortOrder: "asc" | "desc";
         isArchived?: boolean | undefined;
@@ -45,8 +45,8 @@ export declare const getConversationsSchema: z.ZodObject<{
     };
 }, {
     query: {
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         isArchived?: string | undefined;
         isRead?: string | undefined;
         assignedTo?: string | undefined;
@@ -87,20 +87,20 @@ export declare const getMessagesSchema: z.ZodObject<{
         before: z.ZodOptional<z.ZodString>;
         after: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
-        page: number;
         limit: number;
+        page: number;
         before?: string | undefined;
         after?: string | undefined;
     }, {
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         before?: string | undefined;
         after?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        page: number;
         limit: number;
+        page: number;
         before?: string | undefined;
         after?: string | undefined;
     };
@@ -109,8 +109,8 @@ export declare const getMessagesSchema: z.ZodObject<{
     };
 }, {
     query: {
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         before?: string | undefined;
         after?: string | undefined;
     };
@@ -551,25 +551,25 @@ export declare const searchMessagesSchema: z.ZodObject<{
         page: z.ZodDefault<z.ZodOptional<z.ZodEffects<z.ZodString, number, string>>>;
         limit: z.ZodDefault<z.ZodOptional<z.ZodEffects<z.ZodString, number, string>>>;
     }, "strip", z.ZodTypeAny, {
-        page: number;
         limit: number;
+        page: number;
         q: string;
     }, {
         q: string;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        page: number;
         limit: number;
+        page: number;
         q: string;
     };
 }, {
     query: {
         q: string;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
     };
 }>;
 export type GetConversationsSchema = z.infer<typeof getConversationsSchema>;

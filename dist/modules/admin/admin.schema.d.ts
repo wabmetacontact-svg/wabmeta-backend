@@ -108,15 +108,15 @@ export declare const getUsersSchema: z.ZodObject<{
         sortOrder: z.ZodOptional<z.ZodEnum<["asc", "desc"]>>;
     }, "strip", z.ZodTypeAny, {
         status?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
         status?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
@@ -124,8 +124,8 @@ export declare const getUsersSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     query: {
         status?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
@@ -133,8 +133,8 @@ export declare const getUsersSchema: z.ZodObject<{
 }, {
     query: {
         status?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
@@ -293,34 +293,34 @@ export declare const getOrganizationsSchema: z.ZodObject<{
         sortBy: z.ZodOptional<z.ZodString>;
         sortOrder: z.ZodOptional<z.ZodEnum<["asc", "desc"]>>;
     }, "strip", z.ZodTypeAny, {
+        limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        limit?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
+        limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        limit?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
+        limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        limit?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };
 }, {
     query: {
+        limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        limit?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
@@ -679,16 +679,16 @@ export declare const getActivityLogsSchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         userId?: string | undefined;
         organizationId?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         action?: string | undefined;
         startDate?: string | undefined;
         endDate?: string | undefined;
     }, {
         userId?: string | undefined;
         organizationId?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         action?: string | undefined;
         startDate?: string | undefined;
         endDate?: string | undefined;
@@ -697,8 +697,8 @@ export declare const getActivityLogsSchema: z.ZodObject<{
     query: {
         userId?: string | undefined;
         organizationId?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         action?: string | undefined;
         startDate?: string | undefined;
         endDate?: string | undefined;
@@ -707,8 +707,8 @@ export declare const getActivityLogsSchema: z.ZodObject<{
     query: {
         userId?: string | undefined;
         organizationId?: string | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         action?: string | undefined;
         startDate?: string | undefined;
         endDate?: string | undefined;

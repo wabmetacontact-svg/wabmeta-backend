@@ -336,24 +336,24 @@ export declare const getCampaignsSchema: z.ZodObject<{
         sortBy: z.ZodDefault<z.ZodOptional<z.ZodEnum<["createdAt", "name", "scheduledAt", "sentCount"]>>>;
         sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<["asc", "desc"]>>>;
     }, "strip", z.ZodTypeAny, {
-        page: number;
         limit: number;
+        page: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
         sortOrder: "asc" | "desc";
         status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         search?: string | undefined;
     }, {
         status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        page: number;
         limit: number;
+        page: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
         sortOrder: "asc" | "desc";
         status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
@@ -362,8 +362,8 @@ export declare const getCampaignsSchema: z.ZodObject<{
 }, {
     query: {
         status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
@@ -423,18 +423,18 @@ export declare const getCampaignContactsSchema: z.ZodObject<{
             QUEUED: "QUEUED";
         }>>;
     }, "strip", z.ZodTypeAny, {
-        page: number;
         limit: number;
+        page: number;
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
     }, {
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        page: number;
         limit: number;
+        page: number;
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
     };
     params: {
@@ -443,8 +443,8 @@ export declare const getCampaignContactsSchema: z.ZodObject<{
 }, {
     query: {
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
     };
     params: {
         id: string;

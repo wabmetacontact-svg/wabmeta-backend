@@ -15,6 +15,7 @@ const errorHandler_1 = require("../../middleware/errorHandler");
 const google_auth_library_1 = require("google-auth-library");
 const redis_1 = require("../../config/redis");
 const whatsapp_api_1 = require("../whatsapp/whatsapp.api");
+const templateMediaResolver_1 = require("../../utils/templateMediaResolver");
 // ============================================
 // CONSTANTS
 // ============================================
@@ -73,11 +74,13 @@ const sendWhatsAppTemplate = (phone, templateName, bodyParams = []) => {
             },
         },
         select: {
+            id: true,
+            organizationId: true,
             headerType: true,
             headerContent: true,
         },
     })
-        .then((tpl) => {
+        .then(async (tpl) => {
         const templateComponents = {};
         if (bodyParams.length > 0) {
             templateComponents.body = bodyParams.map((param) => ({
@@ -86,13 +89,14 @@ const sendWhatsAppTemplate = (phone, templateName, bodyParams = []) => {
             }));
         }
         if (tpl?.headerContent) {
+            const resolvedUrl = await (0, templateMediaResolver_1.resolveTemplateHeaderMedia)(tpl);
             const typeLower = tpl.headerType?.toLowerCase();
             if (typeLower === 'image' || typeLower === 'video' || typeLower === 'document') {
                 templateComponents.header = [
                     {
                         type: typeLower,
                         [typeLower]: {
-                            link: tpl.headerContent,
+                            link: resolvedUrl,
                             ...(typeLower === 'document' ? { filename: 'Document' } : {}),
                         },
                     },

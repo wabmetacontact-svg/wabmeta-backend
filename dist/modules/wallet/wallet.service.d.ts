@@ -144,16 +144,16 @@ export declare function getAccessRequests(options: {
     limit?: number;
 }): Promise<{
     requests: ({
+        organization: {
+            name: string;
+            id: string;
+            planType: import(".prisma/client").$Enums.PlanType;
+        };
         user: {
             email: string;
             id: string;
             firstName: string;
             lastName: string | null;
-        };
-        organization: {
-            name: string;
-            id: string;
-            planType: import(".prisma/client").$Enums.PlanType;
         };
         reviewer: {
             name: string;

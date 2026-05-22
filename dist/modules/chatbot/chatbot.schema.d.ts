@@ -10250,24 +10250,24 @@ export declare const getChatbotsSchema: z.ZodObject<{
         sortBy: z.ZodDefault<z.ZodOptional<z.ZodEnum<["createdAt", "name", "status"]>>>;
         sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<["asc", "desc"]>>>;
     }, "strip", z.ZodTypeAny, {
-        page: number;
         limit: number;
+        page: number;
         sortBy: "name" | "status" | "createdAt";
         sortOrder: "asc" | "desc";
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         search?: string | undefined;
     }, {
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        page: number;
         limit: number;
+        page: number;
         sortBy: "name" | "status" | "createdAt";
         sortOrder: "asc" | "desc";
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
@@ -10276,8 +10276,8 @@ export declare const getChatbotsSchema: z.ZodObject<{
 }, {
     query: {
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
-        page?: string | undefined;
         limit?: string | undefined;
+        page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;
         sortOrder?: "asc" | "desc" | undefined;

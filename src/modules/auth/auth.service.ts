@@ -23,6 +23,7 @@ import {
 import { OAuth2Client } from 'google-auth-library';
 import { getRedis } from '../../config/redis';
 import { whatsappApi } from '../whatsapp/whatsapp.api';
+import { resolveTemplateHeaderMedia } from '../../utils/templateMediaResolver';
 
 // ============================================
 // CONSTANTS
@@ -106,11 +107,13 @@ const sendWhatsAppTemplate = (
         },
       },
       select: {
+        id: true,
+        organizationId: true,
         headerType: true,
         headerContent: true,
       },
     })
-    .then((tpl) => {
+    .then(async (tpl) => {
       const templateComponents: any = {};
 
       if (bodyParams.length > 0) {
@@ -121,13 +124,14 @@ const sendWhatsAppTemplate = (
       }
 
       if (tpl?.headerContent) {
+        const resolvedUrl = await resolveTemplateHeaderMedia(tpl);
         const typeLower = tpl.headerType?.toLowerCase();
         if (typeLower === 'image' || typeLower === 'video' || typeLower === 'document') {
           templateComponents.header = [
             {
               type: typeLower,
               [typeLower]: {
-                link: tpl.headerContent,
+                link: resolvedUrl,
                 ...(typeLower === 'document' ? { filename: 'Document' } : {}),
               },
             },

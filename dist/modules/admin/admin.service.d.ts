@@ -41,8 +41,8 @@ export declare class AdminService {
         name: string;
         email: string;
         id: string;
-        lastLoginAt: Date | null;
         createdAt: Date;
+        lastLoginAt: Date | null;
         role: string;
         isActive: boolean;
     } | null>;
@@ -96,6 +96,7 @@ export declare class AdminService {
             email: string;
             status: import(".prisma/client").$Enums.UserStatus;
             id: string;
+            createdAt: Date;
             password: string | null;
             firstName: string;
             lastName: string | null;
@@ -103,7 +104,6 @@ export declare class AdminService {
             avatar: string | null;
             emailVerified: boolean;
             lastLoginAt: Date | null;
-            createdAt: Date;
         }[];
         total: number;
     }>;
@@ -145,6 +145,8 @@ export declare class AdminService {
         email: string;
         status: import(".prisma/client").$Enums.UserStatus;
         id: string;
+        createdAt: Date;
+        updatedAt: Date;
         googleId: string | null;
         password: string | null;
         firstName: string;
@@ -160,8 +162,6 @@ export declare class AdminService {
         otpEnabled: boolean;
         lastLoginAt: Date | null;
         lastLoginIp: string | null;
-        createdAt: Date;
-        updatedAt: Date;
     }>;
     updateUserPassword(id: string, data: any): Promise<{
         email: string;
@@ -565,8 +565,8 @@ export declare class AdminService {
         name: string;
         email: string;
         id: string;
-        lastLoginAt: Date | null;
         createdAt: Date;
+        lastLoginAt: Date | null;
         role: string;
         isActive: boolean;
     }[]>;
@@ -590,15 +590,15 @@ export declare class AdminService {
     }>;
     getActivityLogs(input: GetActivityLogsInput): Promise<{
         logs: ({
+            organization: {
+                name: string;
+                id: string;
+            } | null;
             user: {
                 email: string;
                 id: string;
                 firstName: string;
                 lastName: string | null;
-            } | null;
-            organization: {
-                name: string;
-                id: string;
             } | null;
         } & {
             userId: string | null;
@@ -652,12 +652,12 @@ export declare class AdminService {
             organizationId: string;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
             id: string;
+            wabaId: string;
             createdAt: Date;
             updatedAt: Date;
             phoneNumber: string;
             phoneNumberId: string;
             accessToken: string | null;
-            wabaId: string;
             displayName: string;
             qualityRating: string | null;
             tokenExpiresAt: Date | null;
