@@ -19,25 +19,31 @@ export class InboxService {
   async getConversations(organizationId: string, query: any = {}) {
     const redis = getRedis();
 
-    // ✅ Cache key
+    // ✅ Cache TTL 30 sec - realtime feel ke liye short TTL
+    const CACHE_TTL = 30;
+
     const cacheKey = `conversations:${organizationId}:${JSON.stringify(query)}`;
 
-    // ✅ Try cache first
     if (redis) {
-      const cached = await redis.get(cacheKey);
-      if (cached) {
-        console.log('📦 Cache HIT:', cacheKey);
-        return JSON.parse(cached);
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          console.log('📦 Cache HIT:', cacheKey.substring(0, 50));
+          return JSON.parse(cached);
+        }
+      } catch (e) {
+        console.warn('Redis get error:', e);
       }
     }
 
-    // ✅ Fetch from database
     const result = await this.fetchConversationsFromDB(organizationId, query);
 
-    // ✅ Store in cache (5 minutes TTL)
     if (redis) {
-      await redis.setex(cacheKey, 300, JSON.stringify(result));
-      console.log('📦 Cache SET:', cacheKey);
+      try {
+        await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result));
+      } catch (e) {
+        console.warn('Redis set error:', e);
+      }
     }
 
     return result;

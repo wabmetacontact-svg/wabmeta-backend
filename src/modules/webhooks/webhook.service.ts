@@ -346,20 +346,43 @@ export class WebhookService {
     phoneNumberId: string
   ) {
     try {
-      const waFrom = String(message?.from || '');
-      const waMessageId = String(message?.id || '');
-      const typeRaw = String(message?.type || 'text');
-      const msgType = this.mapMessageType(typeRaw);
-      const ts = Number(message?.timestamp || Date.now() / 1000);
+      const waFrom      = String(message?.from || '');
+      const waMessageId = String(message?.id   || '');
+      const typeRaw     = String(message?.type || 'text');
+      const msgType     = this.mapMessageType(typeRaw);
+      const ts          = Number(message?.timestamp || Date.now() / 1000);
       const messageTime = new Date(ts * 1000);
 
-      console.log(`📥 Processing inbound message: ${waMessageId} from ${waFrom}`);
+      if (!waFrom || !waMessageId) {
+        console.warn('⚠️ Invalid message - missing from/id');
+        return;
+      }
 
-      let phone10 = waFrom;
-      if (phone10.startsWith('91') && phone10.length === 12) phone10 = phone10.substring(2);
+      console.log(`📥 Inbound: ${waMessageId} from ${waFrom} type=${typeRaw}`);
 
-      const { contact, wasNewlyCreated } = await this.findOrCreateContact(organizationId, phone10);
+      // ✅ Duplicate check - same waMessageId already saved?
+      const existingMsg = await prisma.message.findFirst({
+        where: {
+          OR: [
+            { waMessageId },
+            { wamId: waMessageId },
+          ],
+        },
+        select: { id: true },
+      });
 
+      if (existingMsg) {
+        console.log(`⏭️ Duplicate message skipped: ${waMessageId}`);
+        return;
+      }
+
+      // Contact find/create
+      const { contact, wasNewlyCreated } = await this.findOrCreateContact(
+        organizationId,
+        waFrom
+      );
+
+      // Conversation find/create
       let conversation = await prisma.conversation.findFirst({
         where: { organizationId, contactId: contact.id },
       });
@@ -368,298 +391,304 @@ export class WebhookService {
         try {
           conversation = await prisma.conversation.create({
             data: {
-              organization: { connect: { id: organizationId } },
-              contact: { connect: { id: contact.id } },
-              isWindowOpen: true,
+              organization:    { connect: { id: organizationId } },
+              contact:         { connect: { id: contact.id } },
+              isWindowOpen:    true,
               windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-              unreadCount: 0,
-              isRead: false,
-              lastMessageAt: messageTime,
+              unreadCount:     0,
+              isRead:          false,
+              lastMessageAt:   messageTime,
             },
           });
-          console.log(`💬 Created new conversation: ${conversation.id}`);
-        } catch (error: any) {
-          if (error.code === 'P2002') {
+          console.log(`💬 New conversation: ${conversation.id}`);
+        } catch (err: any) {
+          if (err.code === 'P2002') {
             conversation = await prisma.conversation.findFirst({
               where: { organizationId, contactId: contact.id },
             });
-            if (!conversation) throw error;
+            if (!conversation) throw err;
           } else {
-            throw error;
+            throw err;
           }
         }
       }
 
-      let content = '';
-      let mediaUrl: string | null = null;
-      let mediaType: string | null = null;
+      // ✅ Content + media parse
+      let content: string           = '';
+      let mediaUrl: string | null   = null;
+      let mediaType: string | null  = null;
       let mediaMimeType: string | null = null;
-      let mediaId: string | null = null;
-      let fileName: string | null = null;
+      let mediaId: string | null    = null;
+      let fileName: string | null   = null;
 
-      // Handle different message types
       switch (typeRaw) {
         case 'text':
           content = message.text?.body || '';
           break;
-
         case 'image':
-          mediaId = message.image?.id;
+          mediaId       = message.image?.id;
           mediaMimeType = message.image?.mime_type || 'image/jpeg';
-          content = message.image?.caption || '[Image]';
-          mediaType = 'image';
-          // ✅ Store the permanent mediaId as mediaUrl — proxy fetches fresh CDN URL on demand
+          content       = message.image?.caption || '[Image]';
+          mediaType     = 'image';
           if (mediaId) mediaUrl = mediaId;
           break;
-
         case 'video':
-          mediaId = message.video?.id;
+          mediaId       = message.video?.id;
           mediaMimeType = message.video?.mime_type || 'video/mp4';
-          content = message.video?.caption || '[Video]';
-          mediaType = 'video';
-          // ✅ Store permanent mediaId
+          content       = message.video?.caption || '[Video]';
+          mediaType     = 'video';
           if (mediaId) mediaUrl = mediaId;
           break;
-
         case 'audio':
-          mediaId = message.audio?.id;
+          mediaId       = message.audio?.id;
           mediaMimeType = message.audio?.mime_type || 'audio/ogg';
-          content = '[Audio]';
-          mediaType = 'audio';
-          // ✅ Store permanent mediaId
+          content       = '[Audio]';
+          mediaType     = 'audio';
           if (mediaId) mediaUrl = mediaId;
           break;
-
         case 'document':
-          mediaId = message.document?.id;
+          mediaId       = message.document?.id;
           mediaMimeType = message.document?.mime_type || 'application/pdf';
-          fileName = message.document?.filename || 'document';
-          content = message.document?.caption || `[Document: ${fileName}]`;
-          mediaType = 'document';
-          // ✅ Store permanent mediaId
+          fileName      = message.document?.filename || 'document';
+          content       = message.document?.caption || `[Document: ${fileName}]`;
+          mediaType     = 'document';
           if (mediaId) mediaUrl = mediaId;
           break;
-
         case 'sticker':
-          mediaId = message.sticker?.id;
+          mediaId       = message.sticker?.id;
           mediaMimeType = message.sticker?.mime_type || 'image/webp';
-          content = '[Sticker]';
-          mediaType = 'sticker';
-          // ✅ Store permanent mediaId
+          content       = '[Sticker]';
+          mediaType     = 'sticker';
           if (mediaId) mediaUrl = mediaId;
           break;
-
         case 'location':
-          const lat = message.location?.latitude;
-          const lng = message.location?.longitude;
-          content = `[Location: ${lat}, ${lng}]`;
+          content  = `[Location: ${message.location?.latitude}, ${message.location?.longitude}]`;
           mediaType = 'location';
-          mediaUrl = JSON.stringify({
-            latitude: lat,
-            longitude: lng,
-            name: message.location?.name,
-            address: message.location?.address,
+          mediaUrl  = JSON.stringify({
+            latitude:  message.location?.latitude,
+            longitude: message.location?.longitude,
+            name:      message.location?.name,
+            address:   message.location?.address,
           });
           break;
-
         case 'contacts':
-          content = '[Contact Card]';
+          content   = '[Contact Card]';
           mediaType = 'contact';
-          mediaUrl = JSON.stringify(message.contacts);
+          mediaUrl  = JSON.stringify(message.contacts);
           break;
-
-        case 'interactive':
+        case 'interactive': {
           const iType = message?.interactive?.type;
-          content = iType === 'button_reply' ? message.interactive.button_reply.title :
-            iType === 'list_reply' ? message.interactive.list_reply.title : '[Interactive]';
+          content = iType === 'button_reply'
+            ? (message.interactive.button_reply.title || '[Button Reply]')
+            : iType === 'list_reply'
+            ? (message.interactive.list_reply.title || '[List Reply]')
+            : '[Interactive]';
           break;
-
+        }
         default:
           content = `[${typeRaw}]`;
       }
 
+      // ✅ Save message
       const savedMessage = await prisma.message.create({
         data: {
-          conversationId: conversation.id,
+          conversationId:   conversation.id,
           whatsappAccountId,
           waMessageId,
-          wamId: waMessageId,
-          direction: 'INBOUND',
-          type: msgType,
+          wamId:            waMessageId,
+          direction:        'INBOUND',
+          type:             msgType,
           content,
           mediaUrl,
           mediaType,
           mediaMimeType,
           mediaId,
           fileName,
-          status: 'DELIVERED',
-          sentAt: messageTime,
-          deliveredAt: messageTime,
-          timestamp: messageTime,
-          createdAt: messageTime,
+          status:           'DELIVERED',
+          sentAt:           messageTime,
+          deliveredAt:      messageTime,
+          timestamp:        messageTime,
+          createdAt:        messageTime,
         },
       });
 
+      // ✅ Update conversation
       const updatedConversation = await prisma.conversation.update({
         where: { id: conversation.id },
         data: {
-          lastMessageAt: messageTime,
-          lastMessagePreview: (content || `[${typeRaw}]`).substring(0, 100),
+          lastMessageAt:         messageTime,
+          lastMessagePreview:    (content || `[${typeRaw}]`).substring(0, 100),
           lastCustomerMessageAt: messageTime,
-          unreadCount: { increment: 1 },
-          isRead: false,
-          isWindowOpen: true,
-          windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          unreadCount:           { increment: 1 },
+          isRead:                false,
+          isWindowOpen:          true,
+          windowExpiresAt:       new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
         include: {
           contact: {
             select: {
-              id: true,
-              phone: true,
-              firstName: true,
-              lastName: true,
-              avatar: true,
+              id:                  true,
+              phone:               true,
+              firstName:           true,
+              lastName:            true,
+              avatar:              true,
               whatsappProfileName: true,
             },
           },
         },
       });
 
-      await prisma.contact.update({
+      // Contact message count update (non-blocking)
+      prisma.contact.update({
         where: { id: contact.id },
         data: {
           lastMessageAt: messageTime,
-          messageCount: { increment: 1 },
+          messageCount:  { increment: 1 },
         },
-      });
+      }).catch((e: any) => console.error('Contact update error:', e));
 
-      console.log(`✅ Inbound message saved and conversation updated: ${updatedConversation.id}`);
+      // ✅ Clear cache (non-blocking)
+      import('../inbox/inbox.service')
+        .then(({ inboxService }) => inboxService.clearCache(organizationId))
+        .catch((e: any) => console.error('Cache clear error:', e));
 
-      // ✅ AUTOMATION TRIGGERS - Clean Logic
-      try {
-          if (wasNewlyCreated) {
-              // 🆕 Brand new contact - UNKNOWN_MESSAGE trigger
-              console.log(`🤖 New contact detected → triggerUnknownMessage and triggerNewContact`);
-              await automationEngine.triggerUnknownMessage({
-                  organizationId,
-                  contactId: contact.id,
-                  phone: waFrom,            // ✅ Full number with country code (e.g. 917982722016)
-                  message: content,
-                  conversationId: updatedConversation.id,
-              });
-              
-              // ✅ Also trigger NEW_CONTACT since this is technically a new contact
-              await automationEngine.triggerNewContact({
-                  organizationId,
-                  contactId: contact.id,
-                  phone: waFrom,
-                  message: content,
-                  conversationId: updatedConversation.id,
-              });
-          } else {
-              // 👤 Existing contact - KEYWORD trigger check
-              console.log(`🔑 Existing contact → triggerKeyword check`);
-              const triggered = await automationEngine.triggerKeyword({
-                  organizationId,
-                  contactId: contact.id,
-                  phone: waFrom,            // ✅ Full number with country code
-                  message: content,
-                  conversationId: updatedConversation.id,
-              });
-              
-              if (triggered) {
-                  console.log('🤖 Keyword automation triggered for existing contact');
-              }
-          }
-      } catch (automationError) {
-          // ✅ Automation error inbox ko affect na kare
-          console.error('🤖 Automation error (non-blocking):', automationError);
-      }
+      // ✅ Build contact name for socket payload
+      const contactName =
+        (updatedConversation.contact as any).whatsappProfileName ||
+        ((updatedConversation.contact as any).firstName
+          ? `${(updatedConversation.contact as any).firstName} ${(updatedConversation.contact as any).lastName || ''}`.trim()
+          : (updatedConversation.contact as any).phone);
 
-      // ✅ Button click handler - dono cases me check karo
-      if (msgType === 'INTERACTIVE') {
-          const buttonId = message?.interactive?.button_reply?.id;
-          if (buttonId) {
-              automationEngine.handleButtonClick({
-                  organizationId,
-                  contactId: contact.id,
-                  buttonId,
-                  conversationId: updatedConversation.id,
-              }).catch((e: any) => console.error('Button click error:', e));
-          }
-      }
+      const contactWithName = {
+        ...updatedConversation.contact,
+        name: contactName,
+      };
 
-      // ✅ Clear inbox cache
-      const { inboxService } = await import('../inbox/inbox.service');
-      await inboxService.clearCache(organizationId);
+      // ✅ Emit INBOUND message to socket
+      const messagePayload = {
+        ...savedMessage,
+        createdAt:   savedMessage.createdAt   instanceof Date ? savedMessage.createdAt.toISOString()   : savedMessage.createdAt,
+        sentAt:      savedMessage.sentAt      instanceof Date ? savedMessage.sentAt.toISOString()       : savedMessage.sentAt,
+        deliveredAt: savedMessage.deliveredAt instanceof Date ? savedMessage.deliveredAt.toISOString()  : savedMessage.deliveredAt,
+        timestamp:   savedMessage.timestamp   instanceof Date ? savedMessage.timestamp.toISOString()    : savedMessage.timestamp,
+      };
 
-      // ✅ Emit events
       webhookEvents.emit('newMessage', {
         organizationId,
         conversationId: updatedConversation.id,
+        message:        messagePayload,
         conversation: {
           ...updatedConversation,
-          contact: {
-            ...updatedConversation.contact,
-            name: (updatedConversation.contact as any).whatsappProfileName ||
-              ((updatedConversation.contact as any).firstName
-                ? `${(updatedConversation.contact as any).firstName} ${(updatedConversation.contact as any).lastName || ''}`.trim()
-                : (updatedConversation.contact as any).phone)
-          }
-        },
-        message: {
-          ...savedMessage,
+          contact: contactWithName,
+          lastMessageAt: updatedConversation.lastMessageAt instanceof Date
+            ? updatedConversation.lastMessageAt.toISOString()
+            : updatedConversation.lastMessageAt,
+          windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
+            ? updatedConversation.windowExpiresAt.toISOString()
+            : updatedConversation.windowExpiresAt,
         },
       });
-
-      // Transform contact to include name for frontend compatibility
-      const contactWithBotName = {
-        ...updatedConversation.contact,
-        name: (updatedConversation.contact as any).whatsappProfileName ||
-          ((updatedConversation.contact as any).firstName
-            ? `${(updatedConversation.contact as any).firstName} ${(updatedConversation.contact as any).lastName || ''}`.trim()
-            : (updatedConversation.contact as any).phone)
-      };
 
       webhookEvents.emit('conversationUpdated', {
         organizationId,
         conversation: {
           ...updatedConversation,
-          contact: contactWithBotName
+          contact: contactWithName,
+          lastMessageAt: updatedConversation.lastMessageAt instanceof Date
+            ? updatedConversation.lastMessageAt.toISOString()
+            : updatedConversation.lastMessageAt,
+          windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
+            ? updatedConversation.windowExpiresAt.toISOString()
+            : updatedConversation.windowExpiresAt,
         },
       });
 
+      // ✅ Automations (non-blocking)
+      this.runAutomations(
+        wasNewlyCreated, organizationId, contact,
+        content, waFrom, updatedConversation, message, msgType
+      ).catch((e: any) => console.error('Automation error:', e));
 
-
-      // ✅ Trigger Chatbot Engine
+      // ✅ Chatbot (non-blocking)
       if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {
-        // isNewConversation = true if:
-        // 1. Contact was just created (brand new), OR
-        // 2. This is the first message in this conversation (messageCount was 0 before this)
-        const isNewConversation = wasNewlyCreated || (updatedConversation.unreadCount <= 1);
-
-        // For button/list replies, pass the button ID too so engine can match edges
-        let chatbotContent = content || '';
+        let chatbotContent = content;
         if (msgType === 'INTERACTIVE') {
           const iType = message?.interactive?.type;
-          if (iType === 'button_reply') {
-            // Pass both id and title so engine can match either
-            chatbotContent = message.interactive.button_reply.id || message.interactive.button_reply.title || content || '';
-          } else if (iType === 'list_reply') {
-            chatbotContent = message.interactive.list_reply.id || message.interactive.list_reply.title || content || '';
-          }
+          chatbotContent = iType === 'button_reply'
+            ? (message.interactive.button_reply.id || message.interactive.button_reply.title || content)
+            : iType === 'list_reply'
+            ? (message.interactive.list_reply.id || message.interactive.list_reply.title || content)
+            : content;
         }
 
+        const isNewConversation = wasNewlyCreated || updatedConversation.unreadCount <= 1;
         chatbotEngine.processMessage(
           updatedConversation.id,
           organizationId,
           chatbotContent,
           waFrom,
           isNewConversation
-        ).catch(e => console.error('🤖 Chatbot engine trigger error:', e));
+        ).catch((e: any) => console.error('Chatbot error:', e));
       }
+
+      console.log(`✅ Inbound message processed: ${savedMessage.id}`);
+
     } catch (e) {
       console.error('processIncomingMessage error:', e);
+    }
+  }
+
+  // ✅ Helper method - automations alag karo
+  private async runAutomations(
+    wasNewlyCreated: boolean,
+    organizationId:  string,
+    contact:         any,
+    content:         string,
+    waFrom:          string,
+    conversation:    any,
+    message:         any,
+    msgType:         string
+  ) {
+    try {
+      if (wasNewlyCreated) {
+        await automationEngine.triggerUnknownMessage({
+          organizationId,
+          contactId:      contact.id,
+          phone:          waFrom,
+          message:        content,
+          conversationId: conversation.id,
+        });
+        await automationEngine.triggerNewContact({
+          organizationId,
+          contactId:      contact.id,
+          phone:          waFrom,
+          message:        content,
+          conversationId: conversation.id,
+        });
+      } else {
+        await automationEngine.triggerKeyword({
+          organizationId,
+          contactId:      contact.id,
+          phone:          waFrom,
+          message:        content,
+          conversationId: conversation.id,
+        });
+      }
+
+      // Button click
+      if (msgType === 'INTERACTIVE') {
+        const buttonId = message?.interactive?.button_reply?.id;
+        if (buttonId) {
+          await automationEngine.handleButtonClick({
+            organizationId,
+            contactId:      contact.id,
+            buttonId,
+            conversationId: conversation.id,
+          });
+        }
+      }
+    } catch (e) {
+      console.error('runAutomations error:', e);
     }
   }
 
