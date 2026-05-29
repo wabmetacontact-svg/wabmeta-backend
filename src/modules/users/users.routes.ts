@@ -110,5 +110,24 @@ router.delete(
   validate(deleteAccountSchema),
   usersController.deleteAccount.bind(usersController)
 );
+/**
+ * @route   POST /api/v1/users/subscribe
+ * @desc    Subscribe to push notifications
+ * @access  Private
+ */
+router.post(
+  '/subscribe',
+  usersController.subscribePush.bind(usersController)
+);
+
+/**
+ * @route   POST /api/v1/users/unsubscribe
+ * @desc    Unsubscribe from push notifications
+ * @access  Private
+ */
+router.post(
+  '/unsubscribe',
+  usersController.unsubscribePush.bind(usersController)
+);
 
 export default router;

@@ -4,6 +4,7 @@ import { Request, Response, NextFunction } from 'express';
 import { usersService } from './users.service';
 import { sendSuccess } from '../../utils/response';
 import { UpdateProfileInput, DeleteAccountInput } from './users.types';
+import { webpushService } from '../notifications/webpush.service';
 
 // Extended Request interface
 interface AuthRequest extends Request {
@@ -162,6 +163,32 @@ export class UsersController {
 
       const result = await usersService.addPhoneNumber(userId, phone);
       return sendSuccess(res, result, result.message);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // PUSH NOTIFICATIONS SUBSCRIPTION
+  // ==========================================
+  async subscribePush(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.id;
+      const subscription = req.body;
+      const result = await webpushService.saveSubscription(userId, subscription);
+      return sendSuccess(res, result, 'Push subscription saved successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async unsubscribePush(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { endpoint } = req.body;
+      if (endpoint) {
+        await webpushService.removeSubscription(endpoint);
+      }
+      return sendSuccess(res, null, 'Push subscription removed successfully');
     } catch (error) {
       next(error);
     }

@@ -39,6 +39,7 @@ model User {
   refreshTokens        RefreshToken[]
   wallet               Wallet[]
   walletAccessRequests WalletAccessRequest[]
+  pushSubscriptions    PushSubscription[]
 
   @@index([email])
   @@index([googleId])
@@ -1211,4 +1212,16 @@ model WalletTransaction {
   @@index([type])
   @@index([createdAt])
   @@index([razorpayPaymentId])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

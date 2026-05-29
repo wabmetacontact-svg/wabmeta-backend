@@ -609,6 +609,23 @@ export class WebhookService {
         content, waFrom, updatedConversation, message, msgType
       ).catch((e: any) => console.error('Automation error:', e));
 
+      // ✅ Push Notification (non-blocking)
+      prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { ownerId: true },
+      }).then((org: any) => {
+        if (org && org.ownerId) {
+          import('../notifications/webpush.service').then(({ webpushService }) => {
+            webpushService.sendNotificationToUser(org.ownerId, {
+              title: `Message from ${contactWithName.name}`,
+              body: content || `[${typeRaw}]`,
+              url: `/dashboard/inbox`,
+            });
+          }).catch((err: any) => console.error('Push Notification error:', err));
+        }
+      }).catch((err: any) => console.error('Error fetching org owner for push:', err));
+
+
       // ✅ Chatbot (non-blocking)
       if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {
         let chatbotContent = content;
