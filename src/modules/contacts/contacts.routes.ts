@@ -5,7 +5,7 @@ import multer from 'multer';
 import { contactsController } from './contacts.controller';
 import { authenticate } from '../../middleware/auth';
 import { validate } from '../../middleware/validate';
-import { checkContactLimit } from '../../middleware/planLimits';
+import { requireActiveSubscription, checkContactLimit } from '../../middleware/planLimits';
 import {
   createContactSchema,
   updateContactSchema,
@@ -90,10 +90,10 @@ router.delete(
 // ============================================
 
 router.get('/', contactsController.getList.bind(contactsController));
-router.post('/', validate(createContactSchema), checkContactLimit, contactsController.create.bind(contactsController));
+router.post('/', validate(createContactSchema), requireActiveSubscription, checkContactLimit, contactsController.create.bind(contactsController));
 
 // Import contacts - with file upload
-router.post('/import', upload.single('file'), (req, res, next) => {
+router.post('/import', requireActiveSubscription, upload.single('file'), (req, res, next) => {
   contactsController.import(req, res, next);
 });
 

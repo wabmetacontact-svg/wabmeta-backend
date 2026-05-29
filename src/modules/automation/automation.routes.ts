@@ -1,8 +1,7 @@
-// ✅ CREATE: src/modules/automation/automation.routes.ts
-
 import { Router } from 'express';
 import { automationController } from './automation.controller';
 import { authenticate } from '../../middleware/auth';
+import { requireActiveSubscription, checkAutomationLimit } from '../../middleware/planLimits';
 
 const router = Router();
 
@@ -25,7 +24,12 @@ router.get('/', automationController.getAll.bind(automationController));
  * @route   POST /api/v1/automations
  * @desc    Create new automation
  */
-router.post('/', automationController.create.bind(automationController));
+router.post(
+  '/',
+  requireActiveSubscription,
+  checkAutomationLimit,
+  automationController.create.bind(automationController)
+);
 
 /**
  * @route   GET /api/v1/automations/:id

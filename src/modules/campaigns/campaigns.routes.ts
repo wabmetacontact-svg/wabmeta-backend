@@ -5,7 +5,7 @@ import { campaignsController, csvUpload } from './campaigns.controller';
 import { validate } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
 import { successResponse } from '../../utils/response';
-import { checkCampaignLimit } from '../../middleware/planLimits';
+import { requireActiveSubscription, checkCampaignLimit } from '../../middleware/planLimits';
 import {
   createCampaignSchema,
   updateCampaignSchema,
@@ -90,6 +90,7 @@ router.post(
  */
 router.post(
   '/',
+  requireActiveSubscription,
   checkCampaignLimit,
   validate(createCampaignSchema),
   campaignsController.create.bind(campaignsController)
@@ -187,6 +188,7 @@ router.get(
  */
 router.post(
   '/:id/start',
+  requireActiveSubscription,
   validate(startCampaignSchema),
   campaignsController.start.bind(campaignsController)
 );

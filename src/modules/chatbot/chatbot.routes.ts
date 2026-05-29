@@ -1,15 +1,23 @@
-// ✅ CREATE/UPDATE: src/modules/chatbot/chatbot.routes.ts
+// src/modules/chatbot/chatbot.routes.ts
 
 import { Router } from 'express';
 import { chatbotController } from './chatbot.controller';
 import { authenticate } from '../../middleware/auth';
+import { requireActiveSubscription, checkChatbotLimit } from '../../middleware/planLimits';
 
 const router = Router();
 
 router.use(authenticate);
 
 router.get('/', chatbotController.getAll.bind(chatbotController));
-router.post('/', chatbotController.create.bind(chatbotController));
+
+router.post(
+  '/',
+  requireActiveSubscription,
+  checkChatbotLimit,
+  chatbotController.create.bind(chatbotController)
+);
+
 router.get('/:id', chatbotController.getById.bind(chatbotController));
 router.put('/:id', chatbotController.update.bind(chatbotController));
 router.delete('/:id', chatbotController.delete.bind(chatbotController));
