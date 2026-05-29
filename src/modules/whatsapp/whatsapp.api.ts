@@ -480,20 +480,40 @@ class WhatsAppAPI {
   }
 
   /**
-   * Send message (generic)
+   * Send message (generic) - with Authorization header, not query param
    */
-  async sendMessage(phoneNumberId: string, accessToken: string, payload: any): Promise<any> {
+  async sendMessage(
+    phoneNumberId: string,
+    accessToken:   string,
+    to:            string,
+    payload:       any
+  ): Promise<any> {
     try {
-      const response = await this.client.post(`${phoneNumberId}/messages`, payload, {
-        params: {
-          access_token: accessToken,
-          appsecret_proof: this.generateAppSecretProof(accessToken),
-        },
-      });
+      const response = await this.client.post(
+        `${phoneNumberId}/messages`,
+        payload,
+        {
+          headers: {
+            Authorization:  `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000, // 15s timeout
+        }
+      );
 
-      return response.data;
+      const messageId = response.data?.messages?.[0]?.id;
+
+      if (!messageId) {
+        throw new Error('No message ID returned from WhatsApp API');
+      }
+
+      return {
+        messageId,
+        messages: response.data.messages,
+        contacts: response.data.contacts,
+      };
     } catch (error: any) {
-      console.error('❌ Error sending message:', this.formatError(error));
+      console.error('❌ sendMessage API error:', this.formatError(error));
       throw this.handleError(error, 'Failed to send message');
     }
   }
@@ -503,31 +523,41 @@ class WhatsAppAPI {
    */
   async markAsRead(
     phoneNumberId: string,
-    messageId: string,
-    accessToken: string
+    messageId:     string,
+    accessToken:   string
   ): Promise<boolean> {
     try {
       await this.client.post(
         `${phoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
-          status: 'read',
-          message_id: messageId,
+          status:            'read',
+          message_id:        messageId,
         },
         {
-          params: {
-            access_token: accessToken,
-            appsecret_proof: this.generateAppSecretProof(accessToken),
+          headers: {
+            Authorization:  `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
           },
         }
       );
-
       console.log(`✅ Message marked as read: ${messageId}`);
       return true;
     } catch (error: any) {
-      console.error('❌ Error marking message as read:', this.formatError(error));
+      console.warn('markAsRead failed:', error.message);
       return false;
     }
+  }
+
+  /**
+   * Mark message as read (alias for whatsapp.service.ts compatibility)
+   */
+  async markMessageAsRead(
+    phoneNumberId: string,
+    accessToken:   string,
+    messageId:     string
+  ): Promise<boolean> {
+    return this.markAsRead(phoneNumberId, messageId, accessToken);
   }
 
   // ============================================

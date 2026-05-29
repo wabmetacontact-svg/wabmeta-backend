@@ -655,324 +655,306 @@ class WhatsAppService {
   }
 
   /**
-   * Core send message function - WITH CONTACT CHECK
+   * Core send message function
    */
   async sendMessage(options: SendMessageOptions) {
-    const { accountId, to, type, content, conversationId, tempId, clientMsgId } = options;
+    const {
+      accountId,
+      to,
+      type,
+      content,
+      conversationId,
+      organizationId: optOrgId,
+      tempId,
+      clientMsgId,
+      mediaUrl,
+      skipWindowCheck,
+    } = options;
 
-    console.log(`\n📤 ========== SEND MESSAGE START ==========`);
-    console.log(`   Type: ${type}`);
-    console.log(`   To: ${to}`);
-    console.log(`   Account ID: ${accountId}`);
+    console.log(`📤 sendMessage: type=${type} to=${to}`);
 
+    // ── 1. Account + Token ───────────────────────────────────────
+    const { account, accessToken } = await this.getAccountWithToken(accountId);
+    const organizationId = optOrgId || account.organizationId;
+    const formattedTo    = this.formatPhoneNumber(to);
+
+    // ── 2. 24h window check ─────────────────────────────────────
+    if (type !== 'template' && !skipWindowCheck) {
+      await this.checkWindowOrThrow(
+        organizationId, conversationId, to, accountId, type, content
+      );
+    }
+
+    // ── 3. Payload build ─────────────────────────────────────────
+    const messagePayload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type:    'individual',
+      to:                formattedTo,
+      type,
+      ...content,
+    };
+
+    // ── 4. Meta API call ─────────────────────────────────────────
+    let result: any;
     try {
-      const { account, accessToken } = await this.getAccountWithToken(accountId);
-      const organizationId = options.organizationId || account.organizationId;
-
-      console.log(`   Organization ID: ${organizationId}`);
-      console.log(`   Phone Number ID: ${account.phoneNumberId}`);
-
-      const formattedTo = this.formatPhoneNumber(to);
-      console.log(`   Formatted Phone: ${formattedTo}`);
-
-      // ✅ 24-HOUR WINDOW CHECK (For Text/Media/Interactive)
-      // Meta requires Templates for messages outside the 24h window
-      if (type !== 'template' && !options.skipWindowCheck) {
-        try {
-          // Lightweight fetch — do NOT use getOrCreateConversation (it modifies data)
-          let conv: any = null;
-
-          if (conversationId) {
-            conv = await prisma.conversation.findUnique({
-              where: { id: conversationId },
-              select: {
-                id: true,
-                isWindowOpen: true,
-                windowExpiresAt: true,
-                lastCustomerMessageAt: true,
-              },
-            });
-          }
-
-          if (!conv) {
-            // Find by contact + org
-            const contact = await prisma.contact.findFirst({
-              where: {
-                organizationId,
-                OR: [
-                  { phone: to },
-                  { phone: `+${this.formatPhoneNumber(to)}` },
-                  { phone: this.formatPhoneNumber(to) },
-                ],
-              },
-              select: { id: true },
-            });
-
-            if (contact) {
-              conv = await prisma.conversation.findUnique({
-                where: {
-                  organizationId_contactId: { organizationId, contactId: contact.id },
-                },
-                select: {
-                  id: true,
-                  isWindowOpen: true,
-                  windowExpiresAt: true,
-                  lastCustomerMessageAt: true,
-                },
-              });
-            }
-          }
-
-          // If no conversation exists yet, it's a fresh outbound — block it
-          if (!conv) {
-            const errorMsg = 'No inbound message from user yet. You must start with a Template Message.';
-            console.warn(`⚠️ ${errorMsg}`);
-            throw new Error(errorMsg);
-          }
-
-          const now = new Date();
-          let windowExpired = false;
-
-          // ✅ Priority 1: windowExpiresAt is the most reliable signal
-          if (conv.windowExpiresAt) {
-            windowExpired = new Date(conv.windowExpiresAt) <= now;
-          } else if (conv.isWindowOpen === false) {
-            windowExpired = true;
-          } else if (conv.lastCustomerMessageAt) {
-            // Priority 2: last customer message time
-            windowExpired = (now.getTime() - new Date(conv.lastCustomerMessageAt).getTime()) > 24 * 60 * 60 * 1000;
-          } else {
-            // Priority 3: count inbound messages
-            const inboundCount = await prisma.message.count({
-              where: { conversationId: conv.id, direction: MessageDirection.INBOUND },
-            });
-            windowExpired = inboundCount === 0;
-          }
-
-          if (windowExpired) {
-            const errorMsg = conv.lastCustomerMessageAt
-              ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
-              : 'No inbound message from user yet. You must start with a Template Message.';
-
-            console.warn(`⚠️ ${errorMsg}`);
-
-            // Save as failed message so user sees it in inbox
-            if (conv.id) {
-              await prisma.message.create({
-                data: {
-                  conversationId: conv.id,
-                  whatsappAccountId: accountId,
-                  direction: MessageDirection.OUTBOUND,
-                  type: this.mapMessageType(type),
-                  content: this.extractMessageContent(type, content),
-                  status: MessageStatus.FAILED,
-                  failureReason: errorMsg,
-                  sentAt: now,
-                  failedAt: now,
-                },
-              }).catch(() => {}); // non-blocking, don't crash on this
-            }
-
-            throw new Error(errorMsg);
-          }
-        } catch (windowCheckErr: any) {
-          // Re-throw only real window errors, not DB lookup errors
-          if (windowCheckErr.message?.includes('Template Message') || 
-              windowCheckErr.message?.includes('window closed') ||
-              windowCheckErr.message?.includes('session expired')) {
-            throw windowCheckErr;
-          }
-          // DB lookup failed silently — allow message to proceed, Meta API will validate
-          console.warn('⚠️ Window check lookup failed (non-critical), proceeding:', windowCheckErr.message);
-        }
-      }
-
-      // ✅ Skip contact check to reduce latency (Meta API will fail on send if invalid anyway)
-      /* 
-      let contactValid = true;
-      try {
-        console.log('📞 Checking if contact has WhatsApp...');
-
-        const contactCheck = await metaApi.checkContact(
-          account.phoneNumberId,
-          accessToken,
-          formattedTo
-        );
-
-        const status = contactCheck?.contacts?.[0]?.status;
-
-        if (status && status !== 'valid') {
-          contactValid = false;
-          console.warn(`⚠️ Contact ${formattedTo} is invalid or doesn't have WhatsApp`);
-        }
-      } catch (err) {
-        console.warn('⚠️ Contact check failed (non-critical), proceeding:', err.message);
-      }
-      */
-
-      // Prepare message payload
-      const messagePayload: any = {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: formattedTo,
-        type,
-        ...content,
-      };
-
-      console.log(`   Payload type:`, type);
-
-      // Send via Meta API
-      const result = await metaApi.sendMessage(
+      result = await metaApi.sendMessage(
         account.phoneNumberId,
         accessToken,
         formattedTo,
         messagePayload
       );
-
-      console.log(`✅ Message sent successfully!`);
-      console.log(`   Message ID: ${result.messageId}`);
-
-      // Get or create contact
-      const contact = await this.getOrCreateContact(organizationId, to);
-
-      // Extract clean content
-      const messageContent = this.extractMessageContent(type, content);
-      const messagePreview = messageContent.substring(0, 100);
-
-      console.log(`   Message Content: ${messageContent.substring(0, 50)}...`);
-
-      // ✅ Extract mediaUrl properly
-      let mediaUrlForDB: string | null = null;
-      const mediaTypesList = ['image', 'video', 'audio', 'document', 'sticker'];
-
-      if (mediaTypesList.includes(type)) {
-        // Try all possible locations
-        mediaUrlForDB = 
-          content?.[type]?.link ||      // { image: { link: '...' } }
-          content?.[type]?.url ||       // { image: { url: '...' } }
-          content?.link ||              // { link: '...' }
-          content?.url ||               // { url: '...' }
-          options.mediaUrl ||           // Direct mediaUrl option
-          null;
-
-        console.log(`💾 Media URL for ${type}:`, mediaUrlForDB);
-      }
-
-      // Get or create conversation
-      const conversation = await this.getOrCreateConversation(
-        organizationId,
-        contact.id,
-        account.phoneNumberId,
-        messagePreview,
-        conversationId
-      );
-
-      // Save message to database
-      const message = await prisma.message.create({
-        data: {
-          conversationId: conversation.id,
-          whatsappAccountId: accountId,
-          wamId: result.messageId,
-          waMessageId: result.messageId,
-          direction: MessageDirection.OUTBOUND,
-          type: this.mapMessageType(type),
-          content: messageContent,
-          mediaUrl: mediaUrlForDB,  // ✅ Properly set
-          status: MessageStatus.SENT,
-          timestamp: new Date(),
-          sentAt: new Date(),
-          metadata: {
-            ...(tempId ? { tempId } : {}),
-            ...(clientMsgId ? { clientMsgId } : {}),
-          } as any,
-        },
-        include: {
-          conversation: {
-            include: {
-              contact: true,
-            },
-          },
-        },
-      });
-
-      console.log(`💾 Message saved to DB: ${message.id}`);
-
-      // ✅ Emit socket event for real-time update
-      const { webhookEvents } = await import('../webhooks/webhook.service');
-      webhookEvents.emit('newMessage', {
-        organizationId,
-        conversationId: conversation.id,
-        tempId: tempId || (message.metadata as any)?.tempId,
-        clientMsgId: clientMsgId || (message.metadata as any)?.clientMsgId,
-        message: {
-          ...message,
-          tempId: tempId || (message.metadata as any)?.tempId,
-          clientMsgId: clientMsgId || (message.metadata as any)?.clientMsgId,
-        },
-      });
-
-      webhookEvents.emit('conversationUpdated', {
-        organizationId,
-        conversation: {
-          id: conversation.id,
-          lastMessageAt: conversation.lastMessageAt,
-          lastMessagePreview: conversation.lastMessagePreview,
-          unreadCount: conversation.unreadCount,
-          isRead: conversation.isRead,
-          isWindowOpen: conversation.isWindowOpen,
-          windowExpiresAt: (conversation as any).windowExpiresAt,
-          contact: (message as any).conversation?.contact,
-        },
-      });
-
-      console.log(`📤 ========== SEND MESSAGE END ==========\n`);
-
-      return {
-        success: true,
-        messageId: result.messageId,
-        message: {
-          ...message,
-          tempId: tempId || (message.metadata as any)?.tempId,
-          clientMsgId: clientMsgId || (message.metadata as any)?.clientMsgId,
-        },
-      };
     } catch (error: any) {
-      console.error(`❌ Failed to send message:`, {
-        error: error.message,
-        response: error.response?.data,
-      });
+      // Save failed message if conversationId present
+      if (conversationId) {
+        prisma.message.create({
+          data: {
+            conversationId,
+            whatsappAccountId: accountId,
+            direction:         MessageDirection.OUTBOUND,
+            type:              this.mapMessageType(type),
+            content:           this.extractMessageContent(type, content),
+            status:            MessageStatus.FAILED,
+            failureReason:     error.response?.data?.error?.message || error.message,
+            sentAt:            new Date(),
+            failedAt:          new Date(),
+          },
+        }).catch(() => {});
+      }
+      throw new Error(
+        error.response?.data?.error?.message || error.message || 'Failed to send message'
+      );
+    }
+
+    const waMessageId = result.messageId;
+    const now         = new Date();
+    const messageContent = this.extractMessageContent(type, content);
+
+    // ── 5. Contact + Conversation ────────────────────────────────
+    const contact = await this.getOrCreateContact(organizationId, to);
+    const conversation = await this.getOrCreateConversation(
+      organizationId,
+      contact.id,
+      account.phoneNumberId,
+      messageContent.substring(0, 100),
+      conversationId
+    );
+
+    // ── 6. Media URL extraction ──────────────────────────────────
+    let mediaUrlForDB: string | null = null;
+    const mediaTypes = ['image', 'video', 'audio', 'document', 'sticker'];
+    if (mediaTypes.includes(type)) {
+      mediaUrlForDB =
+        content?.[type]?.link ||
+        content?.[type]?.url  ||
+        content?.link         ||
+        mediaUrl              ||
+        null;
+    }
+
+    // ── 7. DB Save ───────────────────────────────────────────────
+    const savedMessage = await prisma.message.create({
+      data: {
+        conversationId:    conversation.id,
+        whatsappAccountId: accountId,
+        wamId:             waMessageId,
+        waMessageId,
+        direction:         MessageDirection.OUTBOUND,
+        type:              this.mapMessageType(type),
+        content:           messageContent,
+        mediaUrl:          mediaUrlForDB,
+        status:            MessageStatus.SENT,
+        timestamp:         now,
+        sentAt:            now,
+        createdAt:         now,
+        metadata: {
+          ...(tempId      ? { tempId }      : {}),
+          ...(clientMsgId ? { clientMsgId } : {}),
+        } as any,
+      },
+    });
+
+    console.log(`💾 Saved message: ${savedMessage.id} | waId: ${waMessageId}`);
+
+    // ── 8. Conversation update (non-blocking) ────────────────────
+    prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        lastMessageAt:      now,
+        lastMessagePreview: messageContent.substring(0, 100),
+        isRead:             true,
+        unreadCount:        0,
+      },
+    }).catch((e: any) => console.error('Conv update error:', e));
+
+    // ── 9. Socket events ─────────────────────────────────────────
+    const { webhookEvents } = await import('../webhooks/webhook.service');
+
+    // ✅ OUTBOUND: emit messageStatus so frontend updates tempId → real status
+    webhookEvents.emit('messageStatus', {
+      organizationId,
+      conversationId: conversation.id,
+      messageId:      savedMessage.id,
+      waMessageId,
+      wamId:          waMessageId,
+      status:         'SENT',
+      tempId,
+      clientMsgId,
+      timestamp:      now.toISOString(),
+    });
+
+    // Fetch contact for socket payload
+    const contactForSocket = await prisma.contact.findUnique({
+      where:  { id: contact.id },
+      select: { id: true, phone: true, firstName: true, lastName: true, whatsappProfileName: true },
+    }).catch(() => null);
+
+    webhookEvents.emit('conversationUpdated', {
+      organizationId,
+      conversation: {
+        id:                 conversation.id,
+        lastMessageAt:      now.toISOString(),
+        lastMessagePreview: messageContent.substring(0, 100),
+        unreadCount:        0,
+        isRead:             true,
+        isWindowOpen:       conversation.isWindowOpen,
+        windowExpiresAt:    conversation.windowExpiresAt instanceof Date
+          ? conversation.windowExpiresAt.toISOString()
+          : conversation.windowExpiresAt,
+        contact: contactForSocket,
+      },
+    });
+
+    // Cache clear (non-blocking)
+    import('../inbox/inbox.service')
+      .then(({ inboxService }) => inboxService.clearCache(organizationId))
+      .catch(() => {});
+
+    return {
+      success:   true,
+      messageId: waMessageId,
+      message: {
+        ...savedMessage,
+        tempId,
+        clientMsgId,
+      },
+    };
+  }
+
+  /**
+   * 24h window check — throws if window is expired
+   */
+  private async checkWindowOrThrow(
+    organizationId: string,
+    conversationId: string | undefined,
+    to:             string,
+    accountId:      string,
+    type:           string,
+    content:        any
+  ) {
+    try {
+      let conv: any = null;
 
       if (conversationId) {
-        try {
-          const failedContent = this.extractMessageContent(type, content);
+        conv = await prisma.conversation.findUnique({
+          where:  { id: conversationId },
+          select: {
+            id:                   true,
+            isWindowOpen:         true,
+            windowExpiresAt:      true,
+            lastCustomerMessageAt: true,
+          },
+        });
+      }
 
-          await prisma.message.create({
-            data: {
-              conversationId,
-              whatsappAccountId: accountId,
-              direction: MessageDirection.OUTBOUND,
-              type: this.mapMessageType(type),
-              content: failedContent,
-              status: MessageStatus.FAILED,
-              failureReason: error.response?.data?.error?.message || error.message,
-              sentAt: new Date(),
-              failedAt: new Date(),
+      if (!conv) {
+        // Try to find by contact + org
+        const digits = to.replace(/[^0-9]/g, '');
+        const contact = await prisma.contact.findFirst({
+          where: {
+            organizationId,
+            OR: [
+              { phone: `+${digits}` },
+              { phone: digits },
+              { phone: digits.slice(-10) },
+            ],
+          },
+          select: { id: true },
+        });
+
+        if (contact) {
+          conv = await prisma.conversation.findUnique({
+            where: { organizationId_contactId: { organizationId, contactId: contact.id } },
+            select: {
+              id:                   true,
+              isWindowOpen:         true,
+              windowExpiresAt:      true,
+              lastCustomerMessageAt: true,
             },
           });
-        } catch (dbError) {
-          console.error('Failed to save error message to DB:', dbError);
         }
       }
 
-      console.log(`📤 ========== SEND MESSAGE END (ERROR) ==========\n`);
+      // No conversation yet → block, need template first
+      if (!conv) {
+        throw new Error(
+          'No inbound message from user yet. You must start with a Template Message.'
+        );
+      }
 
-      const errorMessage =
-        error.response?.data?.error?.message ||
-        error.response?.data?.message ||
-        error.message ||
-        'Failed to send message';
+      const now = new Date();
+      let windowExpired = false;
 
-      throw new Error(errorMessage);
+      if (conv.windowExpiresAt) {
+        windowExpired = new Date(conv.windowExpiresAt) <= now;
+      } else if (conv.isWindowOpen === false) {
+        windowExpired = true;
+      } else if (conv.lastCustomerMessageAt) {
+        windowExpired =
+          now.getTime() - new Date(conv.lastCustomerMessageAt).getTime() >
+          24 * 60 * 60 * 1000;
+      } else {
+        // Count inbound
+        const inboundCount = await prisma.message.count({
+          where: { conversationId: conv.id, direction: MessageDirection.INBOUND },
+        });
+        windowExpired = inboundCount === 0;
+      }
+
+      if (windowExpired) {
+        const errorMsg = conv.lastCustomerMessageAt
+          ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
+          : 'No inbound message from user yet. You must start with a Template Message.';
+
+        // Save failed message (non-blocking)
+        if (conv.id) {
+          prisma.message.create({
+            data: {
+              conversationId:    conv.id,
+              whatsappAccountId: accountId,
+              direction:         MessageDirection.OUTBOUND,
+              type:              this.mapMessageType(type),
+              content:           this.extractMessageContent(type, content),
+              status:            MessageStatus.FAILED,
+              failureReason:     errorMsg,
+              sentAt:            new Date(),
+              failedAt:          new Date(),
+            },
+          }).catch(() => {});
+        }
+
+        throw new Error(errorMsg);
+      }
+    } catch (err: any) {
+      // Re-throw only real window errors
+      if (
+        err.message?.includes('Template Message') ||
+        err.message?.includes('window closed')    ||
+        err.message?.includes('session expired')
+      ) {
+        throw err;
+      }
+      // DB lookup failed silently
+      console.warn('Window check error (non-critical):', err.message);
     }
   }
 
