@@ -426,7 +426,27 @@ export class InboxController {
 
       const url = `${proto}://${host}/uploads/media/${req.file.filename}`;
 
-      const mime = req.file.mimetype || '';
+      let mime = req.file.mimetype || '';
+      
+      // ✅ If extension is webm, ogg, m4a, mp3 - force audio mime type
+      const audioExtensions = ['webm', 'ogg', 'm4a', 'mp3', 'aac', 'amr'];
+      const ext = req.file.originalname.split('.').pop()?.toLowerCase() || '';
+
+      if (audioExtensions.includes(ext)) {
+        if (ext === 'ogg' || ext === 'webm') {
+          mime = 'audio/ogg; codecs=opus';
+        } else if (ext === 'mp3') {
+          mime = 'audio/mpeg';
+        } else if (ext === 'm4a') {
+          mime = 'audio/mp4';
+        } else if (ext === 'aac') {
+          mime = 'audio/aac';
+        } else if (ext === 'amr') {
+          mime = 'audio/amr';
+        }
+        console.log('🎵 Audio detected, using MIME:', mime);
+      }
+
       const mediaType =
         mime.startsWith('image/') ? 'image'
           : mime.startsWith('video/') ? 'video'
@@ -461,11 +481,19 @@ export class InboxController {
       if (!organizationId) throw new AppError('Organization context required', 400);
 
       const { id } = req.params as { id: string };
-      const { mediaType, mediaUrl, caption } = req.body;
+      const { mediaUrl, caption } = req.body;
+      
+      let finalMediaType = req.body.mediaType;
 
-      console.log('📸 sendMediaMessage:', { mediaType, mediaUrl, id });
+      // Auto-detect proper type from URL extension
+      const ext = mediaUrl?.split('.').pop()?.toLowerCase() || '';
+      if (['webm', 'ogg', 'mp3', 'm4a', 'aac', 'amr'].includes(ext)) {
+        finalMediaType = 'audio'; // Force audio type
+      }
 
-      if (!mediaType || !mediaUrl) {
+      console.log('📸 sendMediaMessage:', { mediaType: finalMediaType, mediaUrl, id });
+
+      if (!finalMediaType || !mediaUrl) {
         throw new AppError('mediaType and mediaUrl are required', 400);
       }
 
@@ -481,9 +509,9 @@ export class InboxController {
       const result = await whatsappService.sendMessage({
         accountId: account.id,
         to: conversation.contact.phone,
-        type: mediaType as any,
+        type: finalMediaType as any,
         content: {
-          [mediaType]: {
+          [finalMediaType]: {
             link: mediaUrl,
             ...(caption ? { caption } : {}),
           },
