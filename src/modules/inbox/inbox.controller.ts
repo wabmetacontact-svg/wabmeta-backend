@@ -446,7 +446,7 @@ export class InboxController {
             ffmpeg(inputPath)
               .audioCodec('libopus')
               .toFormat('ogg')
-              .on('error', (err) => reject(err))
+              .on('error', (err: any) => reject(err))
               .on('end', () => resolve(true))
               .save(outputPath);
           });
