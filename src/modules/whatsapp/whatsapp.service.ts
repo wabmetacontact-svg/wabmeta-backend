@@ -1487,7 +1487,7 @@ class WhatsAppService {
     try {
       // Find the last incoming message for this conversation
       const lastIncoming = await prisma.message.findFirst({
-         where: { conversationId, direction: 'inbound' },
+         where: { conversationId, direction: 'INBOUND' },
          orderBy: { createdAt: 'desc' }
       });
       if (!lastIncoming || !lastIncoming.wamId) return { success: false, reason: 'No incoming message' };
@@ -1497,13 +1497,16 @@ class WhatsAppService {
       });
       if (!conversation) return { success: false, reason: 'Conversation not found' };
 
-      const { account, accessToken } = await this.getAccountWithToken(conversation.whatsappAccountId);
+      const defaultAccount = await this.getDefaultAccount(conversation.organizationId);
+      if (!defaultAccount) return { success: false, reason: 'No WhatsApp account found' };
+
+      const { account, accessToken } = await this.getAccountWithToken(defaultAccount.id);
 
       // markAsRead with typing=true
-      await metaApi.markAsRead(
+      await metaApi.markMessageAsRead(
         account.phoneNumberId,
-        lastIncoming.wamId,
         accessToken,
+        lastIncoming.wamId,
         true
       );
       

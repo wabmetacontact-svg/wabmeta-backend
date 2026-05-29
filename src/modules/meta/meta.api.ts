@@ -873,16 +873,23 @@ class MetaApiClient {
   async markMessageAsRead(
     phoneNumberId: string,
     accessToken: string,
-    messageId: string
+    messageId: string,
+    typing: boolean = false
   ): Promise<boolean> {
     try {
+      const payload: any = {
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+      };
+
+      if (typing) {
+        payload.typing_indicator = { type: 'text' };
+      }
+
       const response = await this.client.post(
         `/${phoneNumberId}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          status: 'read',
-          message_id: messageId,
-        },
+        payload,
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
