@@ -658,187 +658,172 @@ class WhatsAppService {
    * Core send message function
    */
   async sendMessage(options: SendMessageOptions) {
-    const {
-      accountId,
-      to,
-      type,
-      content,
-      conversationId,
-      organizationId: optOrgId,
-      tempId,
-      clientMsgId,
-      mediaUrl,
-      skipWindowCheck,
-    } = options;
+  const {
+    accountId, to, type, content,
+    conversationId, organizationId, tempId, clientMsgId,
+    mediaUrl, skipWindowCheck,
+  } = options;
 
-    console.log(`📤 sendMessage: type=${type} to=${to}`);
+  const startTime = Date.now();
+  console.log(`📤 sendMessage START: type=${type} to=${to}`);
 
-    // ── 1. Account + Token ───────────────────────────────────────
-    const { account, accessToken } = await this.getAccountWithToken(accountId);
-    const organizationId = optOrgId || account.organizationId;
-    const formattedTo    = this.formatPhoneNumber(to);
-
-    // ── 2. 24h window check ─────────────────────────────────────
-    if (type !== 'template' && !skipWindowCheck) {
-      await this.checkWindowOrThrow(
-        organizationId, conversationId, to, accountId, type, content
-      );
-    }
-
-    // ── 3. Payload build ─────────────────────────────────────────
-    const messagePayload: any = {
-      messaging_product: 'whatsapp',
-      recipient_type:    'individual',
-      to:                formattedTo,
-      type,
-      ...content,
-    };
-
-    // ── 4. Meta API call ─────────────────────────────────────────
-    let result: any;
-    try {
-      result = await metaApi.sendMessage(
-        account.phoneNumberId,
-        accessToken,
-        formattedTo,
-        messagePayload
-      );
-    } catch (error: any) {
-      // Save failed message if conversationId present
-      if (conversationId) {
-        prisma.message.create({
-          data: {
-            conversationId,
-            whatsappAccountId: accountId,
-            direction:         MessageDirection.OUTBOUND,
-            type:              this.mapMessageType(type),
-            content:           this.extractMessageContent(type, content),
-            status:            MessageStatus.FAILED,
-            failureReason:     error.response?.data?.error?.message || error.message,
-            sentAt:            new Date(),
-            failedAt:          new Date(),
+  // ✅ PARALLEL FETCH - Account + Conversation
+  const [accountData, conversationData] = await Promise.all([
+    this.getAccountWithToken(accountId),
+    conversationId
+      ? prisma.conversation.findUnique({
+          where: { id: conversationId },
+          select: {
+            id: true, contactId: true,
+            isWindowOpen: true, windowExpiresAt: true,
+            lastCustomerMessageAt: true,
           },
-        }).catch(() => {});
-      }
-      throw new Error(
-        error.response?.data?.error?.message || error.message || 'Failed to send message'
-      );
+        })
+      : Promise.resolve(null),
+  ]);
+
+  const { account, accessToken } = accountData;
+  const orgId = organizationId || account.organizationId;
+  const formattedTo = this.formatPhoneNumber(to);
+
+  // ✅ Quick window check (in-memory)
+  if (type !== 'template' && !skipWindowCheck && conversationData) {
+    const now = new Date();
+    let expired = false;
+
+    if (conversationData.windowExpiresAt) {
+      expired = new Date(conversationData.windowExpiresAt) <= now;
+    } else if (conversationData.isWindowOpen === false) {
+      expired = true;
+    } else if (conversationData.lastCustomerMessageAt) {
+      expired = now.getTime() - new Date(conversationData.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
     }
 
-    const waMessageId = result.messageId;
-    const now         = new Date();
-    const messageContent = this.extractMessageContent(type, content);
+    if (expired) {
+      throw new Error('User session expired (24h window closed). Send a Template Message to re-engage.');
+    }
+  }
 
-    // ── 5. Contact + Conversation ────────────────────────────────
-    const contact = await this.getOrCreateContact(organizationId, to);
-    const conversation = await this.getOrCreateConversation(
-      organizationId,
-      contact.id,
-      account.phoneNumberId,
-      messageContent.substring(0, 100),
-      conversationId
+  // ✅ Meta API call
+  const metaStart = Date.now();
+  const messagePayload: any = {
+    messaging_product: 'whatsapp',
+    recipient_type:    'individual',
+    to:                formattedTo,
+    type,
+    ...content,
+  };
+
+  const result = await metaApi.sendMessage(
+    account.phoneNumberId, accessToken, formattedTo, messagePayload
+  );
+
+  console.log(`⏱️ Meta API: ${Date.now() - metaStart}ms`);
+
+  const waMessageId    = result.messageId;
+  const now            = new Date();
+  const messageContent = this.extractMessageContent(type, content);
+
+  // Media URL extract
+  let mediaUrlForDB: string | null = null;
+  const mediaTypes = ['image', 'video', 'audio', 'document', 'sticker'];
+  if (mediaTypes.includes(type)) {
+    mediaUrlForDB = content?.[type]?.link || content?.[type]?.url ||
+                    content?.link || mediaUrl || null;
+  }
+
+  // ✅ Contact + Conversation (need IDs for message save)
+  const contact = await this.getOrCreateContact(orgId, to);
+  let conversation = conversationData;
+  if (!conversation) {
+    conversation = await this.getOrCreateConversation(
+      orgId, contact.id, account.phoneNumberId,
+      messageContent.substring(0, 100), conversationId
     );
+  }
 
-    // ── 6. Media URL extraction ──────────────────────────────────
-    let mediaUrlForDB: string | null = null;
-    const mediaTypes = ['image', 'video', 'audio', 'document', 'sticker'];
-    if (mediaTypes.includes(type)) {
-      mediaUrlForDB =
-        content?.[type]?.link ||
-        content?.[type]?.url  ||
-        content?.link         ||
-        mediaUrl              ||
-        null;
+  // ✅ Save message (must await for response)
+  const savedMessage = await prisma.message.create({
+    data: {
+      conversationId:    conversation.id,
+      whatsappAccountId: accountId,
+      wamId:             waMessageId,
+      waMessageId:       waMessageId,
+      direction:         MessageDirection.OUTBOUND,
+      type:              this.mapMessageType(type),
+      content:           messageContent,
+      mediaUrl:          mediaUrlForDB,
+      status:            MessageStatus.SENT,
+      timestamp:         now,
+      sentAt:            now,
+      createdAt:         now,
+      metadata: {
+        ...(tempId      ? { tempId }      : {}),
+        ...(clientMsgId ? { clientMsgId } : {}),
+      } as any,
+    },
+  });
+
+  // ✅ BACKGROUND TASKS - Non-blocking
+  setImmediate(async () => {
+    try {
+      // Conversation update
+      await prisma.conversation.update({
+        where: { id: conversation!.id },
+        data: {
+          lastMessageAt:      now,
+          lastMessagePreview: messageContent.substring(0, 100),
+          isRead:             true,
+          unreadCount:        0,
+        },
+      });
+
+      // Cache clear
+      const { inboxService } = await import('../inbox/inbox.service');
+      await inboxService.clearCache(orgId);
+
+      // Socket emit
+      const { webhookEvents } = await import('../webhooks/webhook.service');
+      const contactData = await prisma.contact.findUnique({
+        where:  { id: contact.id },
+        select: {
+          id: true, phone: true, firstName: true, lastName: true,
+          whatsappProfileName: true, avatar: true,
+        },
+      });
+
+      webhookEvents.emit('conversationUpdated', {
+        organizationId: orgId,
+        conversation: {
+          id:                 conversation!.id,
+          lastMessageAt:      now.toISOString(),
+          lastMessagePreview: messageContent.substring(0, 100),
+          unreadCount:        0,
+          isRead:             true,
+          isWindowOpen:       conversation!.isWindowOpen,
+          windowExpiresAt:    conversation!.windowExpiresAt instanceof Date
+            ? conversation!.windowExpiresAt.toISOString()
+            : conversation!.windowExpiresAt,
+          contact:            contactData,
+        },
+      });
+    } catch (e) {
+      console.error('Background task error:', e);
     }
+  });
 
-    // ── 7. DB Save ───────────────────────────────────────────────
-    const savedMessage = await prisma.message.create({
-      data: {
-        conversationId:    conversation.id,
-        whatsappAccountId: accountId,
-        wamId:             waMessageId,
-        waMessageId,
-        direction:         MessageDirection.OUTBOUND,
-        type:              this.mapMessageType(type),
-        content:           messageContent,
-        mediaUrl:          mediaUrlForDB,
-        status:            MessageStatus.SENT,
-        timestamp:         now,
-        sentAt:            now,
-        createdAt:         now,
-        metadata: {
-          ...(tempId      ? { tempId }      : {}),
-          ...(clientMsgId ? { clientMsgId } : {}),
-        } as any,
-      },
-    });
+  console.log(`✅ sendMessage TOTAL: ${Date.now() - startTime}ms`);
 
-    console.log(`💾 Saved message: ${savedMessage.id} | waId: ${waMessageId}`);
-
-    // ── 8. Conversation update (non-blocking) ────────────────────
-    prisma.conversation.update({
-      where: { id: conversation.id },
-      data: {
-        lastMessageAt:      now,
-        lastMessagePreview: messageContent.substring(0, 100),
-        isRead:             true,
-        unreadCount:        0,
-      },
-    }).catch((e: any) => console.error('Conv update error:', e));
-
-    // ── 9. Socket events ─────────────────────────────────────────
-    const { webhookEvents } = await import('../webhooks/webhook.service');
-
-    // ✅ OUTBOUND: emit messageStatus so frontend updates tempId → real status
-    webhookEvents.emit('messageStatus', {
-      organizationId,
-      conversationId: conversation.id,
-      messageId:      savedMessage.id,
-      waMessageId,
-      wamId:          waMessageId,
-      status:         'SENT',
+  return {
+    success:   true,
+    messageId: waMessageId,
+    message: {
+      ...savedMessage,
       tempId,
       clientMsgId,
-      timestamp:      now.toISOString(),
-    });
-
-    // Fetch contact for socket payload
-    const contactForSocket = await prisma.contact.findUnique({
-      where:  { id: contact.id },
-      select: { id: true, phone: true, firstName: true, lastName: true, whatsappProfileName: true },
-    }).catch(() => null);
-
-    webhookEvents.emit('conversationUpdated', {
-      organizationId,
-      conversation: {
-        id:                 conversation.id,
-        lastMessageAt:      now.toISOString(),
-        lastMessagePreview: messageContent.substring(0, 100),
-        unreadCount:        0,
-        isRead:             true,
-        isWindowOpen:       conversation.isWindowOpen,
-        windowExpiresAt:    conversation.windowExpiresAt instanceof Date
-          ? conversation.windowExpiresAt.toISOString()
-          : conversation.windowExpiresAt,
-        contact: contactForSocket,
-      },
-    });
-
-    // Cache clear (non-blocking)
-    import('../inbox/inbox.service')
-      .then(({ inboxService }) => inboxService.clearCache(organizationId))
-      .catch(() => {});
-
-    return {
-      success:   true,
-      messageId: waMessageId,
-      message: {
-        ...savedMessage,
-        tempId,
-        clientMsgId,
-      },
-    };
-  }
+    },
+  };
+}
 
   /**
    * 24h window check — throws if window is expired
