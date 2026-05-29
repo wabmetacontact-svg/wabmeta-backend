@@ -745,7 +745,7 @@ class WhatsAppService {
   // ✅ Save message (must await for response)
   const savedMessage = await prisma.message.create({
     data: {
-      conversationId:    conversation.id,
+      conversationId:    conversation!.id,
       whatsappAccountId: accountId,
       wamId:             waMessageId,
       waMessageId:       waMessageId,
