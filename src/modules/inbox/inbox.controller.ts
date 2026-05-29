@@ -416,6 +416,33 @@ export class InboxController {
   }
 
   // ==========================================
+  // ✅ NEW: TYPING INDICATOR
+  // POST /inbox/conversations/:id/typing
+  // ==========================================
+  async sendTypingIndicator(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const { id } = req.params as { id: string };
+
+      // Ensure conversation belongs to org
+      await inboxService.getConversationById(organizationId, id);
+
+      const result = await whatsappService.sendTypingIndicator(id);
+      
+      if (!result.success) {
+         // We don't want to throw an error and crash the UI just because typing failed (e.g. no incoming message)
+         return sendSuccess(res, null, `Typing indicator not sent: ${result.reason || result.error}`);
+      }
+
+      return sendSuccess(res, null, 'Typing indicator sent');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
   // ✅ NEW: UPLOAD MEDIA
   // POST /inbox/media/upload (multipart form-data: file)
   // ==========================================

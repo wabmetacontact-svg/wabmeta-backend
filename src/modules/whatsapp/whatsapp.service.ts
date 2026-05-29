@@ -1480,6 +1480,40 @@ class WhatsAppService {
     }
   }
 
+  /**
+   * Send typing indicator
+   */
+  async sendTypingIndicator(conversationId: string) {
+    try {
+      // Find the last incoming message for this conversation
+      const lastIncoming = await prisma.message.findFirst({
+         where: { conversationId, direction: 'inbound' },
+         orderBy: { createdAt: 'desc' }
+      });
+      if (!lastIncoming || !lastIncoming.wamId) return { success: false, reason: 'No incoming message' };
+
+      const conversation = await prisma.conversation.findUnique({
+          where: { id: conversationId },
+      });
+      if (!conversation) return { success: false, reason: 'Conversation not found' };
+
+      const { account, accessToken } = await this.getAccountWithToken(conversation.whatsappAccountId);
+
+      // markAsRead with typing=true
+      await metaApi.markAsRead(
+        account.phoneNumberId,
+        lastIncoming.wamId,
+        accessToken,
+        true
+      );
+      
+      return { success: true };
+    } catch (error: any) {
+      console.error('❌ Failed to send typing indicator:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // ============================================
   // ACCOUNT MANAGEMENT
   // ============================================

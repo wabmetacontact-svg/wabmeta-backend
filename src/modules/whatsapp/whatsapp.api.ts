@@ -524,16 +524,23 @@ class WhatsAppAPI {
   async markAsRead(
     phoneNumberId: string,
     messageId:     string,
-    accessToken:   string
+    accessToken:   string,
+    typing:        boolean = false
   ): Promise<boolean> {
     try {
+      const payload: any = {
+        messaging_product: 'whatsapp',
+        status:            'read',
+        message_id:        messageId,
+      };
+      
+      if (typing) {
+        payload.typing_indicator = { type: 'text' };
+      }
+
       await this.client.post(
         `${phoneNumberId}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          status:            'read',
-          message_id:        messageId,
-        },
+        payload,
         {
           headers: {
             Authorization:  `Bearer ${accessToken}`,
@@ -541,7 +548,7 @@ class WhatsAppAPI {
           },
         }
       );
-      console.log(`✅ Message marked as read: ${messageId}`);
+      console.log(`✅ Message marked as read (typing: ${typing}): ${messageId}`);
       return true;
     } catch (error: any) {
       console.warn('markAsRead failed:', error.message);

@@ -65,6 +65,11 @@ router.patch('/conversations/:id/pin', (req, res, next) =>
   inboxController.togglePin(req as any, res, next)
 );
 
+// POST /inbox/conversations/:id/typing
+router.post('/conversations/:id/typing', (req, res, next) =>
+  inboxController.sendTypingIndicator(req as any, res, next)
+);
+
 // ✅ Template media resolve
 router.post('/template/resolve-media', (req, res, next) =>
   inboxController.resolveTemplateMedia(req as any, res, next)
