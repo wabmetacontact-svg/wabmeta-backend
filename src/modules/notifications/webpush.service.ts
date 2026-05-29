@@ -1,5 +1,5 @@
 import webpush from 'web-push';
-import prisma from '../../config/prisma';
+import prisma from '../../config/database';
 import logger from '../../utils/logger';
 
 // Configure Web Push with VAPID keys
@@ -86,7 +86,7 @@ export const webpushService = {
       });
 
       // Send to all endpoints, collect promises
-      const sendPromises = subscriptions.map(async (sub) => {
+      const sendPromises = subscriptions.map(async (sub: any) => {
         const pushSubscription = {
           endpoint: sub.endpoint,
           keys: {
