@@ -17,6 +17,11 @@ import axios from 'axios';
 import { inboxMediaService } from './inbox.media';
 import fs from 'fs';
 import path from 'path';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+
+// Set ffmpeg path
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 // Extended Request interface
 interface AuthRequest extends Request {
@@ -424,33 +429,51 @@ export class InboxController {
       const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https') as string;
       const host = req.get('host');
 
-      const url = `${proto}://${host}/uploads/media/${req.file.filename}`;
+      let finalFilename = req.file.filename;
+      let finalMime = req.file.mimetype || '';
+      let finalSize = req.file.size;
+      const originalExt = req.file.originalname.split('.').pop()?.toLowerCase() || '';
 
-      let mime = req.file.mimetype || '';
-      
-      // ✅ If extension is webm, ogg, m4a, mp3 - force audio mime type
       const audioExtensions = ['webm', 'ogg', 'm4a', 'mp3', 'aac', 'amr'];
-      const ext = req.file.originalname.split('.').pop()?.toLowerCase() || '';
+      if (audioExtensions.includes(originalExt)) {
+        console.log(`🎵 Audio detected (${originalExt}), transcoding to OGG/Opus...`);
+        const inputPath = req.file.path;
+        finalFilename = `${req.file.filename.split('.')[0] || Date.now()}_converted.ogg`;
+        const outputPath = path.join(path.dirname(inputPath), finalFilename);
 
-      if (audioExtensions.includes(ext)) {
-        if (ext === 'ogg' || ext === 'webm') {
-          mime = 'audio/ogg; codecs=opus';
-        } else if (ext === 'mp3') {
-          mime = 'audio/mpeg';
-        } else if (ext === 'm4a') {
-          mime = 'audio/mp4';
-        } else if (ext === 'aac') {
-          mime = 'audio/aac';
-        } else if (ext === 'amr') {
-          mime = 'audio/amr';
+        try {
+          await new Promise((resolve, reject) => {
+            ffmpeg(inputPath)
+              .audioCodec('libopus')
+              .toFormat('ogg')
+              .on('error', (err) => reject(err))
+              .on('end', () => resolve(true))
+              .save(outputPath);
+          });
+          
+          finalMime = 'audio/ogg; codecs=opus';
+          
+          // Optionally get new size
+          if (fs.existsSync(outputPath)) {
+             const stats = fs.statSync(outputPath);
+             finalSize = stats.size;
+          }
+          console.log(`✅ Audio successfully transcoded to: ${finalFilename}`);
+        } catch (err: any) {
+          console.error('❌ FFmpeg conversion failed:', err.message);
+          // Fallback to original
+          if (originalExt === 'webm' || originalExt === 'ogg') finalMime = 'audio/ogg; codecs=opus';
+          else if (originalExt === 'm4a') finalMime = 'audio/mp4';
+          else if (originalExt === 'mp3') finalMime = 'audio/mpeg';
         }
-        console.log('🎵 Audio detected, using MIME:', mime);
       }
 
+      const url = `${proto}://${host}/uploads/media/${finalFilename}`;
+
       const mediaType =
-        mime.startsWith('image/') ? 'image'
-          : mime.startsWith('video/') ? 'video'
-            : mime.startsWith('audio/') ? 'audio'
+        finalMime.startsWith('image/') ? 'image'
+          : finalMime.startsWith('video/') ? 'video'
+            : finalMime.startsWith('audio/') ? 'audio'
               : 'document';
 
       return sendSuccess(
@@ -458,9 +481,9 @@ export class InboxController {
         {
           url,
           mediaType,
-          mimeType: mime,
+          mimeType: finalMime,
           filename: req.file.originalname,
-          size: req.file.size,
+          size: finalSize,
         },
         'File uploaded',
         201
