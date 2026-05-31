@@ -373,18 +373,21 @@ export class InboxController {
     }
   }
 
+  // ==========================================
   // CREATE CUSTOM LABEL
+  // ==========================================
   async createCustomLabel(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const organizationId = req.user?.organizationId;
       if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const { label } = req.body;
+      const { label, color } = req.body;
       if (!label || typeof label !== 'string' || label.trim() === '') {
-        throw new AppError('label is required and must be a string', 400);
+        throw new AppError('Label is required and must be a string', 400);
       }
-      const result = await inboxService.createCustomLabel(organizationId, label.trim());
-      return sendSuccess(res, result, 'Label created successfully', 201);
+
+      const newLabel = await inboxService.createCustomLabel(organizationId, label.trim(), color);
+      return sendSuccess(res, newLabel, 'Label created successfully', 201);
     } catch (error) {
       next(error);
     }

@@ -358,7 +358,7 @@ export class InboxService {
     const [org, conversations] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: organizationId },
-        select: { customLabels: true } as any,
+        select: { customLabels: true },
       }),
       prisma.conversation.findMany({
         where: { organizationId },
@@ -367,46 +367,59 @@ export class InboxService {
     ]);
 
     const allLabels = conversations.flatMap((c) => c.labels);
-    const customLabels = org?.customLabels || [];
-    const uniqueLabels = [...new Set([...allLabels, ...customLabels])];
+    // Parse customLabels from JSON
+    const customLabelsObj: Array<{ label: string; color: string }> = Array.isArray(org?.customLabels) ? (org?.customLabels as any) : [];
+    const customLabelNames = customLabelsObj.map(l => l.label);
 
-    return uniqueLabels.map((label) => ({
-      label,
-      count: allLabels.filter((l) => l === label).length,
-    }));
+    const uniqueLabels = [...new Set([...allLabels, ...customLabelNames])];
+
+    // Build the result
+    return uniqueLabels.map((label) => {
+      const customObj = customLabelsObj.find(c => c.label === label);
+      return {
+        label,
+        color: customObj?.color, // Optional: will be undefined for default labels
+        count: allLabels.filter((l) => l === label).length,
+      };
+    });
   }
 
   /**
    * Create custom label
    */
-  async createCustomLabel(organizationId: string, label: string) {
-    const org: any = await prisma.organization.findUnique({
+  async createCustomLabel(organizationId: string, label: string, color?: string) {
+    const org = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { customLabels: true } as any,
+      select: { customLabels: true },
     });
-    const currentLabels: string[] = org?.customLabels || [];
-    if (!currentLabels.includes(label)) {
+    const currentLabels: Array<{ label: string; color: string }> = Array.isArray(org?.customLabels) ? (org?.customLabels as any) : [];
+    
+    // Check if label already exists
+    if (!currentLabels.some(l => l.label === label)) {
+      const newLabelObj = { label, color: color || '#10B981' }; // Default color if not provided
       await prisma.organization.update({
         where: { id: organizationId },
-        data: { customLabels: [...currentLabels, label] } as any,
+        data: { customLabels: [...currentLabels, newLabelObj] as any },
       });
+      return newLabelObj;
     }
-    return { label };
+    return currentLabels.find(l => l.label === label);
   }
 
   /**
    * Delete custom label
    */
   async deleteCustomLabel(organizationId: string, label: string) {
-    const org: any = await prisma.organization.findUnique({
+    const org = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { customLabels: true } as any,
+      select: { customLabels: true },
     });
-    const currentLabels: string[] = org?.customLabels || [];
-    if (currentLabels.includes(label)) {
+    const currentLabels: Array<{ label: string; color: string }> = Array.isArray(org?.customLabels) ? (org?.customLabels as any) : [];
+    
+    if (currentLabels.some(l => l.label === label)) {
       await prisma.organization.update({
         where: { id: organizationId },
-        data: { customLabels: currentLabels.filter((l: string) => l !== label) } as any,
+        data: { customLabels: currentLabels.filter(l => l.label !== label) as any },
       });
     }
     return { success: true };

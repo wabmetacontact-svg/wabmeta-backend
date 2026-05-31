@@ -76,6 +76,7 @@ model Organization {
   featureCsvUpload        Boolean              @default(false)
   featureOverrideByAdmin  Boolean              @default(false)
   featureSimpleBulkUpload Boolean              @default(false)
+  customLabels            Json                 @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
   automations             Automation[]
@@ -203,7 +204,6 @@ model WhatsAppAccount {
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
   isActive               Boolean               @default(true)
-  customLabels           String[]              @default([])
   connectionType         String                @default("CLOUD_API")
   campaigns              Campaign[]
   messages               Message[]
