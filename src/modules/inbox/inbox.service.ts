@@ -355,18 +355,61 @@ export class InboxService {
    * Get all labels
    */
   async getAllLabels(organizationId: string) {
-    const conversations = await prisma.conversation.findMany({
-      where: { organizationId },
-      select: { labels: true },
-    });
+    const [org, conversations] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { customLabels: true },
+      }),
+      prisma.conversation.findMany({
+        where: { organizationId },
+        select: { labels: true },
+      })
+    ]);
 
     const allLabels = conversations.flatMap((c) => c.labels);
-    const uniqueLabels = [...new Set(allLabels)];
+    const customLabels = org?.customLabels || [];
+    const uniqueLabels = [...new Set([...allLabels, ...customLabels])];
 
     return uniqueLabels.map((label) => ({
       label,
       count: allLabels.filter((l) => l === label).length,
     }));
+  }
+
+  /**
+   * Create custom label
+   */
+  async createCustomLabel(organizationId: string, label: string) {
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { customLabels: true },
+    });
+    const currentLabels = org?.customLabels || [];
+    if (!currentLabels.includes(label)) {
+      await prisma.organization.update({
+        where: { id: organizationId },
+        data: { customLabels: [...currentLabels, label] },
+      });
+    }
+    return { label };
+  }
+
+  /**
+   * Delete custom label
+   */
+  async deleteCustomLabel(organizationId: string, label: string) {
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { customLabels: true },
+    });
+    const currentLabels = org?.customLabels || [];
+    if (currentLabels.includes(label)) {
+      await prisma.organization.update({
+        where: { id: organizationId },
+        data: { customLabels: currentLabels.filter((l) => l !== label) },
+      });
+    }
+    return { success: true };
   }
 
   /**

@@ -163,6 +163,12 @@ router.post('/conversations/:id/assign', (req, res, next) =>
 router.get('/labels', (req, res, next) =>
   inboxController.getLabels(req as any, res, next)
 );
+router.post('/labels', (req, res, next) =>
+  inboxController.createCustomLabel(req as any, res, next)
+);
+router.delete('/labels/:label', (req, res, next) =>
+  inboxController.deleteCustomLabel(req as any, res, next)
+);
 
 router.post('/conversations/:id/labels', (req, res, next) =>
   inboxController.addLabels(req as any, res, next)

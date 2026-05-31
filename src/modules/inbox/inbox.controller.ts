@@ -363,10 +363,35 @@ export class InboxController {
   async getLabels(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const organizationId = req.user!.organizationId;
-      if (!organizationId) throw new AppError('Organization context required', 400);
-
       const labels = await inboxService.getAllLabels(organizationId);
       return sendSuccess(res, labels, 'Labels fetched successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // CREATE CUSTOM LABEL
+  async createCustomLabel(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      const { label } = req.body;
+      if (!label || typeof label !== 'string' || label.trim() === '') {
+        throw new AppError('label is required and must be a string', 400);
+      }
+      const result = await inboxService.createCustomLabel(organizationId, label.trim());
+      return sendSuccess(res, result, 'Label created successfully', 201);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // DELETE CUSTOM LABEL
+  async deleteCustomLabel(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      const { label } = req.params;
+      await inboxService.deleteCustomLabel(organizationId, label);
+      return sendSuccess(res, null, 'Label deleted successfully');
     } catch (error) {
       next(error);
     }
