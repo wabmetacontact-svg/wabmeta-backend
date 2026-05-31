@@ -310,12 +310,11 @@ export class InboxService {
   }
 
   /**
-   * Add labels to conversation
+   * Add labels to conversation (Now replaces to keep only 1 label)
    */
   async addLabels(organizationId: string, conversationId: string, newLabels: string[]) {
-    const conversation = await this.getConversationById(organizationId, conversationId);
-    const updatedLabels = [...new Set([...conversation.labels, ...newLabels])];
-
+    // Only keep the most recently added label
+    const updatedLabels = newLabels.length > 0 ? [newLabels[newLabels.length - 1]] : [];
     return this.updateLabels(organizationId, conversationId, updatedLabels);
   }
 
