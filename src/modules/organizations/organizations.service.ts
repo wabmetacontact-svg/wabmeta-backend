@@ -29,6 +29,10 @@ const formatOrganization = (org: any): OrganizationResponse => ({
   industry: org.industry,
   timezone: org.timezone,
   planType: org.planType,
+  featureInboxLocked: org.featureInboxLocked,
+  featureCampaignsLocked: org.featureCampaignsLocked,
+  featureChatbotLocked: org.featureChatbotLocked,
+  featureAutomationLocked: org.featureAutomationLocked,
   createdAt: org.createdAt,
   updatedAt: org.updatedAt,
 });
