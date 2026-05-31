@@ -328,10 +328,11 @@ export class InboxController {
   // ==========================================
   async searchMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const organizationId = req.user!.organizationId;
+      const organizationId = req.user?.organizationId;
       if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const query = req.query.q as string;
+      const searchParams = req.query.search ? String(req.query.search) : undefined;
+      const query = req.query.q ? String(req.query.q) : '';
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
 
@@ -362,7 +363,9 @@ export class InboxController {
   // ==========================================
   async getLabels(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const organizationId = req.user!.organizationId;
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
       const labels = await inboxService.getAllLabels(organizationId);
       return sendSuccess(res, labels, 'Labels fetched successfully');
     } catch (error) {
@@ -373,7 +376,9 @@ export class InboxController {
   // CREATE CUSTOM LABEL
   async createCustomLabel(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const organizationId = req.user!.organizationId;
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
       const { label } = req.body;
       if (!label || typeof label !== 'string' || label.trim() === '') {
         throw new AppError('label is required and must be a string', 400);
@@ -388,9 +393,11 @@ export class InboxController {
   // DELETE CUSTOM LABEL
   async deleteCustomLabel(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const organizationId = req.user!.organizationId;
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
       const { label } = req.params;
-      await inboxService.deleteCustomLabel(organizationId, label);
+      await inboxService.deleteCustomLabel(organizationId, String(label));
       return sendSuccess(res, null, 'Label deleted successfully');
     } catch (error) {
       next(error);

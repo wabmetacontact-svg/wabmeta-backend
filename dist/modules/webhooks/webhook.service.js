@@ -356,11 +356,28 @@ class WebhookService {
             const msgType = this.mapMessageType(typeRaw);
             const ts = Number(message?.timestamp || Date.now() / 1000);
             const messageTime = new Date(ts * 1000);
-            console.log(`📥 Processing inbound message: ${waMessageId} from ${waFrom}`);
-            let phone10 = waFrom;
-            if (phone10.startsWith('91') && phone10.length === 12)
-                phone10 = phone10.substring(2);
-            const { contact, wasNewlyCreated } = await this.findOrCreateContact(organizationId, phone10);
+            if (!waFrom || !waMessageId) {
+                console.warn('⚠️ Invalid message - missing from/id');
+                return;
+            }
+            console.log(`📥 Inbound: ${waMessageId} from ${waFrom} type=${typeRaw}`);
+            // ✅ Duplicate check - same waMessageId already saved?
+            const existingMsg = await database_1.default.message.findFirst({
+                where: {
+                    OR: [
+                        { waMessageId },
+                        { wamId: waMessageId },
+                    ],
+                },
+                select: { id: true },
+            });
+            if (existingMsg) {
+                console.log(`⏭️ Duplicate message skipped: ${waMessageId}`);
+                return;
+            }
+            // Contact find/create
+            const { contact, wasNewlyCreated } = await this.findOrCreateContact(organizationId, waFrom);
+            // Conversation find/create
             let conversation = await database_1.default.conversation.findFirst({
                 where: { organizationId, contactId: contact.id },
             });
@@ -377,28 +394,28 @@ class WebhookService {
                             lastMessageAt: messageTime,
                         },
                     });
-                    console.log(`💬 Created new conversation: ${conversation.id}`);
+                    console.log(`💬 New conversation: ${conversation.id}`);
                 }
-                catch (error) {
-                    if (error.code === 'P2002') {
+                catch (err) {
+                    if (err.code === 'P2002') {
                         conversation = await database_1.default.conversation.findFirst({
                             where: { organizationId, contactId: contact.id },
                         });
                         if (!conversation)
-                            throw error;
+                            throw err;
                     }
                     else {
-                        throw error;
+                        throw err;
                     }
                 }
             }
+            // ✅ Content + media parse
             let content = '';
             let mediaUrl = null;
             let mediaType = null;
             let mediaMimeType = null;
             let mediaId = null;
             let fileName = null;
-            // Handle different message types
             switch (typeRaw) {
                 case 'text':
                     content = message.text?.body || '';
@@ -408,7 +425,6 @@ class WebhookService {
                     mediaMimeType = message.image?.mime_type || 'image/jpeg';
                     content = message.image?.caption || '[Image]';
                     mediaType = 'image';
-                    // ✅ Store the permanent mediaId as mediaUrl — proxy fetches fresh CDN URL on demand
                     if (mediaId)
                         mediaUrl = mediaId;
                     break;
@@ -417,7 +433,6 @@ class WebhookService {
                     mediaMimeType = message.video?.mime_type || 'video/mp4';
                     content = message.video?.caption || '[Video]';
                     mediaType = 'video';
-                    // ✅ Store permanent mediaId
                     if (mediaId)
                         mediaUrl = mediaId;
                     break;
@@ -426,7 +441,6 @@ class WebhookService {
                     mediaMimeType = message.audio?.mime_type || 'audio/ogg';
                     content = '[Audio]';
                     mediaType = 'audio';
-                    // ✅ Store permanent mediaId
                     if (mediaId)
                         mediaUrl = mediaId;
                     break;
@@ -436,7 +450,6 @@ class WebhookService {
                     fileName = message.document?.filename || 'document';
                     content = message.document?.caption || `[Document: ${fileName}]`;
                     mediaType = 'document';
-                    // ✅ Store permanent mediaId
                     if (mediaId)
                         mediaUrl = mediaId;
                     break;
@@ -445,18 +458,15 @@ class WebhookService {
                     mediaMimeType = message.sticker?.mime_type || 'image/webp';
                     content = '[Sticker]';
                     mediaType = 'sticker';
-                    // ✅ Store permanent mediaId
                     if (mediaId)
                         mediaUrl = mediaId;
                     break;
                 case 'location':
-                    const lat = message.location?.latitude;
-                    const lng = message.location?.longitude;
-                    content = `[Location: ${lat}, ${lng}]`;
+                    content = `[Location: ${message.location?.latitude}, ${message.location?.longitude}]`;
                     mediaType = 'location';
                     mediaUrl = JSON.stringify({
-                        latitude: lat,
-                        longitude: lng,
+                        latitude: message.location?.latitude,
+                        longitude: message.location?.longitude,
                         name: message.location?.name,
                         address: message.location?.address,
                     });
@@ -466,14 +476,19 @@ class WebhookService {
                     mediaType = 'contact';
                     mediaUrl = JSON.stringify(message.contacts);
                     break;
-                case 'interactive':
+                case 'interactive': {
                     const iType = message?.interactive?.type;
-                    content = iType === 'button_reply' ? message.interactive.button_reply.title :
-                        iType === 'list_reply' ? message.interactive.list_reply.title : '[Interactive]';
+                    content = iType === 'button_reply'
+                        ? (message.interactive.button_reply.title || '[Button Reply]')
+                        : iType === 'list_reply'
+                            ? (message.interactive.list_reply.title || '[List Reply]')
+                            : '[Interactive]';
                     break;
+                }
                 default:
                     content = `[${typeRaw}]`;
             }
+            // ✅ Save message
             const savedMessage = await database_1.default.message.create({
                 data: {
                     conversationId: conversation.id,
@@ -495,6 +510,7 @@ class WebhookService {
                     createdAt: messageTime,
                 },
             });
+            // ✅ Update conversation
             const updatedConversation = await database_1.default.conversation.update({
                 where: { id: conversation.id },
                 data: {
@@ -519,125 +535,142 @@ class WebhookService {
                     },
                 },
             });
-            await database_1.default.contact.update({
+            // Contact message count update (non-blocking)
+            database_1.default.contact.update({
                 where: { id: contact.id },
                 data: {
                     lastMessageAt: messageTime,
                     messageCount: { increment: 1 },
                 },
-            });
-            console.log(`✅ Inbound message saved and conversation updated: ${updatedConversation.id}`);
-            // ✅ AUTOMATION TRIGGERS - Clean Logic
-            try {
-                if (wasNewlyCreated) {
-                    // 🆕 Brand new contact - UNKNOWN_MESSAGE trigger
-                    console.log(`🤖 New contact detected → triggerUnknownMessage and triggerNewContact`);
-                    await automation_engine_1.automationEngine.triggerUnknownMessage({
-                        organizationId,
-                        contactId: contact.id,
-                        phone: waFrom, // ✅ Full number with country code (e.g. 917982722016)
-                        message: content,
-                        conversationId: updatedConversation.id,
-                    });
-                    // ✅ Also trigger NEW_CONTACT since this is technically a new contact
-                    await automation_engine_1.automationEngine.triggerNewContact({
-                        organizationId,
-                        contactId: contact.id,
-                        phone: waFrom,
-                        message: content,
-                        conversationId: updatedConversation.id,
-                    });
-                }
-                else {
-                    // 👤 Existing contact - KEYWORD trigger check
-                    console.log(`🔑 Existing contact → triggerKeyword check`);
-                    const triggered = await automation_engine_1.automationEngine.triggerKeyword({
-                        organizationId,
-                        contactId: contact.id,
-                        phone: waFrom, // ✅ Full number with country code
-                        message: content,
-                        conversationId: updatedConversation.id,
-                    });
-                    if (triggered) {
-                        console.log('🤖 Keyword automation triggered for existing contact');
-                    }
-                }
-            }
-            catch (automationError) {
-                // ✅ Automation error inbox ko affect na kare
-                console.error('🤖 Automation error (non-blocking):', automationError);
-            }
-            // ✅ Button click handler - dono cases me check karo
-            if (msgType === 'INTERACTIVE') {
-                const buttonId = message?.interactive?.button_reply?.id;
-                if (buttonId) {
-                    automation_engine_1.automationEngine.handleButtonClick({
-                        organizationId,
-                        contactId: contact.id,
-                        buttonId,
-                        conversationId: updatedConversation.id,
-                    }).catch((e) => console.error('Button click error:', e));
-                }
-            }
-            // ✅ Clear inbox cache
-            const { inboxService } = await Promise.resolve().then(() => __importStar(require('../inbox/inbox.service')));
-            await inboxService.clearCache(organizationId);
-            // ✅ Emit events
+            }).catch((e) => console.error('Contact update error:', e));
+            // ✅ Clear cache (non-blocking)
+            Promise.resolve().then(() => __importStar(require('../inbox/inbox.service'))).then(({ inboxService }) => inboxService.clearCache(organizationId))
+                .catch((e) => console.error('Cache clear error:', e));
+            // ✅ Build contact name for socket payload
+            const contactName = updatedConversation.contact.whatsappProfileName ||
+                (updatedConversation.contact.firstName
+                    ? `${updatedConversation.contact.firstName} ${updatedConversation.contact.lastName || ''}`.trim()
+                    : updatedConversation.contact.phone);
+            const contactWithName = {
+                ...updatedConversation.contact,
+                name: contactName,
+            };
+            // ✅ Emit INBOUND message to socket
+            const messagePayload = {
+                ...savedMessage,
+                createdAt: savedMessage.createdAt instanceof Date ? savedMessage.createdAt.toISOString() : savedMessage.createdAt,
+                sentAt: savedMessage.sentAt instanceof Date ? savedMessage.sentAt.toISOString() : savedMessage.sentAt,
+                deliveredAt: savedMessage.deliveredAt instanceof Date ? savedMessage.deliveredAt.toISOString() : savedMessage.deliveredAt,
+                timestamp: savedMessage.timestamp instanceof Date ? savedMessage.timestamp.toISOString() : savedMessage.timestamp,
+            };
             exports.webhookEvents.emit('newMessage', {
                 organizationId,
                 conversationId: updatedConversation.id,
+                message: messagePayload,
                 conversation: {
                     ...updatedConversation,
-                    contact: {
-                        ...updatedConversation.contact,
-                        name: updatedConversation.contact.whatsappProfileName ||
-                            (updatedConversation.contact.firstName
-                                ? `${updatedConversation.contact.firstName} ${updatedConversation.contact.lastName || ''}`.trim()
-                                : updatedConversation.contact.phone)
-                    }
-                },
-                message: {
-                    ...savedMessage,
+                    contact: contactWithName,
+                    lastMessageAt: updatedConversation.lastMessageAt instanceof Date
+                        ? updatedConversation.lastMessageAt.toISOString()
+                        : updatedConversation.lastMessageAt,
+                    windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
+                        ? updatedConversation.windowExpiresAt.toISOString()
+                        : updatedConversation.windowExpiresAt,
                 },
             });
-            // Transform contact to include name for frontend compatibility
-            const contactWithBotName = {
-                ...updatedConversation.contact,
-                name: updatedConversation.contact.whatsappProfileName ||
-                    (updatedConversation.contact.firstName
-                        ? `${updatedConversation.contact.firstName} ${updatedConversation.contact.lastName || ''}`.trim()
-                        : updatedConversation.contact.phone)
-            };
             exports.webhookEvents.emit('conversationUpdated', {
                 organizationId,
                 conversation: {
                     ...updatedConversation,
-                    contact: contactWithBotName
+                    contact: contactWithName,
+                    lastMessageAt: updatedConversation.lastMessageAt instanceof Date
+                        ? updatedConversation.lastMessageAt.toISOString()
+                        : updatedConversation.lastMessageAt,
+                    windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
+                        ? updatedConversation.windowExpiresAt.toISOString()
+                        : updatedConversation.windowExpiresAt,
                 },
             });
-            // ✅ Trigger Chatbot Engine
+            // ✅ Automations (non-blocking)
+            this.runAutomations(wasNewlyCreated, organizationId, contact, content, waFrom, updatedConversation, message, msgType).catch((e) => console.error('Automation error:', e));
+            // ✅ Push Notification (non-blocking)
+            database_1.default.organization.findUnique({
+                where: { id: organizationId },
+                select: { ownerId: true },
+            }).then((org) => {
+                if (org && org.ownerId) {
+                    Promise.resolve().then(() => __importStar(require('../notifications/webpush.service'))).then(({ webpushService }) => {
+                        webpushService.sendNotificationToUser(org.ownerId, {
+                            title: `Message from ${contactWithName.name}`,
+                            body: content || `[${typeRaw}]`,
+                            url: `/dashboard/inbox`,
+                        });
+                    }).catch((err) => console.error('Push Notification error:', err));
+                }
+            }).catch((err) => console.error('Error fetching org owner for push:', err));
+            // ✅ Chatbot (non-blocking)
             if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {
-                // isNewConversation = true if:
-                // 1. Contact was just created (brand new), OR
-                // 2. This is the first message in this conversation (messageCount was 0 before this)
-                const isNewConversation = wasNewlyCreated || (updatedConversation.unreadCount <= 1);
-                // For button/list replies, pass the button ID too so engine can match edges
-                let chatbotContent = content || '';
+                let chatbotContent = content;
                 if (msgType === 'INTERACTIVE') {
                     const iType = message?.interactive?.type;
-                    if (iType === 'button_reply') {
-                        // Pass both id and title so engine can match either
-                        chatbotContent = message.interactive.button_reply.id || message.interactive.button_reply.title || content || '';
-                    }
-                    else if (iType === 'list_reply') {
-                        chatbotContent = message.interactive.list_reply.id || message.interactive.list_reply.title || content || '';
-                    }
+                    chatbotContent = iType === 'button_reply'
+                        ? (message.interactive.button_reply.id || message.interactive.button_reply.title || content)
+                        : iType === 'list_reply'
+                            ? (message.interactive.list_reply.id || message.interactive.list_reply.title || content)
+                            : content;
                 }
-                chatbot_engine_1.chatbotEngine.processMessage(updatedConversation.id, organizationId, chatbotContent, waFrom, isNewConversation).catch(e => console.error('🤖 Chatbot engine trigger error:', e));
+                const isNewConversation = wasNewlyCreated || updatedConversation.unreadCount <= 1;
+                chatbot_engine_1.chatbotEngine.processMessage(updatedConversation.id, organizationId, chatbotContent, waFrom, isNewConversation).catch((e) => console.error('Chatbot error:', e));
             }
+            console.log(`✅ Inbound message processed: ${savedMessage.id}`);
         }
         catch (e) {
             console.error('processIncomingMessage error:', e);
+        }
+    }
+    // ✅ Helper method - automations alag karo
+    async runAutomations(wasNewlyCreated, organizationId, contact, content, waFrom, conversation, message, msgType) {
+        try {
+            if (wasNewlyCreated) {
+                await automation_engine_1.automationEngine.triggerUnknownMessage({
+                    organizationId,
+                    contactId: contact.id,
+                    phone: waFrom,
+                    message: content,
+                    conversationId: conversation.id,
+                });
+                await automation_engine_1.automationEngine.triggerNewContact({
+                    organizationId,
+                    contactId: contact.id,
+                    phone: waFrom,
+                    message: content,
+                    conversationId: conversation.id,
+                });
+            }
+            else {
+                await automation_engine_1.automationEngine.triggerKeyword({
+                    organizationId,
+                    contactId: contact.id,
+                    phone: waFrom,
+                    message: content,
+                    conversationId: conversation.id,
+                });
+            }
+            // Button click
+            if (msgType === 'INTERACTIVE') {
+                const buttonId = message?.interactive?.button_reply?.id;
+                if (buttonId) {
+                    await automation_engine_1.automationEngine.handleButtonClick({
+                        organizationId,
+                        contactId: contact.id,
+                        buttonId,
+                        conversationId: conversation.id,
+                    });
+                }
+            }
+        }
+        catch (e) {
+            console.error('runAutomations error:', e);
         }
     }
     // -----------------------------

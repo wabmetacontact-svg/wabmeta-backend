@@ -93,7 +93,7 @@ declare class MetaApiClient {
             input: string;
         };
     }>;
-    markMessageAsRead(phoneNumberId: string, accessToken: string, messageId: string): Promise<boolean>;
+    markMessageAsRead(phoneNumberId: string, accessToken: string, messageId: string, typing?: boolean): Promise<boolean>;
     getTemplates(wabaId: string, accessToken: string): Promise<any[]>;
     getTemplate(templateId: string, accessToken: string): Promise<any>;
     createTemplate(wabaId: string, accessToken: string, template: {

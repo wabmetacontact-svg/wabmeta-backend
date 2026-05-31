@@ -1,9 +1,9 @@
 "use strict";
-// ✅ CREATE: src/modules/automation/automation.routes.ts
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const automation_controller_1 = require("./automation.controller");
 const auth_1 = require("../../middleware/auth");
+const planLimits_1 = require("../../middleware/planLimits");
 const router = (0, express_1.Router)();
 // All routes require authentication
 router.use(auth_1.authenticate);
@@ -21,7 +21,7 @@ router.get('/', automation_controller_1.automationController.getAll.bind(automat
  * @route   POST /api/v1/automations
  * @desc    Create new automation
  */
-router.post('/', automation_controller_1.automationController.create.bind(automation_controller_1.automationController));
+router.post('/', planLimits_1.requireActiveSubscription, planLimits_1.checkAutomationLimit, automation_controller_1.automationController.create.bind(automation_controller_1.automationController));
 /**
  * @route   GET /api/v1/automations/:id
  * @desc    Get automation by ID

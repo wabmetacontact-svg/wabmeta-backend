@@ -46,6 +46,8 @@ router.post('/conversations/:id/messages/media', (req, res, next) => inbox_contr
 // ==========================================
 // PATCH /inbox/conversations/:id/pin
 router.patch('/conversations/:id/pin', (req, res, next) => inbox_controller_1.inboxController.togglePin(req, res, next));
+// POST /inbox/conversations/:id/typing
+router.post('/conversations/:id/typing', (req, res, next) => inbox_controller_1.inboxController.sendTypingIndicator(req, res, next));
 // ✅ Template media resolve
 router.post('/template/resolve-media', (req, res, next) => inbox_controller_1.inboxController.resolveTemplateMedia(req, res, next));
 // ==========================================
@@ -85,6 +87,8 @@ router.post('/conversations/:id/assign', (req, res, next) => inbox_controller_1.
 // LABELS
 // ==========================================
 router.get('/labels', (req, res, next) => inbox_controller_1.inboxController.getLabels(req, res, next));
+router.post('/labels', (req, res, next) => inbox_controller_1.inboxController.createCustomLabel(req, res, next));
+router.delete('/labels/:label', (req, res, next) => inbox_controller_1.inboxController.deleteCustomLabel(req, res, next));
 router.post('/conversations/:id/labels', (req, res, next) => inbox_controller_1.inboxController.addLabels(req, res, next));
 router.delete('/conversations/:id/labels/:label', (req, res, next) => inbox_controller_1.inboxController.removeLabel(req, res, next));
 // ==========================================

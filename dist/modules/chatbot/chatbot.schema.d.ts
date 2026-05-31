@@ -10257,8 +10257,8 @@ export declare const getChatbotsSchema: z.ZodObject<{
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         search?: string | undefined;
     }, {
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         limit?: string | undefined;
+        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;
@@ -10275,8 +10275,8 @@ export declare const getChatbotsSchema: z.ZodObject<{
     };
 }, {
     query: {
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         limit?: string | undefined;
+        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;

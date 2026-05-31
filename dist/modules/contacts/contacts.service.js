@@ -758,6 +758,24 @@ class ContactsService {
         return { message: 'Contacts deleted successfully', deleted: result.count };
     }
     // ==========================================
+    // DELETE ALL CONTACTS
+    // ==========================================
+    async deleteAll(organizationId) {
+        const result = await database_1.default.contact.deleteMany({
+            where: { organizationId },
+        });
+        const subscription = await database_1.default.subscription.findFirst({ where: { organizationId } });
+        if (subscription && result.count > 0) {
+            await database_1.default.subscription.update({
+                where: { id: subscription.id },
+                data: {
+                    contactsUsed: { decrement: Math.min(result.count, subscription.contactsUsed) },
+                },
+            });
+        }
+        return { message: 'All contacts deleted successfully', deleted: result.count };
+    }
+    // ==========================================
     // GET CONTACT STATS
     // ==========================================
     async getStats(organizationId) {

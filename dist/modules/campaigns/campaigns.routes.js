@@ -54,7 +54,7 @@ router.post('/upload-validate', campaigns_controller_1.csvUpload, campaigns_cont
  * @desc    Create new campaign
  * @access  Private
  */
-router.post('/', planLimits_1.checkCampaignLimit, (0, validate_1.validate)(campaigns_schema_1.createCampaignSchema), campaigns_controller_1.campaignsController.create.bind(campaigns_controller_1.campaignsController));
+router.post('/', planLimits_1.requireActiveSubscription, planLimits_1.checkCampaignLimit, (0, validate_1.validate)(campaigns_schema_1.createCampaignSchema), campaigns_controller_1.campaignsController.create.bind(campaigns_controller_1.campaignsController));
 /**
  * @route   GET /api/v1/campaigns
  * @desc    Get campaigns list with pagination
@@ -108,7 +108,7 @@ router.get('/:id/estimate-cost', (0, validate_1.validate)(campaigns_schema_1.get
  * @desc    Start campaign (validates token before starting)
  * @access  Private
  */
-router.post('/:id/start', (0, validate_1.validate)(campaigns_schema_1.startCampaignSchema), campaigns_controller_1.campaignsController.start.bind(campaigns_controller_1.campaignsController));
+router.post('/:id/start', planLimits_1.requireActiveSubscription, (0, validate_1.validate)(campaigns_schema_1.startCampaignSchema), campaigns_controller_1.campaignsController.start.bind(campaigns_controller_1.campaignsController));
 /**
  * @route   POST /api/v1/campaigns/:id/pause
  * @desc    Pause running campaign

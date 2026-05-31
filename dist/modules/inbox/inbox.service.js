@@ -20,22 +20,29 @@ class InboxService {
      */
     async getConversations(organizationId, query = {}) {
         const redis = (0, redis_1.getRedis)();
-        // ✅ Cache key
+        // ✅ Cache TTL 30 sec - realtime feel ke liye short TTL
+        const CACHE_TTL = 30;
         const cacheKey = `conversations:${organizationId}:${JSON.stringify(query)}`;
-        // ✅ Try cache first
         if (redis) {
-            const cached = await redis.get(cacheKey);
-            if (cached) {
-                console.log('📦 Cache HIT:', cacheKey);
-                return JSON.parse(cached);
+            try {
+                const cached = await redis.get(cacheKey);
+                if (cached) {
+                    console.log('📦 Cache HIT:', cacheKey.substring(0, 50));
+                    return JSON.parse(cached);
+                }
+            }
+            catch (e) {
+                console.warn('Redis get error:', e);
             }
         }
-        // ✅ Fetch from database
         const result = await this.fetchConversationsFromDB(organizationId, query);
-        // ✅ Store in cache (5 minutes TTL)
         if (redis) {
-            await redis.setex(cacheKey, 300, JSON.stringify(result));
-            console.log('📦 Cache SET:', cacheKey);
+            try {
+                await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(result));
+            }
+            catch (e) {
+                console.warn('Redis set error:', e);
+            }
         }
         return result;
     }
@@ -286,16 +293,57 @@ class InboxService {
      * Get all labels
      */
     async getAllLabels(organizationId) {
-        const conversations = await database_1.default.conversation.findMany({
-            where: { organizationId },
-            select: { labels: true },
-        });
+        const [org, conversations] = await Promise.all([
+            database_1.default.organization.findUnique({
+                where: { id: organizationId },
+                select: { customLabels: true },
+            }),
+            database_1.default.conversation.findMany({
+                where: { organizationId },
+                select: { labels: true },
+            })
+        ]);
         const allLabels = conversations.flatMap((c) => c.labels);
-        const uniqueLabels = [...new Set(allLabels)];
+        const customLabels = org?.customLabels || [];
+        const uniqueLabels = [...new Set([...allLabels, ...customLabels])];
         return uniqueLabels.map((label) => ({
             label,
             count: allLabels.filter((l) => l === label).length,
         }));
+    }
+    /**
+     * Create custom label
+     */
+    async createCustomLabel(organizationId, label) {
+        const org = await database_1.default.organization.findUnique({
+            where: { id: organizationId },
+            select: { customLabels: true },
+        });
+        const currentLabels = org?.customLabels || [];
+        if (!currentLabels.includes(label)) {
+            await database_1.default.organization.update({
+                where: { id: organizationId },
+                data: { customLabels: [...currentLabels, label] },
+            });
+        }
+        return { label };
+    }
+    /**
+     * Delete custom label
+     */
+    async deleteCustomLabel(organizationId, label) {
+        const org = await database_1.default.organization.findUnique({
+            where: { id: organizationId },
+            select: { customLabels: true },
+        });
+        const currentLabels = org?.customLabels || [];
+        if (currentLabels.includes(label)) {
+            await database_1.default.organization.update({
+                where: { id: organizationId },
+                data: { customLabels: currentLabels.filter((l) => l !== label) },
+            });
+        }
+        return { success: true };
     }
     /**
      * Search messages
@@ -401,10 +449,39 @@ class InboxService {
         return conversation;
     }
     /**
+     * Helper to check Free Demo chat limit
+     */
+    async checkFreeDemoLimit(organizationId, conversationId) {
+        const org = await database_1.default.organization.findUnique({
+            where: { id: organizationId },
+            select: { planType: true },
+        });
+        if (org?.planType === 'FREE_DEMO') {
+            const existingOutbound = await database_1.default.message.findFirst({
+                where: { conversationId, direction: 'OUTBOUND' },
+            });
+            if (!existingOutbound) {
+                // Find how many distinct conversations have outbound messages
+                const activeConversations = await database_1.default.message.groupBy({
+                    by: ['conversationId'],
+                    where: {
+                        conversation: { organizationId },
+                        direction: 'OUTBOUND',
+                    },
+                });
+                if (activeConversations.length >= 10) {
+                    throw new AppError('TRIAL_CHAT_LIMIT_REACHED', 403);
+                }
+            }
+        }
+    }
+    /**
      * Send message
      */
     async sendMessage(organizationId, userId, conversationId, input) {
         const conversation = await this.getConversationById(organizationId, conversationId);
+        // Enforce 10 contacts limit for free demo
+        await this.checkFreeDemoLimit(organizationId, conversationId);
         // Create message in database
         const message = (await database_1.default.message.create({
             data: {
@@ -431,6 +508,8 @@ class InboxService {
      * Send template message
      */
     async sendTemplateMessage(organizationId, conversationId, templateName, language, params, bodyText) {
+        // Enforce 10 contacts limit for free demo
+        await this.checkFreeDemoLimit(organizationId, conversationId);
         // Store only the body text, not full JSON
         const message = await database_1.default.message.create({
             data: {

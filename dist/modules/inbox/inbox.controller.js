@@ -46,6 +46,10 @@ const whatsapp_service_1 = __importDefault(require("../whatsapp/whatsapp.service
 const axios_1 = __importDefault(require("axios"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const fluent_ffmpeg_1 = __importDefault(require("fluent-ffmpeg"));
+const ffmpeg_1 = __importDefault(require("@ffmpeg-installer/ffmpeg"));
+// Set ffmpeg path
+fluent_ffmpeg_1.default.setFfmpegPath(ffmpeg_1.default.path);
 class InboxController {
     // ==========================================
     // GET CONVERSATIONS
@@ -325,10 +329,11 @@ class InboxController {
     // ==========================================
     async searchMessages(req, res, next) {
         try {
-            const organizationId = req.user.organizationId;
+            const organizationId = req.user?.organizationId;
             if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            const query = req.query.q;
+            const searchParams = req.query.search ? String(req.query.search) : undefined;
+            const query = req.query.q ? String(req.query.q) : '';
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 20;
             const result = await inbox_service_1.inboxService.searchMessages(organizationId, query, page, limit);
@@ -358,11 +363,42 @@ class InboxController {
     // ==========================================
     async getLabels(req, res, next) {
         try {
-            const organizationId = req.user.organizationId;
+            const organizationId = req.user?.organizationId;
             if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
             const labels = await inbox_service_1.inboxService.getAllLabels(organizationId);
             return (0, response_1.sendSuccess)(res, labels, 'Labels fetched successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // CREATE CUSTOM LABEL
+    async createCustomLabel(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { label } = req.body;
+            if (!label || typeof label !== 'string' || label.trim() === '') {
+                throw new errorHandler_1.AppError('label is required and must be a string', 400);
+            }
+            const result = await inbox_service_1.inboxService.createCustomLabel(organizationId, label.trim());
+            return (0, response_1.sendSuccess)(res, result, 'Label created successfully', 201);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // DELETE CUSTOM LABEL
+    async deleteCustomLabel(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { label } = req.params;
+            await inbox_service_1.inboxService.deleteCustomLabel(organizationId, String(label));
+            return (0, response_1.sendSuccess)(res, null, 'Label deleted successfully');
         }
         catch (error) {
             next(error);
@@ -409,6 +445,29 @@ class InboxController {
         }
     }
     // ==========================================
+    // ✅ NEW: TYPING INDICATOR
+    // POST /inbox/conversations/:id/typing
+    // ==========================================
+    async sendTypingIndicator(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { id } = req.params;
+            // Ensure conversation belongs to org
+            await inbox_service_1.inboxService.getConversationById(organizationId, id);
+            const result = await whatsapp_service_1.default.sendTypingIndicator(id);
+            if (!result.success) {
+                // We don't want to throw an error and crash the UI just because typing failed (e.g. no incoming message)
+                return (0, response_1.sendSuccess)(res, null, `Typing indicator not sent: ${result.reason || result.error}`);
+            }
+            return (0, response_1.sendSuccess)(res, null, 'Typing indicator sent');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
     // ✅ NEW: UPLOAD MEDIA
     // POST /inbox/media/upload (multipart form-data: file)
     // ==========================================
@@ -421,18 +480,55 @@ class InboxController {
                 throw new errorHandler_1.AppError('File is required', 400);
             const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'https');
             const host = req.get('host');
-            const url = `${proto}://${host}/uploads/media/${req.file.filename}`;
-            const mime = req.file.mimetype || '';
-            const mediaType = mime.startsWith('image/') ? 'image'
-                : mime.startsWith('video/') ? 'video'
-                    : mime.startsWith('audio/') ? 'audio'
+            let finalFilename = req.file.filename;
+            let finalMime = req.file.mimetype || '';
+            let finalSize = req.file.size;
+            const originalExt = req.file.originalname.split('.').pop()?.toLowerCase() || '';
+            const audioExtensions = ['webm', 'ogg', 'm4a', 'mp3', 'aac', 'amr'];
+            if (audioExtensions.includes(originalExt)) {
+                console.log(`🎵 Audio detected (${originalExt}), transcoding to OGG/Opus...`);
+                const inputPath = req.file.path;
+                finalFilename = `${req.file.filename.split('.')[0] || Date.now()}_converted.ogg`;
+                const outputPath = path_1.default.join(path_1.default.dirname(inputPath), finalFilename);
+                try {
+                    await new Promise((resolve, reject) => {
+                        (0, fluent_ffmpeg_1.default)(inputPath)
+                            .audioCodec('libopus')
+                            .toFormat('ogg')
+                            .on('error', (err) => reject(err))
+                            .on('end', () => resolve(true))
+                            .save(outputPath);
+                    });
+                    finalMime = 'audio/ogg; codecs=opus';
+                    // Optionally get new size
+                    if (fs_1.default.existsSync(outputPath)) {
+                        const stats = fs_1.default.statSync(outputPath);
+                        finalSize = stats.size;
+                    }
+                    console.log(`✅ Audio successfully transcoded to: ${finalFilename}`);
+                }
+                catch (err) {
+                    console.error('❌ FFmpeg conversion failed:', err.message);
+                    // Fallback to original
+                    if (originalExt === 'webm' || originalExt === 'ogg')
+                        finalMime = 'audio/ogg; codecs=opus';
+                    else if (originalExt === 'm4a')
+                        finalMime = 'audio/mp4';
+                    else if (originalExt === 'mp3')
+                        finalMime = 'audio/mpeg';
+                }
+            }
+            const url = `${proto}://${host}/uploads/media/${finalFilename}`;
+            const mediaType = finalMime.startsWith('image/') ? 'image'
+                : finalMime.startsWith('video/') ? 'video'
+                    : finalMime.startsWith('audio/') ? 'audio'
                         : 'document';
             return (0, response_1.sendSuccess)(res, {
                 url,
                 mediaType,
-                mimeType: mime,
+                mimeType: finalMime,
                 filename: req.file.originalname,
-                size: req.file.size,
+                size: finalSize,
             }, 'File uploaded', 201);
         }
         catch (error) {
@@ -450,9 +546,15 @@ class InboxController {
             if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
             const { id } = req.params;
-            const { mediaType, mediaUrl, caption } = req.body;
-            console.log('📸 sendMediaMessage:', { mediaType, mediaUrl, id });
-            if (!mediaType || !mediaUrl) {
+            const { mediaUrl, caption } = req.body;
+            let finalMediaType = req.body.mediaType;
+            // Auto-detect proper type from URL extension
+            const ext = mediaUrl?.split('.').pop()?.toLowerCase() || '';
+            if (['webm', 'ogg', 'mp3', 'm4a', 'aac', 'amr'].includes(ext)) {
+                finalMediaType = 'audio'; // Force audio type
+            }
+            console.log('📸 sendMediaMessage:', { mediaType: finalMediaType, mediaUrl, id });
+            if (!finalMediaType || !mediaUrl) {
                 throw new errorHandler_1.AppError('mediaType and mediaUrl are required', 400);
             }
             const conversation = await inbox_service_1.inboxService.getConversationById(organizationId, id);
@@ -465,9 +567,9 @@ class InboxController {
             const result = await whatsapp_service_1.default.sendMessage({
                 accountId: account.id,
                 to: conversation.contact.phone,
-                type: mediaType,
+                type: finalMediaType,
                 content: {
-                    [mediaType]: {
+                    [finalMediaType]: {
                         link: mediaUrl,
                         ...(caption ? { caption } : {}),
                     },

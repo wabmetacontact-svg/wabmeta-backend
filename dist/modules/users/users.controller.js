@@ -4,6 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.usersController = exports.UsersController = void 0;
 const users_service_1 = require("./users.service");
 const response_1 = require("../../utils/response");
+const webpush_service_1 = require("../notifications/webpush.service");
 class UsersController {
     // ==========================================
     // GET PROFILE
@@ -145,6 +146,32 @@ class UsersController {
             }
             const result = await users_service_1.usersService.addPhoneNumber(userId, phone);
             return (0, response_1.sendSuccess)(res, result, result.message);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
+    // PUSH NOTIFICATIONS SUBSCRIPTION
+    // ==========================================
+    async subscribePush(req, res, next) {
+        try {
+            const userId = req.user.id;
+            const subscription = req.body;
+            const result = await webpush_service_1.webpushService.saveSubscription(userId, subscription);
+            return (0, response_1.sendSuccess)(res, result, 'Push subscription saved successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    async unsubscribePush(req, res, next) {
+        try {
+            const { endpoint } = req.body;
+            if (endpoint) {
+                await webpush_service_1.webpushService.removeSubscription(endpoint);
+            }
+            return (0, response_1.sendSuccess)(res, null, 'Push subscription removed successfully');
         }
         catch (error) {
             next(error);

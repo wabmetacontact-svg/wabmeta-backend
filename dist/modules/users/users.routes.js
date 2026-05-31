@@ -70,5 +70,17 @@ router.post('/add-phone', (0, rateLimit_1.rateLimit)({ windowMs: 60 * 1000, max:
  * @access  Private
  */
 router.delete('/account', (0, validate_1.validate)(users_schema_1.deleteAccountSchema), users_controller_1.usersController.deleteAccount.bind(users_controller_1.usersController));
+/**
+ * @route   POST /api/v1/users/subscribe
+ * @desc    Subscribe to push notifications
+ * @access  Private
+ */
+router.post('/subscribe', users_controller_1.usersController.subscribePush.bind(users_controller_1.usersController));
+/**
+ * @route   POST /api/v1/users/unsubscribe
+ * @desc    Unsubscribe from push notifications
+ * @access  Private
+ */
+router.post('/unsubscribe', users_controller_1.usersController.unsubscribePush.bind(users_controller_1.usersController));
 exports.default = router;
 //# sourceMappingURL=users.routes.js.map

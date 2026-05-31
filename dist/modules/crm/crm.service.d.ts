@@ -7,8 +7,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            order: number;
             color: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -30,8 +30,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            order: number;
             color: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -61,8 +61,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            order: number;
             color: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -111,8 +111,8 @@ export declare class CRMService {
             } | null;
         } & {
             organizationId: string;
-            status: import(".prisma/client").$Enums.LeadStatus;
             id: string;
+            status: import(".prisma/client").$Enums.LeadStatus;
             createdAt: Date;
             updatedAt: Date;
             value: Prisma.Decimal | null;
@@ -140,8 +140,8 @@ export declare class CRMService {
             email: string | null;
             organizationId: string;
             tags: string[];
-            status: import(".prisma/client").$Enums.ContactStatus;
             id: string;
+            status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
             firstName: string | null;
@@ -165,8 +165,8 @@ export declare class CRMService {
                 createdAt: Date;
                 updatedAt: Date;
                 pipelineId: string;
-                order: number;
                 color: string;
+                order: number;
                 probability: number;
                 isWon: boolean;
                 isLost: boolean;
@@ -196,8 +196,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            order: number;
             color: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -227,8 +227,8 @@ export declare class CRMService {
         }[];
     } & {
         organizationId: string;
-        status: import(".prisma/client").$Enums.LeadStatus;
         id: string;
+        status: import(".prisma/client").$Enums.LeadStatus;
         createdAt: Date;
         updatedAt: Date;
         value: Prisma.Decimal | null;
@@ -258,8 +258,8 @@ export declare class CRMService {
             email: string | null;
             organizationId: string;
             tags: string[];
-            status: import(".prisma/client").$Enums.ContactStatus;
             id: string;
+            status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
             firstName: string | null;
@@ -292,16 +292,16 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            order: number;
             color: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
         } | null;
     } & {
         organizationId: string;
-        status: import(".prisma/client").$Enums.LeadStatus;
         id: string;
+        status: import(".prisma/client").$Enums.LeadStatus;
         createdAt: Date;
         updatedAt: Date;
         value: Prisma.Decimal | null;
@@ -330,8 +330,8 @@ export declare class CRMService {
             email: string | null;
             organizationId: string;
             tags: string[];
-            status: import(".prisma/client").$Enums.ContactStatus;
             id: string;
+            status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
             firstName: string | null;
@@ -364,16 +364,16 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            order: number;
             color: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
         } | null;
     } & {
         organizationId: string;
-        status: import(".prisma/client").$Enums.LeadStatus;
         id: string;
+        status: import(".prisma/client").$Enums.LeadStatus;
         createdAt: Date;
         updatedAt: Date;
         value: Prisma.Decimal | null;

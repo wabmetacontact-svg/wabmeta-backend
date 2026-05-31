@@ -4,8 +4,8 @@ export declare function getWalletDetails(organizationId: string): Promise<{
     balance: number;
     hasPendingRequest: boolean;
     pendingRequest: {
-        status: string;
         id: string;
+        status: string;
         requestedAt: Date;
     } | null;
 } | {
@@ -33,8 +33,8 @@ export declare function getWalletDetails(organizationId: string): Promise<{
     exists: boolean;
     hasPendingRequest: boolean;
     pendingRequest: {
-        status: string;
         id: string;
+        status: string;
         requestedAt: Date;
     } | null;
 }>;
@@ -45,8 +45,8 @@ export declare function requestWalletAccess(organizationId: string, userId: stri
     request: {
         userId: string;
         organizationId: string;
-        status: string;
         id: string;
+        status: string;
         createdAt: Date;
         updatedAt: Date;
         reason: string;
@@ -163,8 +163,8 @@ export declare function getAccessRequests(options: {
     } & {
         userId: string;
         organizationId: string;
-        status: string;
         id: string;
+        status: string;
         createdAt: Date;
         updatedAt: Date;
         reason: string;

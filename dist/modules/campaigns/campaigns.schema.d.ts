@@ -343,8 +343,8 @@ export declare const getCampaignsSchema: z.ZodObject<{
         status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         search?: string | undefined;
     }, {
-        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         limit?: string | undefined;
+        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
@@ -361,8 +361,8 @@ export declare const getCampaignsSchema: z.ZodObject<{
     };
 }, {
     query: {
-        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         limit?: string | undefined;
+        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
@@ -427,8 +427,8 @@ export declare const getCampaignContactsSchema: z.ZodObject<{
         page: number;
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
     }, {
-        status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
         limit?: string | undefined;
+        status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
         page?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
@@ -442,8 +442,8 @@ export declare const getCampaignContactsSchema: z.ZodObject<{
     };
 }, {
     query: {
-        status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
         limit?: string | undefined;
+        status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
         page?: string | undefined;
     };
     params: {

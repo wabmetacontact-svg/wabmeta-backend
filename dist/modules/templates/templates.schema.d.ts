@@ -450,19 +450,19 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         limit: number;
         page: number;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         limit?: string | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
@@ -472,21 +472,21 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     query?: {
         limit: number;
         page: number;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     } | undefined;
 }, {
     query?: {
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         limit?: string | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;

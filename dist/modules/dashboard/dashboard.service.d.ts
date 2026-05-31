@@ -64,8 +64,8 @@ export declare class DashboardService {
         recentCampaigns: {
             deliveryRate: number;
             name: string;
-            status: import(".prisma/client").$Enums.CampaignStatus;
             id: string;
+            status: import(".prisma/client").$Enums.CampaignStatus;
             createdAt: Date;
             totalContacts: number;
             sentCount: number;

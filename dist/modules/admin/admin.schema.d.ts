@@ -107,15 +107,15 @@ export declare const getUsersSchema: z.ZodObject<{
         sortBy: z.ZodOptional<z.ZodString>;
         sortOrder: z.ZodOptional<z.ZodEnum<["asc", "desc"]>>;
     }, "strip", z.ZodTypeAny, {
-        status?: string | undefined;
         limit?: string | undefined;
+        status?: string | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
-        status?: string | undefined;
         limit?: string | undefined;
+        status?: string | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
@@ -123,8 +123,8 @@ export declare const getUsersSchema: z.ZodObject<{
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        status?: string | undefined;
         limit?: string | undefined;
+        status?: string | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;
@@ -132,8 +132,8 @@ export declare const getUsersSchema: z.ZodObject<{
     };
 }, {
     query: {
-        status?: string | undefined;
         limit?: string | undefined;
+        status?: string | undefined;
         page?: string | undefined;
         search?: string | undefined;
         sortBy?: string | undefined;

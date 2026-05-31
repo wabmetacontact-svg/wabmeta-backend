@@ -17,6 +17,7 @@ export declare class WebhookService {
     }>;
     private handleTemplateUpdate;
     private processIncomingMessage;
+    private runAutomations;
     private processStatusUpdate;
     private updateCampaignContactStatus;
     verifyWebhook(mode: string, token: string, challenge: string): string | null;

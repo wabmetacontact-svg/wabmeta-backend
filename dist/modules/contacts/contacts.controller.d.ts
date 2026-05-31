@@ -9,6 +9,7 @@ export declare class ContactsController {
     import(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     bulkUpdate(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     bulkDelete(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
+    deleteAll(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     getStats(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     getTags(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
     export(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;

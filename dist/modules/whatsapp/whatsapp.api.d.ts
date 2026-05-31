@@ -91,13 +91,17 @@ declare class WhatsAppAPI {
         waMessageId: string;
     }>;
     /**
-     * Send message (generic)
+     * Send message (generic) - with Authorization header, not query param
      */
-    sendMessage(phoneNumberId: string, accessToken: string, payload: any): Promise<any>;
+    sendMessage(phoneNumberId: string, accessToken: string, to: string, payload: any): Promise<any>;
     /**
      * Mark message as read
      */
-    markAsRead(phoneNumberId: string, messageId: string, accessToken: string): Promise<boolean>;
+    markAsRead(phoneNumberId: string, messageId: string, accessToken: string, typing?: boolean): Promise<boolean>;
+    /**
+     * Mark message as read (alias for whatsapp.service.ts compatibility)
+     */
+    markMessageAsRead(phoneNumberId: string, accessToken: string, messageId: string): Promise<boolean>;
     /**
      * Create message template with specific API version
      */

@@ -358,7 +358,7 @@ export class InboxService {
     const [org, conversations] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: organizationId },
-        select: { customLabels: true },
+        select: { customLabels: true } as any,
       }),
       prisma.conversation.findMany({
         where: { organizationId },
@@ -380,15 +380,15 @@ export class InboxService {
    * Create custom label
    */
   async createCustomLabel(organizationId: string, label: string) {
-    const org = await prisma.organization.findUnique({
+    const org: any = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { customLabels: true },
+      select: { customLabels: true } as any,
     });
-    const currentLabels = org?.customLabels || [];
+    const currentLabels: string[] = org?.customLabels || [];
     if (!currentLabels.includes(label)) {
       await prisma.organization.update({
         where: { id: organizationId },
-        data: { customLabels: [...currentLabels, label] },
+        data: { customLabels: [...currentLabels, label] } as any,
       });
     }
     return { label };
@@ -398,15 +398,15 @@ export class InboxService {
    * Delete custom label
    */
   async deleteCustomLabel(organizationId: string, label: string) {
-    const org = await prisma.organization.findUnique({
+    const org: any = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { customLabels: true },
+      select: { customLabels: true } as any,
     });
-    const currentLabels = org?.customLabels || [];
+    const currentLabels: string[] = org?.customLabels || [];
     if (currentLabels.includes(label)) {
       await prisma.organization.update({
         where: { id: organizationId },
-        data: { customLabels: currentLabels.filter((l) => l !== label) },
+        data: { customLabels: currentLabels.filter((l: string) => l !== label) } as any,
       });
     }
     return { success: true };

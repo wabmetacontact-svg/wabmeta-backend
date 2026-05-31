@@ -9,8 +9,8 @@ export declare class ChatbotService {
         chatbots: {
             name: string;
             organizationId: string;
-            status: import(".prisma/client").$Enums.ChatbotStatus;
             id: string;
+            status: import(".prisma/client").$Enums.ChatbotStatus;
             createdAt: Date;
             updatedAt: Date;
             isDefault: boolean;
@@ -28,8 +28,8 @@ export declare class ChatbotService {
     getById(organizationId: string, chatbotId: string): Promise<{
         name: string;
         organizationId: string;
-        status: import(".prisma/client").$Enums.ChatbotStatus;
         id: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
         createdAt: Date;
         updatedAt: Date;
         isDefault: boolean;
@@ -51,8 +51,8 @@ export declare class ChatbotService {
     }): Promise<{
         name: string;
         organizationId: string;
-        status: import(".prisma/client").$Enums.ChatbotStatus;
         id: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
         createdAt: Date;
         updatedAt: Date;
         isDefault: boolean;
@@ -75,8 +75,8 @@ export declare class ChatbotService {
     }): Promise<{
         name: string;
         organizationId: string;
-        status: import(".prisma/client").$Enums.ChatbotStatus;
         id: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
         createdAt: Date;
         updatedAt: Date;
         isDefault: boolean;
@@ -93,8 +93,8 @@ export declare class ChatbotService {
     activate(organizationId: string, chatbotId: string): Promise<{
         name: string;
         organizationId: string;
-        status: import(".prisma/client").$Enums.ChatbotStatus;
         id: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
         createdAt: Date;
         updatedAt: Date;
         isDefault: boolean;
@@ -108,8 +108,8 @@ export declare class ChatbotService {
     deactivate(organizationId: string, chatbotId: string): Promise<{
         name: string;
         organizationId: string;
-        status: import(".prisma/client").$Enums.ChatbotStatus;
         id: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
         createdAt: Date;
         updatedAt: Date;
         isDefault: boolean;
@@ -123,8 +123,8 @@ export declare class ChatbotService {
     duplicate(organizationId: string, chatbotId: string, userId: string, newName?: string): Promise<{
         name: string;
         organizationId: string;
-        status: import(".prisma/client").$Enums.ChatbotStatus;
         id: string;
+        status: import(".prisma/client").$Enums.ChatbotStatus;
         createdAt: Date;
         updatedAt: Date;
         isDefault: boolean;

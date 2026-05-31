@@ -664,13 +664,17 @@ class MetaApiClient {
             throw this.handleError(error, 'Failed to send message');
         }
     }
-    async markMessageAsRead(phoneNumberId, accessToken, messageId) {
+    async markMessageAsRead(phoneNumberId, accessToken, messageId, typing = false) {
         try {
-            const response = await this.client.post(`/${phoneNumberId}/messages`, {
+            const payload = {
                 messaging_product: 'whatsapp',
                 status: 'read',
                 message_id: messageId,
-            }, {
+            };
+            if (typing) {
+                payload.typing_indicator = { type: 'text' };
+            }
+            const response = await this.client.post(`/${phoneNumberId}/messages`, payload, {
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
                 },

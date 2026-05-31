@@ -35,6 +35,10 @@ export declare class ContactsService {
         message: string;
         deleted: number;
     }>;
+    deleteAll(organizationId: string): Promise<{
+        message: string;
+        deleted: number;
+    }>;
     getStats(organizationId: string): Promise<ContactStats>;
     getAllTags(organizationId: string): Promise<{
         tag: string;

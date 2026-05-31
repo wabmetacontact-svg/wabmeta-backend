@@ -60,9 +60,9 @@ router.delete('/groups/:groupId/contacts', (0, validate_1.validate)(contacts_sch
 // LIST / CREATE / IMPORT / BULK
 // ============================================
 router.get('/', contacts_controller_1.contactsController.getList.bind(contacts_controller_1.contactsController));
-router.post('/', (0, validate_1.validate)(contacts_schema_1.createContactSchema), planLimits_1.checkContactLimit, contacts_controller_1.contactsController.create.bind(contacts_controller_1.contactsController));
+router.post('/', (0, validate_1.validate)(contacts_schema_1.createContactSchema), planLimits_1.requireActiveSubscription, planLimits_1.checkContactLimit, contacts_controller_1.contactsController.create.bind(contacts_controller_1.contactsController));
 // Import contacts - with file upload
-router.post('/import', upload.single('file'), (req, res, next) => {
+router.post('/import', planLimits_1.requireActiveSubscription, upload.single('file'), (req, res, next) => {
     contacts_controller_1.contactsController.import(req, res, next);
 });
 // ✅ Simple Bulk Paste (₹2,500+)
@@ -71,6 +71,7 @@ router.post('/bulk-paste', contacts_controller_1.contactsController.simpleBulkPa
 router.post('/csv-upload', contacts_controller_1.contactsController.csvUpload.bind(contacts_controller_1.contactsController));
 router.patch('/bulk', (0, validate_1.validate)(contacts_schema_1.bulkUpdateSchema), contacts_controller_1.contactsController.bulkUpdate.bind(contacts_controller_1.contactsController));
 router.delete('/bulk', (0, validate_1.validate)(contacts_schema_1.bulkDeleteSchema), contacts_controller_1.contactsController.bulkDelete.bind(contacts_controller_1.contactsController));
+router.delete('/all', contacts_controller_1.contactsController.deleteAll.bind(contacts_controller_1.contactsController));
 // ============================================
 // CONTACT BY ID (LAST)
 // ============================================

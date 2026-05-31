@@ -533,280 +533,249 @@ class WhatsAppService {
         });
     }
     /**
-     * Core send message function - WITH CONTACT CHECK
+     * Core send message function
      */
     async sendMessage(options) {
-        const { accountId, to, type, content, conversationId, tempId, clientMsgId } = options;
-        console.log(`\n📤 ========== SEND MESSAGE START ==========`);
-        console.log(`   Type: ${type}`);
-        console.log(`   To: ${to}`);
-        console.log(`   Account ID: ${accountId}`);
-        try {
-            const { account, accessToken } = await this.getAccountWithToken(accountId);
-            const organizationId = options.organizationId || account.organizationId;
-            console.log(`   Organization ID: ${organizationId}`);
-            console.log(`   Phone Number ID: ${account.phoneNumberId}`);
-            const formattedTo = this.formatPhoneNumber(to);
-            console.log(`   Formatted Phone: ${formattedTo}`);
-            // ✅ 24-HOUR WINDOW CHECK (For Text/Media/Interactive)
-            // Meta requires Templates for messages outside the 24h window
-            if (type !== 'template' && !options.skipWindowCheck) {
-                try {
-                    // Lightweight fetch — do NOT use getOrCreateConversation (it modifies data)
-                    let conv = null;
-                    if (conversationId) {
-                        conv = await database_1.default.conversation.findUnique({
-                            where: { id: conversationId },
-                            select: {
-                                id: true,
-                                isWindowOpen: true,
-                                windowExpiresAt: true,
-                                lastCustomerMessageAt: true,
-                            },
-                        });
-                    }
-                    if (!conv) {
-                        // Find by contact + org
-                        const contact = await database_1.default.contact.findFirst({
-                            where: {
-                                organizationId,
-                                OR: [
-                                    { phone: to },
-                                    { phone: `+${this.formatPhoneNumber(to)}` },
-                                    { phone: this.formatPhoneNumber(to) },
-                                ],
-                            },
-                            select: { id: true },
-                        });
-                        if (contact) {
-                            conv = await database_1.default.conversation.findUnique({
-                                where: {
-                                    organizationId_contactId: { organizationId, contactId: contact.id },
-                                },
-                                select: {
-                                    id: true,
-                                    isWindowOpen: true,
-                                    windowExpiresAt: true,
-                                    lastCustomerMessageAt: true,
-                                },
-                            });
-                        }
-                    }
-                    // If no conversation exists yet, it's a fresh outbound — block it
-                    if (!conv) {
-                        const errorMsg = 'No inbound message from user yet. You must start with a Template Message.';
-                        console.warn(`⚠️ ${errorMsg}`);
-                        throw new Error(errorMsg);
-                    }
-                    const now = new Date();
-                    let windowExpired = false;
-                    // ✅ Priority 1: windowExpiresAt is the most reliable signal
-                    if (conv.windowExpiresAt) {
-                        windowExpired = new Date(conv.windowExpiresAt) <= now;
-                    }
-                    else if (conv.isWindowOpen === false) {
-                        windowExpired = true;
-                    }
-                    else if (conv.lastCustomerMessageAt) {
-                        // Priority 2: last customer message time
-                        windowExpired = (now.getTime() - new Date(conv.lastCustomerMessageAt).getTime()) > 24 * 60 * 60 * 1000;
-                    }
-                    else {
-                        // Priority 3: count inbound messages
-                        const inboundCount = await database_1.default.message.count({
-                            where: { conversationId: conv.id, direction: client_1.MessageDirection.INBOUND },
-                        });
-                        windowExpired = inboundCount === 0;
-                    }
-                    if (windowExpired) {
-                        const errorMsg = conv.lastCustomerMessageAt
-                            ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
-                            : 'No inbound message from user yet. You must start with a Template Message.';
-                        console.warn(`⚠️ ${errorMsg}`);
-                        // Save as failed message so user sees it in inbox
-                        if (conv.id) {
-                            await database_1.default.message.create({
-                                data: {
-                                    conversationId: conv.id,
-                                    whatsappAccountId: accountId,
-                                    direction: client_1.MessageDirection.OUTBOUND,
-                                    type: this.mapMessageType(type),
-                                    content: this.extractMessageContent(type, content),
-                                    status: client_1.MessageStatus.FAILED,
-                                    failureReason: errorMsg,
-                                    sentAt: now,
-                                    failedAt: now,
-                                },
-                            }).catch(() => { }); // non-blocking, don't crash on this
-                        }
-                        throw new Error(errorMsg);
-                    }
-                }
-                catch (windowCheckErr) {
-                    // Re-throw only real window errors, not DB lookup errors
-                    if (windowCheckErr.message?.includes('Template Message') ||
-                        windowCheckErr.message?.includes('window closed') ||
-                        windowCheckErr.message?.includes('session expired')) {
-                        throw windowCheckErr;
-                    }
-                    // DB lookup failed silently — allow message to proceed, Meta API will validate
-                    console.warn('⚠️ Window check lookup failed (non-critical), proceeding:', windowCheckErr.message);
-                }
-            }
-            // ✅ Skip contact check to reduce latency (Meta API will fail on send if invalid anyway)
-            /*
-            let contactValid = true;
-            try {
-              console.log('📞 Checking if contact has WhatsApp...');
-      
-              const contactCheck = await metaApi.checkContact(
-                account.phoneNumberId,
-                accessToken,
-                formattedTo
-              );
-      
-              const status = contactCheck?.contacts?.[0]?.status;
-      
-              if (status && status !== 'valid') {
-                contactValid = false;
-                console.warn(`⚠️ Contact ${formattedTo} is invalid or doesn't have WhatsApp`);
-              }
-            } catch (err) {
-              console.warn('⚠️ Contact check failed (non-critical), proceeding:', err.message);
-            }
-            */
-            // Prepare message payload
-            const messagePayload = {
-                messaging_product: 'whatsapp',
-                recipient_type: 'individual',
-                to: formattedTo,
-                type,
-                ...content,
-            };
-            console.log(`   Payload type:`, type);
-            // Send via Meta API
-            const result = await meta_api_1.metaApi.sendMessage(account.phoneNumberId, accessToken, formattedTo, messagePayload);
-            console.log(`✅ Message sent successfully!`);
-            console.log(`   Message ID: ${result.messageId}`);
-            // Get or create contact
-            const contact = await this.getOrCreateContact(organizationId, to);
-            // Extract clean content
-            const messageContent = this.extractMessageContent(type, content);
-            const messagePreview = messageContent.substring(0, 100);
-            console.log(`   Message Content: ${messageContent.substring(0, 50)}...`);
-            // ✅ Extract mediaUrl properly
-            let mediaUrlForDB = null;
-            const mediaTypesList = ['image', 'video', 'audio', 'document', 'sticker'];
-            if (mediaTypesList.includes(type)) {
-                // Try all possible locations
-                mediaUrlForDB =
-                    content?.[type]?.link || // { image: { link: '...' } }
-                        content?.[type]?.url || // { image: { url: '...' } }
-                        content?.link || // { link: '...' }
-                        content?.url || // { url: '...' }
-                        options.mediaUrl || // Direct mediaUrl option
-                        null;
-                console.log(`💾 Media URL for ${type}:`, mediaUrlForDB);
-            }
-            // Get or create conversation
-            const conversation = await this.getOrCreateConversation(organizationId, contact.id, account.phoneNumberId, messagePreview, conversationId);
-            // Save message to database
-            const message = await database_1.default.message.create({
-                data: {
-                    conversationId: conversation.id,
-                    whatsappAccountId: accountId,
-                    wamId: result.messageId,
-                    waMessageId: result.messageId,
-                    direction: client_1.MessageDirection.OUTBOUND,
-                    type: this.mapMessageType(type),
-                    content: messageContent,
-                    mediaUrl: mediaUrlForDB, // ✅ Properly set
-                    status: client_1.MessageStatus.SENT,
-                    timestamp: new Date(),
-                    sentAt: new Date(),
-                    metadata: {
-                        ...(tempId ? { tempId } : {}),
-                        ...(clientMsgId ? { clientMsgId } : {}),
+        const { accountId, to, type, content, conversationId, organizationId, tempId, clientMsgId, mediaUrl, skipWindowCheck, } = options;
+        const startTime = Date.now();
+        console.log(`📤 sendMessage START: type=${type} to=${to}`);
+        // ✅ PARALLEL FETCH - Account + Conversation
+        const [accountData, conversationData] = await Promise.all([
+            this.getAccountWithToken(accountId),
+            conversationId
+                ? database_1.default.conversation.findUnique({
+                    where: { id: conversationId },
+                    select: {
+                        id: true, contactId: true,
+                        isWindowOpen: true, windowExpiresAt: true,
+                        lastCustomerMessageAt: true,
                     },
-                },
-                include: {
-                    conversation: {
-                        include: {
-                            contact: true,
-                        },
-                    },
-                },
-            });
-            console.log(`💾 Message saved to DB: ${message.id}`);
-            // ✅ Emit socket event for real-time update
-            const { webhookEvents } = await Promise.resolve().then(() => __importStar(require('../webhooks/webhook.service')));
-            webhookEvents.emit('newMessage', {
-                organizationId,
-                conversationId: conversation.id,
-                tempId: tempId || message.metadata?.tempId,
-                clientMsgId: clientMsgId || message.metadata?.clientMsgId,
-                message: {
-                    ...message,
-                    tempId: tempId || message.metadata?.tempId,
-                    clientMsgId: clientMsgId || message.metadata?.clientMsgId,
-                },
-            });
-            webhookEvents.emit('conversationUpdated', {
-                organizationId,
-                conversation: {
-                    id: conversation.id,
-                    lastMessageAt: conversation.lastMessageAt,
-                    lastMessagePreview: conversation.lastMessagePreview,
-                    unreadCount: conversation.unreadCount,
-                    isRead: conversation.isRead,
-                    isWindowOpen: conversation.isWindowOpen,
-                    windowExpiresAt: conversation.windowExpiresAt,
-                    contact: message.conversation?.contact,
-                },
-            });
-            console.log(`📤 ========== SEND MESSAGE END ==========\n`);
-            return {
-                success: true,
-                messageId: result.messageId,
-                message: {
-                    ...message,
-                    tempId: tempId || message.metadata?.tempId,
-                    clientMsgId: clientMsgId || message.metadata?.clientMsgId,
-                },
-            };
+                })
+                : Promise.resolve(null),
+        ]);
+        const { account, accessToken } = accountData;
+        const orgId = organizationId || account.organizationId;
+        const formattedTo = this.formatPhoneNumber(to);
+        // ✅ Quick window check (in-memory)
+        if (type !== 'template' && !skipWindowCheck && conversationData) {
+            const now = new Date();
+            let expired = false;
+            if (conversationData.windowExpiresAt) {
+                expired = new Date(conversationData.windowExpiresAt) <= now;
+            }
+            else if (conversationData.isWindowOpen === false) {
+                expired = true;
+            }
+            else if (conversationData.lastCustomerMessageAt) {
+                expired = now.getTime() - new Date(conversationData.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
+            }
+            if (expired) {
+                throw new Error('User session expired (24h window closed). Send a Template Message to re-engage.');
+            }
         }
-        catch (error) {
-            console.error(`❌ Failed to send message:`, {
-                error: error.message,
-                response: error.response?.data,
-            });
+        // ✅ Meta API call
+        const metaStart = Date.now();
+        const messagePayload = {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: formattedTo,
+            type,
+            ...content,
+        };
+        const result = await meta_api_1.metaApi.sendMessage(account.phoneNumberId, accessToken, formattedTo, messagePayload);
+        console.log(`⏱️ Meta API: ${Date.now() - metaStart}ms`);
+        const waMessageId = result.messageId;
+        const now = new Date();
+        const messageContent = this.extractMessageContent(type, content);
+        // Media URL extract
+        let mediaUrlForDB = null;
+        const mediaTypes = ['image', 'video', 'audio', 'document', 'sticker'];
+        if (mediaTypes.includes(type)) {
+            mediaUrlForDB = content?.[type]?.link || content?.[type]?.url ||
+                content?.link || mediaUrl || null;
+        }
+        // ✅ Contact + Conversation (need IDs for message save)
+        const contact = await this.getOrCreateContact(orgId, to);
+        let conversation = conversationData;
+        if (!conversation) {
+            conversation = await this.getOrCreateConversation(orgId, contact.id, account.phoneNumberId, messageContent.substring(0, 100), conversationId);
+        }
+        // ✅ Save message (must await for response)
+        const savedMessage = await database_1.default.message.create({
+            data: {
+                conversationId: conversation.id,
+                whatsappAccountId: accountId,
+                wamId: waMessageId,
+                waMessageId: waMessageId,
+                direction: client_1.MessageDirection.OUTBOUND,
+                type: this.mapMessageType(type),
+                content: messageContent,
+                mediaUrl: mediaUrlForDB,
+                status: client_1.MessageStatus.SENT,
+                timestamp: now,
+                sentAt: now,
+                createdAt: now,
+                metadata: {
+                    ...(tempId ? { tempId } : {}),
+                    ...(clientMsgId ? { clientMsgId } : {}),
+                },
+            },
+        });
+        // ✅ BACKGROUND TASKS - Non-blocking
+        setImmediate(async () => {
+            try {
+                // Conversation update
+                await database_1.default.conversation.update({
+                    where: { id: conversation.id },
+                    data: {
+                        lastMessageAt: now,
+                        lastMessagePreview: messageContent.substring(0, 100),
+                        isRead: true,
+                        unreadCount: 0,
+                    },
+                });
+                // Cache clear
+                const { inboxService } = await Promise.resolve().then(() => __importStar(require('../inbox/inbox.service')));
+                await inboxService.clearCache(orgId);
+                // Socket emit
+                const { webhookEvents } = await Promise.resolve().then(() => __importStar(require('../webhooks/webhook.service')));
+                const contactData = await database_1.default.contact.findUnique({
+                    where: { id: contact.id },
+                    select: {
+                        id: true, phone: true, firstName: true, lastName: true,
+                        whatsappProfileName: true, avatar: true,
+                    },
+                });
+                webhookEvents.emit('conversationUpdated', {
+                    organizationId: orgId,
+                    conversation: {
+                        id: conversation.id,
+                        lastMessageAt: now.toISOString(),
+                        lastMessagePreview: messageContent.substring(0, 100),
+                        unreadCount: 0,
+                        isRead: true,
+                        isWindowOpen: conversation.isWindowOpen,
+                        windowExpiresAt: conversation.windowExpiresAt instanceof Date
+                            ? conversation.windowExpiresAt.toISOString()
+                            : conversation.windowExpiresAt,
+                        contact: contactData,
+                    },
+                });
+            }
+            catch (e) {
+                console.error('Background task error:', e);
+            }
+        });
+        console.log(`✅ sendMessage TOTAL: ${Date.now() - startTime}ms`);
+        return {
+            success: true,
+            messageId: waMessageId,
+            message: {
+                ...savedMessage,
+                tempId,
+                clientMsgId,
+            },
+        };
+    }
+    /**
+     * 24h window check — throws if window is expired
+     */
+    async checkWindowOrThrow(organizationId, conversationId, to, accountId, type, content) {
+        try {
+            let conv = null;
             if (conversationId) {
-                try {
-                    const failedContent = this.extractMessageContent(type, content);
-                    await database_1.default.message.create({
-                        data: {
-                            conversationId,
-                            whatsappAccountId: accountId,
-                            direction: client_1.MessageDirection.OUTBOUND,
-                            type: this.mapMessageType(type),
-                            content: failedContent,
-                            status: client_1.MessageStatus.FAILED,
-                            failureReason: error.response?.data?.error?.message || error.message,
-                            sentAt: new Date(),
-                            failedAt: new Date(),
+                conv = await database_1.default.conversation.findUnique({
+                    where: { id: conversationId },
+                    select: {
+                        id: true,
+                        isWindowOpen: true,
+                        windowExpiresAt: true,
+                        lastCustomerMessageAt: true,
+                    },
+                });
+            }
+            if (!conv) {
+                // Try to find by contact + org
+                const digits = to.replace(/[^0-9]/g, '');
+                const contact = await database_1.default.contact.findFirst({
+                    where: {
+                        organizationId,
+                        OR: [
+                            { phone: `+${digits}` },
+                            { phone: digits },
+                            { phone: digits.slice(-10) },
+                        ],
+                    },
+                    select: { id: true },
+                });
+                if (contact) {
+                    conv = await database_1.default.conversation.findUnique({
+                        where: { organizationId_contactId: { organizationId, contactId: contact.id } },
+                        select: {
+                            id: true,
+                            isWindowOpen: true,
+                            windowExpiresAt: true,
+                            lastCustomerMessageAt: true,
                         },
                     });
                 }
-                catch (dbError) {
-                    console.error('Failed to save error message to DB:', dbError);
-                }
             }
-            console.log(`📤 ========== SEND MESSAGE END (ERROR) ==========\n`);
-            const errorMessage = error.response?.data?.error?.message ||
-                error.response?.data?.message ||
-                error.message ||
-                'Failed to send message';
-            throw new Error(errorMessage);
+            // No conversation yet → block, need template first
+            if (!conv) {
+                throw new Error('No inbound message from user yet. You must start with a Template Message.');
+            }
+            const now = new Date();
+            let windowExpired = false;
+            if (conv.windowExpiresAt) {
+                windowExpired = new Date(conv.windowExpiresAt) <= now;
+            }
+            else if (conv.isWindowOpen === false) {
+                windowExpired = true;
+            }
+            else if (conv.lastCustomerMessageAt) {
+                windowExpired =
+                    now.getTime() - new Date(conv.lastCustomerMessageAt).getTime() >
+                        24 * 60 * 60 * 1000;
+            }
+            else {
+                // Count inbound
+                const inboundCount = await database_1.default.message.count({
+                    where: { conversationId: conv.id, direction: client_1.MessageDirection.INBOUND },
+                });
+                windowExpired = inboundCount === 0;
+            }
+            if (windowExpired) {
+                const errorMsg = conv.lastCustomerMessageAt
+                    ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
+                    : 'No inbound message from user yet. You must start with a Template Message.';
+                // Save failed message (non-blocking)
+                if (conv.id) {
+                    database_1.default.message.create({
+                        data: {
+                            conversationId: conv.id,
+                            whatsappAccountId: accountId,
+                            direction: client_1.MessageDirection.OUTBOUND,
+                            type: this.mapMessageType(type),
+                            content: this.extractMessageContent(type, content),
+                            status: client_1.MessageStatus.FAILED,
+                            failureReason: errorMsg,
+                            sentAt: new Date(),
+                            failedAt: new Date(),
+                        },
+                    }).catch(() => { });
+                }
+                throw new Error(errorMsg);
+            }
+        }
+        catch (err) {
+            // Re-throw only real window errors
+            if (err.message?.includes('Template Message') ||
+                err.message?.includes('window closed') ||
+                err.message?.includes('session expired')) {
+                throw err;
+            }
+            // DB lookup failed silently
+            console.warn('Window check error (non-critical):', err.message);
         }
     }
     // ============================================
@@ -1229,6 +1198,36 @@ class WhatsAppService {
         }
         catch (error) {
             console.error('❌ Failed to mark as read:', error);
+            return { success: false, error: error.message };
+        }
+    }
+    /**
+     * Send typing indicator
+     */
+    async sendTypingIndicator(conversationId) {
+        try {
+            // Find the last incoming message for this conversation
+            const lastIncoming = await database_1.default.message.findFirst({
+                where: { conversationId, direction: 'INBOUND' },
+                orderBy: { createdAt: 'desc' }
+            });
+            if (!lastIncoming || !lastIncoming.wamId)
+                return { success: false, reason: 'No incoming message' };
+            const conversation = await database_1.default.conversation.findUnique({
+                where: { id: conversationId },
+            });
+            if (!conversation)
+                return { success: false, reason: 'Conversation not found' };
+            const defaultAccount = await this.getDefaultAccount(conversation.organizationId);
+            if (!defaultAccount)
+                return { success: false, reason: 'No WhatsApp account found' };
+            const { account, accessToken } = await this.getAccountWithToken(defaultAccount.id);
+            // markAsRead with typing=true
+            await meta_api_1.metaApi.markMessageAsRead(account.phoneNumberId, accessToken, lastIncoming.wamId, true);
+            return { success: true };
+        }
+        catch (error) {
+            console.error('❌ Failed to send typing indicator:', error);
             return { success: false, error: error.message };
         }
     }

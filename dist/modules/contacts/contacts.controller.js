@@ -212,6 +212,22 @@ class ContactsController {
         }
     }
     // ==========================================
+    // DELETE ALL CONTACTS
+    // ==========================================
+    async deleteAll(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId) {
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            }
+            const result = await contacts_service_1.contactsService.deleteAll(organizationId);
+            (0, response_1.sendSuccess)(res, result, result.message);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
     // GET CONTACT STATS
     // ==========================================
     async getStats(req, res, next) {

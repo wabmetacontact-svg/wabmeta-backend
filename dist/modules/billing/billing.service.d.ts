@@ -75,8 +75,8 @@ declare class BillingService {
             features: import("@prisma/client/runtime/library").JsonValue;
         };
         organizationId: string;
-        status: import(".prisma/client").$Enums.SubscriptionStatus;
         id: string;
+        status: import(".prisma/client").$Enums.SubscriptionStatus;
         createdAt: Date;
         updatedAt: Date;
         billingCycle: string;
@@ -184,8 +184,8 @@ declare class BillingService {
     }): Promise<{
         subscription: {
             organizationId: string;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
             id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -234,8 +234,8 @@ declare class BillingService {
         billingCycle?: string;
     }): Promise<{
         organizationId: string;
-        status: import(".prisma/client").$Enums.SubscriptionStatus;
         id: string;
+        status: import(".prisma/client").$Enums.SubscriptionStatus;
         createdAt: Date;
         updatedAt: Date;
         billingCycle: string;
@@ -253,8 +253,8 @@ declare class BillingService {
         message: string;
         subscription: {
             organizationId: string;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
             id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -271,8 +271,8 @@ declare class BillingService {
     }>;
     resumeSubscription(organizationId: string): Promise<{
         organizationId: string;
-        status: import(".prisma/client").$Enums.SubscriptionStatus;
         id: string;
+        status: import(".prisma/client").$Enums.SubscriptionStatus;
         createdAt: Date;
         updatedAt: Date;
         billingCycle: string;
@@ -325,8 +325,8 @@ declare class BillingService {
             };
         } & {
             organizationId: string;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
             id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;

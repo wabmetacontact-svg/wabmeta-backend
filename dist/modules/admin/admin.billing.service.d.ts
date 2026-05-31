@@ -39,8 +39,8 @@ export declare class AdminBillingService {
             };
         } & {
             organizationId: string;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
             id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -141,8 +141,8 @@ export declare class AdminBillingService {
             };
         } & {
             organizationId: string;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
             id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -213,8 +213,8 @@ export declare class AdminBillingService {
             };
         } & {
             organizationId: string;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
             id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
@@ -291,8 +291,8 @@ export declare class AdminBillingService {
                 features: import("@prisma/client/runtime/library").JsonValue;
             };
             organizationId: string;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
             id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
             billingCycle: string;
