@@ -500,6 +500,37 @@ export class InboxService {
   }
 
   /**
+   * Helper to check Free Demo chat limit
+   */
+  private async checkFreeDemoLimit(organizationId: string, conversationId: string) {
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { planType: true },
+    });
+
+    if (org?.planType === 'FREE_DEMO') {
+      const existingOutbound = await prisma.message.findFirst({
+        where: { conversationId, direction: 'OUTBOUND' },
+      });
+
+      if (!existingOutbound) {
+        // Find how many distinct conversations have outbound messages
+        const activeConversations = await prisma.message.groupBy({
+          by: ['conversationId'],
+          where: {
+            conversation: { organizationId },
+            direction: 'OUTBOUND',
+          },
+        });
+
+        if (activeConversations.length >= 10) {
+          throw new AppError('TRIAL_CHAT_LIMIT_REACHED', 403);
+        }
+      }
+    }
+  }
+
+  /**
    * Send message
    */
   async sendMessage(
@@ -509,6 +540,9 @@ export class InboxService {
     input: any
   ) {
     const conversation = await this.getConversationById(organizationId, conversationId);
+
+    // Enforce 10 contacts limit for free demo
+    await this.checkFreeDemoLimit(organizationId, conversationId);
 
     // Create message in database
     const message = (await prisma.message.create({
@@ -546,6 +580,9 @@ export class InboxService {
     params: any[],
     bodyText: string
   ) {
+    // Enforce 10 contacts limit for free demo
+    await this.checkFreeDemoLimit(organizationId, conversationId);
+
     // Store only the body text, not full JSON
     const message = await prisma.message.create({
       data: {
