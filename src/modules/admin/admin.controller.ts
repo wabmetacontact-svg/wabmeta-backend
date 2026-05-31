@@ -475,7 +475,11 @@ export class AdminController {
         features: {
           simpleBulkPaste: (org as any).featureSimpleBulkUpload ?? false,
           csvUpload: (org as any).featureCsvUpload ?? false,
-          adminOverride: (org as any).featureOverrideByAdmin ?? false
+          adminOverride: (org as any).featureOverrideByAdmin ?? false,
+          inboxLocked: (org as any).featureInboxLocked ?? false,
+          campaignsLocked: (org as any).featureCampaignsLocked ?? false,
+          chatbotLocked: (org as any).featureChatbotLocked ?? false,
+          automationLocked: (org as any).featureAutomationLocked ?? false
         }
       }, 'Features fetched');
 
@@ -487,7 +491,7 @@ export class AdminController {
   async updateOrganizationFeatures(req: AdminRequest, res: Response, next: NextFunction) {
     try {
       const organizationId = getParamId(req.params.organizationId);
-      const { simpleBulkPaste, csvUpload, enableOverride } = req.body;
+      const { simpleBulkPaste, csvUpload, enableOverride, inboxLocked, campaignsLocked, chatbotLocked, automationLocked } = req.body;
 
       const org = await prisma.organization.findUnique({
         where: { id: organizationId }
@@ -502,7 +506,11 @@ export class AdminController {
         data: {
           featureSimpleBulkUpload: simpleBulkPaste,
           featureCsvUpload: csvUpload,
-          featureOverrideByAdmin: enableOverride ?? true
+          featureOverrideByAdmin: enableOverride ?? true,
+          featureInboxLocked: inboxLocked ?? false,
+          featureCampaignsLocked: campaignsLocked ?? false,
+          featureChatbotLocked: chatbotLocked ?? false,
+          featureAutomationLocked: automationLocked ?? false
         } as any
       });
 
@@ -511,7 +519,11 @@ export class AdminController {
         features: {
           simpleBulkPaste: (updated as any).featureSimpleBulkUpload,
           csvUpload: (updated as any).featureCsvUpload,
-          adminOverride: (updated as any).featureOverrideByAdmin
+          adminOverride: (updated as any).featureOverrideByAdmin,
+          inboxLocked: (updated as any).featureInboxLocked,
+          campaignsLocked: (updated as any).featureCampaignsLocked,
+          chatbotLocked: (updated as any).featureChatbotLocked,
+          automationLocked: (updated as any).featureAutomationLocked
         }
       }, 'Features updated');
 

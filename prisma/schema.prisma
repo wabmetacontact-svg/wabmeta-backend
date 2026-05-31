@@ -76,6 +76,10 @@ model Organization {
   featureCsvUpload        Boolean              @default(false)
   featureOverrideByAdmin  Boolean              @default(false)
   featureSimpleBulkUpload Boolean              @default(false)
+  featureInboxLocked      Boolean              @default(false)
+  featureCampaignsLocked  Boolean              @default(false)
+  featureChatbotLocked    Boolean              @default(false)
+  featureAutomationLocked Boolean              @default(false)
   customLabels            Json                 @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
