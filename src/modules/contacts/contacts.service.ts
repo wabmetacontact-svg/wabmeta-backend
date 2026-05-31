@@ -919,6 +919,29 @@ export class ContactsService {
   }
 
   // ==========================================
+  // DELETE ALL CONTACTS
+  // ==========================================
+
+  async deleteAll(organizationId: string): Promise<{ message: string; deleted: number }> {
+    const result = await prisma.contact.deleteMany({
+      where: { organizationId },
+    });
+
+    const subscription = await prisma.subscription.findFirst({ where: { organizationId } });
+
+    if (subscription && result.count > 0) {
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          contactsUsed: { decrement: Math.min(result.count, subscription.contactsUsed) },
+        },
+      });
+    }
+
+    return { message: 'All contacts deleted successfully', deleted: result.count };
+  }
+
+  // ==========================================
   // GET CONTACT STATS
   // ==========================================
 

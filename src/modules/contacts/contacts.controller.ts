@@ -238,6 +238,23 @@ export class ContactsController {
   }
 
   // ==========================================
+  // DELETE ALL CONTACTS
+  // ==========================================
+  async deleteAll(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) {
+        throw new AppError('Organization context required', 400);
+      }
+
+      const result = await contactsService.deleteAll(organizationId);
+      sendSuccess(res, result, result.message);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
   // GET CONTACT STATS
   // ==========================================
   async getStats(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {

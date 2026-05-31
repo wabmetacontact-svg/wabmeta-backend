@@ -105,6 +105,7 @@ router.post('/csv-upload', contactsController.csvUpload.bind(contactsController)
 
 router.patch('/bulk', validate(bulkUpdateSchema), contactsController.bulkUpdate.bind(contactsController));
 router.delete('/bulk', validate(bulkDeleteSchema), contactsController.bulkDelete.bind(contactsController));
+router.delete('/all', contactsController.deleteAll.bind(contactsController));
 
 // ============================================
 // CONTACT BY ID (LAST)
