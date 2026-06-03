@@ -25,6 +25,22 @@ class AnalyticsController {
         }
     }
 
+    async getUnifiedDashboard(req: Request, res: Response) {
+        try {
+            const organizationId = req.user?.organizationId || req.headers['x-organization-id'];
+            if (!organizationId) {
+                return errorResponse(res, 'Organization not found', 400);
+            }
+
+            const days = parseInt(req.query.days as string) || 30;
+            const data = await analyticsService.getUnifiedDashboardStats(organizationId as string, days);
+            return sendSuccess(res, data, 'Unified dashboard stats retrieved');
+        } catch (error: any) {
+            console.error('Get unified dashboard error:', error);
+            return errorResponse(res, error.message, 500);
+        }
+    }
+
     async getMessageAnalytics(req: Request, res: Response) {
         try {
             const organizationId = req.user?.organizationId;

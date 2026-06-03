@@ -104,6 +104,7 @@ model Organization {
   whatsappAccounts        WhatsAppAccount[]
   wallet                  Wallet?
   walletAccessRequest     WalletAccessRequest[]
+  instagramAccounts       InstagramAccount[]
 
   @@index([slug])
   @@index([ownerId])
@@ -913,6 +914,171 @@ model ContactNote {
   contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([contactId])
+}
+
+// ─── Instagram Integration ────────────────────────────────────────────────────
+
+model InstagramAccount {
+  id             String       @id @default(cuid())
+  organizationId String
+  igUserId       String       @unique  // Instagram User ID
+  username       String
+  name           String?
+  biography      String?
+  profilePicUrl  String?
+  followersCount Int          @default(0)
+  followingCount Int          @default(0)
+  mediaCount     Int          @default(0)
+  accessToken    String       // Long-lived token (encrypted)
+  tokenExpiresAt DateTime?
+  pageId         String?      // Facebook Page ID linked
+  wabaId         String?      // Same WABA if linked
+  status         IgAccountStatus @default(PENDING)
+  isActive       Boolean      @default(true)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dmAutomations  IgDmAutomation[]
+  commentRules   IgCommentRule[]
+  storyRules     IgStoryRule[]
+  igMessages     IgMessage[]
+  igAnalytics    IgAnalytics[]
+
+  @@index([organizationId])
+  @@index([igUserId])
+  @@index([status])
+}
+
+model IgDmAutomation {
+  id                String      @id @default(cuid())
+  organizationId    String
+  igAccountId       String
+  name              String
+  description       String?
+  triggerType       IgTriggerType
+  keywords          String[]    @default([])
+  matchType         String      @default("contains") // contains | exact | starts_with
+  isActive          Boolean     @default(false)
+  responseType      String      @default("text")    // text | template | flow
+  responseText      String?
+  responseFlow      Json?
+  iceBreaker        Boolean     @default(false)
+  storyReplyEnabled Boolean     @default(false)
+  repliesCount      Int         @default(0)
+  lastTriggeredAt   DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([igAccountId])
+  @@index([isActive])
+  @@index([triggerType])
+}
+
+model IgCommentRule {
+  id             String      @id @default(cuid())
+  organizationId String
+  igAccountId    String
+  name           String
+  keywords       String[]    @default([])
+  postIds        String[]    @default([])  // specific posts or empty = all
+  action         String      @default("reply")  // reply | reply_and_dm | hide | delete
+  commentReply   String?
+  dmMessage      String?
+  isActive       Boolean     @default(false)
+  triggeredCount Int         @default(0)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([igAccountId])
+  @@index([isActive])
+}
+
+model IgStoryRule {
+  id             String      @id @default(cuid())
+  organizationId String
+  igAccountId    String
+  name           String
+  triggerType    String      @default("mention") // mention | reply | reaction
+  replyMessage   String?
+  dmMessage      String?
+  isActive       Boolean     @default(false)
+  triggeredCount Int         @default(0)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([igAccountId])
+}
+
+model IgMessage {
+  id             String      @id @default(cuid())
+  igAccountId    String
+  igMessageId    String      @unique
+  senderId       String      // Instagram sender ID
+  senderUsername String?
+  messageType    String      @default("text") // text | image | story_reply | reaction
+  content        String?
+  mediaUrl       String?
+  storyId        String?
+  direction      MessageDirection
+  isAutomated    Boolean     @default(false)
+  automationId   String?
+  sentAt         DateTime?
+  createdAt      DateTime    @default(now())
+
+  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+
+  @@index([igAccountId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model IgAnalytics {
+  id             String      @id @default(cuid())
+  igAccountId    String
+  date           DateTime    @db.Date
+  followersCount Int         @default(0)
+  followersGain  Int         @default(0)
+  profileViews   Int         @default(0)
+  reach          Int         @default(0)
+  impressions    Int         @default(0)
+  dmsSent        Int         @default(0)
+  dmsReceived    Int         @default(0)
+  commentsReplied Int        @default(0)
+  automationReplies Int      @default(0)
+  createdAt      DateTime    @default(now())
+
+  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([igAccountId, date])
+  @@index([igAccountId])
+  @@index([date])
+}
+
+enum IgAccountStatus {
+  PENDING
+  CONNECTED
+  DISCONNECTED
+  TOKEN_EXPIRED
+  ERROR
+}
+
+enum IgTriggerType {
+  KEYWORD
+  DM_RECEIVED
+  STORY_REPLY
+  COMMENT_TO_DM
+  ICE_BREAKER
 }
 
 enum UserStatus {

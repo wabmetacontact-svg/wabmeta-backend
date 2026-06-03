@@ -10,6 +10,7 @@ router.use(authenticate);
 
 // Overview stats
 router.get('/overview', analyticsController.getOverview);
+router.get('/unified', analyticsController.getUnifiedDashboard);
 
 // Specific analytics
 router.get('/messages', analyticsController.getMessageAnalytics);

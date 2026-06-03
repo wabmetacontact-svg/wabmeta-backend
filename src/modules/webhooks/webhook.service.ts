@@ -8,6 +8,7 @@ import { chatbotEngine } from '../chatbot/chatbot.engine';
 import { inboxMediaService } from '../inbox/inbox.media';
 import { automationEngine } from '../automation/automation.engine';
 import { toCanonicalPhone, buildPhoneVariants } from '../../utils/phone';
+import * as instagramService from '../instagram/instagram.service';
 
 // ✅ Socket.ts will subscribe to this
 export const webhookEvents = new EventEmitter();
@@ -166,11 +167,120 @@ export class WebhookService {
   }
 
   // -----------------------------
+  // Instagram Webhook Handler
+  // -----------------------------
+  private async handleInstagramEvent(payload: any): Promise<{ status: string; reason?: string; source?: string; error?: string }> {
+    try {
+      const entry = payload.entry?.[0];
+      
+      // CASE 1: Messages (DMs)
+      if (entry?.messaging) {
+        const messaging = entry.messaging[0];
+
+        const igUserId = entry.id; // Page/Account ID
+        const senderId = messaging.sender.id; // Customer ID
+        
+        // Check if it's a message
+        if (messaging.message && !messaging.message.is_echo) {
+          const messageText = messaging.message.text;
+
+          // Logic A: Find Automation Match
+          const match = await instagramService.findMatchingAutomation(igUserId, messageText);
+
+          if (match && match.isActive) {
+            // MATCH MIL GAYA! Reply bhejna hai
+            console.log(`🤖 IG Automation Match: ${match.name}`);
+            
+            // Call Instagram Graph API to send message
+            const account = await prisma.instagramAccount.findUnique({
+              where: { igUserId }
+            });
+
+            if (account?.accessToken) {
+              const instagramApi = await import('../instagram/instagram.api');
+              if (match.responseText) {
+                await instagramApi.sendIGMessage(account.accessToken, senderId, match.responseText);
+              }
+            }
+            
+            // Update stats
+            await prisma.igDmAutomation.update({
+              where: { id: match.id },
+              data: { repliesCount: { increment: 1 }, lastTriggeredAt: new Date() }
+            });
+          }
+        }
+      }
+
+      // CASE 2: Comments (Changes)
+      if (entry?.changes) {
+        const change = entry.changes[0];
+        
+        // Check if it's a comment on a post
+        if (change.field === 'comments' && change.value.verb === 'add') {
+          const commentId = change.value.id;
+          const commentText = change.value.text.toLowerCase();
+          const igUserId = entry.id; // Business Account ID
+          const senderId = change.value.from.id; // Customer IG ID
+
+          // Don't reply to our own comments
+          if (senderId === igUserId) return { status: 'skipped', reason: 'Own comment' };
+
+          // 1. Find matching Comment Rule
+          const rule = await prisma.igCommentRule.findFirst({
+            where: {
+              igAccount: { igUserId },
+              isActive: true,
+              OR: [
+                { keywords: { has: commentText } },
+                { keywords: { equals: [] } } // Empty array means reply to all
+              ]
+            },
+            include: { igAccount: true }
+          });
+
+          if (rule) {
+            const token = rule.igAccount.accessToken;
+            const instagramApi = await import('../instagram/instagram.api');
+
+            // 2. Public Reply to Comment
+            if (rule.commentReply) {
+              await instagramApi.replyToIGComment(token, commentId, rule.commentReply);
+            }
+
+            // 3. Private DM (Comment-to-DM)
+            if (rule.dmMessage) {
+              await instagramApi.sendIGMessage(token, senderId, rule.dmMessage);
+            }
+
+            // 4. Increment stats
+            await prisma.igCommentRule.update({
+              where: { id: rule.id },
+              data: { triggeredCount: { increment: 1 } }
+            });
+          }
+        }
+      }
+
+      return { status: 'success', source: 'instagram' };
+    } catch (error: any) {
+      console.error('❌ Instagram Webhook Error:', error.message);
+      return { status: 'failed', error: error.message };
+    }
+  }
+
+  // -----------------------------
   // Main Handler
   // -----------------------------
   async handleWebhook(payload: any): Promise<{ status: string; reason?: string; profileName?: string; error?: string }> {
     try {
       console.log('📨 Webhook received');
+
+      // 1. Check karein ki ye Instagram event hai ya WhatsApp
+      // Instagram payload mein 'object: instagram' hota hai
+      if (payload.object === 'instagram') {
+        return await this.handleInstagramEvent(payload);
+      }
 
       const value = this.extractValue(payload);
       const field = payload?.entry?.[0]?.changes?.[0]?.field || 'unknown';

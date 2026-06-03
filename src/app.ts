@@ -33,6 +33,7 @@ import crmRoutes from './modules/crm/crm.routes';
 import automationRoutes from './modules/automation/automation.routes';
 import callingRoutes from './modules/calling/calling.routes';
 import walletRoutes from './modules/wallet/wallet.routes';
+import instagramRoutes from './modules/instagram/instagram.routes';
 
 // ============================================
 // VERIFY IMPORTS
@@ -357,6 +358,9 @@ try {
 
   app.use('/api', walletRoutes);
   console.log('  ✅ /api (wallet)');
+
+  app.use('/api/instagram', instagramRoutes);
+  console.log('  ✅ /api/instagram');
 
   logger.info('✅ All API routes registered successfully');
 } catch (error: any) {
