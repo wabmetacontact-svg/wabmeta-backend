@@ -1185,8 +1185,9 @@ export class AuthService {
   // REFRESH TOKEN
   // ────────────────────────────────────────────
   async refreshToken(refreshToken: string): Promise<AuthTokens> {
+    let payload: any;
     try {
-      verifyRefreshToken(refreshToken);
+      payload = verifyRefreshToken(refreshToken);
     } catch {
       throw new AppError('Invalid refresh token', 401);
     }
@@ -1196,7 +1197,16 @@ export class AuthService {
       include: { user: true },
     });
 
-    if (!stored) throw new AppError('Refresh token not found', 401);
+    if (!stored) {
+      // 🚨 TOKEN REUSE DETECTION
+      // Token is valid JWT but not in DB -> it was already used and deleted.
+      // This means a compromised token is being reused. Revoke all sessions!
+      if (payload && payload.userId) {
+        console.warn(`🚨 TOKEN REUSE DETECTED! Revoking all sessions for user: ${payload.userId}`);
+        await prisma.refreshToken.deleteMany({ where: { userId: payload.userId } });
+      }
+      throw new AppError('Refresh token reused or not found. All sessions revoked for security.', 401);
+    }
 
     if (stored.expiresAt < new Date()) {
       await prisma.refreshToken.delete({ where: { id: stored.id } });
