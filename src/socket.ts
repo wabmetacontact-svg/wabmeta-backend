@@ -235,9 +235,26 @@ function wireWebhookEvents() {
           console.log(`✅ INBOUND message emitted to org + conversation rooms`);
 
         } else if (message.direction === 'OUTBOUND') {
-          // ✅ OUTBOUND: SIRF status update emit karo
-          // Message already frontend pe optimistically add ho chuka hai
-          // Hume bas real waMessageId aur status batana hai
+          // ✅ OUTBOUND: Emit both message:new AND message:status
+          // message:new is for OTHER devices/agents in the organization
+          // message:status is for the original sender to update their optimistic message
+
+          io.to(`org:${orgId}`)
+            .to(`conversation:${conversationId}`)
+            .emit('message:new', {
+              organizationId: orgId,
+              conversationId,
+              message: {
+                ...message,
+                createdAt: message.createdAt instanceof Date
+                  ? message.createdAt.toISOString()
+                  : message.createdAt || new Date().toISOString(),
+                timestamp: message.timestamp instanceof Date
+                  ? message.timestamp.toISOString()
+                  : message.timestamp || message.createdAt || new Date().toISOString(),
+              },
+              conversation: data.conversation || null,
+            });
 
           const waMessageId = message.waMessageId || message.wamId;
           const tempId = message.tempId ||
@@ -260,7 +277,7 @@ function wireWebhookEvents() {
                   : message.sentAt || new Date().toISOString(),
               });
 
-            console.log(`✅ OUTBOUND status emitted: tempId=${tempId} -> waMessageId=${waMessageId}`);
+            console.log(`✅ OUTBOUND emitted message:new and message:status (tempId=${tempId})`);
           }
         }
       });
