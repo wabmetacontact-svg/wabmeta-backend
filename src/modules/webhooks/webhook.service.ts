@@ -968,7 +968,10 @@ export class WebhookService {
               sentCount: true, 
               deliveredCount: true, 
               readCount: true, 
-              failedCount: true 
+              failedCount: true,
+              template: {
+                select: { name: true, category: true, language: true }
+              }
             } 
           },
           contact: { select: { phone: true } },
@@ -1023,6 +1026,53 @@ export class WebhookService {
         }
       } else if (newStatus === 'FAILED' && currentStatus !== 'FAILED') {
         campaignUpdateData.failedCount = { increment: 1 };
+
+        // ✅ REFUND WALLET FOR FAILED MESSAGE
+        if (campaignContact.campaign && (campaignContact.campaign as any).template) {
+          try {
+            const template = (campaignContact.campaign as any).template;
+            const { getRateForCategory } = await import('../wallet/wallet.deduction.service');
+            const rateRupees = getRateForCategory(
+              template.category || 'MARKETING',
+              campaignContact.contact?.phone || '',
+              template.language
+            );
+            const refundPaise = Math.round(rateRupees * 100);
+
+            if (refundPaise > 0) {
+              await prisma.$transaction(async (tx) => {
+                const wallet = await tx.wallet.findUnique({ where: { organizationId: campaignContact.campaign.organizationId } });
+                if (wallet) {
+                  const balanceBefore = wallet.balancePaise;
+                  const balanceAfter = balanceBefore + refundPaise;
+                  
+                  await tx.wallet.update({
+                    where: { id: wallet.id },
+                    data: { balancePaise: balanceAfter }
+                  });
+
+                  await tx.walletTransaction.create({
+                    data: {
+                      walletId: wallet.id,
+                      type: 'credit',
+                      amountPaise: refundPaise,
+                      balanceBeforePaise: balanceBefore,
+                      balanceAfterPaise: balanceAfter,
+                      description: `Refund: Failed campaign message (${campaignContact.contact?.phone}) - ${template.name}`,
+                      status: 'completed',
+                      metaChargeId: waMessageId,
+                      metaService: 'template_message_refund',
+                      note: `Campaign Refund (ID: ${campaignContact.campaign.id})`,
+                    }
+                  });
+                  console.log(`💰 Refunded ₹${rateRupees.toFixed(2)} to wallet for failed message to ${campaignContact.contact?.phone}`);
+                }
+              });
+            }
+          } catch (refundErr: any) {
+            console.error('❌ Failed to process wallet refund:', refundErr.message);
+          }
+        }
       }
 
       let campaign = campaignContact.campaign;
