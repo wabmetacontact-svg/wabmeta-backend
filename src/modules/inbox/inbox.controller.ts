@@ -308,6 +308,21 @@ export class InboxController {
   }
 
   // ==========================================
+  // DELETE ALL CONVERSATIONS
+  // ==========================================
+  async deleteAll(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const result = await inboxService.deleteAllConversations(organizationId);
+      return sendSuccess(res, result, result.message);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
   // BULK UPDATE
   // ==========================================
   async bulkUpdate(req: AuthRequest, res: Response, next: NextFunction) {
@@ -318,6 +333,26 @@ export class InboxController {
       const { conversationIds, ...updates } = req.body;
       const result = await inboxService.bulkUpdate(organizationId, conversationIds, updates);
       return sendSuccess(res, result, `${result.updated} conversations updated`);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // BULK DELETE
+  // ==========================================
+  async bulkDelete(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const { conversationIds } = req.body;
+      if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+        throw new AppError('conversationIds array is required', 400);
+      }
+
+      const result = await inboxService.bulkDelete(organizationId, conversationIds);
+      return sendSuccess(res, result, result.message);
     } catch (error) {
       next(error);
     }

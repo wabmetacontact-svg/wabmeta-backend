@@ -185,6 +185,14 @@ router.post('/bulk', (req, res, next) =>
   inboxController.bulkUpdate(req as any, res, next)
 );
 
+router.post('/bulk-delete', (req, res, next) =>
+  inboxController.bulkDelete(req as any, res, next)
+);
+
+router.delete('/delete-all', (req, res, next) =>
+  inboxController.deleteAll(req as any, res, next)
+);
+
 // ==========================================
 // SEARCH & STATS
 // ==========================================

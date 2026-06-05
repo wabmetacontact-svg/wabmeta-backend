@@ -504,6 +504,31 @@ export class InboxService {
   }
 
   /**
+   * Delete all conversations for organization
+   */
+  async deleteAllConversations(organizationId: string) {
+    const result = await prisma.conversation.deleteMany({
+      where: { organizationId },
+    });
+
+    return { success: true, count: result.count, message: 'All conversations deleted' };
+  }
+
+  /**
+   * Bulk delete conversations
+   */
+  async bulkDelete(organizationId: string, conversationIds: string[]) {
+    const result = await prisma.conversation.deleteMany({
+      where: {
+        id: { in: conversationIds },
+        organizationId,
+      },
+    });
+
+    return { success: true, count: result.count, message: `${result.count} conversations deleted` };
+  }
+
+  /**
    * Update conversation
    */
   async updateConversation(
