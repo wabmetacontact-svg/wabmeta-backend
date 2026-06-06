@@ -1,5 +1,0 @@
-﻿src/modules/inbox/inbox.controller.ts(366,17): error TS2353: Object literal may only specify known properties, and 'isPinned' does not exist in type '(Without<ConversationUpdateInput, ConversationUncheckedUpdateInput> & ConversationUncheckedUpdateInput) | (Without<...> & ConversationUpdateInput)'.
-src/modules/inbox/inbox.media.ts(33,66): error TS2503: Cannot find namespace 'multer'.
-src/modules/inbox/inbox.media.ts(54,5): error TS2322: Type '(req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => any' is not assignable to type '(req: Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>, file: File, callback: FileFilterCallback) => void'.
-  Types of parameters 'file' and 'file' are incompatible.
-    Property 'stream' is missing in type 'File' but required in type 'Express.Multer.File'.

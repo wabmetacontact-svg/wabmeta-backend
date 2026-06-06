@@ -1,4 +1,0 @@
-﻿src/modules/inbox/inbox.media.ts(33,19): error TS2503: Cannot find namespace 'multer'.
-src/modules/inbox/inbox.media.ts(33,51): error TS7006: Parameter 'req' implicitly has an 'any' type.
-src/modules/inbox/inbox.media.ts(33,56): error TS7006: Parameter 'file' implicitly has an 'any' type.
-src/modules/inbox/inbox.media.ts(33,62): error TS7006: Parameter 'cb' implicitly has an 'any' type.

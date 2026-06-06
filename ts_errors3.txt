@@ -1,4 +1,0 @@
-﻿src/modules/inbox/inbox.media.ts(3,18): error TS2305: Module '"multer"' has no exported member 'FileFilterCallback'.
-src/modules/inbox/inbox.media.ts(54,5): error TS2322: Type '(req: Request, file: Express.Multer.File, cb: FileFilterCallback) => any' is not assignable to type '(req: Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>, file: File, callback: FileFilterCallback) => void'.
-  Types of parameters 'file' and 'file' are incompatible.
-    Property 'stream' is missing in type 'File' but required in type 'Express.Multer.File'.

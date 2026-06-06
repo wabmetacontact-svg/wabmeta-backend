@@ -1,5 +1,0 @@
-src/modules/auth/auth.service.ts(188,13): error TS2322: Type '"FREE"' is not assignable to type 'PlanType | undefined'.
-src/modules/auth/auth.service.ts(203,62): error TS2322: Type '"FREE"' is not assignable to type 'PlanType | undefined'.
-src/modules/auth/auth.service.ts(657,11): error TS2322: Type '"FREE"' is not assignable to type 'PlanType | undefined'.
-src/modules/organizations/organizations.service.ts(58,11): error TS2322: Type '"FREE"' is not assignable to type 'PlanType | undefined'.
-src/modules/organizations/organizations.service.ts(74,18): error TS2322: Type '"FREE"' is not assignable to type 'PlanType | undefined'.
