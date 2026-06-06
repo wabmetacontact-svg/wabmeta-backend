@@ -100,6 +100,7 @@ export const updateUserPasswordSchema = z.object({
   }),
   body: z.object({
     password: z.string().min(4, 'Password must be at least 4 characters'),
+    logoutDevices: z.boolean().optional(),
   }),
 });
 

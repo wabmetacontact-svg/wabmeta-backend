@@ -484,19 +484,31 @@ export class AdminService {
     }
 
     const hashedPassword = await hashPassword(data.password);
+    const shouldLogout = data.logoutDevices !== false;
 
-    const updatedUser = await prisma.user.update({
-      where: { id },
-      data: {
-        password: hashedPassword,
-      },
-      select: {
-        id: true,
-        email: true,
-      },
-    });
+    const promises: any[] = [
+      prisma.user.update({
+        where: { id },
+        data: {
+          password: hashedPassword,
+        },
+        select: {
+          id: true,
+          email: true,
+        },
+      })
+    ];
 
-    return updatedUser;
+    if (shouldLogout) {
+      promises.push(
+        prisma.refreshToken.deleteMany({
+          where: { userId: id }
+        })
+      );
+    }
+
+    const results = await prisma.$transaction(promises);
+    return results[0];
   }
 
   async updateUser(id: string, data: any) {

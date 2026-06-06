@@ -277,7 +277,7 @@ export class AdminController {
   async updateUserPassword(req: AdminRequest, res: Response, next: NextFunction) {
     try {
       const id = getParamId(req.params.id);
-      const { password } = req.body;
+      const { password, logoutDevices } = req.body;
 
       if (!id) {
         throw new AppError('User ID is required', 400);
@@ -287,7 +287,7 @@ export class AdminController {
         throw new AppError('Password is required', 400);
       }
 
-      const user = await adminService.updateUserPassword(id, { password });
+      const user = await adminService.updateUserPassword(id, { password, logoutDevices });
       return sendSuccess(res, user, 'User password updated successfully');
     } catch (error) {
       next(error);
