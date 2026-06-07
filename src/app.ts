@@ -94,7 +94,8 @@ app.use(
       // ✅ No origin (mobile apps, postman, Meta webhooks)
       if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
+      const isVercel = origin.endsWith('.vercel.app') || origin.includes('vercel.app');
+      if (allowedOrigins.includes(origin) || isVercel) {
         callback(null, true);
       } else {
         console.warn(`⚠️ CORS blocked origin: ${origin}`);
