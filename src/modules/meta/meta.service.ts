@@ -210,26 +210,49 @@ export class MetaService {
       }
 
       // Fallback: try business query
+      // ⚠️ Wrapped in try-catch because this requires 'business_management' scope
+      // which Embedded Signup tokens may NOT have
       if (!wabaId) {
-        console.log('⚠️ WABA not in token, querying business...');
-        const wabas = await metaApi.getSharedWABAs(accessToken);
-        if (wabas.length > 0) {
-          wabaId = wabas[0].id;
-          businessId = wabas[0].owner_business_info?.id || businessId;
-          console.log('✅ Found WABA from business:', wabaId);
+        console.log('⚠️ WABA not in token granular scopes, trying business API fallback...');
+        try {
+          const wabas = await metaApi.getSharedWABAs(accessToken);
+          if (wabas.length > 0) {
+            wabaId = wabas[0].id;
+            businessId = wabas[0].owner_business_info?.id || businessId;
+            console.log('✅ Found WABA from business API:', wabaId);
+          }
+        } catch (wabaErr: any) {
+          // #100 Missing Permission = token doesn't have business_management scope
+          // This is EXPECTED for Embedded Signup tokens - they only have whatsapp_business_management
+          console.warn('⚠️ Business API fallback failed (expected for Embedded Signup tokens):', wabaErr.message);
         }
       }
 
       if (!wabaId) {
-        throw new AppError('No WhatsApp Business Account found', 404);
+        throw new AppError(
+          '🚫 WhatsApp Setup Incomplete\n' +
+          'You logged in to Facebook, but WhatsApp Business Account was not shared with us.\n' +
+          '✅ Please click "Connect" again and FULLY complete the wizard:\n' +
+          '1. Create or select a Business Portfolio\n' +
+          '2. Create a WhatsApp Business Account (WABA)\n' +
+          '3. Add and VERIFY a phone number\n' +
+          '4. Click FINISH at the end',
+          400
+        );
       }
 
-      // Get WABA details
-      const wabaDetails = await metaApi.getWABADetails(wabaId, accessToken);
-      console.log('✅ WABA Details:', {
-        id: wabaDetails.id,
-        name: wabaDetails.name,
-      });
+      // Get WABA details (wrapped in try-catch - some fields may require extra permissions)
+      let wabaDetails: any = { id: wabaId, name: 'WhatsApp Business Account' };
+      try {
+        wabaDetails = await metaApi.getWABADetails(wabaId, accessToken);
+        console.log('✅ WABA Details:', {
+          id: wabaDetails.id,
+          name: wabaDetails.name,
+        });
+      } catch (detailErr: any) {
+        console.warn('⚠️ Could not get full WABA details (non-fatal):', detailErr.message);
+        console.log('💡 Continuing with minimal WABA info: id=', wabaId);
+      }
 
       onProgress?.({
         step: 'FETCHING_WABA',

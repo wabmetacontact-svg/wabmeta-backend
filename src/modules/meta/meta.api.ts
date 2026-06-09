@@ -287,7 +287,9 @@ class MetaApiClient {
       const response = await this.client.get(`${wabaId}`, {
         params: {
           access_token: accessToken,
-          fields: 'id,name,currency,timezone_id,message_template_namespace,owner_business_info,on_behalf_of_business_info,account_review_status',
+          // ✅ Only request basic fields — owner_business_info, account_review_status
+          // require extra permissions not always granted by Embedded Signup tokens
+          fields: 'id,name,currency,timezone_id,message_template_namespace',
         },
       });
 
