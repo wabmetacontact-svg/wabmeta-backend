@@ -247,7 +247,68 @@ const checkSingleAccountLimit = async (req: any, res: any, next: any) => {
 };
 
 router.post('/callback', checkSingleAccountLimit, metaController.handleCallback.bind(metaController));
-router.post('/connect', checkSingleAccountLimit, metaController.handleCallback.bind(metaController));
+
+router.post('/connect', authenticate, async (req, res, next) => {
+  try {
+    const { code, organizationId } = req.body;
+    const userId = (req as any).user?.id;
+
+    if (!code) {
+      throw new AppError('Authorization code is required', 400);
+    }
+
+    if (!organizationId) {
+      throw new AppError('Organization ID is required', 400);
+    }
+
+    if (!userId) {
+      throw new AppError('Authentication required', 401);
+    }
+
+    // Verify user permission
+    const membership = await prisma.organizationMember.findFirst({
+      where: {
+        organizationId,
+        userId,
+        role: { in: ['OWNER', 'ADMIN'] },
+      },
+    });
+
+    if (!membership) {
+      throw new AppError('You do not have permission to connect WhatsApp', 403);
+    }
+
+    // Check single account limit
+    const existingConnected = await prisma.whatsAppAccount.findFirst({
+      where: { organizationId, status: 'CONNECTED' },
+    });
+
+    if (existingConnected) {
+      throw new AppError(
+        `Organization already has a connected WhatsApp account (${existingConnected.phoneNumber}). Please disconnect it first.`,
+        400
+      );
+    }
+
+    console.log('🔄 FB.login Embedded Signup flow - calling completeConnection');
+
+    // Use metaService directly (handles WABA detection, encryption, save, etc.)
+    const result = await metaService.completeConnection(
+      code,
+      organizationId,
+      userId,
+      'CLOUD_API'
+    );
+
+    if (result.success) {
+      return sendSuccess(res, result.account, 'WhatsApp connected successfully');
+    } else {
+      throw new AppError(result.error || 'Connection failed', 400);
+    }
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ============================================
 // PROTECTED ROUTES
