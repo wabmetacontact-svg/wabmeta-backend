@@ -169,68 +169,100 @@ export class MetaController {
   // ============================================
   async handleCallback(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const { code, state } = req.body;
+      const { code, state, organizationId: bodyOrgId } = req.body;
 
       console.log('\n🔄 ========== META CALLBACK ==========');
       console.log('   Code:', code ? `${code.substring(0, 10)}...` : 'Missing');
-      console.log('   State:', state ? `${state.substring(0, 20)}...` : 'Missing');
+      console.log('   State:', state ? `${state.substring(0, 20)}...` : 'Missing (Embedded Signup)');
+      console.log('   Body Org ID:', bodyOrgId || 'Missing');
 
       if (!code) {
         throw new AppError('Authorization code is required', 400);
       }
 
-      if (!state) {
-        throw new AppError('State parameter is required', 400);
-      }
+      let organizationId: string;
 
-      // Verify state
-      const oauthState = await (prisma as any).oAuthState.findUnique({
-        where: { state },
-      });
+      // ✅ EMBEDDED SIGNUP FLOW (no state, has organizationId in body)
+      if (!state && bodyOrgId) {
+        console.log('📱 Embedded Signup flow detected');
+        organizationId = bodyOrgId;
 
-      if (!oauthState) {
-        console.error('❌ Invalid state token');
-        throw new AppError('Invalid or expired state token', 400);
-      }
+        // Verify user has permission
+        const userId = req.user?.id;
+        if (userId) {
+          const membership = await prisma.organizationMember.findFirst({
+            where: {
+              organizationId,
+              userId,
+              role: { in: ['OWNER', 'ADMIN'] },
+            },
+          });
 
-      if (oauthState.expiresAt < new Date()) {
-        await (prisma as any).oAuthState.delete({ where: { state } });
-        console.error('❌ State token expired');
-        throw new AppError('State token expired. Please try again.', 400);
-      }
-
-      const organizationId = oauthState.organizationId;
-      console.log('   Organization ID:', organizationId);
-
-      // Verify user permissions
-      const userId = req.user?.id;
-      if (userId) {
-        const membership = await prisma.organizationMember.findFirst({
-          where: {
-            organizationId,
-            userId,
-            role: { in: ['OWNER', 'ADMIN'] },
-          },
+          if (!membership) {
+            throw new AppError('You do not have permission to connect WhatsApp', 403);
+          }
+        }
+      } 
+      // ✅ OAUTH URL FLOW (with state - legacy)
+      else if (state) {
+        console.log('🔗 OAuth URL flow detected');
+        
+        const oauthState = await (prisma as any).oAuthState.findUnique({
+          where: { state },
         });
 
-        if (!membership) {
-          throw new AppError('You do not have permission to connect WhatsApp', 403);
+        if (!oauthState) {
+          throw new AppError('Invalid or expired state token', 400);
         }
+
+        if (oauthState.expiresAt < new Date()) {
+          await (prisma as any).oAuthState.delete({ where: { state } });
+          throw new AppError('State token expired. Please try again.', 400);
+        }
+
+        organizationId = oauthState.organizationId;
+
+        // Verify user permissions
+        const userId = req.user?.id;
+        if (userId) {
+          const membership = await prisma.organizationMember.findFirst({
+            where: {
+              organizationId,
+              userId,
+              role: { in: ['OWNER', 'ADMIN'] },
+            },
+          });
+
+          if (!membership) {
+            throw new AppError('You do not have permission', 403);
+          }
+        }
+
+        // Delete used state
+        await (prisma as any).oAuthState.delete({ where: { state } });
+      } else {
+        throw new AppError('Either state or organizationId is required', 400);
       }
+
+      console.log('   Organization ID:', organizationId);
 
       console.log('📊 Step 1: Exchanging code for access token...');
 
-      // Exchange code for access token
+      // ✅ FIX: Token exchange WITHOUT redirect_uri for Embedded Signup
+      const tokenParams: any = {
+        client_id: process.env.META_APP_ID,
+        client_secret: process.env.META_APP_SECRET,
+        code,
+      };
+
+      // Only add redirect_uri for legacy OAuth flow
+      if (state) {
+        tokenParams.redirect_uri = `${process.env.FRONTEND_URL}/meta/callback`;
+      }
+
       const tokenResponse = await axios.get(
         `https://graph.facebook.com/${config.meta.graphApiVersion}/oauth/access_token`,
-        {
-          params: {
-            client_id: process.env.META_APP_ID,
-            client_secret: process.env.META_APP_SECRET,
-            code,
-            redirect_uri: `${process.env.FRONTEND_URL}/meta/callback`,
-          },
-        }
+        { params: tokenParams }
       );
 
       const { access_token } = tokenResponse.data;
