@@ -344,7 +344,7 @@ export class MetaService {
       });
 
       // ============================================
-      // STEP 5: Save to Database - ✅ FIXED LOGIC
+      // STEP 5: Save to Database — UPSERT approach
       // ============================================
       onProgress?.({
         step: 'SAVING',
@@ -352,12 +352,11 @@ export class MetaService {
         message: 'Saving account...',
       });
 
-      // ✅ ADD: Organization level - sirf ek connected account allowed
+      // Block if org already has a DIFFERENT phone connected
       const existingConnectedInOrg = await prisma.whatsAppAccount.findFirst({
         where: {
           organizationId,
           status: WhatsAppAccountStatus.CONNECTED,
-          // Same phone number se reconnect allow karo
           phoneNumberId: { not: primaryPhone.id },
         },
       });
@@ -370,17 +369,8 @@ export class MetaService {
         );
       }
 
-      // ✅ Check existing by phoneNumberId ONLY
-      const existingAccount = await prisma.whatsAppAccount.findFirst({
-        where: {
-          phoneNumberId: primaryPhone.id,
-        },
-      });
-
       console.log('🔐 Encrypting token...');
       const encryptedToken = encrypt(accessToken);
-
-      // Verify encryption
       const verifyDecrypt = safeDecryptStrict(encryptedToken);
       if (verifyDecrypt !== accessToken) {
         throw new AppError('Token encryption verification failed', 500);
@@ -389,71 +379,62 @@ export class MetaService {
 
       const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
       const cleanPhoneNumber = primaryPhone.displayPhoneNumber.replace(/\D/g, '');
+      const webhookVerifyToken = uuidv4();
+      const encryptedWebhookSecret = encrypt(webhookVerifyToken);
 
+      // ✅ UPSERT — atomically handles ALL cases:
+      //   • Brand new phone number → CREATE
+      //   • Same phone, same org → UPDATE (reactivate)
+      //   • Same phone, different org → UPDATE (transfer ownership)
+      //   • Race condition / findFirst miss → UPDATE (no crash)
       let savedAccount;
+      try {
+        // Check if any existing record with this phoneNumberId (any org, any status)
+        const existingByPhone = await prisma.whatsAppAccount.findUnique({
+          where: { phoneNumberId: primaryPhone.id },
+        });
 
-      if (existingAccount) {
-        // Account exists - check organization
-        if (existingAccount.organizationId === organizationId) {
-          // ✅ Same organization - REACTIVATE/UPDATE existing account
-          console.log('🔄 Reactivating existing account for same organization');
+        if (existingByPhone) {
+          const isSameOrg = existingByPhone.organizationId === organizationId;
+          console.log(isSameOrg
+            ? '🔄 Reactivating existing account (same org)'
+            : `🔄 Transferring phone to new org (was: ${existingByPhone.organizationId})`
+          );
 
-          // Check if there's a default account already
           const hasDefault = await prisma.whatsAppAccount.findFirst({
             where: {
               organizationId,
               isDefault: true,
-              id: { not: existingAccount.id },
+              id: { not: existingByPhone.id },
             },
           });
 
           savedAccount = await prisma.whatsAppAccount.update({
-            where: { id: existingAccount.id },
+            where: { id: existingByPhone.id },
             data: {
+              organizationId,          // update org if transferring
               accessToken: encryptedToken,
               tokenExpiresAt,
               wabaId,
+              phoneNumber: cleanPhoneNumber,
               displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
               verifiedName: primaryPhone.verifiedName,
               qualityRating: primaryPhone.qualityRating,
               status: WhatsAppAccountStatus.CONNECTED,
               connectionType: finalConnectionType,
-              isDefault: existingAccount.isDefault || !hasDefault, // Restore or set as default if no other default
+              isDefault: existingByPhone.isDefault || !hasDefault,
               codeVerificationStatus: primaryPhone.codeVerificationStatus,
               nameStatus: primaryPhone.nameStatus,
               messagingLimit: primaryPhone.messagingLimitTier,
             } as any,
           });
 
-          console.log('✅ Account reactivated successfully');
+          console.log('✅ Account updated successfully');
         } else {
-          // ✅ Different organization - Soft disconnect old, CREATE new
-          console.log('🔄 Phone number switching organizations');
-          console.log(`   Old org: ${existingAccount.organizationId}`);
-          console.log(`   New org: ${organizationId}`);
+          // Truly new — CREATE
+          console.log('🔄 Creating new WhatsApp account');
+          const accountCount = await prisma.whatsAppAccount.count({ where: { organizationId } });
 
-          // Soft disconnect old account (preserves data for old org)
-          await prisma.whatsAppAccount.update({
-            where: { id: existingAccount.id },
-            data: {
-              status: WhatsAppAccountStatus.DISCONNECTED,
-              accessToken: null,
-              tokenExpiresAt: null,
-              isDefault: false,
-            },
-          });
-
-          console.log('✅ Old account soft-disconnected (data preserved)');
-
-          // Check if new org already has accounts
-          const accountCount = await prisma.whatsAppAccount.count({
-            where: { organizationId },
-          });
-
-          const webhookVerifyToken = uuidv4();
-          const encryptedWebhookSecret = encrypt(webhookVerifyToken);
-
-          // Create new account for current organization
           savedAccount = await prisma.whatsAppAccount.create({
             data: {
               organizationId,
@@ -475,41 +456,42 @@ export class MetaService {
             } as any,
           });
 
-          console.log('✅ New account created for new organization');
+          console.log('✅ New account created');
         }
-      } else {
-        // ✅ No existing account - CREATE new
-        console.log('🔄 Creating completely new account');
-
-        const accountCount = await prisma.whatsAppAccount.count({
-          where: { organizationId },
-        });
-
-        const webhookVerifyToken = uuidv4();
-        const encryptedWebhookSecret = encrypt(webhookVerifyToken);
-
-        savedAccount = await prisma.whatsAppAccount.create({
-          data: {
-            organizationId,
-            wabaId,
-            phoneNumberId: primaryPhone.id,
-            phoneNumber: cleanPhoneNumber,
-            displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
-            verifiedName: primaryPhone.verifiedName,
-            qualityRating: primaryPhone.qualityRating,
-            accessToken: encryptedToken,
-            tokenExpiresAt,
-            webhookSecret: encryptedWebhookSecret,
-            status: WhatsAppAccountStatus.CONNECTED,
-            connectionType: finalConnectionType,
-            isDefault: accountCount === 0,
-            codeVerificationStatus: primaryPhone.codeVerificationStatus,
-            nameStatus: primaryPhone.nameStatus,
-            messagingLimit: primaryPhone.messagingLimitTier,
-          } as any,
-        });
-
-        console.log('✅ New account created');
+      } catch (dbError: any) {
+        // Last resort: if create still hits unique constraint, do a findUnique + update
+        if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
+          console.warn('⚠️ Unique constraint hit despite findUnique miss — doing force update');
+          const forceExisting = await prisma.whatsAppAccount.findFirst({
+            where: { phoneNumberId: primaryPhone.id },
+          });
+          if (forceExisting) {
+            savedAccount = await prisma.whatsAppAccount.update({
+              where: { id: forceExisting.id },
+              data: {
+                organizationId,
+                accessToken: encryptedToken,
+                tokenExpiresAt,
+                wabaId,
+                phoneNumber: cleanPhoneNumber,
+                displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
+                verifiedName: primaryPhone.verifiedName,
+                qualityRating: primaryPhone.qualityRating,
+                status: WhatsAppAccountStatus.CONNECTED,
+                connectionType: finalConnectionType,
+                isDefault: true,
+                codeVerificationStatus: primaryPhone.codeVerificationStatus,
+                nameStatus: primaryPhone.nameStatus,
+                messagingLimit: primaryPhone.messagingLimitTier,
+              } as any,
+            });
+            console.log('✅ Force-updated existing account');
+          } else {
+            throw dbError;
+          }
+        } else {
+          throw dbError;
+        }
       }
 
       onProgress?.({
