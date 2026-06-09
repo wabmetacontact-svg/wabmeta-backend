@@ -298,12 +298,15 @@ router.post('/connect', authenticate, async (req, res, next) => {
       );
     }
 
-    // ✅ Use metaService.completeConnection (handles everything properly)
+    // ✅ Use metaService.completeConnection with embeddedSignup=true
+    // This tells it to NOT send redirect_uri during token exchange (Meta requirement for FB.login)
     const result = await metaService.completeConnection(
       code,
       organizationId,
       userId,
-      'CLOUD_API'
+      'CLOUD_API',
+      undefined,   // no onProgress callback
+      true         // ✅ embeddedSignup = true → skipRedirectUri during token exchange
     );
 
     if (result.success) {

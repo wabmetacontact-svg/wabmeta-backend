@@ -121,7 +121,8 @@ export class MetaService {
     organizationId: string,
     userId: string,
     connectionType: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP' = 'CLOUD_API',
-    onProgress?: (progress: ConnectionProgress) => void
+    onProgress?: (progress: ConnectionProgress) => void,
+    embeddedSignup = false  // ✅ true = FB.login flow, no redirect_uri needed
   ): Promise<{ success: boolean; account?: any; error?: string }> {
     try {
       console.log('\n🔄 ========== META CONNECTION START ==========');
@@ -145,7 +146,9 @@ export class MetaService {
         accessToken = codeOrToken;
       } else {
         console.log('🔄 Exchanging code for token...');
-        const tokenResponse = await metaApi.exchangeCodeForToken(codeOrToken);
+        // ✅ Pass skipRedirectUri=true for FB.login flow (Embedded Signup)
+        // FB.login codes MUST be exchanged WITHOUT redirect_uri
+        const tokenResponse = await metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
         accessToken = tokenResponse.accessToken;
         console.log('✅ Short-lived token obtained');
       }

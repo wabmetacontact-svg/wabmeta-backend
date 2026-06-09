@@ -80,19 +80,33 @@ class MetaApiClient {
   // TOKEN MANAGEMENT
   // ============================================
 
-  async exchangeCodeForToken(code: string): Promise<TokenExchangeResponse> {
+  /**
+   * Exchange authorization code for access token.
+   * @param code - The authorization code from FB.login or OAuth redirect
+   * @param skipRedirectUri - Set TRUE for FB.login/Embedded Signup flow.
+   *   FB.login codes must be exchanged WITHOUT a redirect_uri.
+   *   Only OAuth redirect flow (state-token based) needs redirect_uri.
+   */
+  async exchangeCodeForToken(code: string, skipRedirectUri = false): Promise<TokenExchangeResponse> {
     try {
       console.log('[Meta API] Exchanging code for token...');
-      console.log('[Meta API] Redirect URI:', config.meta.redirectUri);
 
-      const response = await this.client.get('/oauth/access_token', {
-        params: {
-          client_id: config.meta.appId,
-          client_secret: config.meta.appSecret,
-          redirect_uri: config.meta.redirectUri,
-          code: code,
-        },
-      });
+      // ✅ FB.login Embedded Signup: NO redirect_uri (Meta requirement)
+      // ❌ Sending redirect_uri causes: "Error validating verification code"
+      const params: Record<string, string> = {
+        client_id: config.meta.appId,
+        client_secret: config.meta.appSecret,
+        code: code,
+      };
+
+      if (!skipRedirectUri) {
+        params.redirect_uri = config.meta.redirectUri;
+        console.log('[Meta API] Redirect URI:', config.meta.redirectUri);
+      } else {
+        console.log('[Meta API] ⚠️  Skipping redirect_uri (FB.login Embedded Signup flow)');
+      }
+
+      const response = await this.client.get('/oauth/access_token', { params });
 
       console.log('[Meta API] ✅ Token exchange successful');
 
