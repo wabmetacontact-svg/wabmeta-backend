@@ -252,13 +252,15 @@ router.post('/callback', checkSingleAccountLimit, metaController.handleCallback.
 // /connect - Frontend FB.login Embedded Signup flow (NO state token)
 router.post('/connect', authenticate, async (req, res, next) => {
   try {
-    const { code, organizationId } = req.body;
+    const { code, organizationId, wabaId, phoneNumberId } = req.body;
     const userId = (req as any).user?.id;
 
     console.log('\n🔄 ========== META CONNECT (FB.login flow) ==========');
     console.log('   Code:', code ? `${code.substring(0, 10)}...` : 'Missing');
     console.log('   Organization ID:', organizationId);
     console.log('   User ID:', userId);
+    console.log('   Session WABA ID:', wabaId || '(not provided — will lookup from token)');
+    console.log('   Session Phone ID:', phoneNumberId || '(not provided — will lookup from WABA)');
 
     if (!code) {
       throw new AppError('Authorization code is required', 400);
@@ -299,14 +301,16 @@ router.post('/connect', authenticate, async (req, res, next) => {
     }
 
     // ✅ Use metaService.completeConnection with embeddedSignup=true
-    // This tells it to NOT send redirect_uri during token exchange (Meta requirement for FB.login)
+    // Pass wabaId + phoneNumberId from session info (if captured by frontend)
     const result = await metaService.completeConnection(
       code,
       organizationId,
       userId,
       'CLOUD_API',
       undefined,   // no onProgress callback
-      true         // ✅ embeddedSignup = true → skipRedirectUri during token exchange
+      true,        // embeddedSignup = true → skipRedirectUri during token exchange
+      wabaId || undefined,        // ✅ Session WABA ID from message event
+      phoneNumberId || undefined  // ✅ Session Phone Number ID from message event
     );
 
     if (result.success) {

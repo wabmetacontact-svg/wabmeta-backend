@@ -122,13 +122,16 @@ export class MetaService {
     userId: string,
     connectionType: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP' = 'CLOUD_API',
     onProgress?: (progress: ConnectionProgress) => void,
-    embeddedSignup = false  // ✅ true = FB.login flow, no redirect_uri needed
+    embeddedSignup = false,       // true = FB.login flow, no redirect_uri needed
+    sessionWabaId?: string,       // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
+    sessionPhoneNumberId?: string // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
   ): Promise<{ success: boolean; account?: any; error?: string }> {
     try {
       console.log('\n🔄 ========== META CONNECTION START ==========');
       console.log('   Organization ID:', organizationId);
-      console.log('   Connection Type:', connectionType);
-      console.log('   User ID:', userId);
+      console.log('   Embedded Signup:', embeddedSignup);
+      console.log('   Session WABA ID:', sessionWabaId || '(will lookup from token)');
+      console.log('   Session Phone ID:', sessionPhoneNumberId || '(will lookup from WABA)');
 
       // ============================================
       // STEP 1: Get Access Token
@@ -192,51 +195,54 @@ export class MetaService {
 
       console.log('🔍 Token is valid');
 
-      // Get WABA ID
-      let wabaId: string | null = null;
+      // Get WABA ID - Priority: session info > granular scopes > business API
+      let wabaId: string | null = sessionWabaId || null;
       let businessId: string | null = null;
 
-      const granularScopes = debugInfo.data.granular_scopes || [];
+      if (wabaId) {
+        console.log('✅ Using WABA ID from session info (most reliable):', wabaId);
+      } else {
+        // Method 1: granular scopes from debug token
+        const granularScopes = debugInfo.data.granular_scopes || [];
+        console.log('🔍 Granular scopes:', JSON.stringify(granularScopes));
 
-      for (const scope of granularScopes) {
-        if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
-          wabaId = scope.target_ids[0];
-          console.log('✅ Found WABA ID:', wabaId);
-          break;
-        }
-        if (scope.scope === 'business_management' && scope.target_ids?.length) {
-          businessId = scope.target_ids[0];
-        }
-      }
-
-      // Fallback: try business query
-      // ⚠️ Wrapped in try-catch because this requires 'business_management' scope
-      // which Embedded Signup tokens may NOT have
-      if (!wabaId) {
-        console.log('⚠️ WABA not in token granular scopes, trying business API fallback...');
-        try {
-          const wabas = await metaApi.getSharedWABAs(accessToken);
-          if (wabas.length > 0) {
-            wabaId = wabas[0].id;
-            businessId = wabas[0].owner_business_info?.id || businessId;
-            console.log('✅ Found WABA from business API:', wabaId);
+        for (const scope of granularScopes) {
+          if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
+            wabaId = scope.target_ids[0];
+            console.log('✅ Found WABA ID from granular scopes:', wabaId);
+            break;
           }
-        } catch (wabaErr: any) {
-          // #100 Missing Permission = token doesn't have business_management scope
-          // This is EXPECTED for Embedded Signup tokens - they only have whatsapp_business_management
-          console.warn('⚠️ Business API fallback failed (expected for Embedded Signup tokens):', wabaErr.message);
+          if (scope.scope === 'business_management' && scope.target_ids?.length) {
+            businessId = scope.target_ids[0];
+          }
+        }
+
+        // Method 2: business API fallback (requires business_management scope - may fail)
+        if (!wabaId) {
+          console.log('⚠️ WABA not in granular scopes, trying business API fallback...');
+          try {
+            const wabas = await metaApi.getSharedWABAs(accessToken);
+            if (wabas.length > 0) {
+              wabaId = wabas[0].id;
+              businessId = wabas[0].owner_business_info?.id || businessId;
+              console.log('✅ Found WABA from business API:', wabaId);
+            }
+          } catch (wabaErr: any) {
+            console.warn('⚠️ Business API fallback failed (expected for Embedded Signup tokens):', wabaErr.message);
+          }
         }
       }
 
       if (!wabaId) {
         throw new AppError(
           '🚫 WhatsApp Setup Incomplete\n' +
-          'You logged in to Facebook, but WhatsApp Business Account was not shared with us.\n' +
-          '✅ Please click "Connect" again and FULLY complete the wizard:\n' +
-          '1. Create or select a Business Portfolio\n' +
-          '2. Create a WhatsApp Business Account (WABA)\n' +
-          '3. Add and VERIFY a phone number\n' +
-          '4. Click FINISH at the end',
+          'Facebook login succeeded but WhatsApp Business Account was not shared.\n' +
+          '✅ Please try again and FULLY complete the wizard:\n' +
+          '1. Click "Get Started"\n' +
+          '2. Create/select a Business Portfolio\n' +
+          '3. Create a WhatsApp Business Account\n' +
+          '4. Add and VERIFY a phone number\n' +
+          '5. Click FINISH and wait for the popup to close',
           400
         );
       }
@@ -270,7 +276,33 @@ export class MetaService {
         message: 'Fetching phone numbers...',
       });
 
-      const phoneNumbers = await metaApi.getPhoneNumbers(wabaId, accessToken);
+      let phoneNumbers;
+
+      // ✅ If session phone number ID provided, get it directly (most reliable for Embedded Signup)
+      if (sessionPhoneNumberId) {
+        console.log('📥 Fetching specific phone by session ID:', sessionPhoneNumberId);
+        try {
+          const specificPhone = await metaApi.getPhoneNumberDetails(sessionPhoneNumberId, accessToken);
+          phoneNumbers = [{
+            id: specificPhone.id,
+            verifiedName: specificPhone.verifiedName,
+            displayPhoneNumber: specificPhone.displayPhoneNumber,
+            qualityRating: specificPhone.qualityRating,
+            codeVerificationStatus: specificPhone.codeVerificationStatus,
+            nameStatus: specificPhone.nameStatus,
+            messagingLimitTier: null,
+            platformType: null,
+            throughput: null,
+            status: null,
+          }];
+          console.log('✅ Got phone from session ID:', specificPhone.displayPhoneNumber);
+        } catch (phoneErr: any) {
+          console.warn('⚠️ Could not get phone by session ID, falling back to WABA list:', phoneErr.message);
+          phoneNumbers = await metaApi.getPhoneNumbers(wabaId, accessToken);
+        }
+      } else {
+        phoneNumbers = await metaApi.getPhoneNumbers(wabaId, accessToken);
+      }
 
       if (phoneNumbers.length === 0) {
         throw new AppError('No phone numbers found', 404);
