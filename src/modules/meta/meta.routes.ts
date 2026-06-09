@@ -736,6 +736,49 @@ router.delete('/accounts/:id', metaController.disconnectAccount.bind(metaControl
 // ✅ Also support POST /accounts/:id/disconnect (frontend uses this)
 router.post('/accounts/:id/disconnect', metaController.disconnectAccount.bind(metaController));
 
+// ✅ Set default account shortcut (gets org from JWT context)
+router.post('/accounts/:id/set-default', async (req, res, next) => {
+  try {
+    const { id: accountId } = req.params;
+    const userId = (req as any).user?.id;
+
+    if (!userId) {
+      throw new AppError('Authentication required', 401);
+    }
+
+    // Find account to get organizationId
+    const account = await prisma.whatsAppAccount.findFirst({
+      where: { id: accountId },
+      include: {
+        organization: {
+          include: {
+            members: { where: { userId, role: { in: ['OWNER', 'ADMIN'] } } }
+          }
+        }
+      } as any,
+    });
+
+    if (!account) {
+      throw new AppError('Account not found', 404);
+    }
+
+    const organizationId = account.organizationId;
+
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId, userId, role: { in: ['OWNER', 'ADMIN'] } },
+    });
+
+    if (!membership) {
+      throw new AppError('You do not have permission to set default account', 403);
+    }
+
+    const result = await metaService.setDefaultAccount(accountId, organizationId);
+    return sendSuccess(res, result, 'Default account updated successfully');
+  } catch (error) {
+    next(error);
+  }
+});
+
 
 // ============================================
 // HEALTH CHECK
