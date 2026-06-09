@@ -246,12 +246,19 @@ const checkSingleAccountLimit = async (req: any, res: any, next: any) => {
   }
 };
 
+// /callback - Backend OAuth redirect flow (state token based)
 router.post('/callback', checkSingleAccountLimit, metaController.handleCallback.bind(metaController));
 
+// /connect - Frontend FB.login Embedded Signup flow (NO state token)
 router.post('/connect', authenticate, async (req, res, next) => {
   try {
     const { code, organizationId } = req.body;
     const userId = (req as any).user?.id;
+
+    console.log('\n🔄 ========== META CONNECT (FB.login flow) ==========');
+    console.log('   Code:', code ? `${code.substring(0, 10)}...` : 'Missing');
+    console.log('   Organization ID:', organizationId);
+    console.log('   User ID:', userId);
 
     if (!code) {
       throw new AppError('Authorization code is required', 400);
@@ -265,7 +272,7 @@ router.post('/connect', authenticate, async (req, res, next) => {
       throw new AppError('Authentication required', 401);
     }
 
-    // Verify user permission
+    // Verify membership
     const membership = await prisma.organizationMember.findFirst({
       where: {
         organizationId,
@@ -285,14 +292,13 @@ router.post('/connect', authenticate, async (req, res, next) => {
 
     if (existingConnected) {
       throw new AppError(
-        `Organization already has a connected WhatsApp account (${existingConnected.phoneNumber}). Please disconnect it first.`,
+        `Organization already has a connected WhatsApp account (${existingConnected.phoneNumber}). ` +
+        `Please disconnect it first.`,
         400
       );
     }
 
-    console.log('🔄 FB.login Embedded Signup flow - calling completeConnection');
-
-    // Use metaService directly (handles WABA detection, encryption, save, etc.)
+    // ✅ Use metaService.completeConnection (handles everything properly)
     const result = await metaService.completeConnection(
       code,
       organizationId,
@@ -301,11 +307,14 @@ router.post('/connect', authenticate, async (req, res, next) => {
     );
 
     if (result.success) {
+      console.log('✅ FB.login connection successful');
       return sendSuccess(res, result.account, 'WhatsApp connected successfully');
     } else {
+      console.error('❌ FB.login connection failed:', result.error);
       throw new AppError(result.error || 'Connection failed', 400);
     }
   } catch (error) {
+    console.error('❌ /connect error:', error);
     next(error);
   }
 });
