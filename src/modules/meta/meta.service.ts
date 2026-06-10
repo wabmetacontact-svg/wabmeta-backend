@@ -517,6 +517,65 @@ export class MetaService {
         }
       }
 
+      // ============================================
+      // STEP 5.5: Save/Update MetaConnection & PhoneNumbers
+      // ============================================
+      let savedMetaConnection = null;
+      try {
+        console.log('🔄 Saving MetaConnection...');
+        savedMetaConnection = await (prisma as any).metaConnection.upsert({
+          where: { organizationId },
+          update: {
+            accessToken: encryptedToken,
+            wabaId,
+            wabaName: wabaDetails.name,
+            status: 'CONNECTED',
+            lastSyncedAt: new Date(),
+          },
+          create: {
+            organizationId,
+            accessToken: encryptedToken,
+            wabaId,
+            wabaName: wabaDetails.name,
+            status: 'CONNECTED',
+          },
+        });
+        console.log('✅ MetaConnection saved:', savedMetaConnection.id);
+      } catch (e: any) {
+        console.warn('⚠️ MetaConnection save failed:', e.message);
+      }
+
+      try {
+        if (savedMetaConnection) {
+          console.log('🔄 Saving PhoneNumbers...');
+          for (const phone of phoneNumbers) {
+            await (prisma as any).phoneNumber.upsert({
+              where: { phoneNumberId: phone.id },
+              update: {
+                phoneNumber: phone.displayPhoneNumber.replace(/\D/g, ''),
+                displayName: phone.verifiedName || phone.displayPhoneNumber,
+                qualityRating: phone.qualityRating,
+                verifiedName: phone.verifiedName,
+                isActive: true,
+              },
+              create: {
+                metaConnectionId: savedMetaConnection.id,
+                phoneNumberId: phone.id,
+                phoneNumber: phone.displayPhoneNumber.replace(/\D/g, ''),
+                displayName: phone.verifiedName || phone.displayPhoneNumber,
+                qualityRating: phone.qualityRating,
+                verifiedName: phone.verifiedName,
+                isActive: true,
+                isPrimary: phone.id === primaryPhone.id,
+              },
+            });
+          }
+          console.log('✅ PhoneNumbers saved');
+        }
+      } catch (e: any) {
+        console.warn('⚠️ PhoneNumber save failed:', e.message);
+      }
+
       onProgress?.({
         step: 'COMPLETED',
         status: 'completed',
