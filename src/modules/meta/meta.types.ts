@@ -136,6 +136,7 @@ export interface ConnectionProgress {
   | 'FETCHING_WABA'
   | 'FETCHING_PHONE'
   | 'SUBSCRIBE_WEBHOOK'
+  | 'REGISTER_PHONE'
   | 'SAVING'
   | 'COMPLETED';
   status: 'pending' | 'in_progress' | 'completed' | 'error';

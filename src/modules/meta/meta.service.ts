@@ -344,6 +344,29 @@ export class MetaService {
       });
 
       // ============================================
+      // STEP 4.5: Register Phone Number for Cloud API
+      // ============================================
+      onProgress?.({
+        step: 'REGISTER_PHONE',
+        status: 'in_progress',
+        message: 'Registering phone number to Cloud API...',
+      });
+
+      try {
+        console.log(`[Meta Service] Registering phone number ${primaryPhone.id}...`);
+        await metaApi.registerPhoneNumber(primaryPhone.id, accessToken);
+        console.log('✅ Phone number registered successfully');
+      } catch (registerError: any) {
+        console.warn('⚠️ Phone number registration failed:', registerError.message);
+      }
+
+      onProgress?.({
+        step: 'REGISTER_PHONE',
+        status: 'completed',
+        message: 'Phone number registered',
+      });
+
+      // ============================================
       // STEP 5: Save to Database — UPSERT approach
       // ============================================
       onProgress?.({
