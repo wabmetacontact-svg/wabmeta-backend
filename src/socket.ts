@@ -300,11 +300,11 @@ function wireWebhookEvents() {
 }
 
 // ============================================
-// ✅ NEW: Force logout helper - admin use karega
+// ✅ Force logout helper - PROFESSIONAL MESSAGES
 // ============================================
 export const emitForceLogout = (
   userId: string,
-  reason: string = 'password_changed'
+  reason: string = 'security_update'
 ) => {
   if (!io) {
     console.warn('⚠️ Socket.IO not initialized, cannot emit force_logout');
@@ -313,14 +313,29 @@ export const emitForceLogout = (
 
   console.log(`🔒 Force logout emit → user:${userId} | reason: ${reason}`);
 
+  // ✅ Professional messages - no admin reference
+  const messages: Record<string, { title: string; message: string }> = {
+    password_changed: {
+      title: 'Session Expired',
+      message:
+        'For your security, your session has ended. Please sign in again to continue.',
+    },
+    account_suspended: {
+      title: 'Session Ended',
+      message: 'Your session has been ended. Please sign in to continue.',
+    },
+    security_update: {
+      title: 'Session Expired',
+      message: 'Your session has expired. Please sign in to continue.',
+    },
+  };
+
+  const messageData = messages[reason] || messages.security_update;
+
   io.to(`user:${userId}`).emit('force_logout', {
-    reason,
-    message:
-      reason === 'password_changed'
-        ? 'Your password has been changed by admin. Please login again.'
-        : reason === 'account_suspended'
-        ? 'Your account has been suspended. Please contact support.'
-        : 'You have been logged out by admin.',
+    reason: 'security_update', // ✅ Frontend ko hamesha generic reason bhejo
+    title: messageData.title,
+    message: messageData.message,
     timestamp: new Date().toISOString(),
   });
 };
