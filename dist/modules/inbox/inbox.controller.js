@@ -309,6 +309,21 @@ class InboxController {
         }
     }
     // ==========================================
+    // DELETE ALL CONVERSATIONS
+    // ==========================================
+    async deleteAll(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const result = await inbox_service_1.inboxService.deleteAllConversations(organizationId);
+            return (0, response_1.sendSuccess)(res, result, result.message);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
     // BULK UPDATE
     // ==========================================
     async bulkUpdate(req, res, next) {
@@ -319,6 +334,25 @@ class InboxController {
             const { conversationIds, ...updates } = req.body;
             const result = await inbox_service_1.inboxService.bulkUpdate(organizationId, conversationIds, updates);
             return (0, response_1.sendSuccess)(res, result, `${result.updated} conversations updated`);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
+    // BULK DELETE
+    // ==========================================
+    async bulkDelete(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { conversationIds } = req.body;
+            if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+                throw new errorHandler_1.AppError('conversationIds array is required', 400);
+            }
+            const result = await inbox_service_1.inboxService.bulkDelete(organizationId, conversationIds);
+            return (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
             next(error);
@@ -373,18 +407,20 @@ class InboxController {
             next(error);
         }
     }
+    // ==========================================
     // CREATE CUSTOM LABEL
+    // ==========================================
     async createCustomLabel(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
             if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            const { label } = req.body;
+            const { label, color } = req.body;
             if (!label || typeof label !== 'string' || label.trim() === '') {
-                throw new errorHandler_1.AppError('label is required and must be a string', 400);
+                throw new errorHandler_1.AppError('Label is required and must be a string', 400);
             }
-            const result = await inbox_service_1.inboxService.createCustomLabel(organizationId, label.trim());
-            return (0, response_1.sendSuccess)(res, result, 'Label created successfully', 201);
+            const newLabel = await inbox_service_1.inboxService.createCustomLabel(organizationId, label.trim(), color);
+            return (0, response_1.sendSuccess)(res, newLabel, 'Label created successfully', 201);
         }
         catch (error) {
             next(error);

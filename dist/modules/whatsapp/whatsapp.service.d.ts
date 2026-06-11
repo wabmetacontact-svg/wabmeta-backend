@@ -270,7 +270,6 @@ declare class WhatsAppService {
         businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
         isDefault: boolean;
         isActive: boolean;
-        customLabels: string[];
         connectionType: string;
     } | null>;
     validateAccount(accountId: string): Promise<{

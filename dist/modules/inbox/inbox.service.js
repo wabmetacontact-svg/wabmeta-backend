@@ -255,11 +255,11 @@ class InboxService {
         return conversation;
     }
     /**
-     * Add labels to conversation
+     * Add labels to conversation (Now replaces to keep only 1 label)
      */
     async addLabels(organizationId, conversationId, newLabels) {
-        const conversation = await this.getConversationById(organizationId, conversationId);
-        const updatedLabels = [...new Set([...conversation.labels, ...newLabels])];
+        // Only keep the most recently added label
+        const updatedLabels = newLabels.length > 0 ? [newLabels[newLabels.length - 1]] : [];
         return this.updateLabels(organizationId, conversationId, updatedLabels);
     }
     /**
@@ -304,29 +304,39 @@ class InboxService {
             })
         ]);
         const allLabels = conversations.flatMap((c) => c.labels);
-        const customLabels = org?.customLabels || [];
-        const uniqueLabels = [...new Set([...allLabels, ...customLabels])];
-        return uniqueLabels.map((label) => ({
-            label,
-            count: allLabels.filter((l) => l === label).length,
-        }));
+        // Parse customLabels from JSON
+        const customLabelsObj = Array.isArray(org?.customLabels) ? org?.customLabels : [];
+        const customLabelNames = customLabelsObj.map(l => l.label);
+        const uniqueLabels = [...new Set([...allLabels, ...customLabelNames])];
+        // Build the result
+        return uniqueLabels.map((label) => {
+            const customObj = customLabelsObj.find(c => c.label === label);
+            return {
+                label,
+                color: customObj?.color, // Optional: will be undefined for default labels
+                count: allLabels.filter((l) => l === label).length,
+            };
+        });
     }
     /**
      * Create custom label
      */
-    async createCustomLabel(organizationId, label) {
+    async createCustomLabel(organizationId, label, color) {
         const org = await database_1.default.organization.findUnique({
             where: { id: organizationId },
             select: { customLabels: true },
         });
-        const currentLabels = org?.customLabels || [];
-        if (!currentLabels.includes(label)) {
+        const currentLabels = Array.isArray(org?.customLabels) ? org?.customLabels : [];
+        // Check if label already exists
+        if (!currentLabels.some(l => l.label === label)) {
+            const newLabelObj = { label, color: color || '#10B981' }; // Default color if not provided
             await database_1.default.organization.update({
                 where: { id: organizationId },
-                data: { customLabels: [...currentLabels, label] },
+                data: { customLabels: [...currentLabels, newLabelObj] },
             });
+            return newLabelObj;
         }
-        return { label };
+        return currentLabels.find(l => l.label === label);
     }
     /**
      * Delete custom label
@@ -336,11 +346,11 @@ class InboxService {
             where: { id: organizationId },
             select: { customLabels: true },
         });
-        const currentLabels = org?.customLabels || [];
-        if (currentLabels.includes(label)) {
+        const currentLabels = Array.isArray(org?.customLabels) ? org?.customLabels : [];
+        if (currentLabels.some(l => l.label === label)) {
             await database_1.default.organization.update({
                 where: { id: organizationId },
-                data: { customLabels: currentLabels.filter((l) => l !== label) },
+                data: { customLabels: currentLabels.filter(l => l.label !== label) },
             });
         }
         return { success: true };
@@ -406,6 +416,27 @@ class InboxService {
             where: { id: conversationId },
         });
         return { success: true, message: 'Conversation deleted' };
+    }
+    /**
+     * Delete all conversations for organization
+     */
+    async deleteAllConversations(organizationId) {
+        const result = await database_1.default.conversation.deleteMany({
+            where: { organizationId },
+        });
+        return { success: true, count: result.count, message: 'All conversations deleted' };
+    }
+    /**
+     * Bulk delete conversations
+     */
+    async bulkDelete(organizationId, conversationIds) {
+        const result = await database_1.default.conversation.deleteMany({
+            where: {
+                id: { in: conversationIds },
+                organizationId,
+            },
+        });
+        return { success: true, count: result.count, message: `${result.count} conversations deleted` };
     }
     /**
      * Update conversation

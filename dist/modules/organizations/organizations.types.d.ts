@@ -32,6 +32,10 @@ export interface OrganizationResponse {
     industry: string | null;
     timezone: string;
     planType: PlanType;
+    featureInboxLocked?: boolean;
+    featureCampaignsLocked?: boolean;
+    featureChatbotLocked?: boolean;
+    featureAutomationLocked?: boolean;
     createdAt: Date;
     updatedAt: Date;
 }

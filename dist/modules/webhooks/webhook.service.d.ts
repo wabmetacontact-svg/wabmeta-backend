@@ -9,6 +9,7 @@ export declare class WebhookService {
     private mapMessageType;
     private buildContentAndMedia;
     private findOrCreateContact;
+    private handleInstagramEvent;
     handleWebhook(payload: any): Promise<{
         status: string;
         reason?: string;

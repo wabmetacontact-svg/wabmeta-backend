@@ -112,6 +112,11 @@ export declare class AdminBillingService {
                 featureCsvUpload: boolean;
                 featureOverrideByAdmin: boolean;
                 featureSimpleBulkUpload: boolean;
+                featureInboxLocked: boolean;
+                featureCampaignsLocked: boolean;
+                featureChatbotLocked: boolean;
+                featureAutomationLocked: boolean;
+                customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
                 name: string;
@@ -184,6 +189,11 @@ export declare class AdminBillingService {
                 featureCsvUpload: boolean;
                 featureOverrideByAdmin: boolean;
                 featureSimpleBulkUpload: boolean;
+                featureInboxLocked: boolean;
+                featureCampaignsLocked: boolean;
+                featureChatbotLocked: boolean;
+                featureAutomationLocked: boolean;
+                customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
                 name: string;
@@ -263,6 +273,11 @@ export declare class AdminBillingService {
                 featureCsvUpload: boolean;
                 featureOverrideByAdmin: boolean;
                 featureSimpleBulkUpload: boolean;
+                featureInboxLocked: boolean;
+                featureCampaignsLocked: boolean;
+                featureChatbotLocked: boolean;
+                featureAutomationLocked: boolean;
+                customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
                 name: string;

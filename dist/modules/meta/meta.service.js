@@ -94,12 +94,16 @@ class MetaService {
     // ============================================
     // CONNECTION FLOW - ✅ FIXED RECONNECT LOGIC
     // ============================================
-    async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress) {
+    async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress, embeddedSignup = false, // true = FB.login flow, no redirect_uri needed
+    sessionWabaId, // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
+    sessionPhoneNumberId // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
+    ) {
         try {
             console.log('\n🔄 ========== META CONNECTION START ==========');
             console.log('   Organization ID:', organizationId);
-            console.log('   Connection Type:', connectionType);
-            console.log('   User ID:', userId);
+            console.log('   Embedded Signup:', embeddedSignup);
+            console.log('   Session WABA ID:', sessionWabaId || '(will lookup from token)');
+            console.log('   Session Phone ID:', sessionPhoneNumberId || '(will lookup from WABA)');
             // ============================================
             // STEP 1: Get Access Token
             // ============================================
@@ -115,7 +119,9 @@ class MetaService {
             }
             else {
                 console.log('🔄 Exchanging code for token...');
-                const tokenResponse = await meta_api_1.metaApi.exchangeCodeForToken(codeOrToken);
+                // ✅ Pass skipRedirectUri=true for FB.login flow (Embedded Signup)
+                // FB.login codes MUST be exchanged WITHOUT redirect_uri
+                const tokenResponse = await meta_api_1.metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
                 accessToken = tokenResponse.accessToken;
                 console.log('✅ Short-lived token obtained');
             }
@@ -151,39 +157,65 @@ class MetaService {
                 throw new errorHandler_1.AppError('Access token is invalid or expired', 401);
             }
             console.log('🔍 Token is valid');
-            // Get WABA ID
-            let wabaId = null;
+            // Get WABA ID - Priority: session info > granular scopes > business API
+            let wabaId = sessionWabaId || null;
             let businessId = null;
-            const granularScopes = debugInfo.data.granular_scopes || [];
-            for (const scope of granularScopes) {
-                if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
-                    wabaId = scope.target_ids[0];
-                    console.log('✅ Found WABA ID:', wabaId);
-                    break;
+            if (wabaId) {
+                console.log('✅ Using WABA ID from session info (most reliable):', wabaId);
+            }
+            else {
+                // Method 1: granular scopes from debug token
+                const granularScopes = debugInfo.data.granular_scopes || [];
+                console.log('🔍 Granular scopes:', JSON.stringify(granularScopes));
+                for (const scope of granularScopes) {
+                    if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
+                        wabaId = scope.target_ids[0];
+                        console.log('✅ Found WABA ID from granular scopes:', wabaId);
+                        break;
+                    }
+                    if (scope.scope === 'business_management' && scope.target_ids?.length) {
+                        businessId = scope.target_ids[0];
+                    }
                 }
-                if (scope.scope === 'business_management' && scope.target_ids?.length) {
-                    businessId = scope.target_ids[0];
+                // Method 2: business API fallback (requires business_management scope - may fail)
+                if (!wabaId) {
+                    console.log('⚠️ WABA not in granular scopes, trying business API fallback...');
+                    try {
+                        const wabas = await meta_api_1.metaApi.getSharedWABAs(accessToken);
+                        if (wabas.length > 0) {
+                            wabaId = wabas[0].id;
+                            businessId = wabas[0].owner_business_info?.id || businessId;
+                            console.log('✅ Found WABA from business API:', wabaId);
+                        }
+                    }
+                    catch (wabaErr) {
+                        console.warn('⚠️ Business API fallback failed (expected for Embedded Signup tokens):', wabaErr.message);
+                    }
                 }
             }
-            // Fallback: try business query
             if (!wabaId) {
-                console.log('⚠️ WABA not in token, querying business...');
-                const wabas = await meta_api_1.metaApi.getSharedWABAs(accessToken);
-                if (wabas.length > 0) {
-                    wabaId = wabas[0].id;
-                    businessId = wabas[0].owner_business_info?.id || businessId;
-                    console.log('✅ Found WABA from business:', wabaId);
-                }
+                throw new errorHandler_1.AppError('🚫 WhatsApp Setup Incomplete\n' +
+                    'Facebook login succeeded but WhatsApp Business Account was not shared.\n' +
+                    '✅ Please try again and FULLY complete the wizard:\n' +
+                    '1. Click "Get Started"\n' +
+                    '2. Create/select a Business Portfolio\n' +
+                    '3. Create a WhatsApp Business Account\n' +
+                    '4. Add and VERIFY a phone number\n' +
+                    '5. Click FINISH and wait for the popup to close', 400);
             }
-            if (!wabaId) {
-                throw new errorHandler_1.AppError('No WhatsApp Business Account found', 404);
+            // Get WABA details (wrapped in try-catch - some fields may require extra permissions)
+            let wabaDetails = { id: wabaId, name: 'WhatsApp Business Account' };
+            try {
+                wabaDetails = await meta_api_1.metaApi.getWABADetails(wabaId, accessToken);
+                console.log('✅ WABA Details:', {
+                    id: wabaDetails.id,
+                    name: wabaDetails.name,
+                });
             }
-            // Get WABA details
-            const wabaDetails = await meta_api_1.metaApi.getWABADetails(wabaId, accessToken);
-            console.log('✅ WABA Details:', {
-                id: wabaDetails.id,
-                name: wabaDetails.name,
-            });
+            catch (detailErr) {
+                console.warn('⚠️ Could not get full WABA details (non-fatal):', detailErr.message);
+                console.log('💡 Continuing with minimal WABA info: id=', wabaId);
+            }
             onProgress?.({
                 step: 'FETCHING_WABA',
                 status: 'completed',
@@ -198,7 +230,34 @@ class MetaService {
                 status: 'in_progress',
                 message: 'Fetching phone numbers...',
             });
-            const phoneNumbers = await meta_api_1.metaApi.getPhoneNumbers(wabaId, accessToken);
+            let phoneNumbers;
+            // ✅ If session phone number ID provided, get it directly (most reliable for Embedded Signup)
+            if (sessionPhoneNumberId) {
+                console.log('📥 Fetching specific phone by session ID:', sessionPhoneNumberId);
+                try {
+                    const specificPhone = await meta_api_1.metaApi.getPhoneNumberDetails(sessionPhoneNumberId, accessToken);
+                    phoneNumbers = [{
+                            id: specificPhone.id,
+                            verifiedName: specificPhone.verifiedName,
+                            displayPhoneNumber: specificPhone.displayPhoneNumber,
+                            qualityRating: specificPhone.qualityRating,
+                            codeVerificationStatus: specificPhone.codeVerificationStatus,
+                            nameStatus: specificPhone.nameStatus,
+                            messagingLimitTier: null,
+                            platformType: null,
+                            throughput: null,
+                            status: null,
+                        }];
+                    console.log('✅ Got phone from session ID:', specificPhone.displayPhoneNumber);
+                }
+                catch (phoneErr) {
+                    console.warn('⚠️ Could not get phone by session ID, falling back to WABA list:', phoneErr.message);
+                    phoneNumbers = await meta_api_1.metaApi.getPhoneNumbers(wabaId, accessToken);
+                }
+            }
+            else {
+                phoneNumbers = await meta_api_1.metaApi.getPhoneNumbers(wabaId, accessToken);
+            }
             if (phoneNumbers.length === 0) {
                 throw new errorHandler_1.AppError('No phone numbers found', 404);
             }
@@ -233,19 +292,39 @@ class MetaService {
                 message: 'Webhooks configured',
             });
             // ============================================
-            // STEP 5: Save to Database - ✅ FIXED LOGIC
+            // STEP 4.5: Register Phone Number for Cloud API
+            // ============================================
+            onProgress?.({
+                step: 'REGISTER_PHONE',
+                status: 'in_progress',
+                message: 'Registering phone number to Cloud API...',
+            });
+            try {
+                console.log(`[Meta Service] Registering phone number ${primaryPhone.id}...`);
+                await meta_api_1.metaApi.registerPhoneNumber(primaryPhone.id, accessToken);
+                console.log('✅ Phone number registered successfully');
+            }
+            catch (registerError) {
+                console.warn('⚠️ Phone number registration failed:', registerError.message);
+            }
+            onProgress?.({
+                step: 'REGISTER_PHONE',
+                status: 'completed',
+                message: 'Phone number registered',
+            });
+            // ============================================
+            // STEP 5: Save to Database — UPSERT approach
             // ============================================
             onProgress?.({
                 step: 'SAVING',
                 status: 'in_progress',
                 message: 'Saving account...',
             });
-            // ✅ ADD: Organization level - sirf ek connected account allowed
+            // Block if org already has a DIFFERENT phone connected
             const existingConnectedInOrg = await database_1.default.whatsAppAccount.findFirst({
                 where: {
                     organizationId,
                     status: client_1.WhatsAppAccountStatus.CONNECTED,
-                    // Same phone number se reconnect allow karo
                     phoneNumberId: { not: primaryPhone.id },
                 },
             });
@@ -253,15 +332,8 @@ class MetaService {
                 throw new errorHandler_1.AppError(`Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
                     `Please disconnect it first before connecting a new one.`, 400);
             }
-            // ✅ Check existing by phoneNumberId ONLY
-            const existingAccount = await database_1.default.whatsAppAccount.findFirst({
-                where: {
-                    phoneNumberId: primaryPhone.id,
-                },
-            });
             console.log('🔐 Encrypting token...');
             const encryptedToken = (0, encryption_1.encrypt)(accessToken);
-            // Verify encryption
             const verifyDecrypt = (0, encryption_1.safeDecryptStrict)(encryptedToken);
             if (verifyDecrypt !== accessToken) {
                 throw new errorHandler_1.AppError('Token encryption verification failed', 500);
@@ -269,62 +341,56 @@ class MetaService {
             console.log('✅ Encryption verified');
             const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
             const cleanPhoneNumber = primaryPhone.displayPhoneNumber.replace(/\D/g, '');
+            const webhookVerifyToken = (0, uuid_1.v4)();
+            const encryptedWebhookSecret = (0, encryption_1.encrypt)(webhookVerifyToken);
+            // ✅ UPSERT — atomically handles ALL cases:
+            //   • Brand new phone number → CREATE
+            //   • Same phone, same org → UPDATE (reactivate)
+            //   • Same phone, different org → UPDATE (transfer ownership)
+            //   • Race condition / findFirst miss → UPDATE (no crash)
             let savedAccount;
-            if (existingAccount) {
-                // Account exists - check organization
-                if (existingAccount.organizationId === organizationId) {
-                    // ✅ Same organization - REACTIVATE/UPDATE existing account
-                    console.log('🔄 Reactivating existing account for same organization');
-                    // Check if there's a default account already
+            try {
+                // Check if any existing record with this phoneNumberId (any org, any status)
+                const existingByPhone = await database_1.default.whatsAppAccount.findUnique({
+                    where: { phoneNumberId: primaryPhone.id },
+                });
+                if (existingByPhone) {
+                    const isSameOrg = existingByPhone.organizationId === organizationId;
+                    console.log(isSameOrg
+                        ? '🔄 Reactivating existing account (same org)'
+                        : `🔄 Transferring phone to new org (was: ${existingByPhone.organizationId})`);
                     const hasDefault = await database_1.default.whatsAppAccount.findFirst({
                         where: {
                             organizationId,
                             isDefault: true,
-                            id: { not: existingAccount.id },
+                            id: { not: existingByPhone.id },
                         },
                     });
                     savedAccount = await database_1.default.whatsAppAccount.update({
-                        where: { id: existingAccount.id },
+                        where: { id: existingByPhone.id },
                         data: {
+                            organizationId, // update org if transferring
                             accessToken: encryptedToken,
                             tokenExpiresAt,
                             wabaId,
+                            phoneNumber: cleanPhoneNumber,
                             displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
                             verifiedName: primaryPhone.verifiedName,
                             qualityRating: primaryPhone.qualityRating,
                             status: client_1.WhatsAppAccountStatus.CONNECTED,
                             connectionType: finalConnectionType,
-                            isDefault: existingAccount.isDefault || !hasDefault, // Restore or set as default if no other default
+                            isDefault: existingByPhone.isDefault || !hasDefault,
                             codeVerificationStatus: primaryPhone.codeVerificationStatus,
                             nameStatus: primaryPhone.nameStatus,
                             messagingLimit: primaryPhone.messagingLimitTier,
                         },
                     });
-                    console.log('✅ Account reactivated successfully');
+                    console.log('✅ Account updated successfully');
                 }
                 else {
-                    // ✅ Different organization - Soft disconnect old, CREATE new
-                    console.log('🔄 Phone number switching organizations');
-                    console.log(`   Old org: ${existingAccount.organizationId}`);
-                    console.log(`   New org: ${organizationId}`);
-                    // Soft disconnect old account (preserves data for old org)
-                    await database_1.default.whatsAppAccount.update({
-                        where: { id: existingAccount.id },
-                        data: {
-                            status: client_1.WhatsAppAccountStatus.DISCONNECTED,
-                            accessToken: null,
-                            tokenExpiresAt: null,
-                            isDefault: false,
-                        },
-                    });
-                    console.log('✅ Old account soft-disconnected (data preserved)');
-                    // Check if new org already has accounts
-                    const accountCount = await database_1.default.whatsAppAccount.count({
-                        where: { organizationId },
-                    });
-                    const webhookVerifyToken = (0, uuid_1.v4)();
-                    const encryptedWebhookSecret = (0, encryption_1.encrypt)(webhookVerifyToken);
-                    // Create new account for current organization
+                    // Truly new — CREATE
+                    console.log('🔄 Creating new WhatsApp account');
+                    const accountCount = await database_1.default.whatsAppAccount.count({ where: { organizationId } });
                     savedAccount = await database_1.default.whatsAppAccount.create({
                         data: {
                             organizationId,
@@ -345,38 +411,104 @@ class MetaService {
                             messagingLimit: primaryPhone.messagingLimitTier,
                         },
                     });
-                    console.log('✅ New account created for new organization');
+                    console.log('✅ New account created');
                 }
             }
-            else {
-                // ✅ No existing account - CREATE new
-                console.log('🔄 Creating completely new account');
-                const accountCount = await database_1.default.whatsAppAccount.count({
+            catch (dbError) {
+                // Last resort: if create still hits unique constraint, do a findUnique + update
+                if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
+                    console.warn('⚠️ Unique constraint hit despite findUnique miss — doing force update');
+                    const forceExisting = await database_1.default.whatsAppAccount.findFirst({
+                        where: { phoneNumberId: primaryPhone.id },
+                    });
+                    if (forceExisting) {
+                        savedAccount = await database_1.default.whatsAppAccount.update({
+                            where: { id: forceExisting.id },
+                            data: {
+                                organizationId,
+                                accessToken: encryptedToken,
+                                tokenExpiresAt,
+                                wabaId,
+                                phoneNumber: cleanPhoneNumber,
+                                displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
+                                verifiedName: primaryPhone.verifiedName,
+                                qualityRating: primaryPhone.qualityRating,
+                                status: client_1.WhatsAppAccountStatus.CONNECTED,
+                                connectionType: finalConnectionType,
+                                isDefault: true,
+                                codeVerificationStatus: primaryPhone.codeVerificationStatus,
+                                nameStatus: primaryPhone.nameStatus,
+                                messagingLimit: primaryPhone.messagingLimitTier,
+                            },
+                        });
+                        console.log('✅ Force-updated existing account');
+                    }
+                    else {
+                        throw dbError;
+                    }
+                }
+                else {
+                    throw dbError;
+                }
+            }
+            // ============================================
+            // STEP 5.5: Save/Update MetaConnection & PhoneNumbers
+            // ============================================
+            let savedMetaConnection = null;
+            try {
+                console.log('🔄 Saving MetaConnection...');
+                savedMetaConnection = await database_1.default.metaConnection.upsert({
                     where: { organizationId },
-                });
-                const webhookVerifyToken = (0, uuid_1.v4)();
-                const encryptedWebhookSecret = (0, encryption_1.encrypt)(webhookVerifyToken);
-                savedAccount = await database_1.default.whatsAppAccount.create({
-                    data: {
-                        organizationId,
-                        wabaId,
-                        phoneNumberId: primaryPhone.id,
-                        phoneNumber: cleanPhoneNumber,
-                        displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
-                        verifiedName: primaryPhone.verifiedName,
-                        qualityRating: primaryPhone.qualityRating,
+                    update: {
                         accessToken: encryptedToken,
-                        tokenExpiresAt,
-                        webhookSecret: encryptedWebhookSecret,
-                        status: client_1.WhatsAppAccountStatus.CONNECTED,
-                        connectionType: finalConnectionType,
-                        isDefault: accountCount === 0,
-                        codeVerificationStatus: primaryPhone.codeVerificationStatus,
-                        nameStatus: primaryPhone.nameStatus,
-                        messagingLimit: primaryPhone.messagingLimitTier,
+                        wabaId,
+                        wabaName: wabaDetails.name,
+                        status: 'CONNECTED',
+                        lastSyncedAt: new Date(),
+                    },
+                    create: {
+                        organizationId,
+                        accessToken: encryptedToken,
+                        wabaId,
+                        wabaName: wabaDetails.name,
+                        status: 'CONNECTED',
                     },
                 });
-                console.log('✅ New account created');
+                console.log('✅ MetaConnection saved:', savedMetaConnection.id);
+            }
+            catch (e) {
+                console.warn('⚠️ MetaConnection save failed:', e.message);
+            }
+            try {
+                if (savedMetaConnection) {
+                    console.log('🔄 Saving PhoneNumbers...');
+                    for (const phone of phoneNumbers) {
+                        await database_1.default.phoneNumber.upsert({
+                            where: { phoneNumberId: phone.id },
+                            update: {
+                                phoneNumber: phone.displayPhoneNumber.replace(/\D/g, ''),
+                                displayName: phone.verifiedName || phone.displayPhoneNumber,
+                                qualityRating: phone.qualityRating,
+                                verifiedName: phone.verifiedName,
+                                isActive: true,
+                            },
+                            create: {
+                                metaConnectionId: savedMetaConnection.id,
+                                phoneNumberId: phone.id,
+                                phoneNumber: phone.displayPhoneNumber.replace(/\D/g, ''),
+                                displayName: phone.verifiedName || phone.displayPhoneNumber,
+                                qualityRating: phone.qualityRating,
+                                verifiedName: phone.verifiedName,
+                                isActive: true,
+                                isPrimary: phone.id === primaryPhone.id,
+                            },
+                        });
+                    }
+                    console.log('✅ PhoneNumbers saved');
+                }
+            }
+            catch (e) {
+                console.warn('⚠️ PhoneNumber save failed:', e.message);
             }
             onProgress?.({
                 step: 'COMPLETED',

@@ -194,7 +194,7 @@ export declare class InboxService {
         labels: string[];
     }>;
     /**
-     * Add labels to conversation
+     * Add labels to conversation (Now replaces to keep only 1 label)
      */
     addLabels(organizationId: string, conversationId: string, newLabels: string[]): Promise<{
         organizationId: string;
@@ -252,297 +252,17 @@ export declare class InboxService {
      * Get all labels
      */
     getAllLabels(organizationId: string): Promise<{
-        label: string | {
-            name: string;
-            organizationId: string;
-            id: string;
-            whatsappAccountId: string | null;
-            wabaId: string | null;
-            metaTemplateId: string | null;
-            language: string;
-            category: import(".prisma/client").$Enums.TemplateCategory;
-            headerType: string | null;
-            headerContent: string | null;
-            bodyText: string;
-            footerText: string | null;
-            buttons: Prisma.JsonValue;
-            variables: Prisma.JsonValue;
-            status: import(".prisma/client").$Enums.TemplateStatus;
-            rejectionReason: string | null;
-            qualityScore: string | null;
-            createdAt: Date;
-            updatedAt: Date;
-            headerMediaId: string | null;
-            headerMediaUploadedAt: Date | null;
-            headerMediaLastVerified: Date | null;
-        } | {
-            userId: string;
-            organizationId: string;
-            id: string;
-            updatedAt: Date;
-            role: import(".prisma/client").$Enums.UserRole;
-            invitedAt: Date;
-            joinedAt: Date | null;
-        } | {
-            email: string | null;
-            organizationId: string;
-            tags: string[];
-            id: string;
-            status: import(".prisma/client").$Enums.ContactStatus;
-            createdAt: Date;
-            updatedAt: Date;
-            firstName: string | null;
-            lastName: string | null;
-            phone: string;
-            avatar: string | null;
-            lastMessageAt: Date | null;
-            countryCode: string;
-            whatsappProfileName: string | null;
-            whatsappProfileFetched: boolean;
-            lastProfileFetchAt: Date | null;
-            profileFetchAttempts: number;
-            customFields: Prisma.JsonValue;
-            messageCount: number;
-            source: string | null;
-        } | {
-            name: string;
-            organizationId: string;
-            id: string;
-            status: import(".prisma/client").$Enums.ChatbotStatus;
-            createdAt: Date;
-            updatedAt: Date;
-            isDefault: boolean;
-            description: string | null;
-            flowData: Prisma.JsonValue;
-            triggerKeywords: string[];
-            welcomeMessage: string | null;
-            fallbackMessage: string | null;
-            createdById: string;
-        } | {
-            organizationId: string;
-            id: string;
-            wabaId: string;
-            status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
-            createdAt: Date;
-            updatedAt: Date;
-            phoneNumber: string;
-            phoneNumberId: string;
-            accessToken: string | null;
-            displayName: string;
-            qualityRating: string | null;
-            tokenExpiresAt: Date | null;
-            webhookSecret: string | null;
-            codeVerificationStatus: string | null;
-            nameStatus: string | null;
-            verifiedName: string | null;
-            messagingLimit: string | null;
-            dailyMessageLimit: number;
-            dailyMessagesUsed: number;
-            lastLimitReset: Date;
-            businessProfile: Prisma.JsonValue | null;
-            isDefault: boolean;
-            isActive: boolean;
-            customLabels: string[];
-            connectionType: string;
-        } | {
-            organizationId: string;
-            id: string;
-            status: import(".prisma/client").$Enums.LeadStatus;
-            createdAt: Date;
-            updatedAt: Date;
-            value: Prisma.Decimal | null;
-            source: string | null;
-            currency: string;
-            contactId: string | null;
-            title: string;
-            pipelineId: string | null;
-            stageId: string | null;
-            priority: import(".prisma/client").$Enums.LeadPriority;
-            assignedToId: string | null;
-            expectedCloseDate: Date | null;
-            actualCloseDate: Date | null;
-            lastActivityAt: Date | null;
-        } | {
-            organizationId: string;
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            phoneNumberId: string | null;
-            lastMessageAt: Date | null;
-            contactId: string;
-            lastMessagePreview: string | null;
-            lastCustomerMessageAt: Date | null;
-            windowExpiresAt: Date | null;
-            isWindowOpen: boolean;
-            lastBotMessageAt: Date | null;
-            isArchived: boolean;
-            isRead: boolean;
-            unreadCount: number;
-            isPinned: boolean;
-            assignedTo: string | null;
-            labels: string[];
-        } | {
-            userId: string | null;
-            organizationId: string | null;
-            id: string;
-            createdAt: Date;
-            userAgent: string | null;
-            ipAddress: string | null;
-            action: import(".prisma/client").$Enums.ActivityAction | null;
-            metadata: Prisma.JsonValue;
-            entity: string | null;
-            entityId: string | null;
-        } | {
-            name: string;
-            organizationId: string;
-            key: string;
-            expiresAt: Date | null;
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            isActive: boolean;
-            secret: string;
-            permissions: string[];
-            rateLimit: number;
-            lastUsedAt: Date | null;
-            usageCount: number;
-        } | {
-            name: string;
-            organizationId: string;
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            isActive: boolean;
-            description: string | null;
-            trigger: import(".prisma/client").$Enums.AutomationTrigger;
-            triggerConfig: Prisma.JsonValue;
-            actions: Prisma.JsonValue;
-            executionCount: number;
-            lastExecutedAt: Date | null;
-            targetGroupIds: string[];
-            excludeExisting: boolean;
-        } | {
-            name: string;
-            organizationId: string;
-            scheduledAt: Date | null;
-            id: string;
-            whatsappAccountId: string;
-            status: import(".prisma/client").$Enums.CampaignStatus;
-            createdAt: Date;
-            updatedAt: Date;
-            description: string | null;
-            createdById: string;
-            templateId: string;
-            contactGroupId: string | null;
-            audienceFilter: Prisma.JsonValue | null;
-            startedAt: Date | null;
-            completedAt: Date | null;
-            totalContacts: number;
-            sentCount: number;
-            deliveredCount: number;
-            readCount: number;
-            failedCount: number;
-        } | {
-            name: string;
-            organizationId: string;
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            description: string | null;
-            color: string | null;
-        } | {
-            type: string;
-            userId: string;
-            organizationId: string | null;
-            read: boolean;
-            id: string;
-            createdAt: Date;
-            description: string;
-            readAt: Date | null;
-            metadata: Prisma.JsonValue;
-            title: string;
-            actionUrl: string | null;
-        } | {
-            organizationId: string;
-            expiresAt: Date;
-            id: string;
-            createdAt: Date;
-            state: string;
-        } | {
-            organizationId: string;
-            id: string;
-            status: import(".prisma/client").$Enums.PaymentStatus;
-            createdAt: Date;
-            updatedAt: Date;
-            description: string | null;
-            billingCycle: string | null;
-            planId: string | null;
-            amount: number;
-            currency: string;
-            razorpayOrderId: string | null;
-            razorpayPaymentId: string | null;
-            failedAt: Date | null;
-            notes: Prisma.JsonValue | null;
-            subscriptionId: string | null;
-            razorpaySignature: string | null;
-            planName: string | null;
-            receipt: string | null;
-            paidAt: Date | null;
-        } | {
-            name: string;
-            organizationId: string;
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            isDefault: boolean;
-            isActive: boolean;
-            description: string | null;
-        } | {
-            organizationId: string;
-            url: string;
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            isActive: boolean;
-            secret: string | null;
-            events: string[];
-            lastTriggeredAt: Date | null;
-            successCount: number;
-            failureCount: number;
-        } | {
-            organizationId: string | null;
-            payload: Prisma.JsonValue;
-            id: string;
-            status: import(".prisma/client").$Enums.WebhookStatus;
-            createdAt: Date;
-            source: string;
-            errorMessage: string | null;
-            eventType: string;
-            processedAt: Date | null;
-            responseTime: number | null;
-        } | {
-            userId: string;
-            organizationId: string;
-            id: string;
-            status: string;
-            createdAt: Date;
-            updatedAt: Date;
-            reason: string;
-            additionalInfo: string | null;
-            reviewedBy: string | null;
-            reviewNote: string | null;
-            reviewedAt: Date | null;
-            planVerified: boolean;
-            requestedAt: Date;
-        };
+        label: string;
+        color: string | undefined;
         count: number;
     }[]>;
     /**
      * Create custom label
      */
-    createCustomLabel(organizationId: string, label: string): Promise<{
+    createCustomLabel(organizationId: string, label: string, color?: string): Promise<{
         label: string;
-    }>;
+        color: string;
+    } | undefined>;
     /**
      * Delete custom label
      */
@@ -647,6 +367,22 @@ export declare class InboxService {
      */
     deleteConversation(organizationId: string, conversationId: string): Promise<{
         success: boolean;
+        message: string;
+    }>;
+    /**
+     * Delete all conversations for organization
+     */
+    deleteAllConversations(organizationId: string): Promise<{
+        success: boolean;
+        count: number;
+        message: string;
+    }>;
+    /**
+     * Bulk delete conversations
+     */
+    bulkDelete(organizationId: string, conversationIds: string[]): Promise<{
+        success: boolean;
+        count: number;
         message: string;
     }>;
     /**

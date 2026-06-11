@@ -136,55 +136,81 @@ class MetaController {
     // ============================================
     async handleCallback(req, res, next) {
         try {
-            const { code, state } = req.body;
+            const { code, state, organizationId: bodyOrgId } = req.body;
             console.log('\n🔄 ========== META CALLBACK ==========');
             console.log('   Code:', code ? `${code.substring(0, 10)}...` : 'Missing');
-            console.log('   State:', state ? `${state.substring(0, 20)}...` : 'Missing');
+            console.log('   State:', state ? `${state.substring(0, 20)}...` : 'Missing (Embedded Signup)');
+            console.log('   Body Org ID:', bodyOrgId || 'Missing');
             if (!code) {
                 throw new errorHandler_1.AppError('Authorization code is required', 400);
             }
-            if (!state) {
-                throw new errorHandler_1.AppError('State parameter is required', 400);
-            }
-            // Verify state
-            const oauthState = await database_1.default.oAuthState.findUnique({
-                where: { state },
-            });
-            if (!oauthState) {
-                console.error('❌ Invalid state token');
-                throw new errorHandler_1.AppError('Invalid or expired state token', 400);
-            }
-            if (oauthState.expiresAt < new Date()) {
-                await database_1.default.oAuthState.delete({ where: { state } });
-                console.error('❌ State token expired');
-                throw new errorHandler_1.AppError('State token expired. Please try again.', 400);
-            }
-            const organizationId = oauthState.organizationId;
-            console.log('   Organization ID:', organizationId);
-            // Verify user permissions
-            const userId = req.user?.id;
-            if (userId) {
-                const membership = await database_1.default.organizationMember.findFirst({
-                    where: {
-                        organizationId,
-                        userId,
-                        role: { in: ['OWNER', 'ADMIN'] },
-                    },
-                });
-                if (!membership) {
-                    throw new errorHandler_1.AppError('You do not have permission to connect WhatsApp', 403);
+            let organizationId;
+            // ✅ EMBEDDED SIGNUP FLOW (no state, has organizationId in body)
+            if (!state && bodyOrgId) {
+                console.log('📱 Embedded Signup flow detected');
+                organizationId = bodyOrgId;
+                // Verify user has permission
+                const userId = req.user?.id;
+                if (userId) {
+                    const membership = await database_1.default.organizationMember.findFirst({
+                        where: {
+                            organizationId,
+                            userId,
+                            role: { in: ['OWNER', 'ADMIN'] },
+                        },
+                    });
+                    if (!membership) {
+                        throw new errorHandler_1.AppError('You do not have permission to connect WhatsApp', 403);
+                    }
                 }
             }
+            // ✅ OAUTH URL FLOW (with state - legacy)
+            else if (state) {
+                console.log('🔗 OAuth URL flow detected');
+                const oauthState = await database_1.default.oAuthState.findUnique({
+                    where: { state },
+                });
+                if (!oauthState) {
+                    throw new errorHandler_1.AppError('Invalid or expired state token', 400);
+                }
+                if (oauthState.expiresAt < new Date()) {
+                    await database_1.default.oAuthState.delete({ where: { state } });
+                    throw new errorHandler_1.AppError('State token expired. Please try again.', 400);
+                }
+                organizationId = oauthState.organizationId;
+                // Verify user permissions
+                const userId = req.user?.id;
+                if (userId) {
+                    const membership = await database_1.default.organizationMember.findFirst({
+                        where: {
+                            organizationId,
+                            userId,
+                            role: { in: ['OWNER', 'ADMIN'] },
+                        },
+                    });
+                    if (!membership) {
+                        throw new errorHandler_1.AppError('You do not have permission', 403);
+                    }
+                }
+                // Delete used state
+                await database_1.default.oAuthState.delete({ where: { state } });
+            }
+            else {
+                throw new errorHandler_1.AppError('Either state or organizationId is required', 400);
+            }
+            console.log('   Organization ID:', organizationId);
             console.log('📊 Step 1: Exchanging code for access token...');
-            // Exchange code for access token
-            const tokenResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/oauth/access_token`, {
-                params: {
-                    client_id: process.env.META_APP_ID,
-                    client_secret: process.env.META_APP_SECRET,
-                    code,
-                    redirect_uri: `${process.env.FRONTEND_URL}/meta/callback`,
-                },
-            });
+            // ✅ FIX: Token exchange WITHOUT redirect_uri for Embedded Signup
+            const tokenParams = {
+                client_id: process.env.META_APP_ID,
+                client_secret: process.env.META_APP_SECRET,
+                code,
+            };
+            // Only add redirect_uri for legacy OAuth flow
+            if (state) {
+                tokenParams.redirect_uri = `${process.env.FRONTEND_URL}/meta/callback`;
+            }
+            const tokenResponse = await axios_1.default.get(`https://graph.facebook.com/${config_1.config.meta.graphApiVersion}/oauth/access_token`, { params: tokenParams });
             const { access_token } = tokenResponse.data;
             console.log('   ✅ Access token obtained');
             console.log('📊 Step 2: Getting WABA ID from token...');
@@ -608,8 +634,7 @@ class MetaController {
             catch (onboardingErr) {
                 console.error('⚠️ Post-connection steps failed:', onboardingErr.message);
             }
-            // Delete used state
-            await database_1.default.oAuthState.delete({ where: { state } });
+            // State is already deleted earlier in the flow (line 242)
             console.log('✅ Meta callback successful');
             // After saving WhatsAppAccount, VERIFY it exists
             if (savedAccount) {

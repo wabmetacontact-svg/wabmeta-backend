@@ -29,6 +29,21 @@ export declare class AnalyticsService {
             approved: number;
         };
     }>;
+    getUnifiedDashboardStats(organizationId: string, days?: number): Promise<{
+        overview: {
+            totalEngagement: number;
+            waVolume: number;
+            igVolume: number;
+        };
+        audience: {
+            whatsappContacts: number;
+            instagramFollowers: number;
+        };
+        performance: {
+            waDeliveryRate: number;
+            igAutomationRate: number;
+        };
+    }>;
     getMessageAnalytics(organizationId: string, days?: number): Promise<{
         chartData: {
             date: string;

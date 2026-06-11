@@ -11,6 +11,7 @@ const errorHandler_1 = require("../../middleware/errorHandler");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const password_1 = require("../../utils/password");
+const socket_1 = require("../../socket");
 // In-memory system settings (use database in production)
 let systemSettings = {
     maintenanceMode: false,
@@ -392,17 +393,48 @@ class AdminService {
             throw new errorHandler_1.AppError('User not found', 404);
         }
         const hashedPassword = await (0, password_1.hashPassword)(data.password);
+        const shouldLogout = data.logoutDevices !== false; // default: true
+        // ✅ Update password + increment tokenVersion (old tokens invalid ho jayenge)
         const updatedUser = await database_1.default.user.update({
             where: { id },
             data: {
                 password: hashedPassword,
+                // ✅ tokenVersion increment karo → old JWT tokens invalid
+                tokenVersion: {
+                    increment: 1,
+                },
             },
             select: {
                 id: true,
                 email: true,
+                tokenVersion: true,
             },
         });
-        return updatedUser;
+        // ✅ Sabhi refresh tokens delete karo
+        if (shouldLogout) {
+            await database_1.default.refreshToken.deleteMany({
+                where: { userId: id },
+            });
+            console.log(`🗑️ All refresh tokens deleted for user: ${id}`);
+        }
+        // ✅ Socket ke through force logout emit karo
+        // User ke sabhi connected devices pe event jayega
+        try {
+            (0, socket_1.emitForceLogout)(id, 'password_changed');
+            console.log(`📡 Force logout emitted for user: ${id}`);
+        }
+        catch (socketError) {
+            // Socket fail hone pe bhi password change successful maana jayega
+            // Kyunki tokenVersion increment aur refreshToken delete ho chuka hai
+            console.warn(`⚠️ Socket emit failed (non-critical): ${socketError.message}`);
+        }
+        return {
+            id: updatedUser.id,
+            email: updatedUser.email,
+            message: shouldLogout
+                ? 'Password updated and user logged out from all devices'
+                : 'Password updated successfully',
+        };
     }
     async updateUser(id, data) {
         const user = await database_1.default.user.findUnique({ where: { id } });

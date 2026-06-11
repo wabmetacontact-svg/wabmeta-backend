@@ -89,6 +89,7 @@ exports.updateUserPasswordSchema = zod_1.z.object({
     }),
     body: zod_1.z.object({
         password: zod_1.z.string().min(4, 'Password must be at least 4 characters'),
+        logoutDevices: zod_1.z.boolean().optional(),
     }),
 });
 exports.deleteUserSchema = idParamSchema;

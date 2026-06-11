@@ -859,6 +859,21 @@ class CampaignsService {
             }
             const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
             const template = campaign.template;
+            // ✅ FIX FOR SERVER CRASH: Pre-resolve media ONCE before the massive loop
+            if (template.headerType && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType.toUpperCase())) {
+                try {
+                    console.log(`🖼️ Pre-resolving media for template ${template.name}...`);
+                    const resolvedMediaId = await this.resolveMediaId(template, phoneNumberId, accessToken, campaign.whatsappAccount.wabaId);
+                    // Update the in-memory template object so the loop uses the fresh cached ID
+                    // instead of trying to download and re-upload the media 1000 times concurrently!
+                    template.headerMediaId = resolvedMediaId;
+                    template.headerMediaUploadedAt = new Date();
+                }
+                catch (err) {
+                    console.error(`❌ Failed to pre-resolve media:`, err.message);
+                    throw new Error(`Failed to prepare template media: ${err.message}`);
+                }
+            }
             // ✅ ── WALLET PRE-CHECK (country-aware) ─────────────────────────────────
             const pendingCount = await database_1.default.campaignContact.count({ where: { campaignId, status: 'PENDING' } });
             // Sample up to 200 phones to get a representative country-rate estimate

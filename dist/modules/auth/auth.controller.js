@@ -7,8 +7,8 @@ const response_1 = require("../../utils/response");
 // ✅ Cookie options for setting cookies (with maxAge)
 const cookieOptions = (isRefresh = false) => ({
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
+    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production, false for local dev over http
+    sameSite: 'lax', // Changed from 'none' to 'lax' to prevent CSRF
     maxAge: isRefresh
         ? 7 * 24 * 60 * 60 * 1000 // 7 days
         : 1 * 60 * 60 * 1000, // 1 hour
@@ -17,8 +17,8 @@ const cookieOptions = (isRefresh = false) => ({
 // ✅ FIX: Cookie options for clearing cookies (NO maxAge)
 const clearCookieOptions = () => ({
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
     path: '/',
 });
 class AuthController {

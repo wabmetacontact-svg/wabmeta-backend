@@ -63,18 +63,31 @@ class MetaApiClient {
     // ============================================
     // TOKEN MANAGEMENT
     // ============================================
-    async exchangeCodeForToken(code) {
+    /**
+     * Exchange authorization code for access token.
+     * @param code - The authorization code from FB.login or OAuth redirect
+     * @param skipRedirectUri - Set TRUE for FB.login/Embedded Signup flow.
+     *   FB.login codes must be exchanged WITHOUT a redirect_uri.
+     *   Only OAuth redirect flow (state-token based) needs redirect_uri.
+     */
+    async exchangeCodeForToken(code, skipRedirectUri = false) {
         try {
             console.log('[Meta API] Exchanging code for token...');
-            console.log('[Meta API] Redirect URI:', config_1.config.meta.redirectUri);
-            const response = await this.client.get('/oauth/access_token', {
-                params: {
-                    client_id: config_1.config.meta.appId,
-                    client_secret: config_1.config.meta.appSecret,
-                    redirect_uri: config_1.config.meta.redirectUri,
-                    code: code,
-                },
-            });
+            // ✅ FB.login Embedded Signup: NO redirect_uri (Meta requirement)
+            // ❌ Sending redirect_uri causes: "Error validating verification code"
+            const params = {
+                client_id: config_1.config.meta.appId,
+                client_secret: config_1.config.meta.appSecret,
+                code: code,
+            };
+            if (!skipRedirectUri) {
+                params.redirect_uri = config_1.config.meta.redirectUri;
+                console.log('[Meta API] Redirect URI:', config_1.config.meta.redirectUri);
+            }
+            else {
+                console.log('[Meta API] ⚠️  Skipping redirect_uri (FB.login Embedded Signup flow)');
+            }
+            const response = await this.client.get('/oauth/access_token', { params });
             console.log('[Meta API] ✅ Token exchange successful');
             return {
                 accessToken: response.data.access_token,
@@ -231,7 +244,9 @@ class MetaApiClient {
             const response = await this.client.get(`${wabaId}`, {
                 params: {
                     access_token: accessToken,
-                    fields: 'id,name,currency,timezone_id,message_template_namespace,owner_business_info,on_behalf_of_business_info,account_review_status',
+                    // ✅ Only request basic fields — owner_business_info, account_review_status
+                    // require extra permissions not always granted by Embedded Signup tokens
+                    fields: 'id,name,currency,timezone_id,message_template_namespace',
                 },
             });
             console.log(`[Meta API] ✅ WABA: ${response.data.name}`);

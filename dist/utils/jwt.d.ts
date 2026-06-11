@@ -2,6 +2,7 @@ export interface TokenPayload {
     userId: string;
     email: string;
     organizationId?: string;
+    tokenVersion?: number;
     type?: 'access' | 'refresh';
 }
 export declare const generateAccessToken: (payload: Omit<TokenPayload, "type">) => string;

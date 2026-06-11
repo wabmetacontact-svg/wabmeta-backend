@@ -97,8 +97,12 @@ class TemplatesController {
             const language = req.query.language?.trim() || undefined;
             const sortBy = req.query.sortBy || 'createdAt';
             const sortOrder = req.query.sortOrder || 'desc';
-            const whatsappAccountId = req.query.whatsappAccountId?.trim() || undefined;
+            let whatsappAccountId = req.query.whatsappAccountId?.trim() || undefined;
             const wabaId = req.query.wabaId?.trim() || undefined; // ✅ NEW
+            // ✅ FIX: Default to the active connected WhatsApp account if none is provided
+            if (!whatsappAccountId && !wabaId) {
+                whatsappAccountId = await this.getDefaultAccountId(organizationId);
+            }
             console.log('📋 Fetching templates:', {
                 organizationId,
                 page,

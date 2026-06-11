@@ -69,6 +69,7 @@ const crm_routes_1 = __importDefault(require("./modules/crm/crm.routes"));
 const automation_routes_1 = __importDefault(require("./modules/automation/automation.routes"));
 const calling_routes_1 = __importDefault(require("./modules/calling/calling.routes"));
 const wallet_routes_1 = __importDefault(require("./modules/wallet/wallet.routes"));
+const instagram_routes_1 = __importDefault(require("./modules/instagram/instagram.routes"));
 // ============================================
 // VERIFY IMPORTS
 // ============================================
@@ -90,7 +91,16 @@ app.set('trust proxy', 1);
 // SECURITY MIDDLEWARE
 // ============================================
 app.use((0, helmet_1.default)({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'none'"],
+            scriptSrc: ["'none'"],
+            styleSrc: ["'none'"],
+            imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com"],
+            connectSrc: ["'self'"],
+            frameAncestors: ["'none'"],
+        },
+    },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow loading media on different domains
 }));
@@ -109,7 +119,8 @@ app.use((0, cors_1.default)({
         // ✅ No origin (mobile apps, postman, Meta webhooks)
         if (!origin)
             return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
+        const isVercel = origin.endsWith('.vercel.app') || origin.includes('vercel.app');
+        if (allowedOrigins.includes(origin) || isVercel) {
             callback(null, true);
         }
         else {
@@ -333,6 +344,8 @@ try {
     console.log('  ✅ /api/chatbots');
     app.use('/api', wallet_routes_1.default);
     console.log('  ✅ /api (wallet)');
+    app.use('/api/instagram', instagram_routes_1.default);
+    console.log('  ✅ /api/instagram');
     logger_1.logger.info('✅ All API routes registered successfully');
 }
 catch (error) {

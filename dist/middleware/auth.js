@@ -179,15 +179,34 @@ const authenticate = async (req, res, next) => {
                     email: true,
                     status: true,
                     emailVerified: true,
+                    tokenVersion: true, // ✅ NEW: tokenVersion bhi fetch karo
                 },
             });
-            // Cache mein store karo (safe - never throws)
+            // Cache mein store karo (without tokenVersion for security)
             if (user) {
-                await safeRedisSet(cacheKey, JSON.stringify(user), CACHE_TTL);
+                await safeRedisSet(cacheKey, JSON.stringify({
+                    id: user.id,
+                    email: user.email,
+                    status: user.status,
+                    emailVerified: user.emailVerified,
+                    tokenVersion: user.tokenVersion, // ✅ Cache me bhi store karo
+                }), CACHE_TTL);
             }
         }
         if (!user) {
             throw new errorHandler_1.AppError('User not found', 401);
+        }
+        // ✅ NEW: tokenVersion check - admin ne password change kiya?
+        // JWT me tokenVersion hoga (naya login pe), DB me current version hai
+        // Agar mismatch → token invalid → logout force karo
+        if (decoded.tokenVersion !== undefined &&
+            user.tokenVersion !== undefined &&
+            decoded.tokenVersion !== user.tokenVersion) {
+            console.warn(`🚨 Token version mismatch for user ${decoded.userId}: ` +
+                `JWT=${decoded.tokenVersion}, DB=${user.tokenVersion}`);
+            // Redis cache invalidate karo
+            await safeRedisDel(cacheKey);
+            throw new errorHandler_1.AppError('Session expired. Please login again.', 401);
         }
         if (user.status === 'SUSPENDED') {
             throw new errorHandler_1.AppError('Account suspended', 403);

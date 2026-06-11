@@ -779,9 +779,7 @@ export class MetaController {
         console.error('⚠️ Post-connection steps failed:', onboardingErr.message);
       }
 
-      // Delete used state
-      await (prisma as any).oAuthState.delete({ where: { state } });
-
+      // State is already deleted earlier in the flow (line 242)
       console.log('✅ Meta callback successful');
 
       // After saving WhatsAppAccount, VERIFY it exists

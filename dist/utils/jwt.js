@@ -31,7 +31,7 @@ const generateAccessToken = (payload) => {
     const options = {
         expiresIn: getExpirySeconds(config_1.config.jwt.expiresIn),
     };
-    return jsonwebtoken_1.default.sign({ ...payload, type: 'access' }, secret, options);
+    return jsonwebtoken_1.default.sign({ tokenVersion: 0, ...payload, type: 'access' }, secret, options);
 };
 exports.generateAccessToken = generateAccessToken;
 // Generate Refresh Token
@@ -40,7 +40,7 @@ const generateRefreshToken = (payload) => {
     const options = {
         expiresIn: getExpirySeconds(config_1.config.jwt.refreshExpiresIn),
     };
-    return jsonwebtoken_1.default.sign({ ...payload, type: 'refresh' }, secret, options);
+    return jsonwebtoken_1.default.sign({ tokenVersion: 0, ...payload, type: 'refresh' }, secret, options);
 };
 exports.generateRefreshToken = generateRefreshToken;
 // Verify Access Token

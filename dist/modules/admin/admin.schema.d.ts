@@ -247,14 +247,18 @@ export declare const updateUserPasswordSchema: z.ZodObject<{
     }>;
     body: z.ZodObject<{
         password: z.ZodString;
+        logoutDevices: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         password: string;
+        logoutDevices?: boolean | undefined;
     }, {
         password: string;
+        logoutDevices?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         password: string;
+        logoutDevices?: boolean | undefined;
     };
     params: {
         id: string;
@@ -262,6 +266,7 @@ export declare const updateUserPasswordSchema: z.ZodObject<{
 }, {
     body: {
         password: string;
+        logoutDevices?: boolean | undefined;
     };
     params: {
         id: string;

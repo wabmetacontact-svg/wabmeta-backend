@@ -3,7 +3,14 @@ declare class MetaApiClient {
     private client;
     private graphVersion;
     constructor();
-    exchangeCodeForToken(code: string): Promise<TokenExchangeResponse>;
+    /**
+     * Exchange authorization code for access token.
+     * @param code - The authorization code from FB.login or OAuth redirect
+     * @param skipRedirectUri - Set TRUE for FB.login/Embedded Signup flow.
+     *   FB.login codes must be exchanged WITHOUT a redirect_uri.
+     *   Only OAuth redirect flow (state-token based) needs redirect_uri.
+     */
+    exchangeCodeForToken(code: string, skipRedirectUri?: boolean): Promise<TokenExchangeResponse>;
     getLongLivedToken(shortLivedToken: string): Promise<TokenExchangeResponse>;
     debugToken(accessToken: string): Promise<DebugTokenResponse>;
     validateToken(accessToken: string): Promise<boolean>;

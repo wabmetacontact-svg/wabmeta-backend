@@ -18,7 +18,9 @@ export declare class MetaService {
         hasRedirectUri: boolean;
         apiVersion: string;
     };
-    completeConnection(codeOrToken: string, organizationId: string, userId: string, connectionType?: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP', onProgress?: (progress: ConnectionProgress) => void): Promise<{
+    completeConnection(codeOrToken: string, organizationId: string, userId: string, connectionType?: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP', onProgress?: (progress: ConnectionProgress) => void, embeddedSignup?: boolean, // true = FB.login flow, no redirect_uri needed
+    sessionWabaId?: string, // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
+    sessionPhoneNumberId?: string): Promise<{
         success: boolean;
         account?: any;
         error?: string;

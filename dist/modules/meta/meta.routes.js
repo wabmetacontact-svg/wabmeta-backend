@@ -221,8 +221,68 @@ const checkSingleAccountLimit = async (req, res, next) => {
         next(error);
     }
 };
+// /callback - Backend OAuth redirect flow (state token based)
 router.post('/callback', checkSingleAccountLimit, meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
-router.post('/connect', checkSingleAccountLimit, meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
+// /connect - Frontend FB.login Embedded Signup flow (NO state token)
+router.post('/connect', auth_1.authenticate, async (req, res, next) => {
+    try {
+        const { code, organizationId, wabaId, phoneNumberId } = req.body;
+        const userId = req.user?.id;
+        console.log('\n🔄 ========== META CONNECT (FB.login flow) ==========');
+        console.log('   Code:', code ? `${code.substring(0, 10)}...` : 'Missing');
+        console.log('   Organization ID:', organizationId);
+        console.log('   User ID:', userId);
+        console.log('   Session WABA ID:', wabaId || '(not provided — will lookup from token)');
+        console.log('   Session Phone ID:', phoneNumberId || '(not provided — will lookup from WABA)');
+        if (!code) {
+            throw new errorHandler_1.AppError('Authorization code is required', 400);
+        }
+        if (!organizationId) {
+            throw new errorHandler_1.AppError('Organization ID is required', 400);
+        }
+        if (!userId) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        // Verify membership
+        const membership = await database_1.default.organizationMember.findFirst({
+            where: {
+                organizationId,
+                userId,
+                role: { in: ['OWNER', 'ADMIN'] },
+            },
+        });
+        if (!membership) {
+            throw new errorHandler_1.AppError('You do not have permission to connect WhatsApp', 403);
+        }
+        // Check single account limit
+        const existingConnected = await database_1.default.whatsAppAccount.findFirst({
+            where: { organizationId, status: 'CONNECTED' },
+        });
+        if (existingConnected) {
+            throw new errorHandler_1.AppError(`Organization already has a connected WhatsApp account (${existingConnected.phoneNumber}). ` +
+                `Please disconnect it first.`, 400);
+        }
+        // ✅ Use metaService.completeConnection with embeddedSignup=true
+        // Pass wabaId + phoneNumberId from session info (if captured by frontend)
+        const result = await meta_service_1.metaService.completeConnection(code, organizationId, userId, 'CLOUD_API', undefined, // no onProgress callback
+        true, // embeddedSignup = true → skipRedirectUri during token exchange
+        wabaId || undefined, // ✅ Session WABA ID from message event
+        phoneNumberId || undefined // ✅ Session Phone Number ID from message event
+        );
+        if (result.success) {
+            console.log('✅ FB.login connection successful');
+            return (0, response_1.sendSuccess)(res, result.account, 'WhatsApp connected successfully');
+        }
+        else {
+            console.error('❌ FB.login connection failed:', result.error);
+            throw new errorHandler_1.AppError(result.error || 'Connection failed', 400);
+        }
+    }
+    catch (error) {
+        console.error('❌ /connect error:', error);
+        next(error);
+    }
+});
 // ============================================
 // PROTECTED ROUTES
 // ============================================
@@ -570,6 +630,42 @@ router.get('/accounts/:id', meta_controller_1.metaController.getAccount.bind(met
 router.delete('/accounts/:id', meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
 // ✅ Also support POST /accounts/:id/disconnect (frontend uses this)
 router.post('/accounts/:id/disconnect', meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
+// ✅ Set default account shortcut (gets org from JWT context)
+router.post('/accounts/:id/set-default', async (req, res, next) => {
+    try {
+        const { id: accountId } = req.params;
+        const userId = req.user?.id;
+        if (!userId) {
+            throw new errorHandler_1.AppError('Authentication required', 401);
+        }
+        // Find account to get organizationId
+        const account = await database_1.default.whatsAppAccount.findFirst({
+            where: { id: accountId },
+            include: {
+                organization: {
+                    include: {
+                        members: { where: { userId, role: { in: ['OWNER', 'ADMIN'] } } }
+                    }
+                }
+            },
+        });
+        if (!account) {
+            throw new errorHandler_1.AppError('Account not found', 404);
+        }
+        const organizationId = account.organizationId;
+        const membership = await database_1.default.organizationMember.findFirst({
+            where: { organizationId, userId, role: { in: ['OWNER', 'ADMIN'] } },
+        });
+        if (!membership) {
+            throw new errorHandler_1.AppError('You do not have permission to set default account', 403);
+        }
+        const result = await meta_service_1.metaService.setDefaultAccount(accountId, organizationId);
+        return (0, response_1.sendSuccess)(res, result, 'Default account updated successfully');
+    }
+    catch (error) {
+        next(error);
+    }
+});
 // ============================================
 // HEALTH CHECK
 // ============================================

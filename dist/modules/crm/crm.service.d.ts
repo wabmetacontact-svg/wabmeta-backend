@@ -7,8 +7,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            color: string;
             order: number;
+            color: string;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -30,8 +30,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            color: string;
             order: number;
+            color: string;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -61,8 +61,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            color: string;
             order: number;
+            color: string;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -165,8 +165,8 @@ export declare class CRMService {
                 createdAt: Date;
                 updatedAt: Date;
                 pipelineId: string;
-                color: string;
                 order: number;
+                color: string;
                 probability: number;
                 isWon: boolean;
                 isLost: boolean;
@@ -196,8 +196,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            color: string;
             order: number;
+            color: string;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -292,8 +292,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            color: string;
             order: number;
+            color: string;
             probability: number;
             isWon: boolean;
             isLost: boolean;
@@ -364,8 +364,8 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             pipelineId: string;
-            color: string;
             order: number;
+            color: string;
             probability: number;
             isWon: boolean;
             isLost: boolean;

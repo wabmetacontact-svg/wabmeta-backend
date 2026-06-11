@@ -8,6 +8,7 @@ const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 // Overview stats
 router.get('/overview', analytics_controller_1.analyticsController.getOverview);
+router.get('/unified', analytics_controller_1.analyticsController.getUnifiedDashboard);
 // Specific analytics
 router.get('/messages', analytics_controller_1.analyticsController.getMessageAnalytics);
 router.get('/campaigns', analytics_controller_1.analyticsController.getCampaignAnalytics);

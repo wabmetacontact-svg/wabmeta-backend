@@ -239,7 +239,17 @@ const formatUser = (user) => ({
 // HELPER: Generate JWT tokens
 // ============================================
 const generateTokenPair = async (userId, email, organizationId) => {
-    const payload = { userId, email, organizationId };
+    // ✅ User ka current tokenVersion fetch karo
+    const user = await database_1.default.user.findUnique({
+        where: { id: userId },
+        select: { tokenVersion: true },
+    });
+    const payload = {
+        userId,
+        email,
+        organizationId,
+        tokenVersion: user?.tokenVersion ?? 0, // ✅ JWT me include karo
+    };
     const accessToken = (0, jwt_1.generateAccessToken)(payload);
     const refreshToken = (0, jwt_1.generateRefreshToken)(payload);
     const expiresAt = new Date(Date.now() + (0, jwt_1.parseExpiryTime)(config_1.config.jwt.refreshExpiresIn));
@@ -258,7 +268,7 @@ const generateTokenPair = async (userId, email, organizationId) => {
 const getDefaultOrg = async (userId) => {
     const owned = await database_1.default.organization.findFirst({
         where: { ownerId: userId },
-        select: { id: true, name: true, slug: true, planType: true },
+        select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true },
     });
     if (owned)
         return owned;
@@ -266,7 +276,7 @@ const getDefaultOrg = async (userId) => {
         where: { userId },
         include: {
             organization: {
-                select: { id: true, name: true, slug: true, planType: true },
+                select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true },
             },
         },
     });
@@ -849,8 +859,9 @@ class AuthService {
     // REFRESH TOKEN
     // ────────────────────────────────────────────
     async refreshToken(refreshToken) {
+        let payload;
         try {
-            (0, jwt_1.verifyRefreshToken)(refreshToken);
+            payload = (0, jwt_1.verifyRefreshToken)(refreshToken);
         }
         catch {
             throw new errorHandler_1.AppError('Invalid refresh token', 401);
@@ -859,8 +870,16 @@ class AuthService {
             where: { token: refreshToken },
             include: { user: true },
         });
-        if (!stored)
-            throw new errorHandler_1.AppError('Refresh token not found', 401);
+        if (!stored) {
+            // 🚨 TOKEN REUSE DETECTION
+            // Token is valid JWT but not in DB -> it was already used and deleted.
+            // This means a compromised token is being reused. Revoke all sessions!
+            if (payload && payload.userId) {
+                console.warn(`🚨 TOKEN REUSE DETECTED! Revoking all sessions for user: ${payload.userId}`);
+                await database_1.default.refreshToken.deleteMany({ where: { userId: payload.userId } });
+            }
+            throw new errorHandler_1.AppError('Refresh token reused or not found. All sessions revoked for security.', 401);
+        }
         if (stored.expiresAt < new Date()) {
             await database_1.default.refreshToken.delete({ where: { id: stored.id } });
             throw new errorHandler_1.AppError('Refresh token expired', 401);

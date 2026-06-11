@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 declare class AnalyticsController {
     getOverview(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
+    getUnifiedDashboard(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
     getMessageAnalytics(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
     getCampaignAnalytics(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;
     getContactAnalytics(req: Request, res: Response): Promise<Response<any, Record<string, any>>>;

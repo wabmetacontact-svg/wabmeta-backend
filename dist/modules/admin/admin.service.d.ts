@@ -143,6 +143,7 @@ export declare class AdminService {
             refreshTokens: number;
         };
         email: string;
+        tokenVersion: number;
         id: string;
         status: import(".prisma/client").$Enums.UserStatus;
         createdAt: Date;
@@ -164,8 +165,9 @@ export declare class AdminService {
         lastLoginIp: string | null;
     }>;
     updateUserPassword(id: string, data: any): Promise<{
-        email: string;
         id: string;
+        email: string;
+        message: string;
     }>;
     updateUser(id: string, data: any): Promise<{
         email: string;
@@ -262,6 +264,11 @@ export declare class AdminService {
             featureCsvUpload: boolean;
             featureOverrideByAdmin: boolean;
             featureSimpleBulkUpload: boolean;
+            featureInboxLocked: boolean;
+            featureCampaignsLocked: boolean;
+            featureChatbotLocked: boolean;
+            featureAutomationLocked: boolean;
+            customLabels: import("@prisma/client/runtime/library").JsonValue;
         })[];
         total: number;
     }>;
@@ -360,6 +367,11 @@ export declare class AdminService {
         featureCsvUpload: boolean;
         featureOverrideByAdmin: boolean;
         featureSimpleBulkUpload: boolean;
+        featureInboxLocked: boolean;
+        featureCampaignsLocked: boolean;
+        featureChatbotLocked: boolean;
+        featureAutomationLocked: boolean;
+        customLabels: import("@prisma/client/runtime/library").JsonValue;
     }>;
     updateOrganization(id: string, data: any): Promise<{
         name: string;
@@ -376,6 +388,11 @@ export declare class AdminService {
         featureCsvUpload: boolean;
         featureOverrideByAdmin: boolean;
         featureSimpleBulkUpload: boolean;
+        featureInboxLocked: boolean;
+        featureCampaignsLocked: boolean;
+        featureChatbotLocked: boolean;
+        featureAutomationLocked: boolean;
+        customLabels: import("@prisma/client/runtime/library").JsonValue;
     }>;
     deleteOrganization(id: string): Promise<{
         message: string;
@@ -475,6 +492,11 @@ export declare class AdminService {
         featureCsvUpload: boolean;
         featureOverrideByAdmin: boolean;
         featureSimpleBulkUpload: boolean;
+        featureInboxLocked: boolean;
+        featureCampaignsLocked: boolean;
+        featureChatbotLocked: boolean;
+        featureAutomationLocked: boolean;
+        customLabels: import("@prisma/client/runtime/library").JsonValue;
     }>;
     getPlans(): Promise<({
         _count: {
@@ -672,7 +694,6 @@ export declare class AdminService {
             businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
             isDefault: boolean;
             isActive: boolean;
-            customLabels: string[];
             connectionType: string;
         };
     }>;

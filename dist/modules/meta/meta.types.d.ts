@@ -94,7 +94,7 @@ export interface SubscribedApps {
     }>;
 }
 export interface ConnectionProgress {
-    step: 'TOKEN_EXCHANGE' | 'FETCHING_WABA' | 'FETCHING_PHONE' | 'SUBSCRIBE_WEBHOOK' | 'SAVING' | 'COMPLETED';
+    step: 'TOKEN_EXCHANGE' | 'FETCHING_WABA' | 'FETCHING_PHONE' | 'SUBSCRIBE_WEBHOOK' | 'REGISTER_PHONE' | 'SAVING' | 'COMPLETED';
     status: 'pending' | 'in_progress' | 'completed' | 'error';
     message: string;
     data?: any;

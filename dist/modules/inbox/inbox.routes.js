@@ -95,6 +95,8 @@ router.delete('/conversations/:id/labels/:label', (req, res, next) => inbox_cont
 // BULK
 // ==========================================
 router.post('/bulk', (req, res, next) => inbox_controller_1.inboxController.bulkUpdate(req, res, next));
+router.post('/bulk-delete', (req, res, next) => inbox_controller_1.inboxController.bulkDelete(req, res, next));
+router.delete('/delete-all', (req, res, next) => inbox_controller_1.inboxController.deleteAll(req, res, next));
 // ==========================================
 // SEARCH & STATS
 // ==========================================

@@ -242,14 +242,14 @@ class AdminController {
     async updateUserPassword(req, res, next) {
         try {
             const id = getParamId(req.params.id);
-            const { password } = req.body;
+            const { password, logoutDevices } = req.body;
             if (!id) {
                 throw new errorHandler_1.AppError('User ID is required', 400);
             }
             if (!password) {
                 throw new errorHandler_1.AppError('Password is required', 400);
             }
-            const user = await admin_service_1.adminService.updateUserPassword(id, { password });
+            const user = await admin_service_1.adminService.updateUserPassword(id, { password, logoutDevices });
             return sendSuccess(res, user, 'User password updated successfully');
         }
         catch (error) {
@@ -403,7 +403,11 @@ class AdminController {
                 features: {
                     simpleBulkPaste: org.featureSimpleBulkUpload ?? false,
                     csvUpload: org.featureCsvUpload ?? false,
-                    adminOverride: org.featureOverrideByAdmin ?? false
+                    adminOverride: org.featureOverrideByAdmin ?? false,
+                    inboxLocked: org.featureInboxLocked ?? false,
+                    campaignsLocked: org.featureCampaignsLocked ?? false,
+                    chatbotLocked: org.featureChatbotLocked ?? false,
+                    automationLocked: org.featureAutomationLocked ?? false
                 }
             }, 'Features fetched');
         }
@@ -414,7 +418,7 @@ class AdminController {
     async updateOrganizationFeatures(req, res, next) {
         try {
             const organizationId = getParamId(req.params.organizationId);
-            const { simpleBulkPaste, csvUpload, enableOverride } = req.body;
+            const { simpleBulkPaste, csvUpload, enableOverride, inboxLocked, campaignsLocked, chatbotLocked, automationLocked } = req.body;
             const org = await database_1.default.organization.findUnique({
                 where: { id: organizationId }
             });
@@ -426,7 +430,11 @@ class AdminController {
                 data: {
                     featureSimpleBulkUpload: simpleBulkPaste,
                     featureCsvUpload: csvUpload,
-                    featureOverrideByAdmin: enableOverride ?? true
+                    featureOverrideByAdmin: enableOverride ?? true,
+                    featureInboxLocked: inboxLocked ?? false,
+                    featureCampaignsLocked: campaignsLocked ?? false,
+                    featureChatbotLocked: chatbotLocked ?? false,
+                    featureAutomationLocked: automationLocked ?? false
                 }
             });
             return sendSuccess(res, {
@@ -434,7 +442,11 @@ class AdminController {
                 features: {
                     simpleBulkPaste: updated.featureSimpleBulkUpload,
                     csvUpload: updated.featureCsvUpload,
-                    adminOverride: updated.featureOverrideByAdmin
+                    adminOverride: updated.featureOverrideByAdmin,
+                    inboxLocked: updated.featureInboxLocked,
+                    campaignsLocked: updated.featureCampaignsLocked,
+                    chatbotLocked: updated.featureChatbotLocked,
+                    automationLocked: updated.featureAutomationLocked
                 }
             }, 'Features updated');
         }
