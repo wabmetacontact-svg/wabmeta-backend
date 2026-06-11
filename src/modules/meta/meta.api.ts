@@ -374,28 +374,22 @@ class MetaApiClient {
   async registerPhoneNumber(phoneNumberId: string, accessToken: string): Promise<boolean> {
     try {
       console.log(`[Meta API] Registering phone number ${phoneNumberId}...`);
-
       const response = await this.client.post(
         `${phoneNumberId}/register`,
-        {
-          messaging_product: 'whatsapp',
-          pin: '123456',
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
+        { messaging_product: 'whatsapp', pin: '000000' },
+        { headers: { Authorization: `Bearer ${accessToken}` } }
       );
-
       console.log('[Meta API] ✅ Phone number registered');
       return response.data.success === true;
     } catch (error: any) {
-      if (error.response?.data?.error?.code === 10) {
-        console.log('[Meta API] Phone number already registered');
+      const code = error.response?.data?.error?.code;
+      // 10 = already registered, 133005/133006 = PIN-related (already set up)
+      if (code === 10 || code === 133005 || code === 133006) {
+        console.log('[Meta API] ℹ️ Phone already registered / PIN set — skipping (non-fatal)');
         return true;
       }
-      throw this.handleError(error, 'Failed to register phone number');
+      console.warn('[Meta API] ⚠️ Register failed (non-fatal):', error.response?.data?.error?.message);
+      return false; // ✅ don't throw — registration failure shouldn't block connection
     }
   }
 

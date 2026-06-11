@@ -207,47 +207,11 @@ router.post('/webhook', async (req, res) => {
 });
 
 // ============================================
+// ============================================
 // PUBLIC OAUTH CALLBACKS
 // These use state token verification instead of JWT
 // ============================================
 
-const checkSingleAccountLimit = async (req: any, res: any, next: any) => {
-  try {
-    const state = req.body.state;
-    if (!state) return next(); // Let controller handle missing state
-
-    const oauthState = await (prisma as any).oAuthState.findUnique({
-      where: { state },
-    });
-
-    if (!oauthState) return next();
-
-    const organizationId = oauthState.organizationId;
-    
-    const existingConnected = await prisma.whatsAppAccount.findFirst({
-      where: {
-        organizationId,
-        status: 'CONNECTED',
-      },
-    });
-
-    if (existingConnected) {
-      await (prisma as any).oAuthState.delete({ where: { state } }).catch(() => {});
-      
-      throw new AppError(
-        `Your organization already has a connected WhatsApp account. Please disconnect it first.`,
-        400
-      );
-    }
-    
-    next();
-  } catch (error) {
-    next(error);
-  }
-};
-
-// /callback - Backend OAuth redirect flow (state token based)
-router.post('/callback', checkSingleAccountLimit, metaController.handleCallback.bind(metaController));
 
 // /connect - Frontend FB.login Embedded Signup flow (NO state token)
 router.post('/connect', authenticate, async (req, res, next) => {
@@ -336,9 +300,6 @@ router.use(authenticate);
 // OAUTH & CONNECTION ROUTES (Private - to generate URL)
 // ============================================
 
-router.get('/oauth-url', metaController.getOAuthUrl.bind(metaController));
-router.get('/auth/url', metaController.getAuthUrl.bind(metaController));
-router.post('/initiate-connection', metaController.initiateConnection.bind(metaController));
 
 // ============================================
 // CONFIGURATION ROUTES
@@ -356,70 +317,14 @@ router.get('/organizations/:organizationId/accounts', async (req, res, next) => 
     const { organizationId } = req.params;
     const userId = req.user?.id;
 
-    console.log('📋 Fetching accounts for organization:', organizationId);
-
     if (userId) {
       const membership = await prisma.organizationMember.findFirst({
         where: { organizationId, userId },
       });
-
-      if (!membership) {
-        throw new AppError('You do not have access to this organization', 403);
-      }
+      if (!membership) throw new AppError('You do not have access to this organization', 403);
     }
 
-    let accounts: any[] = [];
-
-    try {
-      accounts = await metaService.getAccounts(organizationId);
-    } catch (error: any) {
-      console.warn('⚠️ metaService.getAccounts failed:', error.message);
-
-      const whatsappAccounts = await prisma.whatsAppAccount.findMany({
-        where: {
-          organizationId,
-          status: { in: ['CONNECTED', 'PENDING'] },
-        },
-        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-      });
-
-      accounts = whatsappAccounts;
-
-      try {
-        const metaConnection = await (prisma as any).metaConnection.findUnique({
-          where: { organizationId },
-          include: {
-            phoneNumbers: {
-              where: { isActive: true },
-              orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
-            },
-          },
-        });
-
-        if (metaConnection && metaConnection.phoneNumbers?.length > 0) {
-          const metaAccounts = metaConnection.phoneNumbers.map((phone: any) => ({
-            id: phone.id,
-            organizationId,
-            phoneNumberId: phone.phoneNumberId,
-            phoneNumber: phone.phoneNumber,
-            displayName: phone.displayName || phone.verifiedName,
-            wabaId: metaConnection.wabaId,
-            status: metaConnection.status,
-            qualityRating: phone.qualityRating,
-            isDefault: phone.isPrimary,
-            createdAt: phone.createdAt,
-            updatedAt: phone.updatedAt,
-            source: 'MetaConnection',
-          }));
-
-          accounts = [...accounts, ...metaAccounts];
-        }
-      } catch (metaError) {
-        console.log('⚠️ MetaConnection table not available');
-      }
-    }
-
-    console.log(`✅ Found ${accounts.length} account(s)`);
+    const accounts = await metaService.getAccounts(organizationId);
 
     return sendSuccess(
       res,
@@ -431,7 +336,6 @@ router.get('/organizations/:organizationId/accounts', async (req, res, next) => 
       'Accounts fetched successfully'
     );
   } catch (error) {
-    console.error('❌ Get accounts error:', error);
     next(error);
   }
 });

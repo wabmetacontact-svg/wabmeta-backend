@@ -191,38 +191,10 @@ router.post('/webhook', async (req, res) => {
     }
 });
 // ============================================
+// ============================================
 // PUBLIC OAUTH CALLBACKS
 // These use state token verification instead of JWT
 // ============================================
-const checkSingleAccountLimit = async (req, res, next) => {
-    try {
-        const state = req.body.state;
-        if (!state)
-            return next(); // Let controller handle missing state
-        const oauthState = await database_1.default.oAuthState.findUnique({
-            where: { state },
-        });
-        if (!oauthState)
-            return next();
-        const organizationId = oauthState.organizationId;
-        const existingConnected = await database_1.default.whatsAppAccount.findFirst({
-            where: {
-                organizationId,
-                status: 'CONNECTED',
-            },
-        });
-        if (existingConnected) {
-            await database_1.default.oAuthState.delete({ where: { state } }).catch(() => { });
-            throw new errorHandler_1.AppError(`Your organization already has a connected WhatsApp account. Please disconnect it first.`, 400);
-        }
-        next();
-    }
-    catch (error) {
-        next(error);
-    }
-};
-// /callback - Backend OAuth redirect flow (state token based)
-router.post('/callback', checkSingleAccountLimit, meta_controller_1.metaController.handleCallback.bind(meta_controller_1.metaController));
 // /connect - Frontend FB.login Embedded Signup flow (NO state token)
 router.post('/connect', auth_1.authenticate, async (req, res, next) => {
     try {
@@ -290,9 +262,6 @@ router.use(auth_1.authenticate);
 // ============================================
 // OAUTH & CONNECTION ROUTES (Private - to generate URL)
 // ============================================
-router.get('/oauth-url', meta_controller_1.metaController.getOAuthUrl.bind(meta_controller_1.metaController));
-router.get('/auth/url', meta_controller_1.metaController.getAuthUrl.bind(meta_controller_1.metaController));
-router.post('/initiate-connection', meta_controller_1.metaController.initiateConnection.bind(meta_controller_1.metaController));
 // ============================================
 // CONFIGURATION ROUTES
 // ============================================
@@ -305,62 +274,14 @@ router.get('/organizations/:organizationId/accounts', async (req, res, next) => 
     try {
         const { organizationId } = req.params;
         const userId = req.user?.id;
-        console.log('📋 Fetching accounts for organization:', organizationId);
         if (userId) {
             const membership = await database_1.default.organizationMember.findFirst({
                 where: { organizationId, userId },
             });
-            if (!membership) {
+            if (!membership)
                 throw new errorHandler_1.AppError('You do not have access to this organization', 403);
-            }
         }
-        let accounts = [];
-        try {
-            accounts = await meta_service_1.metaService.getAccounts(organizationId);
-        }
-        catch (error) {
-            console.warn('⚠️ metaService.getAccounts failed:', error.message);
-            const whatsappAccounts = await database_1.default.whatsAppAccount.findMany({
-                where: {
-                    organizationId,
-                    status: { in: ['CONNECTED', 'PENDING'] },
-                },
-                orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-            });
-            accounts = whatsappAccounts;
-            try {
-                const metaConnection = await database_1.default.metaConnection.findUnique({
-                    where: { organizationId },
-                    include: {
-                        phoneNumbers: {
-                            where: { isActive: true },
-                            orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
-                        },
-                    },
-                });
-                if (metaConnection && metaConnection.phoneNumbers?.length > 0) {
-                    const metaAccounts = metaConnection.phoneNumbers.map((phone) => ({
-                        id: phone.id,
-                        organizationId,
-                        phoneNumberId: phone.phoneNumberId,
-                        phoneNumber: phone.phoneNumber,
-                        displayName: phone.displayName || phone.verifiedName,
-                        wabaId: metaConnection.wabaId,
-                        status: metaConnection.status,
-                        qualityRating: phone.qualityRating,
-                        isDefault: phone.isPrimary,
-                        createdAt: phone.createdAt,
-                        updatedAt: phone.updatedAt,
-                        source: 'MetaConnection',
-                    }));
-                    accounts = [...accounts, ...metaAccounts];
-                }
-            }
-            catch (metaError) {
-                console.log('⚠️ MetaConnection table not available');
-            }
-        }
-        console.log(`✅ Found ${accounts.length} account(s)`);
+        const accounts = await meta_service_1.metaService.getAccounts(organizationId);
         return (0, response_1.sendSuccess)(res, {
             accounts,
             total: accounts.length,
@@ -368,7 +289,6 @@ router.get('/organizations/:organizationId/accounts', async (req, res, next) => 
         }, 'Accounts fetched successfully');
     }
     catch (error) {
-        console.error('❌ Get accounts error:', error);
         next(error);
     }
 });
