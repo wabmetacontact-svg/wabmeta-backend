@@ -1,5 +1,3 @@
-// src/socket.ts - FINAL FIXED VERSION
-
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
@@ -42,13 +40,10 @@ export const initializeSocket = (server: HttpServer) => {
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-
-    // ✅ Render free tier ke liye optimized timeouts
-    pingTimeout: 120000,   // 2 minutes
-    pingInterval: 30000,   // 30 seconds
+    pingTimeout: 120000,
+    pingInterval: 30000,
     connectTimeout: 45000,
     maxHttpBufferSize: 1e6,
-
     perMessageDeflate: {
       threshold: 1024,
     },
@@ -57,7 +52,7 @@ export const initializeSocket = (server: HttpServer) => {
   let connectionCount = 0;
   const MAX_CONNECTIONS = 5000;
 
-  // ✅ Auth middleware
+  // ✅ Auth middleware - same as before
   io.use((socket: AuthenticatedSocket, next) => {
     const token =
       socket.handshake.auth?.token ||
@@ -69,12 +64,10 @@ export const initializeSocket = (server: HttpServer) => {
       try {
         const decoded = jwt.verify(token, config.jwt.secret) as any;
         socket.userId = decoded.userId || decoded.id;
-        socket.organizationId =
-          decoded.organizationId || orgFromAuth;
+        socket.organizationId = decoded.organizationId || orgFromAuth;
         socket.email = decoded.email;
       } catch (e) {
         console.warn('⚠️ Invalid socket token - allowing as guest');
-        // ✅ Guest connections allow karo (org join manually karenge)
         socket.organizationId = orgFromAuth;
       }
     } else {
@@ -104,7 +97,13 @@ export const initializeSocket = (server: HttpServer) => {
       console.log(`📂 Auto-joined org room: org:${socket.organizationId}`);
     }
 
-    // ✅ Manual org join (frontend se)
+    // ✅ NEW: Auto-join user-specific room for force logout
+    if (socket.userId) {
+      socket.join(`user:${socket.userId}`);
+      console.log(`👤 Auto-joined user room: user:${socket.userId}`);
+    }
+
+    // ✅ Manual org join
     socket.on('org:join', (orgId: string) => {
       if (orgId && typeof orgId === 'string') {
         socket.organizationId = orgId;
@@ -113,18 +112,25 @@ export const initializeSocket = (server: HttpServer) => {
       }
     });
 
+    // ✅ NEW: Manual user room join (agar userId token me na ho)
+    socket.on('user:join', (userId: string) => {
+      if (userId && typeof userId === 'string') {
+        socket.userId = userId;
+        socket.join(`user:${userId}`);
+        console.log(`👤 Manually joined user room: user:${userId}`);
+      }
+    });
+
     // ✅ Conversation rooms
     socket.on('join:conversation', (conversationId: string) => {
       if (conversationId && typeof conversationId === 'string') {
         socket.join(`conversation:${conversationId}`);
-        console.log(`📂 Joined conversation: ${conversationId}`);
       }
     });
 
     socket.on('leave:conversation', (conversationId: string) => {
       if (conversationId && typeof conversationId === 'string') {
         socket.leave(`conversation:${conversationId}`);
-        console.log(`📤 Left conversation: ${conversationId}`);
       }
     });
 
@@ -137,7 +143,7 @@ export const initializeSocket = (server: HttpServer) => {
       if (id) socket.leave(`campaign:${id}`);
     });
 
-    // ✅ Ping/pong for connection health
+    // ✅ Ping/pong
     socket.on('ping', () => {
       socket.emit('pong', { time: Date.now() });
     });
@@ -154,10 +160,8 @@ export const initializeSocket = (server: HttpServer) => {
     });
   });
 
-  // Campaign socket initialize
   initializeCampaignSocket(io);
 
-  // ✅ Wire webhook events ONCE
   if (!webhookListenersAttached) {
     wireWebhookEvents();
     webhookListenersAttached = true;
@@ -168,7 +172,7 @@ export const initializeSocket = (server: HttpServer) => {
 };
 
 // ============================================
-// ✅ WEBHOOK EVENTS WIRING - FIXED
+// WEBHOOK EVENTS - same as before
 // ============================================
 function wireWebhookEvents() {
   import('./modules/webhooks/webhook.service')
@@ -178,15 +182,11 @@ function wireWebhookEvents() {
         return;
       }
 
-      // ✅ Remove ALL old listeners first
       webhookEvents.removeAllListeners('newMessage');
       webhookEvents.removeAllListeners('conversationUpdated');
       webhookEvents.removeAllListeners('messageStatus');
       webhookEvents.removeAllListeners('accountUpdated');
 
-      // ============================================
-      // ✅ NEW MESSAGE - CRITICAL FIX
-      // ============================================
       webhookEvents.on('newMessage', (data: any) => {
         if (!io || !data?.organizationId) return;
 
@@ -196,63 +196,32 @@ function wireWebhookEvents() {
 
         if (!message) return;
 
-        const messageId =
-          message.id ||
-          message.waMessageId ||
-          message.wamId;
-
-        console.log(`📡 Socket emit message:new | Org: ${orgId} | Conv: ${conversationId} | Dir: ${message.direction} | ID: ${messageId}`);
-
-        // ✅ CRITICAL: OUTBOUND messages ko ONLY conversation room mein emit karo
-        // Frontend ke jo user us conversation mein hai, use NAHI milega dobara
-        // (uske paas already optimistic message hai)
-        // 
-        // INBOUND messages ko org room + conversation room DONO mein emit karo
-        // taaki:
-        //   1. Jo conversation open hai - use naya message mile
-        //   2. Jo conversation list mein hai - unread count update ho
+        const normalizedMessage = {
+          ...message,
+          createdAt: message.createdAt instanceof Date
+            ? message.createdAt.toISOString()
+            : message.createdAt || new Date().toISOString(),
+          timestamp: message.timestamp instanceof Date
+            ? message.timestamp.toISOString()
+            : message.timestamp || message.createdAt || new Date().toISOString(),
+        };
 
         if (message.direction === 'INBOUND') {
-          // ✅ INBOUND: Org room + Conversation room dono
           io.to(`org:${orgId}`)
             .to(`conversation:${conversationId}`)
             .emit('message:new', {
               organizationId: orgId,
               conversationId,
-              message: {
-                ...message,
-                // Ensure timestamps are strings
-                createdAt: message.createdAt instanceof Date
-                  ? message.createdAt.toISOString()
-                  : message.createdAt || new Date().toISOString(),
-                timestamp: message.timestamp instanceof Date
-                  ? message.timestamp.toISOString()
-                  : message.timestamp || message.createdAt || new Date().toISOString(),
-              },
+              message: normalizedMessage,
               conversation: data.conversation || null,
             });
-
-          console.log(`✅ INBOUND message emitted to org + conversation rooms`);
-
         } else if (message.direction === 'OUTBOUND') {
-          // ✅ OUTBOUND: Emit both message:new AND message:status
-          // message:new is for OTHER devices/agents in the organization
-          // message:status is for the original sender to update their optimistic message
-
           io.to(`org:${orgId}`)
             .to(`conversation:${conversationId}`)
             .emit('message:new', {
               organizationId: orgId,
               conversationId,
-              message: {
-                ...message,
-                createdAt: message.createdAt instanceof Date
-                  ? message.createdAt.toISOString()
-                  : message.createdAt || new Date().toISOString(),
-                timestamp: message.timestamp instanceof Date
-                  ? message.timestamp.toISOString()
-                  : message.timestamp || message.createdAt || new Date().toISOString(),
-              },
+              message: normalizedMessage,
               conversation: data.conversation || null,
             });
 
@@ -276,59 +245,35 @@ function wireWebhookEvents() {
                   ? message.sentAt.toISOString()
                   : message.sentAt || new Date().toISOString(),
               });
-
-            console.log(`✅ OUTBOUND emitted message:new and message:status (tempId=${tempId})`);
           }
         }
       });
 
-      // ============================================
-      // ✅ CONVERSATION UPDATE
-      // ============================================
       webhookEvents.on('conversationUpdated', (data: any) => {
         if (!io || !data?.organizationId) return;
 
-        const orgId = data.organizationId;
-        const conversation = data.conversation;
-
-        if (!conversation?.id) return;
-
-        console.log(`📡 Socket emit conversation:updated | ${conversation.id}`);
-
-        io.to(`org:${orgId}`).emit('conversation:updated', {
-          organizationId: orgId,
+        io.to(`org:${data.organizationId}`).emit('conversation:updated', {
+          organizationId: data.organizationId,
           conversation: {
-            ...conversation,
-            lastMessageAt: conversation.lastMessageAt instanceof Date
-              ? conversation.lastMessageAt.toISOString()
-              : conversation.lastMessageAt,
-            windowExpiresAt: conversation.windowExpiresAt instanceof Date
-              ? conversation.windowExpiresAt.toISOString()
-              : conversation.windowExpiresAt,
+            ...data.conversation,
+            lastMessageAt: data.conversation?.lastMessageAt instanceof Date
+              ? data.conversation.lastMessageAt.toISOString()
+              : data.conversation?.lastMessageAt,
           },
         });
       });
 
-      // ============================================
-      // ✅ MESSAGE STATUS
-      // ============================================
       webhookEvents.on('messageStatus', (data: any) => {
         if (!io || !data?.organizationId) return;
 
-        const orgId = data.organizationId;
-        const conversationId = data.conversationId;
-
-        console.log(`📡 Socket emit message:status | ${data.waMessageId} -> ${data.status}`);
-
-        // ✅ Emit to both org + conversation room
-        let target = io.to(`org:${orgId}`);
-        if (conversationId) {
-          target = target.to(`conversation:${conversationId}`);
+        let target = io.to(`org:${data.organizationId}`);
+        if (data.conversationId) {
+          target = target.to(`conversation:${data.conversationId}`);
         }
 
         target.emit('message:status', {
-          organizationId: orgId,
-          conversationId,
+          organizationId: data.organizationId,
+          conversationId: data.conversationId,
           messageId: data.messageId,
           waMessageId: data.waMessageId,
           wamId: data.wamId,
@@ -342,9 +287,6 @@ function wireWebhookEvents() {
         });
       });
 
-      // ============================================
-      // ✅ ACCOUNT UPDATED
-      // ============================================
       webhookEvents.on('accountUpdated', (data: any) => {
         if (!io || !data?.organizationId) return;
         io.to(`org:${data.organizationId}`).emit('account:updated', data);
@@ -356,6 +298,32 @@ function wireWebhookEvents() {
       console.error('❌ Failed to wire webhook events:', e.message);
     });
 }
+
+// ============================================
+// ✅ NEW: Force logout helper - admin use karega
+// ============================================
+export const emitForceLogout = (
+  userId: string,
+  reason: string = 'password_changed'
+) => {
+  if (!io) {
+    console.warn('⚠️ Socket.IO not initialized, cannot emit force_logout');
+    return;
+  }
+
+  console.log(`🔒 Force logout emit → user:${userId} | reason: ${reason}`);
+
+  io.to(`user:${userId}`).emit('force_logout', {
+    reason,
+    message:
+      reason === 'password_changed'
+        ? 'Your password has been changed by admin. Please login again.'
+        : reason === 'account_suspended'
+        ? 'Your account has been suspended. Please contact support.'
+        : 'You have been logged out by admin.',
+    timestamp: new Date().toISOString(),
+  });
+};
 
 export const getIO = (): Server => {
   if (!io) throw new Error('Socket.IO not initialized');
@@ -373,4 +341,4 @@ export const closeSocketIO = async () => {
   }
 };
 
-export default { initializeSocket, getIO, closeSocketIO };
+export default { initializeSocket, getIO, closeSocketIO, emitForceLogout };

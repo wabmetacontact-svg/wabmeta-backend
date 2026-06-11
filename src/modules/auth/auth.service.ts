@@ -327,7 +327,19 @@ const generateTokenPair = async (
   email: string,
   organizationId?: string
 ): Promise<AuthTokens> => {
-  const payload = { userId, email, organizationId };
+  // ✅ User ka current tokenVersion fetch karo
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tokenVersion: true },
+  });
+
+  const payload = {
+    userId,
+    email,
+    organizationId,
+    tokenVersion: user?.tokenVersion ?? 0, // ✅ JWT me include karo
+  };
+
   const accessToken = generateAccessToken(payload);
   const refreshToken = generateRefreshToken(payload);
 

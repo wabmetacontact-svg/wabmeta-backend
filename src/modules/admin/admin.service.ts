@@ -6,6 +6,7 @@ import { AppError } from '../../middleware/errorHandler';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { hashPassword } from '../../utils/password';
+import { emitForceLogout } from '../../socket';
 
 // ============================================
 // TYPES
@@ -484,31 +485,52 @@ export class AdminService {
     }
 
     const hashedPassword = await hashPassword(data.password);
-    const shouldLogout = data.logoutDevices !== false;
+    const shouldLogout = data.logoutDevices !== false; // default: true
 
-    const promises: any[] = [
-      prisma.user.update({
-        where: { id },
-        data: {
-          password: hashedPassword,
+    // ✅ Update password + increment tokenVersion (old tokens invalid ho jayenge)
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        password: hashedPassword,
+        // ✅ tokenVersion increment karo → old JWT tokens invalid
+        tokenVersion: {
+          increment: 1,
         },
-        select: {
-          id: true,
-          email: true,
-        },
-      })
-    ];
+      },
+      select: {
+        id: true,
+        email: true,
+        tokenVersion: true,
+      },
+    });
 
+    // ✅ Sabhi refresh tokens delete karo
     if (shouldLogout) {
-      promises.push(
-        prisma.refreshToken.deleteMany({
-          where: { userId: id }
-        })
-      );
+      await prisma.refreshToken.deleteMany({
+        where: { userId: id },
+      });
+
+      console.log(`🗑️ All refresh tokens deleted for user: ${id}`);
     }
 
-    const results = await prisma.$transaction(promises);
-    return results[0];
+    // ✅ Socket ke through force logout emit karo
+    // User ke sabhi connected devices pe event jayega
+    try {
+      emitForceLogout(id, 'password_changed');
+      console.log(`📡 Force logout emitted for user: ${id}`);
+    } catch (socketError: any) {
+      // Socket fail hone pe bhi password change successful maana jayega
+      // Kyunki tokenVersion increment aur refreshToken delete ho chuka hai
+      console.warn(`⚠️ Socket emit failed (non-critical): ${socketError.message}`);
+    }
+
+    return {
+      id: updatedUser.id,
+      email: updatedUser.email,
+      message: shouldLogout
+        ? 'Password updated and user logged out from all devices'
+        : 'Password updated successfully',
+    };
   }
 
   async updateUser(id: string, data: any) {

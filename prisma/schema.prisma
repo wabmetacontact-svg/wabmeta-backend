@@ -28,6 +28,10 @@ model User {
   otpEnabled           Boolean              @default(false)
   lastLoginAt          DateTime?
   lastLoginIp          String?
+
+  // ✅ NEW: Token version for force logout
+  tokenVersion         Int                  @default(0)
+
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   activityLogs         ActivityLog[]

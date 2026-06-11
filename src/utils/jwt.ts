@@ -7,6 +7,7 @@ export interface TokenPayload {
   userId: string;
   email: string;
   organizationId?: string;
+  tokenVersion?: number; // ✅ NEW
   type?: 'access' | 'refresh';
 }
 
@@ -40,7 +41,7 @@ export const generateAccessToken = (payload: Omit<TokenPayload, 'type'>): string
   };
   
   return jwt.sign(
-    { ...payload, type: 'access' },
+    { tokenVersion: 0, ...payload, type: 'access' },
     secret,
     options
   );
@@ -54,7 +55,7 @@ export const generateRefreshToken = (payload: Omit<TokenPayload, 'type'>): strin
   };
   
   return jwt.sign(
-    { ...payload, type: 'refresh' },
+    { tokenVersion: 0, ...payload, type: 'refresh' },
     secret,
     options
   );
