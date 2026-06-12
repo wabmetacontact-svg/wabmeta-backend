@@ -12,6 +12,7 @@ const response_1 = require("../../utils/response");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
 const client_1 = require("@prisma/client");
+const config_1 = require("../../config");
 const router = (0, express_1.Router)();
 // ============================================
 // PUBLIC ROUTES (Webhook) - BEFORE authenticate
@@ -23,7 +24,7 @@ router.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-    const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN;
+    const verifyToken = config_1.config.meta.webhookVerifyToken;
     console.log('📞 Webhook verification request:', {
         mode,
         token: token ? '***' : 'missing',
@@ -593,7 +594,7 @@ router.get('/health', (req, res) => {
     res.json({
         success: true,
         service: 'Meta Integration',
-        version: 'v25.0',
+        version: config_1.config.meta.graphApiVersion,
         configured: !!(process.env.META_APP_ID && process.env.META_APP_SECRET),
         embeddedSignup: !!process.env.META_CONFIG_ID,
         webhookConfigured: !!process.env.META_WEBHOOK_VERIFY_TOKEN,

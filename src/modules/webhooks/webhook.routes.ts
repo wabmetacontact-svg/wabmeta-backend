@@ -2,6 +2,7 @@
 
 import { Router, Request, Response } from 'express';
 import { webhookService } from './webhook.service';
+import { config } from '../../config';
 
 const router = Router();
 
@@ -15,10 +16,7 @@ router.get('/meta', (req: Request, res: Response) => {
   const token     = req.query['hub.verify_token'] as string;
   const challenge = req.query['hub.challenge']    as string;
 
-  const VERIFY_TOKEN =
-    process.env.META_VERIFY_TOKEN ||
-    process.env.WEBHOOK_VERIFY_TOKEN ||
-    'wabmeta_webhook_verify_2024';
+  const VERIFY_TOKEN = config.meta.webhookVerifyToken;
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
     console.log('✅ Webhook verified');

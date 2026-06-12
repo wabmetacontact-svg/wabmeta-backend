@@ -8,6 +8,7 @@ import { sendSuccess } from '../../utils/response';
 import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
 import { MessageStatus } from '@prisma/client';
+import { config } from '../../config';
 
 const router = Router();
 
@@ -23,7 +24,7 @@ router.get('/webhook', (req, res) => {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN;
+  const verifyToken = config.meta.webhookVerifyToken;
 
   console.log('📞 Webhook verification request:', {
     mode,
@@ -699,7 +700,7 @@ router.get('/health', (req, res) => {
   res.json({
     success: true,
     service: 'Meta Integration',
-    version: 'v25.0',
+    version: config.meta.graphApiVersion,
     configured: !!(process.env.META_APP_ID && process.env.META_APP_SECRET),
     embeddedSignup: !!process.env.META_CONFIG_ID,
     webhookConfigured: !!process.env.META_WEBHOOK_VERIFY_TOKEN,

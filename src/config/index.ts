@@ -61,8 +61,8 @@ export const config = {
     appId: getEnv('META_APP_ID'),
     appSecret: getEnv('META_APP_SECRET'),
     webhookVerifyToken: getEnv(
-      'META_VERIFY_TOKEN',
-      getEnv('WEBHOOK_VERIFY_TOKEN', 'webhook-token')
+      'META_WEBHOOK_VERIFY_TOKEN',
+      getEnv('META_VERIFY_TOKEN', getEnv('WEBHOOK_VERIFY_TOKEN', 'webhook-token'))
     ),
     configId: getEnv('META_CONFIG_ID'),
     redirectUri: getEnv(

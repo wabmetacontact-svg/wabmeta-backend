@@ -816,11 +816,12 @@ class MetaService {
         for (const metaTemplate of metaTemplates) {
             try {
                 const status = this.mapTemplateStatus(metaTemplate.status);
+                const key = `${metaTemplate.name}_${metaTemplate.language}`;
                 if (status === 'DRAFT' || status === 'REJECTED') {
+                    metaKeys.add(key); // ✅ ADD THIS: Add before skipping so it doesn't get deleted locally
                     skipped++;
                     continue;
                 }
-                const key = `${metaTemplate.name}_${metaTemplate.language}`;
                 metaKeys.add(key);
                 const existing = existingMap.get(key);
                 // ✅ Extract header handle from Meta's example (for new templates)

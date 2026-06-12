@@ -171,8 +171,8 @@ function isMetaToken(value) {
     // Meta tokens start with EAA (Extended Access Token)
     const isValidFormat = value.startsWith('EAA');
     const isValidLength = value.length >= 50 && value.length <= 500;
-    // Meta tokens are alphanumeric with some special chars
-    const hasValidChars = /^[A-Za-z0-9_-]+$/.test(value);
+    // Meta tokens are alphanumeric with some special chars (like | in system/app tokens)
+    const hasValidChars = /^[A-Za-z0-9_\-|]+$/.test(value);
     return isValidFormat && isValidLength && hasValidChars;
 }
 /**

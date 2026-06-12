@@ -348,8 +348,12 @@ class WebhookService {
                         });
                         if (phoneRecord) {
                             console.log(`✅ Found account via PhoneNumber table fallback for ID: ${phoneNumberId}`);
+                            // ✅ FIX: Find the actual WhatsAppAccount using phoneNumber to get the correct ID
+                            const waAccount = await database_1.default.whatsAppAccount.findFirst({
+                                where: { phoneNumber: phoneRecord.phoneNumber, organizationId: phoneRecord.metaConnection.organizationId }
+                            });
                             account = {
-                                id: phoneRecord.id, // Using PhoneNumber ID as account ID
+                                id: waAccount ? waAccount.id : null, // ✅ Using WhatsAppAccount ID, not PhoneNumber ID
                                 organizationId: phoneRecord.metaConnection.organizationId,
                                 phoneNumberId: phoneRecord.phoneNumberId,
                                 phoneNumber: phoneRecord.phoneNumber,

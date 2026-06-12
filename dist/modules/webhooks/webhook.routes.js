@@ -3,6 +3,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const webhook_service_1 = require("./webhook.service");
+const config_1 = require("../../config");
 const router = (0, express_1.Router)();
 console.log('📦 Webhook routes module loaded');
 // GET /api/webhooks/meta - Verification
@@ -11,9 +12,7 @@ router.get('/meta', (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-    const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN ||
-        process.env.WEBHOOK_VERIFY_TOKEN ||
-        'wabmeta_webhook_verify_2024';
+    const VERIFY_TOKEN = config_1.config.meta.webhookVerifyToken;
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
         console.log('✅ Webhook verified');
         return res.status(200).send(challenge);
