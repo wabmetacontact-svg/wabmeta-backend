@@ -780,32 +780,30 @@ class MetaApiClient {
     to: string,
     message: any
   ): Promise<{ messageId: string; contacts?: any[] }> {
+    const cleanTo = to.replace(/[^0-9]/g, '');
+    console.log(`[Meta API] Sending message to ${cleanTo.substring(0, 5)}...`);
+
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: cleanTo,
+      ...message,
+    };
+
     try {
-      const cleanTo = to.replace(/[^0-9]/g, '');
-      console.log(`[Meta API] Sending message to ${cleanTo.substring(0, 5)}...`);
-
-      const payload: any = {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: cleanTo,
-        ...message,
-      };
-
-      const response = await this.client.post(`${phoneNumberId}/messages`, payload, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      const response = await this.withRetry(
+        () => this.client.post(`${phoneNumberId}/messages`, payload, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 15000, // hang hone se rokta hai
+        }),
+        { label: 'sendMessage' }
+      );
 
       const messageId = response.data.messages?.[0]?.id;
       console.log(`[Meta API] ✅ Message sent: ${messageId}`);
-
-      return {
-        messageId: messageId,
-        contacts: response.data.contacts,
-      };
+      return { messageId, contacts: response.data.contacts };
     } catch (error: any) {
-      console.error('[Meta API] ❌ Failed to send message');
+      console.error('[Meta API] ❌ Failed to send message (after retries)');
       throw this.handleError(error, 'Failed to send message');
     }
   }
@@ -848,22 +846,24 @@ class MetaApiClient {
       input: string;
     };
   }> {
+    const cleanTo = to.replace(/[^0-9]/g, '');
+    console.log(`[Meta API] Sending message to ${cleanTo.substring(0, 5)}...`);
+
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: cleanTo,
+      ...message,
+    };
+
     try {
-      const cleanTo = to.replace(/[^0-9]/g, '');
-      console.log(`[Meta API] Sending message to ${cleanTo.substring(0, 5)}...`);
-
-      const payload: any = {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: cleanTo,
-        ...message,
-      };
-
-      const response = await this.client.post(`/${phoneNumberId}/messages`, payload, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      const response = await this.withRetry(
+        () => this.client.post(`/${phoneNumberId}/messages`, payload, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 15000, // hang hone se rokta hai
+        }),
+        { label: 'sendMessageWithContactInfo' }
+      );
 
       const messageId = response.data.messages?.[0]?.id;
       const contact = this.extractContactFromMessageResponse(response.data);
@@ -875,7 +875,7 @@ class MetaApiClient {
         contact: contact || undefined,
       };
     } catch (error: any) {
-      console.error('[Meta API] ❌ Failed to send message');
+      console.error('[Meta API] ❌ Failed to send message (after retries)');
       throw this.handleError(error, 'Failed to send message');
     }
   }
@@ -886,31 +886,25 @@ class MetaApiClient {
     messageId: string,
     typing: boolean = false
   ): Promise<boolean> {
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+    };
+    if (typing) payload.typing_indicator = { type: 'text' };
+
     try {
-      const payload: any = {
-        messaging_product: 'whatsapp',
-        status: 'read',
-        message_id: messageId,
-      };
-
-      if (typing) {
-        payload.typing_indicator = { type: 'text' };
-      }
-
-      const response = await this.client.post(
-        `/${phoneNumberId}/messages`,
-        payload,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
+      const response = await this.withRetry(
+        () => this.client.post(`/${phoneNumberId}/messages`, payload, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 10000,
+        }),
+        { label: 'markMessageAsRead', maxRetries: 1 }
       );
-
       return response.data.success === true;
     } catch (error: any) {
-      console.error('[Meta API] Failed to mark message as read:', error.message);
-      return false;
+      console.warn('[Meta API] markMessageAsRead failed (non-fatal):', error.message);
+      return false; // crash mat karo — read-receipt important nahi hai
     }
   }
 
@@ -1202,6 +1196,46 @@ class MetaApiClient {
     const standardErr = new Error(error.message || defaultMessage);
     (standardErr as any).response = error.response;
     return standardErr;
+  }
+
+  private async withRetry<T>(
+    fn: () => Promise<T>,
+    opts: { label?: string; maxRetries?: number } = {}
+  ): Promise<T> {
+    const label = opts.label ?? 'request';
+    const maxRetries = opts.maxRetries ?? 3;
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        lastError = error;
+        if (attempt === maxRetries || !this.isRetryable(error)) throw error;
+
+        const delay = Math.min(1000 * 2 ** attempt, 8000) + Math.floor(Math.random() * 300);
+        const code = error?.response?.data?.error?.code ?? error?.code;
+        console.warn(`[Meta API] ⏳ ${label} transient fail (code ${code}); retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+    throw lastError;
+  }
+
+  private isRetryable(error: any): boolean {
+    // Network / timeout errors
+    if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'].includes(error?.code)) return true;
+
+    const status = error?.response?.status;
+    const code = error?.response?.data?.error?.code;
+
+    // 131000 = "Something went wrong", 131016 = "Service unavailable" → dono transient
+    if (code === 131000 || code === 131016) return true;
+
+    // Meta ke 5xx server errors
+    if (status && status >= 500) return true;
+
+    return false; // baaki sab (auth, param, template, recipient errors) retry mat karo
   }
 
   // ============================================

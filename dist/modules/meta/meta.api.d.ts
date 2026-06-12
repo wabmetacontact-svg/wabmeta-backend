@@ -126,6 +126,8 @@ declare class MetaApiClient {
         metrics?: string[];
     }): Promise<any>;
     private handleError;
+    private withRetry;
+    private isRetryable;
     enableCalling(phoneNumberId: string, accessToken: string, options?: {
         callingEnabled: boolean;
         inboundCallsEnabled?: boolean;
