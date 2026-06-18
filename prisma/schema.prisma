@@ -108,6 +108,7 @@ model Organization {
   whatsappAccounts        WhatsAppAccount[]
   wallet                  Wallet?
   walletAccessRequest     WalletAccessRequest[]
+  settings                OrganizationSettings?  // ✅ ADD THIS
   instagramAccounts       InstagramAccount[]
 
   @@index([slug])
@@ -803,19 +804,33 @@ model Lead {
   stageId           String?
   status            LeadStatus     @default(NEW)
   priority          LeadPriority   @default(MEDIUM)
-  source            String?
+  source            String?        // whatsapp_ad, organic, chatbot, manual
+
+  // ✅ NEW: Smart Lead Fields
+  score             Int            @default(0)    // 0-100 lead score
+  conversationId    String?                       // WhatsApp conversation link
+  serviceInterest   String?                       // User interested service
+  budget            String?                       // User's budget
+  city              String?                       // User's city
+  adSource          String?                       // Click-to-WhatsApp ad info
+  adId              String?                       // Meta Ad ID
+  campaignId        String?                       // Meta Campaign ID
+  chatbotQualified  Boolean        @default(false) // Chatbot ne qualify kiya?
+  qualificationData Json           @default("{}") // All chatbot collected data
+  notes             LeadNote[]
+
   assignedToId      String?
   expectedCloseDate DateTime?
   actualCloseDate   DateTime?
   lastActivityAt    DateTime?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
+
   contact           Contact?       @relation(fields: [contactId], references: [id])
   organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   pipeline          Pipeline?      @relation(fields: [pipelineId], references: [id])
   stage             PipelineStage? @relation(fields: [stageId], references: [id])
   activities        LeadActivity[]
-  notes             LeadNote[]
   tasks             LeadTask[]
 
   @@index([organizationId])
@@ -823,6 +838,10 @@ model Lead {
   @@index([status])
   @@index([pipelineId, stageId])
   @@index([assignedToId])
+  @@index([score])
+  @@index([source])
+  @@index([chatbotQualified])
+  @@index([conversationId])
 }
 
 model Pipeline {
@@ -1067,6 +1086,36 @@ model IgAnalytics {
   @@unique([igAccountId, date])
   @@index([igAccountId])
   @@index([date])
+}
+
+// ✅ NEW: Organization Settings Model
+// Schema ke end mein add karo (enums se pehle)
+model OrganizationSettings {
+  id                    String   @id @default(cuid())
+  organizationId        String   @unique
+
+  // Lead Settings
+  leadCreationMode      String   @default("FLOW_BASED") // FLOW_BASED | SCORE_BASED | HYBRID
+  leadScoreThreshold    Int      @default(50)           // Auto-create lead if score >= this
+  autoAssignLeads       Boolean  @default(false)
+  defaultAssigneeId     String?
+
+  // Pipeline Settings
+  defaultPipelineId     String?
+
+  // Notification Settings
+  notifyOnNewLead       Boolean  @default(true)
+  notifyUserId          String?
+
+  // Ad Tracking
+  trackAdSource         Boolean  @default(true)
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 enum IgAccountStatus {

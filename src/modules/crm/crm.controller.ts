@@ -137,6 +137,46 @@ export class CRMController {
             return sendSuccess(res, result, result.message);
         } catch (e) { next(e); }
     }
+
+    async getSettings(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId = req.user!.organizationId!;
+            const settings = await crmService.getOrCreateSettings(orgId);
+            return sendSuccess(res, settings, 'Settings fetched');
+        } catch (e) { next(e); }
+    }
+
+    async updateSettings(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId = req.user!.organizationId!;
+            const settings = await crmService.updateSettings(orgId, req.body);
+            return sendSuccess(res, settings, 'Settings updated');
+        } catch (e) { next(e); }
+    }
+
+    async getHotLeads(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId = req.user!.organizationId!;
+            const result = await crmService.getLeads(orgId, {
+                minScore: 70,
+                status: 'NEW' as any,
+                limit: 20,
+            });
+            return sendSuccess(res, result.leads, 'Hot leads fetched');
+        } catch (e) { next(e); }
+    }
+
+    async getChatbotLeads(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId = req.user!.organizationId!;
+            const result = await crmService.getLeads(orgId, {
+                chatbotQualified: true,
+                limit: req.query.limit as any,
+                page: req.query.page as any,
+            });
+            return res.json({ success: true, data: result.leads, meta: result.meta });
+        } catch (e) { next(e); }
+    }
 }
 
 export const crmController = new CRMController();

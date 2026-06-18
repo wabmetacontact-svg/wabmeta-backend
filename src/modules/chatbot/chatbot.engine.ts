@@ -217,7 +217,8 @@ export class ChatbotEngine {
     organizationId: string,
     messageContent: string,
     senderPhone: string,
-    isNewConversation: boolean
+    isNewConversation: boolean,
+    rawMessage?: any
   ): Promise<void> {
 
     const sessionKey = `${organizationId}:${conversationId}`;
@@ -316,7 +317,8 @@ export class ChatbotEngine {
         session = await this.createNewSession(
           chatbot, organizationId, conversationId,
           senderPhone, cleanMessage, flowData,
-          account, sessionKey, chatbot.welcomeMessage || ''
+          account, sessionKey, chatbot.welcomeMessage || '',
+          rawMessage
         );
         if (!session) return;
       } else {
@@ -361,7 +363,8 @@ export class ChatbotEngine {
     flowData: FlowData,
     account: any,
     sessionKey: string,
-    welcomeMessage: string
+    welcomeMessage: string,
+    rawMessage?: any
   ): Promise<ChatSession | null> {
 
     console.log(`🆕 Creating new session for: ${chatbot.name}`);
@@ -398,11 +401,17 @@ export class ChatbotEngine {
       waitingForInput: false,
       expectedInputType: 'any',
       variables: {
-        phone: senderPhone,
+        phone:          senderPhone,
         conversationId,
         message,
-        userName: 'Guest',
-        startTime: new Date().toISOString(),
+        userName:       'Guest',
+        startTime:      new Date().toISOString(),
+        leadScore:      0,          // ✅ NEW
+        leadCreated:    false,      // ✅ NEW
+        // ✅ Ad tracking (webhook se inject hoga)
+        adSource:       rawMessage?.referral?.source || '',
+        adId:           rawMessage?.referral?.ad_id || '',
+        campaignId:     rawMessage?.referral?.ads_context_data?.ad_title || '',
       },
       chatHistory: [],
       startedAt: Date.now(),
@@ -1576,26 +1585,24 @@ export class ChatbotEngine {
     try {
       switch (action.type) {
 
+        // ─────────────────────────────────────────
         case 'tagContact': {
           const tag = action.params?.tag;
           if (!tag) break;
-          const phone10 = phone.replace(/\D/g, '').slice(-10);
-          await prisma.contact.updateMany({
-            where: {
-              organizationId,
-              OR: [
-                { phone: phone10 },
-                { phone: `+91${phone10}` },
-                { phone: `91${phone10}` },
-                { phone },
-              ],
-            },
-            data: { tags: { push: tag } },
-          });
-          console.log(`🏷️ Tagged: ${tag}`);
+
+          const contact = await this.findContact(organizationId, phone);
+          if (contact) {
+            await prisma.contact.update({
+              where: { id: contact.id },
+              data: { tags: { push: tag } },
+            });
+            session.variables[`tagged_${tag}`] = true;
+            console.log(`🏷️ Tagged: ${tag}`);
+          }
           break;
         }
 
+        // ─────────────────────────────────────────
         case 'setVariable': {
           const { name, value } = action.params || {};
           if (name) {
@@ -1605,56 +1612,144 @@ export class ChatbotEngine {
           break;
         }
 
-        case 'createLead': {
-          const phone10 = phone.replace(/\D/g, '').slice(-10);
-          const contact = await prisma.contact.findFirst({
-            where: {
-              organizationId,
-              OR: [
-                { phone: phone10 },
-                { phone: `+91${phone10}` },
-                { phone: `91${phone10}` },
-                { phone },
-              ],
-            },
-          });
+        // ─────────────────────────────────────────
+        // ✅ NEW: Add score to lead qualification
+        case 'addScore': {
+          const points = Number(action.params?.points || 0);
+          const currentScore = Number(session.variables['leadScore'] || 0);
+          const newScore = Math.min(100, currentScore + points);
+
+          session.variables['leadScore'] = newScore;
+          console.log(`📊 Score: ${currentScore} + ${points} = ${newScore}`);
+
+          // ✅ Check SCORE_BASED mode
+          const contact = await this.findContact(organizationId, phone);
           if (contact) {
-            const existing = await prisma.lead.findFirst({
-              where: {
-                organizationId,
-                contactId: contact.id,
-                status: { notIn: ['WON', 'LOST'] },
-              },
-            });
-            if (!existing) {
-              await prisma.lead.create({
-                data: {
-                  organizationId,
-                  contactId: contact.id,
-                  title: action.params?.title || 'Chatbot Lead',
-                  source: 'chatbot',
-                  status: 'NEW',
-                },
-              });
-              console.log(`💼 Lead created`);
+            const { crmService } = await import('../crm/crm.service');
+            const created = await crmService.checkAndCreateLeadByScore(
+              organizationId,
+              contact.id,
+              newScore,
+              {
+                conversationId,
+                qualificationData: session.variables,
+                source: 'chatbot_score',
+              }
+            );
+            if (created) {
+              session.variables['leadCreated'] = true;
+              console.log(`🎯 Lead auto-created by score threshold`);
             }
           }
           break;
         }
 
+        // ─────────────────────────────────────────
+        // ✅ UPGRADED: Smart createLead
+        case 'createLead': {
+          const contact = await this.findContact(organizationId, phone);
+          if (!contact) {
+            console.warn('⚠️ createLead: contact not found');
+            break;
+          }
+
+          const { crmService } = await import('../crm/crm.service');
+
+          const result = await crmService.smartCreateLead({
+            organizationId,
+            contactId:         contact.id,
+            conversationId,
+            title:             action.params?.title
+              ? this.replaceVariables(action.params.title, session.variables)
+              : undefined,
+            source:            action.params?.source || 'chatbot',
+            score:             Number(session.variables['leadScore'] || 0),
+            priority:          action.params?.priority || undefined,
+            serviceInterest:   session.variables['serviceInterest']
+              || session.variables['service']
+              || action.params?.serviceInterest
+              || undefined,
+            budget:            session.variables['budget']
+              || action.params?.budget
+              || undefined,
+            city:              session.variables['city']
+              || action.params?.city
+              || undefined,
+            adSource:          session.variables['adSource'] || undefined,
+            adId:              session.variables['adId'] || undefined,
+            chatbotQualified:  true,
+            qualificationData: {
+              ...session.variables,
+              chatbotId:   session.chatbotId,
+              completedAt: new Date().toISOString(),
+            },
+            notes: action.params?.notes
+              ? this.replaceVariables(action.params.notes, session.variables)
+              : undefined,
+          });
+
+          session.variables['leadCreated']   = true;
+          session.variables['leadId']        = result.lead.id;
+          session.variables['leadAction']    = result.action;
+
+          console.log(`💼 Lead ${result.action}: ${result.lead.id}`);
+          break;
+        }
+
+        // ─────────────────────────────────────────
+        // ✅ NEW: Update lead stage
+        case 'updateLeadStage': {
+          const leadId = session.variables['leadId'];
+          if (!leadId || !action.params?.stageId) break;
+
+          await prisma.lead.update({
+            where: { id: leadId },
+            data: {
+              stageId:       action.params.stageId,
+              lastActivityAt: new Date(),
+            },
+          });
+          console.log(`📈 Lead stage updated`);
+          break;
+        }
+
+        // ─────────────────────────────────────────
+        // ✅ NEW: Assign lead to user
+        case 'assignLead': {
+          const leadId = session.variables['leadId'];
+          if (!leadId || !action.params?.userId) break;
+
+          await prisma.lead.update({
+            where: { id: leadId },
+            data: {
+              assignedToId:  action.params.userId,
+              lastActivityAt: new Date(),
+            },
+          });
+          console.log(`👤 Lead assigned to: ${action.params.userId}`);
+          break;
+        }
+
+        // ─────────────────────────────────────────
         case 'webhook': {
           const { url, method = 'POST' } = action.params || {};
           if (!url) break;
+
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 5000);
+          const timeout    = setTimeout(() => controller.abort(), 5000);
+
           try {
             await fetch(url, {
               method,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                phone, organizationId, conversationId,
-                variables: session.variables,
-                timestamp: new Date().toISOString(),
+                phone,
+                organizationId,
+                conversationId,
+                variables:  session.variables,
+                leadScore:  session.variables['leadScore'],
+                leadId:     session.variables['leadId'],
+                timestamp:  new Date().toISOString(),
               }),
               signal: controller.signal,
             });
@@ -1667,6 +1762,22 @@ export class ChatbotEngine {
     } catch (error) {
       console.error(`❌ Action "${action.type}" error:`, error);
     }
+  }
+
+  // ✅ NEW Helper: Find contact by phone
+  private async findContact(organizationId: string, phone: string) {
+    const phone10 = phone.replace(/\D/g, '').slice(-10);
+    return prisma.contact.findFirst({
+      where: {
+        organizationId,
+        OR: [
+          { phone: phone10 },
+          { phone: `+91${phone10}` },
+          { phone: `91${phone10}` },
+          { phone },
+        ],
+      },
+    });
   }
 
   // ==========================================

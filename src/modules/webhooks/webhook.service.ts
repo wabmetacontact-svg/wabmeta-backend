@@ -811,7 +811,8 @@ export class WebhookService {
           organizationId,
           chatbotContent,
           waFrom,
-          isNewConversation
+          isNewConversation,
+          message
         ).catch((e: any) => console.error('Chatbot error:', e));
       }
 
