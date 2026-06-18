@@ -1575,6 +1575,14 @@ export class CampaignsService {
         });
       }
 
+      // Get template details to enrich metadata with bodyText, footerText, and buttons
+      const template = await prisma.template.findFirst({
+        where: {
+          organizationId: orgId,
+          name: tplName,
+        }
+      });
+
       // ✅ Create message with error handling for duplicates
       await prisma.message.create({
         data: {
@@ -1587,7 +1595,15 @@ export class CampaignsService {
           whatsappAccountId: accId,
           templateId: tplId,
           content: `Campaign: ${campName}\nTemplate: ${tplName}`,
-          metadata: { campaignId, campaignName: campName, templateName: tplName } as any,
+          metadata: { 
+            campaignId, 
+            campaignName: campName, 
+            templateName: tplName,
+            bodyText: template?.bodyText || undefined,
+            footerText: template?.footerText || undefined,
+            headerText: template?.headerContent || undefined,
+            buttons: template?.buttons || undefined
+          } as any,
           sentAt: now,
         },
       }).catch((err: any) => {

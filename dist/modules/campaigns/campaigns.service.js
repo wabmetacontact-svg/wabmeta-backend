@@ -1303,6 +1303,13 @@ class CampaignsService {
                     },
                 });
             }
+            // Get template details to enrich metadata with bodyText, footerText, and buttons
+            const template = await database_1.default.template.findFirst({
+                where: {
+                    organizationId: orgId,
+                    name: tplName,
+                }
+            });
             // ✅ Create message with error handling for duplicates
             await database_1.default.message.create({
                 data: {
@@ -1315,7 +1322,15 @@ class CampaignsService {
                     whatsappAccountId: accId,
                     templateId: tplId,
                     content: `Campaign: ${campName}\nTemplate: ${tplName}`,
-                    metadata: { campaignId, campaignName: campName, templateName: tplName },
+                    metadata: {
+                        campaignId,
+                        campaignName: campName,
+                        templateName: tplName,
+                        bodyText: template?.bodyText || undefined,
+                        footerText: template?.footerText || undefined,
+                        headerText: template?.headerContent || undefined,
+                        buttons: template?.buttons || undefined
+                    },
                     sentAt: now,
                 },
             }).catch((err) => {
