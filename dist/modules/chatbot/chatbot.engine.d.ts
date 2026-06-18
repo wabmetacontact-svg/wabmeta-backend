@@ -11,6 +11,7 @@ export declare class ChatbotEngine {
     private executeListNode;
     private executeConditionNode;
     private executeAINode;
+    private buildEnhancedSystemPrompt;
     private findMatchingChatbot;
     private sendText;
     private sendButtonMessage;

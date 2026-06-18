@@ -8,6 +8,7 @@ declare class AIService {
     private readonly FALLBACK_MODEL;
     constructor();
     generateResponse(systemPrompt: string, userMessage: string, chatHistory?: ChatMessage[]): Promise<string>;
+    private sleep;
     private callModel;
     private buildSystemInstruction;
     private buildGeminiHistory;

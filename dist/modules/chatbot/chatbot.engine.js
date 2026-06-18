@@ -119,27 +119,52 @@ class ChatbotEngine {
         const cleanMessage = (messageContent || '').trim();
         console.log(`\n🤖 ═══════ CHATBOT ENGINE ═══════`);
         console.log(`   Msg    : "${cleanMessage}"`);
-        console.log(`   Phone  : ${senderPhone}`);
         console.log(`   New    : ${isNewConversation}`);
-        console.log(`   Key    : ${sessionKey}`);
-        // ✅ Distributed lock - prevent duplicate processing
-        const locked = await sessionManager.acquireLock(sessionKey);
-        if (!locked) {
-            console.log(`🔒 Session locked, skipping duplicate message`);
+        // ✅ FIXED: Lock with retry instead of silent drop
+        let lockAcquired = false;
+        let lockRetries = 3;
+        while (!lockAcquired && lockRetries > 0) {
+            lockAcquired = await sessionManager.acquireLock(sessionKey);
+            if (!lockAcquired) {
+                lockRetries--;
+                if (lockRetries > 0) {
+                    await this.sleep(500); // Wait and retry
+                    console.log(`🔒 Lock retry... (${lockRetries} left)`);
+                }
+            }
+        }
+        if (!lockAcquired) {
+            console.log(`🔒 Could not acquire lock after retries, skipping`);
             return;
         }
         try {
-            // 1. Load existing session from Redis
             let session = await sessionManager.get(sessionKey);
-            console.log(`   Session: ${session ? `FOUND (node: ${session.currentNodeId})` : 'NEW'}`);
-            // 2. Find matching chatbot
-            let chatbot = await this.findMatchingChatbot(organizationId, cleanMessage, isNewConversation, session?.chatbotId);
+            console.log(`   Session: ${session
+                ? `FOUND (node: ${session.currentNodeId}, AI: ${session.aiNodeActive})`
+                : 'NEW'}`);
+            // ✅ FIXED: isNewConversation check improved
+            // If existing session exists and AI is active - NEVER reset
+            const shouldReset = isNewConversation &&
+                !session?.aiNodeActive && // AI not active
+                !session?.waitingForInput; // Not waiting for any input
+            let chatbot = await this.findMatchingChatbot(organizationId, cleanMessage, isNewConversation || !session, // New if no session
+            session?.chatbotId);
             // Stale session cleanup
-            if (!chatbot && session) {
-                console.log(`⚠️ Stale session found, clearing...`);
+            if (!chatbot && session && !session.aiNodeActive) {
+                console.log(`⚠️ Stale session, clearing...`);
                 await sessionManager.delete(sessionKey);
                 session = null;
                 chatbot = await this.findMatchingChatbot(organizationId, cleanMessage, true, undefined);
+            }
+            // ✅ AI active session - use same chatbot
+            if (!chatbot && session?.aiNodeActive) {
+                chatbot = await database_1.default.chatbot.findFirst({
+                    where: {
+                        id: session.chatbotId,
+                        organizationId,
+                        status: 'ACTIVE'
+                    }
+                });
             }
             if (!chatbot) {
                 console.log(`🤖 No active chatbot found`);
@@ -147,10 +172,9 @@ class ChatbotEngine {
             }
             const flowData = chatbot.flowData;
             if (!flowData?.nodes?.length) {
-                console.log(`🤖 Chatbot "${chatbot.name}" has empty flow`);
+                console.log(`🤖 Empty flow`);
                 return;
             }
-            // 3. Get WhatsApp account
             const account = await database_1.default.whatsAppAccount.findFirst({
                 where: { organizationId, status: 'CONNECTED' },
                 orderBy: { isDefault: 'desc' },
@@ -159,20 +183,20 @@ class ChatbotEngine {
                 console.error(`❌ No connected WhatsApp account`);
                 return;
             }
-            // 4. Session management
-            if (!session || isNewConversation) {
-                // ── NEW SESSION ────────────────────────
+            // ✅ FIXED: Session decision logic
+            if (!session || shouldReset) {
+                // Need to create new session
                 session = await this.createNewSession(chatbot, organizationId, conversationId, senderPhone, cleanMessage, flowData, account, sessionKey, chatbot.welcomeMessage || '');
                 if (!session)
                     return;
             }
             else {
-                // ── EXISTING SESSION ───────────────────
+                // Continue existing session
                 session = await this.handleExistingSession(session, cleanMessage, flowData, organizationId, conversationId, senderPhone, account, sessionKey, chatbot);
             }
-            // 5. Save session
+            // Save session
             await sessionManager.set(sessionKey, session);
-            // 6. Execute flow if not waiting
+            // Execute flow
             if (!session.waitingForInput) {
                 await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, chatbot.fallbackMessage || '');
             }
@@ -230,52 +254,59 @@ class ChatbotEngine {
         return session;
     }
     // ==========================================
-    // HANDLE EXISTING SESSION
+    // HANDLE EXISTING SESSION - FIXED
     // ==========================================
     async handleExistingSession(session, input, flowData, organizationId, conversationId, senderPhone, account, sessionKey, chatbot) {
         console.log(`🔄 Resuming session at: ${session.currentNodeId}`);
+        console.log(`   AI Active: ${session.aiNodeActive}`);
+        console.log(`   Waiting: ${session.waitingForInput}`);
         session.messageCount++;
+        // ✅ ALWAYS store input - NEVER lose it
+        session.variables['previousInput'] = session.variables['lastInput'] || '';
         session.variables['lastInput'] = input;
         session.variables['message'] = input;
+        // ✅ CASE 1: AI Node Active - Direct AI processing
+        // Perform this check FIRST - before waitingForInput
+        if (session.aiNodeActive) {
+            console.log(`🤖 AI mode active - routing to AI node directly`);
+            session.waitingForInput = false;
+            // currentNodeId will remain on the AI node
+            return session;
+        }
+        // ✅ CASE 2: Waiting for input - process it
         if (session.waitingForInput) {
-            // Process user input
             session = await this.processUserInput(session, input, flowData);
+            return session;
         }
-        else {
-            // Session active but not waiting
-            // Check keyword for different chatbot
-            const newChatbot = await this.findMatchingChatbot(organizationId, input, false, undefined);
-            if (newChatbot && newChatbot.id !== session.chatbotId) {
-                console.log(`🔀 New chatbot keyword matched, resetting session`);
-                await sessionManager.delete(sessionKey);
-                await this.processMessage(conversationId, organizationId, input, senderPhone, true);
-                // Return old session to prevent double execution
-                session.waitingForInput = true; // Prevent execution
-                return session;
-            }
-            // AI node check - agar AI mode mein hai
-            if (session.aiNodeActive) {
-                console.log(`🤖 AI mode active, processing as AI input`);
-                session.waitingForInput = false;
-            }
-            else if (chatbot.fallbackMessage) {
-                await this.sendText(account, senderPhone, chatbot.fallbackMessage, conversationId, organizationId);
-                session.waitingForInput = true; // Stay paused
-            }
+        // ✅ CASE 3: Not waiting, not AI - check for new keyword
+        const newChatbot = await this.findMatchingChatbot(organizationId, input, false, undefined);
+        if (newChatbot && newChatbot.id !== session.chatbotId) {
+            console.log(`🔀 New chatbot keyword matched: ${newChatbot.name}`);
+            await sessionManager.delete(sessionKey);
+            // ✅ Recursive call - create new session
+            await this.processMessage(conversationId, organizationId, input, senderPhone, true);
+            // Stop current execution
+            session.waitingForInput = true;
+            session.aiNodeActive = false;
+            return session;
         }
+        // ✅ CASE 4: Session active, no special state
+        // Continue flow from current node
+        session.waitingForInput = false;
         return session;
     }
     // ==========================================
-    // PROCESS USER INPUT
-    // Button, List, Text handling
+    // PROCESS USER INPUT - FIXED
     // ==========================================
     async processUserInput(session, input, flowData) {
         const currentNode = flowData.nodes.find(n => n.id === session.currentNodeId);
         if (!currentNode) {
+            console.warn(`⚠️ Node not found: ${session.currentNodeId}`);
             session.waitingForInput = false;
             return session;
         }
-        console.log(`🎯 Processing input for node: [${currentNode.type}]`);
+        console.log(`🎯 Processing input for node type: [${currentNode.type}]`);
+        console.log(`   Input: "${input.substring(0, 50)}"`);
         switch (currentNode.type) {
             case 'button': {
                 session = this.matchButtonInput(session, input, currentNode, flowData);
@@ -287,10 +318,12 @@ class ChatbotEngine {
             }
             case 'message': {
                 if (currentNode.data.waitForInput) {
-                    // Store input aur move to next
-                    const varName = currentNode.data.label || 'lastInput';
+                    // ✅ Get variable name from label
+                    const varName = currentNode.data.label
+                        ?.toLowerCase()
+                        .replace(/\s+/g, '_') || 'userInput';
                     session.variables[varName] = input;
-                    session.variables['lastInput'] = input;
+                    session.variables['lastInput'] = input; // ✅ Keep lastInput
                     const nextId = this.getNextNodeId(currentNode.id, flowData);
                     if (nextId) {
                         session.currentNodeId = nextId;
@@ -301,10 +334,11 @@ class ChatbotEngine {
                 break;
             }
             case 'ai': {
-                // AI node: user ne reply diya
-                session.variables['lastInput'] = input;
+                // ✅ AI node - input already stored in lastInput
+                // Just set waitingForInput = false, AI will execute
                 session.waitingForInput = false;
                 session.aiNodeActive = true;
+                console.log(`🤖 AI node: input ready for processing`);
                 break;
             }
             default: {
@@ -628,39 +662,67 @@ class ChatbotEngine {
     // ==========================================
     // AI NODE - Gemini Powered
     // ==========================================
+    // ==========================================
+    // AI NODE - FIXED (Most Important)
+    // ==========================================
     async executeAINode(node, session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, fallbackMessage, depth) {
         const systemPrompt = node.data.systemPrompt ||
             'You are a helpful WhatsApp business assistant.';
+        // ✅ FIXED: Retrieve input from multiple sources
         const userMessage = (session.variables['lastInput'] ||
             session.variables['message'] ||
+            session.variables['previousInput'] ||
             '').trim();
-        if (!userMessage) {
-            console.log(`⏸️ AI node: waiting for first user message`);
+        console.log(`🤖 AI Node executing`);
+        console.log(`   Message: "${userMessage.substring(0, 50)}"`);
+        console.log(`   History: ${session.chatHistory.length} messages`);
+        // ✅ FIXED: First time at AI node - send welcome message
+        if (!userMessage && !session.aiNodeActive) {
+            console.log(`⏸️ AI node: first time - waiting for user`);
+            // If the node contains a message, send it
+            if (node.data.message) {
+                await this.sendText(account, senderPhone, node.data.message, conversationId, organizationId);
+            }
             session.waitingForInput = true;
             session.aiNodeActive = true;
+            session.currentNodeId = node.id; // ✅ Stay on the AI node
             session.expectedInputType = 'text';
             await sessionManager.set(sessionKey, session);
             return;
         }
+        // ✅ No message - still waiting
+        if (!userMessage) {
+            session.waitingForInput = true;
+            session.aiNodeActive = true;
+            session.currentNodeId = node.id;
+            await sessionManager.set(sessionKey, session);
+            return;
+        }
         console.log(`🤖 AI processing: "${userMessage.substring(0, 50)}"`);
-        // ✅ Summarize if history too long (>15 messages)
-        if (session.chatHistory.length > 15) {
-            const summary = await ai_service_1.aiService.summarizeConversation(session.chatHistory);
+        // ✅ FIXED: Smart history management
+        // Summarize after 30 messages (not 15)
+        if (session.chatHistory.length > 30) {
+            const summary = await ai_service_1.aiService.summarizeConversation(session.chatHistory.slice(0, -10) // Keep last 10
+            );
             if (summary) {
                 session.conversationSummary = summary;
-                // Keep only last 6 messages
-                session.chatHistory = session.chatHistory.slice(-6);
-                console.log(`📝 History summarized`);
+                session.chatHistory = session.chatHistory.slice(-10); // Keep last 10 messages
+                console.log(`📝 History summarized, keeping last 10`);
             }
         }
-        // Build enhanced system prompt with summary
-        let enhancedPrompt = systemPrompt;
-        if (session.conversationSummary) {
-            enhancedPrompt += `\n\nPrevious conversation summary: ${session.conversationSummary}`;
+        // ✅ FIXED: Rich system prompt with context
+        const enhancedPrompt = this.buildEnhancedSystemPrompt(systemPrompt, session);
+        // ✅ Generate AI response
+        let aiResponse;
+        try {
+            aiResponse = await ai_service_1.aiService.generateResponse(enhancedPrompt, userMessage, session.chatHistory);
         }
-        // ✅ Generate AI response with Gemini
-        const aiResponse = await ai_service_1.aiService.generateResponse(enhancedPrompt, userMessage, session.chatHistory);
-        // ✅ Update history
+        catch (error) {
+            console.error('❌ AI generation failed:', error);
+            aiResponse = fallbackMessage ||
+                'I apologize, but I did not understand that. Please try again.';
+        }
+        // ✅ FIXED: Add to history BEFORE clearing lastInput
         session.chatHistory.push({
             role: 'user',
             content: userMessage,
@@ -671,30 +733,78 @@ class ChatbotEngine {
             content: aiResponse,
             timestamp: Date.now(),
         });
-        // Clear lastInput
-        session.variables['lastInput'] = '';
+        // ✅ Variables update
         session.variables['aiLastResponse'] = aiResponse;
-        // Send to user
+        session.variables['lastInput'] = ''; // Clear after use
+        session.variables['previousInput'] = userMessage; // Keep reference
+        // Send response
         await this.sendText(account, senderPhone, aiResponse, conversationId, organizationId);
-        // Check next node
+        // ✅ FIXED: Next node check
         const nextId = this.getNextNodeId(node.id, flowData);
         if (nextId) {
-            // Has next node - move forward
-            session.currentNodeId = nextId;
-            session.aiNodeActive = false;
-            session.waitingForInput = false;
-            await sessionManager.set(sessionKey, session);
-            await this.sleep(300);
-            await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, fallbackMessage, depth + 1);
+            // ✅ Has next node - check if it's another AI node or end
+            const nextNode = flowData.nodes.find(n => n.id === nextId);
+            if (nextNode?.type === 'end') {
+                // Flow ended
+                session.currentNodeId = nextId;
+                session.aiNodeActive = false;
+                session.waitingForInput = false;
+                await sessionManager.set(sessionKey, session);
+                await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, fallbackMessage, depth + 1);
+            }
+            else if (nextNode?.type === 'condition') {
+                // Evaluate condition
+                session.currentNodeId = nextId;
+                session.aiNodeActive = false;
+                session.waitingForInput = false;
+                await sessionManager.set(sessionKey, session);
+                await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, fallbackMessage, depth + 1);
+            }
+            else {
+                // ✅ Other node - continue flow
+                session.currentNodeId = nextId;
+                session.aiNodeActive = false;
+                session.waitingForInput = false;
+                await sessionManager.set(sessionKey, session);
+                await this.sleep(300);
+                await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, fallbackMessage, depth + 1);
+            }
         }
         else {
-            // ✅ No next node = stay in AI conversation mode
+            // ✅ FIXED: Stay on AI node
             session.waitingForInput = true;
             session.aiNodeActive = true;
+            session.currentNodeId = node.id; // ✅ Stay on the AI node
             session.expectedInputType = 'text';
             await sessionManager.set(sessionKey, session);
-            console.log(`🤖 AI staying in conversation mode`);
+            console.log(`🤖 AI staying in conversation mode at node: ${node.id}`);
         }
+    }
+    // ==========================================
+    // NEW: Enhanced System Prompt Builder
+    // ==========================================
+    buildEnhancedSystemPrompt(systemPrompt, session) {
+        let enhanced = systemPrompt;
+        // ✅ Add previous summary
+        if (session.conversationSummary) {
+            enhanced += `\n\n[Conversation History Summary]: ${session.conversationSummary}`;
+        }
+        // ✅ Add known variables (for context)
+        const relevantVars = Object.entries(session.variables)
+            .filter(([key, val]) => val &&
+            !['lastInput', 'previousInput', 'aiLastResponse', 'message'].includes(key) &&
+            typeof val === 'string' &&
+            val.length < 200)
+            .map(([key, val]) => `${key}: ${val}`)
+            .join(', ');
+        if (relevantVars) {
+            enhanced += `\n\n[User Context]: ${relevantVars}`;
+        }
+        // ✅ Message count context
+        if (session.messageCount > 5) {
+            enhanced += `\n\n[Note]: This is an ongoing conversation (${session.messageCount} messages). Maintain continuity.`;
+        }
+        return enhanced;
     }
     // ==========================================
     // FIND CHATBOT
