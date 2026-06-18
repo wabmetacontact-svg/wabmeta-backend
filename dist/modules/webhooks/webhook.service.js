@@ -95,11 +95,15 @@ class WebhookService {
             location: 'LOCATION',
             contacts: 'CONTACT',
             interactive: 'INTERACTIVE',
-            button: 'INTERACTIVE',
-            list: 'INTERACTIVE',
+            button: 'INTERACTIVE', // ✅ Already hai - sahi hai
+            list: 'INTERACTIVE', // ✅ ADD
             template: 'TEMPLATE',
+            system: 'TEXT', // ✅ ADD: System messages
+            order: 'TEXT', // ✅ ADD: Order messages
+            unsupported: 'TEXT', // ✅ ADD: Graceful handling
+            unknown: 'TEXT', // ✅ ADD
         };
-        return map[t] || 'TEXT';
+        return map[t] || 'TEXT'; // ✅ Default TEXT - kabhi "unsupported" nahi
     }
     buildContentAndMedia(message) {
         const type = String(message?.type || 'text').toLowerCase();
@@ -575,11 +579,53 @@ class WebhookService {
                     break;
                 case 'interactive': {
                     const iType = message?.interactive?.type;
-                    content = iType === 'button_reply'
-                        ? (message.interactive.button_reply.title || '[Button Reply]')
-                        : iType === 'list_reply'
-                            ? (message.interactive.list_reply.title || '[List Reply]')
-                            : '[Interactive]';
+                    if (iType === 'button_reply') {
+                        content = message.interactive.button_reply?.title || '[Button Reply]';
+                        // ✅ Full structure save karo metadata mein
+                        mediaUrl = JSON.stringify({
+                            type: 'button_reply',
+                            button_reply: {
+                                id: message.interactive.button_reply?.id,
+                                title: message.interactive.button_reply?.title,
+                            }
+                        });
+                    }
+                    else if (iType === 'list_reply') {
+                        content = message.interactive.list_reply?.title || '[List Reply]';
+                        mediaUrl = JSON.stringify({
+                            type: 'list_reply',
+                            list_reply: {
+                                id: message.interactive.list_reply?.id,
+                                title: message.interactive.list_reply?.title,
+                                description: message.interactive.list_reply?.description,
+                            }
+                        });
+                    }
+                    else if (iType === 'button') {
+                        // ✅ Outbound button message (chatbot ne bheja)
+                        content = message.interactive?.body?.text || '[Interactive]';
+                        mediaUrl = JSON.stringify(message.interactive);
+                    }
+                    else if (iType === 'list') {
+                        content = message.interactive?.body?.text || '[List]';
+                        mediaUrl = JSON.stringify(message.interactive);
+                    }
+                    else {
+                        content = '[Interactive]';
+                        mediaUrl = JSON.stringify(message.interactive || {});
+                    }
+                    break;
+                }
+                case 'button': {
+                    // ✅ Template button reply - user ne template button click kiya
+                    content = message.button?.text || '[Button Reply]';
+                    mediaUrl = JSON.stringify({
+                        type: 'button_reply',
+                        button_reply: {
+                            id: message.button?.payload || message.button?.text,
+                            title: message.button?.text,
+                        }
+                    });
                     break;
                 }
                 default:
@@ -605,6 +651,14 @@ class WebhookService {
                     deliveredAt: messageTime,
                     timestamp: messageTime,
                     createdAt: messageTime,
+                    // ✅ ADD: Full message structure save karo
+                    metadata: {
+                        originalType: typeRaw,
+                        interactive: message?.interactive || null,
+                        button: message?.button || null,
+                        context: message?.context || null, // Reply context
+                        referral: message?.referral || null,
+                    },
                 },
             });
             // ✅ Update conversation
