@@ -227,6 +227,22 @@ class ChatbotEngine {
                 // Continue existing session
                 session = await this.handleExistingSession(session, cleanMessage, flowData, organizationId, conversationId, senderPhone, account, sessionKey, chatbot);
             }
+            // ✅ AUTO INTEREST DETECTION ON ALL USER MESSAGES
+            const currentScore = Number(session.variables['leadScore'] || 0);
+            const detection = this.detectInterestFromInput(cleanMessage, currentScore);
+            if (detection.isInterested) {
+                const newScore = Math.min(100, currentScore + detection.scoreBoost);
+                session.variables['leadScore'] = newScore;
+                session.variables['userInterested'] = true;
+                session.variables['interestReason'] = detection.reason;
+                console.log(`🎯 Interest detected from input text! Score: ${newScore}`);
+                this.autoCreateInterestedLead(session).catch(e => console.error('Auto lead creation error:', e));
+            }
+            else if (detection.scoreBoost > 0) {
+                const newScore = Math.min(100, currentScore + detection.scoreBoost);
+                session.variables['leadScore'] = newScore;
+                console.log(`📊 Engagement score updated: ${newScore}`);
+            }
             // Save session
             await sessionManager.set(sessionKey, session);
             // Execute flow
