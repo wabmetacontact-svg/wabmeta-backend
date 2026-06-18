@@ -564,6 +564,153 @@ export class ChatbotEngine {
   }
 
   // ==========================================
+  // INTEREST KEYWORDS - Auto Detection
+  // ==========================================
+  private readonly INTEREST_SIGNALS = [
+    // High intent
+    'price', 'pricing', 'cost', 'rate', 'charge', 'fee', 'fees',
+    'buy', 'purchase', 'order', 'book', 'booking',
+    'demo', 'trial', 'start', 'begin', 'join',
+    'interested', 'interest', 'yes', 'haan', 'ha',
+    'call', 'callback', 'contact', 'connect',
+    'consult', 'consultation', 'appointment',
+    'enroll', 'admission', 'register', 'registration',
+    'quote', 'proposal', 'plan',
+
+    // Hindi
+    'kharidna', 'chahiye', 'lena', 'batao', 'bataiye',
+    'milega', 'milegi', 'kaisa', 'kitna',
+  ];
+
+  private readonly DISINTEREST_SIGNALS = [
+    'no', 'nahi', 'nope', 'not', 'cancel', 'stop',
+    'bye', 'exit', 'quit', 'leave',
+    'not interested', 'exploring', 'just looking',
+    'baad mein', 'later', 'abhi nahi',
+  ];
+
+  // ==========================================
+  // AUTO DETECT INTEREST FROM BUTTON/LIST
+  // ==========================================
+  private detectInterestFromInput(
+    text: string,
+    score: number = 0
+  ): {
+    isInterested: boolean;
+    scoreBoost: number;
+    reason: string;
+  } {
+    const lower = text.toLowerCase().trim();
+
+    // Check disinterest first
+    for (const signal of this.DISINTEREST_SIGNALS) {
+      if (lower.includes(signal)) {
+        return {
+          isInterested: false,
+          scoreBoost: 0,
+          reason: `disinterest_signal: ${signal}`,
+        };
+      }
+    }
+
+    // Check interest signals
+    for (const signal of this.INTEREST_SIGNALS) {
+      if (lower.includes(signal)) {
+        return {
+          isInterested: true,
+          scoreBoost: 25,
+          reason: `interest_signal: ${signal}`,
+        };
+      }
+    }
+
+    // Score based
+    if (score >= 50) {
+      return {
+        isInterested: true,
+        scoreBoost: 0,
+        reason: 'score_threshold',
+      };
+    }
+
+    // Default - neutral button click still shows some interest
+    return {
+      isInterested: false,
+      scoreBoost: 10, // Small boost for any engagement
+      reason: 'neutral_engagement',
+    };
+  }
+
+  // ==========================================
+  // AUTO CREATE INTERESTED LEAD
+  // ✅ Ye automatically call hoga jab interest detect ho
+  // ==========================================
+  private async autoCreateInterestedLead(
+    session: ChatSession
+  ): Promise<void> {
+    try {
+      // Already lead bana chuka hai toh skip
+      if (session.variables['leadCreated']) {
+        console.log(`⏭️ Lead already created, skipping auto-create`);
+        return;
+      }
+
+      const contact = await this.findContact(
+        session.organizationId,
+        session.senderPhone
+      );
+
+      if (!contact) {
+        console.warn('⚠️ Auto lead: contact not found');
+        return;
+      }
+
+      const { crmService } = await import('../crm/crm.service');
+
+      const result = await crmService.smartCreateLead({
+        organizationId:    session.organizationId,
+        contactId:         contact.id,
+        conversationId:    session.conversationId,
+        source:            session.variables['adSource']
+                            ? 'whatsapp_ad'
+                            : 'chatbot_auto',
+        score:             Number(session.variables['leadScore'] || 25),
+        chatbotQualified:  true,
+        serviceInterest:   session.variables['selectedButton']
+                            || session.variables['selectedOption']
+                            || session.variables['serviceInterest']
+                            || undefined,
+        budget:            session.variables['budget'] || undefined,
+        city:              session.variables['city'] || undefined,
+        adSource:          session.variables['adSource'] || undefined,
+        adId:              session.variables['adId'] || undefined,
+        qualificationData: {
+          selectedButton:  session.variables['selectedButton'],
+          selectedOption:  session.variables['selectedOption'],
+          interestReason:  session.variables['interestReason'],
+          leadScore:       session.variables['leadScore'],
+          chatbotId:       session.chatbotId,
+          autoDetected:    true,
+          detectedAt:      new Date().toISOString(),
+        },
+      });
+
+      // Session mein mark karo
+      session.variables['leadCreated'] = true;
+      session.variables['leadId']      = result.lead.id;
+      session.variables['leadAction']  = result.action;
+
+      console.log(
+        `🎯 Auto Lead ${result.action}: ${result.lead.id} ` +
+        `(score: ${session.variables['leadScore']})`
+      );
+
+    } catch (error) {
+      console.error('❌ autoCreateInterestedLead failed:', error);
+    }
+  }
+
+  // ==========================================
   // BUTTON INPUT MATCHING
   // ==========================================
   private matchButtonInput(
@@ -577,7 +724,7 @@ export class ChatbotEngine {
     const inputLower = input.toLowerCase().trim();
     let matchedButton: { id: string; text: string } | null = null;
 
-    // Strategy 1: Exact ID match (WhatsApp sends button_reply.id)
+    // Strategy 1: Exact ID match
     matchedButton = buttons.find(b => b.id === input) || null;
 
     // Strategy 2: Exact text match
@@ -595,7 +742,7 @@ export class ChatbotEngine {
       ) || null;
     }
 
-    // Strategy 4: Number match (1, 2, 3)
+    // Strategy 4: Number match
     if (!matchedButton) {
       const num = parseInt(input);
       if (!isNaN(num) && num >= 1 && num <= buttons.length) {
@@ -608,7 +755,31 @@ export class ChatbotEngine {
       session.variables['selectedButton'] = matchedButton.text;
       session.variables['selectedButtonId'] = matchedButton.id;
 
-      // Find edge by multiple strategies
+      // ✅ AUTO INTEREST DETECTION
+      const currentScore = Number(session.variables['leadScore'] || 0);
+      const detection = this.detectInterestFromInput(
+        matchedButton.text,
+        currentScore
+      );
+
+      // Update score
+      const newScore = Math.min(100, currentScore + detection.scoreBoost);
+      session.variables['leadScore'] = newScore;
+
+      if (detection.isInterested) {
+        session.variables['userInterested'] = true;
+        session.variables['interestReason'] = detection.reason;
+        console.log(`🎯 Interest detected! Score: ${currentScore} → ${newScore}`);
+
+        // ✅ Auto trigger lead creation (non-blocking)
+        this.autoCreateInterestedLead(session).catch(
+          e => console.error('Auto lead creation error:', e)
+        );
+      } else if (detection.scoreBoost > 0) {
+        console.log(`📊 Engagement score: ${currentScore} → ${newScore}`);
+      }
+
+      // Find next node
       const edge = this.findButtonEdge(
         node.id, matchedButton, input, flowData
       );
@@ -617,7 +788,6 @@ export class ChatbotEngine {
         session.currentNodeId = edge.target;
         console.log(`➡️ Moving to: ${edge.target}`);
       } else {
-        // Fallback: first edge from this node
         const anyEdge = flowData.edges.find(e => e.source === node.id);
         if (anyEdge) {
           session.currentNodeId = anyEdge.target;
@@ -626,7 +796,6 @@ export class ChatbotEngine {
       }
     } else {
       console.log(`❌ No button matched for: "${input}"`);
-      // Don't change node - user ko re-prompt karo
     }
 
     session.waitingForInput = false;
@@ -652,7 +821,7 @@ export class ChatbotEngine {
     const inputLower = input.toLowerCase().trim();
     let matchedRow: { id: string; title: string } | null = null;
 
-    // Strategy 1: Exact ID match (WhatsApp sends list_reply.id)
+    // Strategy 1: Exact ID match
     matchedRow = allRows.find(r => r.id === input) || null;
 
     // Strategy 2: Exact title match
@@ -683,18 +852,35 @@ export class ChatbotEngine {
       session.variables['selectedOption'] = matchedRow.title;
       session.variables['selectedOptionId'] = matchedRow.id;
 
+      // ✅ AUTO INTEREST DETECTION
+      const currentScore = Number(session.variables['leadScore'] || 0);
+      const detection = this.detectInterestFromInput(
+        matchedRow.title,
+        currentScore
+      );
+
+      const newScore = Math.min(100, currentScore + detection.scoreBoost);
+      session.variables['leadScore'] = newScore;
+
+      if (detection.isInterested) {
+        session.variables['userInterested'] = true;
+        session.variables['interestReason'] = detection.reason;
+        console.log(`🎯 Interest detected from list! Score: ${newScore}`);
+
+        this.autoCreateInterestedLead(session).catch(
+          e => console.error('Auto lead creation error:', e)
+        );
+      }
+
       const edge = this.findListEdge(
         node.id, matchedRow, input, flowData
       );
 
       if (edge) {
         session.currentNodeId = edge.target;
-        console.log(`➡️ Moving to: ${edge.target}`);
       } else {
         const anyEdge = flowData.edges.find(e => e.source === node.id);
-        if (anyEdge) {
-          session.currentNodeId = anyEdge.target;
-        }
+        if (anyEdge) session.currentNodeId = anyEdge.target;
       }
     }
 

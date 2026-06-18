@@ -177,6 +177,18 @@ export class CRMController {
             return res.json({ success: true, data: result.leads, meta: result.meta });
         } catch (e) { next(e); }
     }
+
+    async getInterestedLeads(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId  = req.user!.organizationId!;
+            const result = await crmService.getInterestedLeads(orgId, req.query as any);
+            return res.json({
+                success: true,
+                data:    result,
+                message: 'Interested leads fetched',
+            });
+        } catch (e) { next(e); }
+    }
 }
 
 export const crmController = new CRMController();

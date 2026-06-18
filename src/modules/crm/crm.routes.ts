@@ -24,6 +24,7 @@ router.put('/settings', crmController.updateSettings.bind(crmController));
 router.get('/leads', crmController.getLeads.bind(crmController));
 router.get('/leads/hot', crmController.getHotLeads.bind(crmController));
 router.get('/leads/chatbot', crmController.getChatbotLeads.bind(crmController));
+router.get('/leads/interested', crmController.getInterestedLeads.bind(crmController));
 router.post('/leads', crmController.createLead.bind(crmController));
 router.get('/leads/:id', crmController.getLeadById.bind(crmController));
 router.put('/leads/:id', crmController.updateLead.bind(crmController));

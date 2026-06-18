@@ -471,6 +471,74 @@ export class CRMService {
     };
   }
 
+  // ==========================================
+  // INTERESTED LEADS - Dedicated Section
+  // ==========================================
+  async getInterestedLeads(
+    organizationId: string,
+    options: {
+      page?: number;
+      limit?: number;
+      search?: string;
+    } = {}
+  ) {
+    const page  = Number(options.page)  || 1;
+    const limit = Number(options.limit) || 50;
+    const skip  = (page - 1) * limit;
+
+    const where: any = {
+      organizationId,
+      chatbotQualified: true,
+      status: { notIn: ['WON', 'LOST'] },
+    };
+
+    if (options.search) {
+      where.OR = [
+        { title:          { contains: options.search, mode: 'insensitive' } },
+        { serviceInterest:{ contains: options.search, mode: 'insensitive' } },
+        { contact: { phone:     { contains: options.search } } },
+        { contact: { firstName: { contains: options.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [leads, total] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        include: {
+          contact: {
+            select: {
+              id: true, phone: true,
+              firstName: true, lastName: true,
+              email: true, avatar: true,
+              whatsappProfileName: true,
+            },
+          },
+          stage:    { select: { id: true, name: true, color: true } },
+          pipeline: { select: { id: true, name: true } },
+          _count:   { select: { activities: true, notes: true } },
+        },
+        orderBy: [
+          { score:     'desc' },
+          { createdAt: 'desc' },
+        ],
+        skip,
+        take: limit,
+      }),
+      prisma.lead.count({ where }),
+    ]);
+
+    // ✅ Group by interest level
+    const hot  = leads.filter(l => (l as any).score >= 70);
+    const warm = leads.filter(l => (l as any).score >= 40 && (l as any).score < 70);
+    const cold = leads.filter(l => (l as any).score < 40);
+
+    return {
+      leads,
+      grouped: { hot, warm, cold },
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   async getLeadById(organizationId: string, leadId: string) {
     const lead = await prisma.lead.findFirst({
       where: { id: leadId, organizationId },
