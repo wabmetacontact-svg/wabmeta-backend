@@ -440,27 +440,89 @@ const buildMetaTemplatePayload = (t: {
   }
 
   // ============================================
-  // BUTTONS COMPONENT (unchanged)
+  // BUTTONS COMPONENT - FIXED
   // ============================================
   if (t.buttons && t.buttons.length > 0) {
-    const buttons = t.buttons.slice(0, 10).map((b: any) => {
-      const type = String(b.type || '').toUpperCase();
-      const btn: any = {
-        type: type.includes('PHONE') ? 'PHONE_NUMBER' : (type.includes('URL') ? 'URL' : 'QUICK_REPLY'),
-        text: b.text
-      };
+    
+    const validButtons = t.buttons.filter((b: any) => b.text?.trim());
+    
+    if (validButtons.length > 0) {
+      const buttons = validButtons.slice(0, 10).map((b: any) => {
+        
+        // ✅ Normalize type - handle all possible formats
+        const rawType = String(b.type || '').toUpperCase()
+          .replace(/[^A-Z_]/g, '');
+        
+        let metaType: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER';
+        
+        if (rawType.includes('PHONE') || rawType === 'CALL') {
+          metaType = 'PHONE_NUMBER';
+        } else if (rawType === 'URL' || rawType.includes('URL') || rawType === 'WEBSITE') {
+          metaType = 'URL';
+        } else {
+          metaType = 'QUICK_REPLY';
+        }
 
-      if (btn.type === 'URL') {
-        if (!b.url) throw new AppError('URL button requires url field', 400);
-        btn.url = b.url;
-      } else if (btn.type === 'PHONE_NUMBER') {
-        btn.phone_number = b.phoneNumber || b.phone_number;
-      }
+        // ✅ Base button
+        const btn: any = {
+          type: metaType,
+          text: String(b.text || '').trim().substring(0, 25), // Max 25 chars
+        };
 
-      return btn;
-    });
+        // ✅ URL button
+        if (metaType === 'URL') {
+          const url = b.url || b.website_url || '';
+          if (!url || !url.startsWith('http')) {
+            throw new AppError(
+              `URL button "${btn.text}" requires a valid URL starting with http/https`,
+              400
+            );
+          }
+          btn.url = url.trim();
+        }
 
-    components.push({ type: 'BUTTONS', buttons });
+        // ✅ Phone button - Meta requires 'phone_number' (underscore format)
+        if (metaType === 'PHONE_NUMBER') {
+          // Handle both 'phoneNumber' (camelCase) and 'phone_number' (snake_case)
+          const phone = b.phoneNumber || b.phone_number || '';
+          
+          if (!phone) {
+            throw new AppError(
+              `Phone button "${btn.text}" requires a phone number`,
+              400
+            );
+          }
+          
+          // Validate E.164 format
+          const cleanPhone = String(phone).trim();
+          if (!cleanPhone.startsWith('+')) {
+            throw new AppError(
+              `Phone number must be in E.164 format (e.g., +919876543210). Got: ${cleanPhone}`,
+              400
+            );
+          }
+          
+          btn.phone_number = cleanPhone; // ✅ Meta expects 'phone_number' NOT 'phoneNumber'
+        }
+
+        // ✅ Quick Reply - no extra fields needed
+        // Just type and text
+
+        console.log(`  ✅ Button mapped: ${metaType} - "${btn.text}"`, 
+          metaType === 'URL' ? `→ ${btn.url}` : 
+          metaType === 'PHONE_NUMBER' ? `→ ${btn.phone_number}` : ''
+        );
+
+        return btn;
+      });
+
+      components.push({ 
+        type: 'BUTTONS', 
+        buttons 
+      });
+      
+      console.log(`✅ BUTTONS component: ${buttons.length} buttons added`);
+    }
   }
 
   const payload = {
@@ -473,6 +535,17 @@ const buildMetaTemplatePayload = (t: {
   console.log('📦 Final Meta payload:', JSON.stringify(payload, null, 2));
 
   return payload;
+};
+
+// ✅ Buttons normalize karo before saving to DB
+const normalizeButtonsForDB = (buttons: any[]): any[] => {
+  return (buttons || []).map((b: any) => ({
+    type: b.type, // 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'
+    text: b.text || '',
+    // ✅ Unified format - ALWAYS save both fields
+    url: b.url || b.website_url || undefined,
+    phoneNumber: b.phone_number || b.phoneNumber || undefined, // camelCase save karo
+  }));
 };
 
 /**
@@ -1240,7 +1313,9 @@ export class TemplatesService {
               headerContent: finalHeaderContent,
               bodyText: bodyComponent?.text || existing.bodyText,
               footerText: footerComponent?.text || existing.footerText,
-              buttons: toJsonValue(buttonsComponent?.buttons || []),
+              buttons: toJsonValue(
+                normalizeButtonsForDB(buttonsComponent?.buttons || []) // ✅ FIXED
+              ),
             };
 
             if (waData.wabaId) updateData.wabaId = waData.wabaId;
@@ -1263,7 +1338,9 @@ export class TemplatesService {
               footerText: footerComponent?.text || null,
               status: mappedStatus,
               metaTemplateId: metaId,
-              buttons: toJsonValue(buttonsComponent?.buttons || []),
+              buttons: toJsonValue(
+                normalizeButtonsForDB(buttonsComponent?.buttons || []) // ✅ FIXED
+              ),
               variables: toJsonValue([]),
               rejectionReason,
             };
@@ -1643,6 +1720,16 @@ export class TemplatesService {
 
     const waData = await getWhatsAppAccountWithToken(organizationId, whatsappAccountId);
 
+    // ✅ Buttons ko normalize karo before building payload
+    const normalizedButtons = ((template.buttons as any[]) || []).map((b: any) => ({
+      type: b.type,
+      text: b.text,
+      // ✅ Both formats handle karo
+      url: b.url || b.website_url,
+      phoneNumber: b.phoneNumber || b.phone_number,
+      phone_number: b.phone_number || b.phoneNumber,
+    }));
+
     const metaPayload = buildMetaTemplatePayload({
       name: template.name,
       language: template.language,
@@ -1651,7 +1738,7 @@ export class TemplatesService {
       headerContent: template.headerContent,
       bodyText: template.bodyText,
       footerText: template.footerText,
-      buttons: (template.buttons as any) || [],
+      buttons: normalizedButtons as any,
       variables: (template.variables as any) || [],
       headerMediaId: (template as any).headerMediaId || undefined,
     });
@@ -1660,13 +1747,15 @@ export class TemplatesService {
       templateId,
       name: template.name,
       language: toMetaLanguage(template.language),
+      buttonsCount: normalizedButtons.length,
     });
 
+    // ✅ FIXED: v21.0 use karo (same as create)
     const metaRes = await (whatsappApi as any).createMessageTemplateByVersion(
       waData.wabaId,
       waData.accessToken,
       metaPayload,
-      'v17.0'
+      'v21.0' // ✅ Was 'v17.0' - FIXED
     );
 
     const metaTemplateId = metaRes?.id || metaRes?.template_id;
