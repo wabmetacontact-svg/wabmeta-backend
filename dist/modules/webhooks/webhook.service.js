@@ -771,7 +771,7 @@ class WebhookService {
                             : content;
                 }
                 const isNewConversation = wasNewlyCreated || updatedConversation.unreadCount <= 1;
-                chatbot_engine_1.chatbotEngine.processMessage(updatedConversation.id, organizationId, chatbotContent, waFrom, isNewConversation).catch((e) => console.error('Chatbot error:', e));
+                chatbot_engine_1.chatbotEngine.processMessage(updatedConversation.id, organizationId, chatbotContent, waFrom, isNewConversation, message).catch((e) => console.error('Chatbot error:', e));
             }
             console.log(`✅ Inbound message processed: ${savedMessage.id}`);
         }

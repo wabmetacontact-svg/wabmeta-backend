@@ -629,8 +629,8 @@ export declare class AdminService {
             createdAt: Date;
             userAgent: string | null;
             ipAddress: string | null;
-            action: import(".prisma/client").$Enums.ActivityAction | null;
             metadata: import("@prisma/client/runtime/library").JsonValue;
+            action: import(".prisma/client").$Enums.ActivityAction | null;
             entity: string | null;
             entityId: string | null;
         })[];

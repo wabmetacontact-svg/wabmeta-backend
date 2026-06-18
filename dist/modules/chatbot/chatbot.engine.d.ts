@@ -1,8 +1,12 @@
 export declare class ChatbotEngine {
-    processMessage(conversationId: string, organizationId: string, messageContent: string, senderPhone: string, isNewConversation: boolean): Promise<void>;
+    processMessage(conversationId: string, organizationId: string, messageContent: string, senderPhone: string, isNewConversation: boolean, rawMessage?: any): Promise<void>;
     private createNewSession;
     private handleExistingSession;
     private processUserInput;
+    private readonly INTEREST_SIGNALS;
+    private readonly DISINTEREST_SIGNALS;
+    private detectInterestFromInput;
+    private autoCreateInterestedLead;
     private matchButtonInput;
     private matchListInput;
     private executeFlow;
@@ -20,6 +24,7 @@ export declare class ChatbotEngine {
     private findListEdge;
     private getNextNodeId;
     private executeAction;
+    private findContact;
     private evaluateCondition;
     private replaceVariables;
     private sleep;

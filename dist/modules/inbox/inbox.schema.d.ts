@@ -15,19 +15,19 @@ export declare const getConversationsSchema: z.ZodObject<{
         page: number;
         sortBy: "createdAt" | "lastMessageAt" | "unreadCount";
         sortOrder: "asc" | "desc";
+        search?: string | undefined;
         isArchived?: boolean | undefined;
         isRead?: boolean | undefined;
         assignedTo?: string | undefined;
         labels?: string | undefined;
-        search?: string | undefined;
     }, {
         limit?: string | undefined;
         page?: string | undefined;
+        search?: string | undefined;
         isArchived?: string | undefined;
         isRead?: string | undefined;
         assignedTo?: string | undefined;
         labels?: string | undefined;
-        search?: string | undefined;
         sortBy?: "createdAt" | "lastMessageAt" | "unreadCount" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
@@ -37,21 +37,21 @@ export declare const getConversationsSchema: z.ZodObject<{
         page: number;
         sortBy: "createdAt" | "lastMessageAt" | "unreadCount";
         sortOrder: "asc" | "desc";
+        search?: string | undefined;
         isArchived?: boolean | undefined;
         isRead?: boolean | undefined;
         assignedTo?: string | undefined;
         labels?: string | undefined;
-        search?: string | undefined;
     };
 }, {
     query: {
         limit?: string | undefined;
         page?: string | undefined;
+        search?: string | undefined;
         isArchived?: string | undefined;
         isRead?: string | undefined;
         assignedTo?: string | undefined;
         labels?: string | undefined;
-        search?: string | undefined;
         sortBy?: "createdAt" | "lastMessageAt" | "unreadCount" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };

@@ -421,10 +421,10 @@ export class CRMService {
     if (options.assignedToId)    where.assignedToId   = options.assignedToId;
     if (options.source)          (where as any).source = options.source;
     if (options.chatbotQualified !== undefined) {
-      (where as any).chatbotQualified = options.chatbotQualified;
+      (where as any).chatbotQualified = options.chatbotQualified === true || String(options.chatbotQualified) === 'true';
     }
     if (options.minScore !== undefined) {
-      (where as any).score = { gte: options.minScore };
+      (where as any).score = { gte: Number(options.minScore) };
     }
 
     if (options.search) {

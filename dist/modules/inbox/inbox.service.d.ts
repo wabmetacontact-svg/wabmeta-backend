@@ -46,6 +46,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -54,7 +55,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -73,9 +73,11 @@ export declare class InboxService {
             updatedAt: Date;
             templateName: string | null;
             conversationId: string;
+            metadata: Prisma.JsonValue | null;
+            content: string | null;
+            readAt: Date | null;
             wamId: string | null;
             direction: import(".prisma/client").$Enums.MessageDirection;
-            content: string | null;
             mediaUrl: string | null;
             mediaType: string | null;
             mediaMimeType: string | null;
@@ -83,11 +85,9 @@ export declare class InboxService {
             templateParams: Prisma.JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
-            readAt: Date | null;
             failedAt: Date | null;
             failureReason: string | null;
             replyToMessageId: string | null;
-            metadata: Prisma.JsonValue | null;
             retryCount: number;
             statusUpdatedAt: Date | null;
             fileName: string | null;
@@ -112,6 +112,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -120,7 +121,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -135,6 +135,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -143,7 +144,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -158,6 +158,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -166,7 +167,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -181,6 +181,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -189,7 +190,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -204,6 +204,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -212,7 +213,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -227,6 +227,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -235,7 +236,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -305,6 +305,7 @@ export declare class InboxService {
                 phoneNumberId: string | null;
                 lastMessageAt: Date | null;
                 contactId: string;
+                isPinned: boolean;
                 lastMessagePreview: string | null;
                 lastCustomerMessageAt: Date | null;
                 windowExpiresAt: Date | null;
@@ -313,7 +314,6 @@ export declare class InboxService {
                 isArchived: boolean;
                 isRead: boolean;
                 unreadCount: number;
-                isPinned: boolean;
                 assignedTo: string | null;
                 labels: string[];
             };
@@ -327,9 +327,11 @@ export declare class InboxService {
             updatedAt: Date;
             templateName: string | null;
             conversationId: string;
+            metadata: Prisma.JsonValue | null;
+            content: string | null;
+            readAt: Date | null;
             wamId: string | null;
             direction: import(".prisma/client").$Enums.MessageDirection;
-            content: string | null;
             mediaUrl: string | null;
             mediaType: string | null;
             mediaMimeType: string | null;
@@ -337,11 +339,9 @@ export declare class InboxService {
             templateParams: Prisma.JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
-            readAt: Date | null;
             failedAt: Date | null;
             failureReason: string | null;
             replyToMessageId: string | null;
-            metadata: Prisma.JsonValue | null;
             retryCount: number;
             statusUpdatedAt: Date | null;
             fileName: string | null;
@@ -396,6 +396,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -404,7 +405,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -442,6 +442,7 @@ export declare class InboxService {
         phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
+        isPinned: boolean;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -450,7 +451,6 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
-        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
     }>;
@@ -475,9 +475,11 @@ export declare class InboxService {
         updatedAt: Date;
         templateName: string | null;
         conversationId: string;
+        metadata: Prisma.JsonValue | null;
+        content: string | null;
+        readAt: Date | null;
         wamId: string | null;
         direction: import(".prisma/client").$Enums.MessageDirection;
-        content: string | null;
         mediaUrl: string | null;
         mediaType: string | null;
         mediaMimeType: string | null;
@@ -485,11 +487,9 @@ export declare class InboxService {
         templateParams: Prisma.JsonValue | null;
         sentAt: Date | null;
         deliveredAt: Date | null;
-        readAt: Date | null;
         failedAt: Date | null;
         failureReason: string | null;
         replyToMessageId: string | null;
-        metadata: Prisma.JsonValue | null;
         retryCount: number;
         statusUpdatedAt: Date | null;
         fileName: string | null;
@@ -511,9 +511,11 @@ export declare class InboxService {
         updatedAt: Date;
         templateName: string | null;
         conversationId: string;
+        metadata: Prisma.JsonValue | null;
+        content: string | null;
+        readAt: Date | null;
         wamId: string | null;
         direction: import(".prisma/client").$Enums.MessageDirection;
-        content: string | null;
         mediaUrl: string | null;
         mediaType: string | null;
         mediaMimeType: string | null;
@@ -521,11 +523,9 @@ export declare class InboxService {
         templateParams: Prisma.JsonValue | null;
         sentAt: Date | null;
         deliveredAt: Date | null;
-        readAt: Date | null;
         failedAt: Date | null;
         failureReason: string | null;
         replyToMessageId: string | null;
-        metadata: Prisma.JsonValue | null;
         retryCount: number;
         statusUpdatedAt: Date | null;
         fileName: string | null;

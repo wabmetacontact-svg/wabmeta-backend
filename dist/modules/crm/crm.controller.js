@@ -162,6 +162,68 @@ class CRMController {
             next(e);
         }
     }
+    async getSettings(req, res, next) {
+        try {
+            const orgId = req.user.organizationId;
+            const settings = await crm_service_1.crmService.getOrCreateSettings(orgId);
+            return (0, response_1.sendSuccess)(res, settings, 'Settings fetched');
+        }
+        catch (e) {
+            next(e);
+        }
+    }
+    async updateSettings(req, res, next) {
+        try {
+            const orgId = req.user.organizationId;
+            const settings = await crm_service_1.crmService.updateSettings(orgId, req.body);
+            return (0, response_1.sendSuccess)(res, settings, 'Settings updated');
+        }
+        catch (e) {
+            next(e);
+        }
+    }
+    async getHotLeads(req, res, next) {
+        try {
+            const orgId = req.user.organizationId;
+            const result = await crm_service_1.crmService.getLeads(orgId, {
+                minScore: 70,
+                status: 'NEW',
+                limit: 20,
+            });
+            return (0, response_1.sendSuccess)(res, result.leads, 'Hot leads fetched');
+        }
+        catch (e) {
+            next(e);
+        }
+    }
+    async getChatbotLeads(req, res, next) {
+        try {
+            const orgId = req.user.organizationId;
+            const result = await crm_service_1.crmService.getLeads(orgId, {
+                chatbotQualified: true,
+                limit: req.query.limit,
+                page: req.query.page,
+            });
+            return res.json({ success: true, data: result.leads, meta: result.meta });
+        }
+        catch (e) {
+            next(e);
+        }
+    }
+    async getInterestedLeads(req, res, next) {
+        try {
+            const orgId = req.user.organizationId;
+            const result = await crm_service_1.crmService.getInterestedLeads(orgId, req.query);
+            return res.json({
+                success: true,
+                data: result,
+                message: 'Interested leads fetched',
+            });
+        }
+        catch (e) {
+            next(e);
+        }
+    }
 }
 exports.CRMController = CRMController;
 exports.crmController = new CRMController();

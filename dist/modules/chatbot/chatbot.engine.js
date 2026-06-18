@@ -1,6 +1,39 @@
 "use strict";
 // src/modules/chatbot/chatbot.engine.ts
 // COMPLETE REWRITE - Redis Persistent + Gemini AI + Perfect Flow
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -114,7 +147,7 @@ class ChatbotEngine {
     // ==========================================
     // MAIN ENTRY POINT
     // ==========================================
-    async processMessage(conversationId, organizationId, messageContent, senderPhone, isNewConversation) {
+    async processMessage(conversationId, organizationId, messageContent, senderPhone, isNewConversation, rawMessage) {
         const sessionKey = `${organizationId}:${conversationId}`;
         const cleanMessage = (messageContent || '').trim();
         console.log(`\n🤖 ═══════ CHATBOT ENGINE ═══════`);
@@ -186,7 +219,7 @@ class ChatbotEngine {
             // ✅ FIXED: Session decision logic
             if (!session || shouldReset) {
                 // Need to create new session
-                session = await this.createNewSession(chatbot, organizationId, conversationId, senderPhone, cleanMessage, flowData, account, sessionKey, chatbot.welcomeMessage || '');
+                session = await this.createNewSession(chatbot, organizationId, conversationId, senderPhone, cleanMessage, flowData, account, sessionKey, chatbot.welcomeMessage || '', rawMessage);
                 if (!session)
                     return;
             }
@@ -212,7 +245,7 @@ class ChatbotEngine {
     // ==========================================
     // CREATE NEW SESSION
     // ==========================================
-    async createNewSession(chatbot, organizationId, conversationId, senderPhone, message, flowData, account, sessionKey, welcomeMessage) {
+    async createNewSession(chatbot, organizationId, conversationId, senderPhone, message, flowData, account, sessionKey, welcomeMessage, rawMessage) {
         console.log(`🆕 Creating new session for: ${chatbot.name}`);
         // Send welcome message
         if (welcomeMessage) {
@@ -244,6 +277,12 @@ class ChatbotEngine {
                 message,
                 userName: 'Guest',
                 startTime: new Date().toISOString(),
+                leadScore: 0, // ✅ NEW
+                leadCreated: false, // ✅ NEW
+                // ✅ Ad tracking (webhook se inject hoga)
+                adSource: rawMessage?.referral?.source || '',
+                adId: rawMessage?.referral?.ad_id || '',
+                campaignId: rawMessage?.referral?.ads_context_data?.ad_title || '',
             },
             chatHistory: [],
             startedAt: Date.now(),
@@ -349,13 +388,131 @@ class ChatbotEngine {
         return session;
     }
     // ==========================================
+    // INTEREST KEYWORDS - Auto Detection
+    // ==========================================
+    INTEREST_SIGNALS = [
+        // High intent
+        'price', 'pricing', 'cost', 'rate', 'charge', 'fee', 'fees',
+        'buy', 'purchase', 'order', 'book', 'booking',
+        'demo', 'trial', 'start', 'begin', 'join',
+        'interested', 'interest', 'yes', 'haan', 'ha',
+        'call', 'callback', 'contact', 'connect',
+        'consult', 'consultation', 'appointment',
+        'enroll', 'admission', 'register', 'registration',
+        'quote', 'proposal', 'plan',
+        // Hindi
+        'kharidna', 'chahiye', 'lena', 'batao', 'bataiye',
+        'milega', 'milegi', 'kaisa', 'kitna',
+    ];
+    DISINTEREST_SIGNALS = [
+        'no', 'nahi', 'nope', 'not', 'cancel', 'stop',
+        'bye', 'exit', 'quit', 'leave',
+        'not interested', 'exploring', 'just looking',
+        'baad mein', 'later', 'abhi nahi',
+    ];
+    // ==========================================
+    // AUTO DETECT INTEREST FROM BUTTON/LIST
+    // ==========================================
+    detectInterestFromInput(text, score = 0) {
+        const lower = text.toLowerCase().trim();
+        // Check disinterest first
+        for (const signal of this.DISINTEREST_SIGNALS) {
+            if (lower.includes(signal)) {
+                return {
+                    isInterested: false,
+                    scoreBoost: 0,
+                    reason: `disinterest_signal: ${signal}`,
+                };
+            }
+        }
+        // Check interest signals
+        for (const signal of this.INTEREST_SIGNALS) {
+            if (lower.includes(signal)) {
+                return {
+                    isInterested: true,
+                    scoreBoost: 25,
+                    reason: `interest_signal: ${signal}`,
+                };
+            }
+        }
+        // Score based
+        if (score >= 50) {
+            return {
+                isInterested: true,
+                scoreBoost: 0,
+                reason: 'score_threshold',
+            };
+        }
+        // Default - neutral button click still shows some interest
+        return {
+            isInterested: false,
+            scoreBoost: 10, // Small boost for any engagement
+            reason: 'neutral_engagement',
+        };
+    }
+    // ==========================================
+    // AUTO CREATE INTERESTED LEAD
+    // ✅ Ye automatically call hoga jab interest detect ho
+    // ==========================================
+    async autoCreateInterestedLead(session) {
+        try {
+            // Already lead bana chuka hai toh skip
+            if (session.variables['leadCreated']) {
+                console.log(`⏭️ Lead already created, skipping auto-create`);
+                return;
+            }
+            const contact = await this.findContact(session.organizationId, session.senderPhone);
+            if (!contact) {
+                console.warn('⚠️ Auto lead: contact not found');
+                return;
+            }
+            const { crmService } = await Promise.resolve().then(() => __importStar(require('../crm/crm.service')));
+            const result = await crmService.smartCreateLead({
+                organizationId: session.organizationId,
+                contactId: contact.id,
+                conversationId: session.conversationId,
+                source: session.variables['adSource']
+                    ? 'whatsapp_ad'
+                    : 'chatbot_auto',
+                score: Number(session.variables['leadScore'] || 25),
+                chatbotQualified: true,
+                serviceInterest: session.variables['selectedButton']
+                    || session.variables['selectedOption']
+                    || session.variables['serviceInterest']
+                    || undefined,
+                budget: session.variables['budget'] || undefined,
+                city: session.variables['city'] || undefined,
+                adSource: session.variables['adSource'] || undefined,
+                adId: session.variables['adId'] || undefined,
+                qualificationData: {
+                    selectedButton: session.variables['selectedButton'],
+                    selectedOption: session.variables['selectedOption'],
+                    interestReason: session.variables['interestReason'],
+                    leadScore: session.variables['leadScore'],
+                    chatbotId: session.chatbotId,
+                    autoDetected: true,
+                    detectedAt: new Date().toISOString(),
+                },
+            });
+            // Session mein mark karo
+            session.variables['leadCreated'] = true;
+            session.variables['leadId'] = result.lead.id;
+            session.variables['leadAction'] = result.action;
+            console.log(`🎯 Auto Lead ${result.action}: ${result.lead.id} ` +
+                `(score: ${session.variables['leadScore']})`);
+        }
+        catch (error) {
+            console.error('❌ autoCreateInterestedLead failed:', error);
+        }
+    }
+    // ==========================================
     // BUTTON INPUT MATCHING
     // ==========================================
     matchButtonInput(session, input, node, flowData) {
         const buttons = node.data.buttons || [];
         const inputLower = input.toLowerCase().trim();
         let matchedButton = null;
-        // Strategy 1: Exact ID match (WhatsApp sends button_reply.id)
+        // Strategy 1: Exact ID match
         matchedButton = buttons.find(b => b.id === input) || null;
         // Strategy 2: Exact text match
         if (!matchedButton) {
@@ -366,7 +523,7 @@ class ChatbotEngine {
             matchedButton = buttons.find(b => inputLower.includes(b.text.toLowerCase().trim()) ||
                 b.text.toLowerCase().trim().includes(inputLower)) || null;
         }
-        // Strategy 4: Number match (1, 2, 3)
+        // Strategy 4: Number match
         if (!matchedButton) {
             const num = parseInt(input);
             if (!isNaN(num) && num >= 1 && num <= buttons.length) {
@@ -377,14 +534,29 @@ class ChatbotEngine {
             console.log(`✅ Button matched: "${matchedButton.text}"`);
             session.variables['selectedButton'] = matchedButton.text;
             session.variables['selectedButtonId'] = matchedButton.id;
-            // Find edge by multiple strategies
+            // ✅ AUTO INTEREST DETECTION
+            const currentScore = Number(session.variables['leadScore'] || 0);
+            const detection = this.detectInterestFromInput(matchedButton.text, currentScore);
+            // Update score
+            const newScore = Math.min(100, currentScore + detection.scoreBoost);
+            session.variables['leadScore'] = newScore;
+            if (detection.isInterested) {
+                session.variables['userInterested'] = true;
+                session.variables['interestReason'] = detection.reason;
+                console.log(`🎯 Interest detected! Score: ${currentScore} → ${newScore}`);
+                // ✅ Auto trigger lead creation (non-blocking)
+                this.autoCreateInterestedLead(session).catch(e => console.error('Auto lead creation error:', e));
+            }
+            else if (detection.scoreBoost > 0) {
+                console.log(`📊 Engagement score: ${currentScore} → ${newScore}`);
+            }
+            // Find next node
             const edge = this.findButtonEdge(node.id, matchedButton, input, flowData);
             if (edge) {
                 session.currentNodeId = edge.target;
                 console.log(`➡️ Moving to: ${edge.target}`);
             }
             else {
-                // Fallback: first edge from this node
                 const anyEdge = flowData.edges.find(e => e.source === node.id);
                 if (anyEdge) {
                     session.currentNodeId = anyEdge.target;
@@ -394,7 +566,6 @@ class ChatbotEngine {
         }
         else {
             console.log(`❌ No button matched for: "${input}"`);
-            // Don't change node - user ko re-prompt karo
         }
         session.waitingForInput = false;
         return session;
@@ -411,7 +582,7 @@ class ChatbotEngine {
         });
         const inputLower = input.toLowerCase().trim();
         let matchedRow = null;
-        // Strategy 1: Exact ID match (WhatsApp sends list_reply.id)
+        // Strategy 1: Exact ID match
         matchedRow = allRows.find(r => r.id === input) || null;
         // Strategy 2: Exact title match
         if (!matchedRow) {
@@ -433,16 +604,25 @@ class ChatbotEngine {
             console.log(`✅ List matched: "${matchedRow.title}"`);
             session.variables['selectedOption'] = matchedRow.title;
             session.variables['selectedOptionId'] = matchedRow.id;
+            // ✅ AUTO INTEREST DETECTION
+            const currentScore = Number(session.variables['leadScore'] || 0);
+            const detection = this.detectInterestFromInput(matchedRow.title, currentScore);
+            const newScore = Math.min(100, currentScore + detection.scoreBoost);
+            session.variables['leadScore'] = newScore;
+            if (detection.isInterested) {
+                session.variables['userInterested'] = true;
+                session.variables['interestReason'] = detection.reason;
+                console.log(`🎯 Interest detected from list! Score: ${newScore}`);
+                this.autoCreateInterestedLead(session).catch(e => console.error('Auto lead creation error:', e));
+            }
             const edge = this.findListEdge(node.id, matchedRow, input, flowData);
             if (edge) {
                 session.currentNodeId = edge.target;
-                console.log(`➡️ Moving to: ${edge.target}`);
             }
             else {
                 const anyEdge = flowData.edges.find(e => e.source === node.id);
-                if (anyEdge) {
+                if (anyEdge)
                     session.currentNodeId = anyEdge.target;
-                }
             }
         }
         session.waitingForInput = false;
@@ -999,26 +1179,23 @@ class ChatbotEngine {
         console.log(`⚡ Action: ${action.type}`);
         try {
             switch (action.type) {
+                // ─────────────────────────────────────────
                 case 'tagContact': {
                     const tag = action.params?.tag;
                     if (!tag)
                         break;
-                    const phone10 = phone.replace(/\D/g, '').slice(-10);
-                    await database_1.default.contact.updateMany({
-                        where: {
-                            organizationId,
-                            OR: [
-                                { phone: phone10 },
-                                { phone: `+91${phone10}` },
-                                { phone: `91${phone10}` },
-                                { phone },
-                            ],
-                        },
-                        data: { tags: { push: tag } },
-                    });
-                    console.log(`🏷️ Tagged: ${tag}`);
+                    const contact = await this.findContact(organizationId, phone);
+                    if (contact) {
+                        await database_1.default.contact.update({
+                            where: { id: contact.id },
+                            data: { tags: { push: tag } },
+                        });
+                        session.variables[`tagged_${tag}`] = true;
+                        console.log(`🏷️ Tagged: ${tag}`);
+                    }
                     break;
                 }
+                // ─────────────────────────────────────────
                 case 'setVariable': {
                     const { name, value } = action.params || {};
                     if (name) {
@@ -1027,42 +1204,110 @@ class ChatbotEngine {
                     }
                     break;
                 }
-                case 'createLead': {
-                    const phone10 = phone.replace(/\D/g, '').slice(-10);
-                    const contact = await database_1.default.contact.findFirst({
-                        where: {
-                            organizationId,
-                            OR: [
-                                { phone: phone10 },
-                                { phone: `+91${phone10}` },
-                                { phone: `91${phone10}` },
-                                { phone },
-                            ],
-                        },
-                    });
+                // ─────────────────────────────────────────
+                // ✅ NEW: Add score to lead qualification
+                case 'addScore': {
+                    const points = Number(action.params?.points || 0);
+                    const currentScore = Number(session.variables['leadScore'] || 0);
+                    const newScore = Math.min(100, currentScore + points);
+                    session.variables['leadScore'] = newScore;
+                    console.log(`📊 Score: ${currentScore} + ${points} = ${newScore}`);
+                    // ✅ Check SCORE_BASED mode
+                    const contact = await this.findContact(organizationId, phone);
                     if (contact) {
-                        const existing = await database_1.default.lead.findFirst({
-                            where: {
-                                organizationId,
-                                contactId: contact.id,
-                                status: { notIn: ['WON', 'LOST'] },
-                            },
+                        const { crmService } = await Promise.resolve().then(() => __importStar(require('../crm/crm.service')));
+                        const created = await crmService.checkAndCreateLeadByScore(organizationId, contact.id, newScore, {
+                            conversationId,
+                            qualificationData: session.variables,
+                            source: 'chatbot_score',
                         });
-                        if (!existing) {
-                            await database_1.default.lead.create({
-                                data: {
-                                    organizationId,
-                                    contactId: contact.id,
-                                    title: action.params?.title || 'Chatbot Lead',
-                                    source: 'chatbot',
-                                    status: 'NEW',
-                                },
-                            });
-                            console.log(`💼 Lead created`);
+                        if (created) {
+                            session.variables['leadCreated'] = true;
+                            console.log(`🎯 Lead auto-created by score threshold`);
                         }
                     }
                     break;
                 }
+                // ─────────────────────────────────────────
+                // ✅ UPGRADED: Smart createLead
+                case 'createLead': {
+                    const contact = await this.findContact(organizationId, phone);
+                    if (!contact) {
+                        console.warn('⚠️ createLead: contact not found');
+                        break;
+                    }
+                    const { crmService } = await Promise.resolve().then(() => __importStar(require('../crm/crm.service')));
+                    const result = await crmService.smartCreateLead({
+                        organizationId,
+                        contactId: contact.id,
+                        conversationId,
+                        title: action.params?.title
+                            ? this.replaceVariables(action.params.title, session.variables)
+                            : undefined,
+                        source: action.params?.source || 'chatbot',
+                        score: Number(session.variables['leadScore'] || 0),
+                        priority: action.params?.priority || undefined,
+                        serviceInterest: session.variables['serviceInterest']
+                            || session.variables['service']
+                            || action.params?.serviceInterest
+                            || undefined,
+                        budget: session.variables['budget']
+                            || action.params?.budget
+                            || undefined,
+                        city: session.variables['city']
+                            || action.params?.city
+                            || undefined,
+                        adSource: session.variables['adSource'] || undefined,
+                        adId: session.variables['adId'] || undefined,
+                        chatbotQualified: true,
+                        qualificationData: {
+                            ...session.variables,
+                            chatbotId: session.chatbotId,
+                            completedAt: new Date().toISOString(),
+                        },
+                        notes: action.params?.notes
+                            ? this.replaceVariables(action.params.notes, session.variables)
+                            : undefined,
+                    });
+                    session.variables['leadCreated'] = true;
+                    session.variables['leadId'] = result.lead.id;
+                    session.variables['leadAction'] = result.action;
+                    console.log(`💼 Lead ${result.action}: ${result.lead.id}`);
+                    break;
+                }
+                // ─────────────────────────────────────────
+                // ✅ NEW: Update lead stage
+                case 'updateLeadStage': {
+                    const leadId = session.variables['leadId'];
+                    if (!leadId || !action.params?.stageId)
+                        break;
+                    await database_1.default.lead.update({
+                        where: { id: leadId },
+                        data: {
+                            stageId: action.params.stageId,
+                            lastActivityAt: new Date(),
+                        },
+                    });
+                    console.log(`📈 Lead stage updated`);
+                    break;
+                }
+                // ─────────────────────────────────────────
+                // ✅ NEW: Assign lead to user
+                case 'assignLead': {
+                    const leadId = session.variables['leadId'];
+                    if (!leadId || !action.params?.userId)
+                        break;
+                    await database_1.default.lead.update({
+                        where: { id: leadId },
+                        data: {
+                            assignedToId: action.params.userId,
+                            lastActivityAt: new Date(),
+                        },
+                    });
+                    console.log(`👤 Lead assigned to: ${action.params.userId}`);
+                    break;
+                }
+                // ─────────────────────────────────────────
                 case 'webhook': {
                     const { url, method = 'POST' } = action.params || {};
                     if (!url)
@@ -1074,8 +1319,12 @@ class ChatbotEngine {
                             method,
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                phone, organizationId, conversationId,
+                                phone,
+                                organizationId,
+                                conversationId,
                                 variables: session.variables,
+                                leadScore: session.variables['leadScore'],
+                                leadId: session.variables['leadId'],
                                 timestamp: new Date().toISOString(),
                             }),
                             signal: controller.signal,
@@ -1091,6 +1340,21 @@ class ChatbotEngine {
         catch (error) {
             console.error(`❌ Action "${action.type}" error:`, error);
         }
+    }
+    // ✅ NEW Helper: Find contact by phone
+    async findContact(organizationId, phone) {
+        const phone10 = phone.replace(/\D/g, '').slice(-10);
+        return database_1.default.contact.findFirst({
+            where: {
+                organizationId,
+                OR: [
+                    { phone: phone10 },
+                    { phone: `+91${phone10}` },
+                    { phone: `91${phone10}` },
+                    { phone },
+                ],
+            },
+        });
     }
     // ==========================================
     // EVALUATE CONDITION

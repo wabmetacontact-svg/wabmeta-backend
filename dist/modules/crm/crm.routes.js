@@ -12,8 +12,14 @@ router.post('/sync-from-contacts', crm_controller_1.crmController.syncFromContac
 // Pipelines
 router.get('/pipelines', crm_controller_1.crmController.getPipelines.bind(crm_controller_1.crmController));
 router.post('/pipelines', crm_controller_1.crmController.createPipeline.bind(crm_controller_1.crmController));
+// Settings
+router.get('/settings', crm_controller_1.crmController.getSettings.bind(crm_controller_1.crmController));
+router.put('/settings', crm_controller_1.crmController.updateSettings.bind(crm_controller_1.crmController));
 // Leads
 router.get('/leads', crm_controller_1.crmController.getLeads.bind(crm_controller_1.crmController));
+router.get('/leads/hot', crm_controller_1.crmController.getHotLeads.bind(crm_controller_1.crmController));
+router.get('/leads/chatbot', crm_controller_1.crmController.getChatbotLeads.bind(crm_controller_1.crmController));
+router.get('/leads/interested', crm_controller_1.crmController.getInterestedLeads.bind(crm_controller_1.crmController));
 router.post('/leads', crm_controller_1.crmController.createLead.bind(crm_controller_1.crmController));
 router.get('/leads/:id', crm_controller_1.crmController.getLeadById.bind(crm_controller_1.crmController));
 router.put('/leads/:id', crm_controller_1.crmController.updateLead.bind(crm_controller_1.crmController));
