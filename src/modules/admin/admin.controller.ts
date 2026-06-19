@@ -1284,14 +1284,28 @@ export class AdminController {
             language: true,
             category: true,
             headerType: true,
+            headerContent: true,      // ✅ NEW
             bodyText: true,
             footerText: true,
+            buttons: true,             // ✅ NEW
+            variables: true,           // ✅ NEW
             status: true,
             rejectionReason: true,
+            qualityScore: true,        // ✅ NEW
+            headerMediaId: true,       // ✅ NEW
+            metaTemplateId: true,      // ✅ NEW
+            wabaId: true,              // ✅ NEW
             createdAt: true,
             updatedAt: true,
             organization: {
               select: { id: true, name: true },
+            },
+            whatsappAccount: {         // ✅ NEW - kis number se bana
+              select: {
+                id: true,
+                phoneNumber: true,
+                displayName: true,
+              },
             },
             _count: {
               select: { campaigns: true },
