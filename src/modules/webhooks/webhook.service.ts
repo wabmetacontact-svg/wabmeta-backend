@@ -542,6 +542,9 @@ export class WebhookService {
       let fileName: string | null   = null;
 
       switch (typeRaw) {
+        case 'reaction':
+          content = message.reaction?.emoji || '[Reaction]';
+          break;
         case 'text':
           content = message.text?.body || '';
           break;
