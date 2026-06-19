@@ -1079,10 +1079,12 @@ export class AdminController {
         ];
       }
 
-      // includeDeleted = false hone par sirf ACTIVE contacts
+      // ✅ includeDeleted = false → sirf non-deleted (ACTIVE, BLOCKED, UNSUBSCRIBED)
+      // ✅ includeDeleted = true → SAB dikhao including DELETED
       if (!includeDeleted) {
-        where.status = 'ACTIVE';
+        where.status = { not: 'DELETED' };
       }
+      // Agar includeDeleted = true, koi status filter mat lagao - sab dikhega
 
       const [contacts, total] = await Promise.all([
         prisma.contact.findMany({
@@ -1103,6 +1105,8 @@ export class AdminController {
             messageCount: true,
             lastMessageAt: true,
             createdAt: true,
+            deletedAt: true,        // ✅ NEW
+            deletedBy: true,        // ✅ NEW
             organization: {
               select: { id: true, name: true },
             },
@@ -1163,6 +1167,7 @@ export class AdminController {
           source: true,
           messageCount: true,
           createdAt: true,
+          deletedAt: true,         // ✅ NEW
           organization: { select: { name: true } },
         },
       });
@@ -1180,6 +1185,7 @@ export class AdminController {
         'Message Count',
         'Organization',
         'Created At',
+        'Deleted At',  // ✅ NEW
       ];
 
       const rows = contacts.map((c) => [
@@ -1194,6 +1200,7 @@ export class AdminController {
         c.messageCount,
         c.organization?.name || '',
         new Date(c.createdAt).toISOString(),
+        c.deletedAt ? new Date(c.deletedAt).toISOString() : '',  // ✅ NEW
       ]);
 
       const csvContent = [headers, ...rows]

@@ -121,12 +121,13 @@ export class ContactsController {
   async delete(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
+      const userId = req.user?.id; // ✅ NEW
       if (!organizationId) {
         throw new AppError('Organization context required', 400);
       }
 
       const id = req.params.id as string;
-      const result = await contactsService.delete(organizationId, id);
+      const result = await contactsService.delete(organizationId, id, userId); // ✅ Pass userId
       sendSuccess(res, result, result.message);
     } catch (error) {
       next(error);
@@ -225,12 +226,13 @@ export class ContactsController {
   async bulkDelete(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
+      const userId = req.user?.id; // ✅ NEW
       if (!organizationId) {
         throw new AppError('Organization context required', 400);
       }
 
       const { contactIds } = req.body;
-      const result = await contactsService.bulkDelete(organizationId, contactIds);
+      const result = await contactsService.bulkDelete(organizationId, contactIds, userId); // ✅
       sendSuccess(res, result, result.message);
     } catch (error) {
       next(error);
@@ -243,11 +245,12 @@ export class ContactsController {
   async deleteAll(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
+      const userId = req.user?.id; // ✅ NEW
       if (!organizationId) {
         throw new AppError('Organization context required', 400);
       }
 
-      const result = await contactsService.deleteAll(organizationId);
+      const result = await contactsService.deleteAll(organizationId, userId); // ✅
       sendSuccess(res, result, result.message);
     } catch (error) {
       next(error);

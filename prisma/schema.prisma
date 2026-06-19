@@ -307,6 +307,9 @@ model Contact {
   lastMessageAt          DateTime?
   messageCount           Int                  @default(0)
   source                 String?
+  deletedAt              DateTime?
+  deletedBy              String?              // userId who deleted
+
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
   automationSequences    AutomationSequence[]
@@ -327,6 +330,7 @@ model Contact {
   @@index([createdAt])
   @@index([organizationId, phone])
   @@index([email])
+  @@index([deletedAt])
 }
 
 model ContactGroup {
@@ -1183,6 +1187,7 @@ enum ContactStatus {
   ACTIVE
   BLOCKED
   UNSUBSCRIBED
+  DELETED
 }
 
 enum TemplateCategory {

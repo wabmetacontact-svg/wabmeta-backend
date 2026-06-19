@@ -241,6 +241,39 @@ export class ContactsService {
     });
 
     if (existing) {
+      // ✅ Agar DELETED contact hai toh restore karo (re-add ho gaya)
+      if (existing.status === 'DELETED') {
+        const restored = await prisma.contact.update({
+          where: { id: existing.id },
+          data: {
+            status: 'ACTIVE',
+            deletedAt: null,
+            deletedBy: null,
+            firstName: input.firstName || existing.firstName || 'Unknown',
+            lastName: input.lastName ?? existing.lastName,
+            email: input.email ?? existing.email,
+            tags: input.tags || existing.tags,
+            customFields: (input.customFields || existing.customFields) as any,
+            updatedAt: new Date(),
+          },
+        });
+
+        console.log(`♻️ Restored deleted contact: ${existing.id}`);
+
+        // Subscription count increment karo (re-add hua)
+        const subscription = await prisma.subscription.findFirst({
+          where: { organizationId },
+        });
+        if (subscription) {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { contactsUsed: { increment: 1 } },
+          });
+        }
+
+        return formatContact(restored);
+      }
+
       throw new AppError('Contact with this phone number already exists', 409);
     }
 
@@ -329,7 +362,12 @@ export class ContactsService {
 
     const safeLimit = Math.min(limit, 10000);
     const skip = (page - 1) * safeLimit;
-    const where: Prisma.ContactWhereInput = { organizationId };
+    
+    // ✅ Default: deleted contacts exclude karo
+    const where: Prisma.ContactWhereInput = { 
+      organizationId,
+      status: { not: 'DELETED' },
+    };
 
     if (search) {
       where.OR = [
@@ -340,6 +378,7 @@ export class ContactsService {
       ];
     }
 
+    // ✅ Agar user specific status filter de (ACTIVE, BLOCKED, UNSUBSCRIBED) toh wo override karega
     if (status) where.status = status;
     if (tags && tags.length > 0) where.tags = { hasSome: tags };
     if (groupId) where.groupMemberships = { some: { groupId } };
@@ -367,7 +406,11 @@ export class ContactsService {
 
   async getById(organizationId: string, contactId: string): Promise<ContactWithGroups> {
     const contact = await prisma.contact.findFirst({
-      where: { id: contactId, organizationId },
+      where: { 
+        id: contactId, 
+        organizationId,
+        status: { not: 'DELETED' }, // ✅ Deleted contact user ko nahi dikhao
+      },
       include: {
         groupMemberships: {
           include: {
@@ -443,15 +486,32 @@ export class ContactsService {
   // DELETE CONTACT
   // ==========================================
 
-  async delete(organizationId: string, contactId: string): Promise<{ message: string }> {
+  async delete(
+    organizationId: string,
+    contactId: string,
+    userId?: string
+  ): Promise<{ message: string }> {
     const contact = await prisma.contact.findFirst({
-      where: { id: contactId, organizationId },
+      where: { 
+        id: contactId, 
+        organizationId,
+        status: { not: 'DELETED' }, // ✅ Already deleted contact ko prevent karo
+      },
     });
 
     if (!contact) throw new AppError('Contact not found', 404);
 
-    await prisma.contact.delete({ where: { id: contactId } });
+    // ✅ Soft delete - sirf status change karo
+    await prisma.contact.update({
+      where: { id: contactId },
+      data: {
+        status: 'DELETED',
+        deletedAt: new Date(),
+        deletedBy: userId || null,
+      },
+    });
 
+    // Subscription count decrement karo (user ke liye limit calculation)
     const subscription = await prisma.subscription.findFirst({ where: { organizationId } });
     if (subscription && subscription.contactsUsed > 0) {
       await prisma.subscription.update({
@@ -460,6 +520,7 @@ export class ContactsService {
       });
     }
 
+    console.log(`🗑️ Contact soft-deleted: ${contactId} by user ${userId}`);
     return { message: 'Contact deleted successfully' };
   }
 
@@ -658,6 +719,34 @@ export class ContactsService {
 
     if (validContacts.length > availableSlots) {
       console.warn(`⚠️ Limit exceeded: ${validContacts.length - availableSlots} contacts skipped`);
+    }
+
+    // ✅ Check for DELETED contacts and restore them
+    const phonesToImport = contactsToImport.map(c => c.phone);
+    const deletedContacts = await prisma.contact.findMany({
+      where: {
+        organizationId,
+        phone: { in: phonesToImport },
+        status: 'DELETED',
+      },
+      select: { id: true, phone: true },
+    });
+
+    let restoredCount = 0;
+    if (deletedContacts.length > 0) {
+      const restored = await prisma.contact.updateMany({
+        where: {
+          id: { in: deletedContacts.map(c => c.id) },
+        },
+        data: {
+          status: 'ACTIVE',
+          deletedAt: null,
+          deletedBy: null,
+          source: 'import',
+        },
+      });
+      restoredCount = restored.count;
+      console.log(`♻️ Restored ${restoredCount} previously deleted contacts`);
     }
 
     // ✅ 5. CREATE CONTACTS
@@ -898,10 +987,21 @@ export class ContactsService {
 
   async bulkDelete(
     organizationId: string,
-    contactIds: string[]
+    contactIds: string[],
+    userId?: string
   ): Promise<{ message: string; deleted: number }> {
-    const result = await prisma.contact.deleteMany({
-      where: { id: { in: contactIds }, organizationId },
+    // ✅ Soft delete: updateMany use karo
+    const result = await prisma.contact.updateMany({
+      where: { 
+        id: { in: contactIds }, 
+        organizationId,
+        status: { not: 'DELETED' }, // Already deleted skip karo
+      },
+      data: {
+        status: 'DELETED',
+        deletedAt: new Date(),
+        deletedBy: userId || null,
+      },
     });
 
     const subscription = await prisma.subscription.findFirst({ where: { organizationId } });
@@ -915,6 +1015,7 @@ export class ContactsService {
       });
     }
 
+    console.log(`🗑️ Bulk soft-deleted ${result.count} contacts`);
     return { message: 'Contacts deleted successfully', deleted: result.count };
   }
 
@@ -922,9 +1023,21 @@ export class ContactsService {
   // DELETE ALL CONTACTS
   // ==========================================
 
-  async deleteAll(organizationId: string): Promise<{ message: string; deleted: number }> {
-    const result = await prisma.contact.deleteMany({
-      where: { organizationId },
+  async deleteAll(
+    organizationId: string,
+    userId?: string
+  ): Promise<{ message: string; deleted: number }> {
+    // ✅ Soft delete: updateMany use karo
+    const result = await prisma.contact.updateMany({
+      where: { 
+        organizationId,
+        status: { not: 'DELETED' },
+      },
+      data: {
+        status: 'DELETED',
+        deletedAt: new Date(),
+        deletedBy: userId || null,
+      },
     });
 
     const subscription = await prisma.subscription.findFirst({ where: { organizationId } });
@@ -948,15 +1061,18 @@ export class ContactsService {
   async getStats(organizationId: string): Promise<ContactStats> {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
+    // ✅ Base filter: DELETED exclude
+    const baseWhere = { organizationId, status: { not: 'DELETED' as ContactStatus } };
+
     const [total, active, blocked, unsubscribed, recentlyAdded, withMessages, whatsappVerified] =
       await Promise.all([
-        prisma.contact.count({ where: { organizationId } }),
+        prisma.contact.count({ where: baseWhere }),
         prisma.contact.count({ where: { organizationId, status: 'ACTIVE' } }),
         prisma.contact.count({ where: { organizationId, status: 'BLOCKED' } }),
         prisma.contact.count({ where: { organizationId, status: 'UNSUBSCRIBED' } }),
-        prisma.contact.count({ where: { organizationId, createdAt: { gte: sevenDaysAgo } } }),
-        prisma.contact.count({ where: { organizationId, messageCount: { gt: 0 } } }),
-        prisma.contact.count({ where: { organizationId, whatsappProfileFetched: true } }),
+        prisma.contact.count({ where: { ...baseWhere, createdAt: { gte: sevenDaysAgo } } }),
+        prisma.contact.count({ where: { ...baseWhere, messageCount: { gt: 0 } } }),
+        prisma.contact.count({ where: { ...baseWhere, whatsappProfileFetched: true } }),
       ]);
 
     return {
@@ -976,7 +1092,10 @@ export class ContactsService {
 
   async getAllTags(organizationId: string): Promise<{ tag: string; count: number }[]> {
     const contacts = await prisma.contact.findMany({
-      where: { organizationId },
+      where: { 
+        organizationId,
+        status: { not: 'DELETED' }, // ✅ Deleted contacts ke tags nahi
+      },
       select: { tags: true },
     });
 
@@ -997,7 +1116,10 @@ export class ContactsService {
   // ==========================================
 
   async export(organizationId: string, groupId?: string): Promise<any[]> {
-    const where: Prisma.ContactWhereInput = { organizationId };
+    const where: Prisma.ContactWhereInput = { 
+      organizationId,
+      status: { not: 'DELETED' }, // ✅ User export mein deleted nahi dikhao
+    };
     if (groupId) where.groupMemberships = { some: { groupId } };
 
     const contacts = await prisma.contact.findMany({
