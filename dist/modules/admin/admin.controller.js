@@ -882,6 +882,541 @@ class AdminController {
             next(error);
         }
     }
+    // ============================================
+    // USER DETAIL VIEW - CONTACTS
+    // ============================================
+    async getUserContacts(req, res, next) {
+        try {
+            const userId = req.params.userId;
+            const page = parseQueryNumber(req.query.page, 1);
+            const limit = parseQueryNumber(req.query.limit, 50);
+            const search = parseQueryString(req.query.search);
+            const includeDeleted = req.query.includeDeleted !== 'false'; // default: true
+            if (!userId)
+                throw new errorHandler_1.AppError('User ID is required', 400);
+            // User ki saari organizations dhundo
+            const memberships = await database_1.default.organizationMember.findMany({
+                where: { userId },
+                select: { organizationId: true },
+            });
+            const ownedOrgs = await database_1.default.organization.findMany({
+                where: { ownerId: userId },
+                select: { id: true },
+            });
+            // Unique org IDs collect karo
+            const orgIds = [
+                ...new Set([
+                    ...memberships.map((m) => m.organizationId),
+                    ...ownedOrgs.map((o) => o.id),
+                ]),
+            ];
+            if (orgIds.length === 0) {
+                return sendSuccess(res, { contacts: [], total: 0 }, 'No contacts found');
+            }
+            const where = {
+                organizationId: { in: orgIds },
+            };
+            // Search filter
+            if (search) {
+                where.OR = [
+                    { firstName: { contains: search, mode: 'insensitive' } },
+                    { lastName: { contains: search, mode: 'insensitive' } },
+                    { phone: { contains: search, mode: 'insensitive' } },
+                    { email: { contains: search, mode: 'insensitive' } },
+                ];
+            }
+            // includeDeleted = false hone par sirf ACTIVE contacts
+            if (!includeDeleted) {
+                where.status = 'ACTIVE';
+            }
+            const [contacts, total] = await Promise.all([
+                database_1.default.contact.findMany({
+                    where,
+                    skip: (page - 1) * limit,
+                    take: limit,
+                    orderBy: { createdAt: 'desc' },
+                    select: {
+                        id: true,
+                        phone: true,
+                        countryCode: true,
+                        firstName: true,
+                        lastName: true,
+                        email: true,
+                        tags: true,
+                        status: true,
+                        source: true,
+                        messageCount: true,
+                        lastMessageAt: true,
+                        createdAt: true,
+                        organization: {
+                            select: { id: true, name: true },
+                        },
+                    },
+                }),
+                database_1.default.contact.count({ where }),
+            ]);
+            return sendSuccess(res, { contacts, total }, 'User contacts fetched', 200, {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // USER CONTACTS - CSV EXPORT
+    // ============================================
+    async exportUserContacts(req, res, next) {
+        try {
+            const userId = req.params.userId;
+            if (!userId)
+                throw new errorHandler_1.AppError('User ID is required', 400);
+            const memberships = await database_1.default.organizationMember.findMany({
+                where: { userId },
+                select: { organizationId: true },
+            });
+            const ownedOrgs = await database_1.default.organization.findMany({
+                where: { ownerId: userId },
+                select: { id: true },
+            });
+            const orgIds = [
+                ...new Set([
+                    ...memberships.map((m) => m.organizationId),
+                    ...ownedOrgs.map((o) => o.id),
+                ]),
+            ];
+            const contacts = await database_1.default.contact.findMany({
+                where: { organizationId: { in: orgIds } },
+                orderBy: { createdAt: 'desc' },
+                select: {
+                    phone: true,
+                    countryCode: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    tags: true,
+                    status: true,
+                    source: true,
+                    messageCount: true,
+                    createdAt: true,
+                    organization: { select: { name: true } },
+                },
+            });
+            // CSV generate karo
+            const headers = [
+                'Phone',
+                'Country Code',
+                'First Name',
+                'Last Name',
+                'Email',
+                'Tags',
+                'Status',
+                'Source',
+                'Message Count',
+                'Organization',
+                'Created At',
+            ];
+            const rows = contacts.map((c) => [
+                c.phone,
+                c.countryCode,
+                c.firstName || '',
+                c.lastName || '',
+                c.email || '',
+                (c.tags || []).join('; '),
+                c.status,
+                c.source || '',
+                c.messageCount,
+                c.organization?.name || '',
+                new Date(c.createdAt).toISOString(),
+            ]);
+            const csvContent = [headers, ...rows]
+                .map((row) => row
+                .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+                .join(','))
+                .join('\n');
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', `attachment; filename="user_${userId}_contacts.csv"`);
+            return res.send(csvContent);
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // USER DETAIL VIEW - TEMPLATES
+    // ============================================
+    async getUserTemplates(req, res, next) {
+        try {
+            const userId = req.params.userId;
+            const page = parseQueryNumber(req.query.page, 1);
+            const limit = parseQueryNumber(req.query.limit, 20);
+            const search = parseQueryString(req.query.search);
+            const status = parseQueryString(req.query.status);
+            const category = parseQueryString(req.query.category);
+            if (!userId)
+                throw new errorHandler_1.AppError('User ID is required', 400);
+            const memberships = await database_1.default.organizationMember.findMany({
+                where: { userId },
+                select: { organizationId: true },
+            });
+            const ownedOrgs = await database_1.default.organization.findMany({
+                where: { ownerId: userId },
+                select: { id: true },
+            });
+            const orgIds = [
+                ...new Set([
+                    ...memberships.map((m) => m.organizationId),
+                    ...ownedOrgs.map((o) => o.id),
+                ]),
+            ];
+            if (orgIds.length === 0) {
+                return sendSuccess(res, { templates: [], total: 0 }, 'No templates found');
+            }
+            const where = {
+                organizationId: { in: orgIds },
+            };
+            if (search) {
+                where.OR = [
+                    { name: { contains: search, mode: 'insensitive' } },
+                    { bodyText: { contains: search, mode: 'insensitive' } },
+                ];
+            }
+            if (status)
+                where.status = status.toUpperCase();
+            if (category)
+                where.category = category.toUpperCase();
+            const [templates, total] = await Promise.all([
+                database_1.default.template.findMany({
+                    where,
+                    skip: (page - 1) * limit,
+                    take: limit,
+                    orderBy: { createdAt: 'desc' },
+                    select: {
+                        id: true,
+                        name: true,
+                        language: true,
+                        category: true,
+                        headerType: true,
+                        bodyText: true,
+                        footerText: true,
+                        status: true,
+                        rejectionReason: true,
+                        createdAt: true,
+                        updatedAt: true,
+                        organization: {
+                            select: { id: true, name: true },
+                        },
+                        _count: {
+                            select: { campaigns: true },
+                        },
+                    },
+                }),
+                database_1.default.template.count({ where }),
+            ]);
+            return sendSuccess(res, { templates, total }, 'User templates fetched', 200, {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // USER DETAIL VIEW - ANALYTICS
+    // ============================================
+    async getUserAnalytics(req, res, next) {
+        try {
+            const userId = req.params.userId;
+            if (!userId)
+                throw new errorHandler_1.AppError('User ID is required', 400);
+            const memberships = await database_1.default.organizationMember.findMany({
+                where: { userId },
+                select: { organizationId: true },
+            });
+            const ownedOrgs = await database_1.default.organization.findMany({
+                where: { ownerId: userId },
+                select: { id: true },
+            });
+            const orgIds = [
+                ...new Set([
+                    ...memberships.map((m) => m.organizationId),
+                    ...ownedOrgs.map((o) => o.id),
+                ]),
+            ];
+            if (orgIds.length === 0) {
+                return sendSuccess(res, {
+                    overview: {
+                        totalContacts: 0,
+                        totalTemplates: 0,
+                        totalCampaigns: 0,
+                        totalMessages: 0,
+                        totalChatbots: 0,
+                        totalAutomations: 0,
+                    },
+                    campaigns: { byStatus: {}, last5: [] },
+                    messages: { sent: 0, delivered: 0, read: 0, failed: 0 },
+                    recentActivity: [],
+                }, 'No analytics data');
+            }
+            const now = new Date();
+            const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            // Saare stats parallel fetch karo
+            const [totalContacts, totalTemplates, totalCampaigns, totalChatbots, totalAutomations, campaignsByStatus, last5Campaigns, messageStats, messagesLast30Days, messagesLast7Days, recentActivity, contactsLast30Days,] = await Promise.all([
+                // Overview counts
+                database_1.default.contact.count({
+                    where: { organizationId: { in: orgIds } },
+                }),
+                database_1.default.template.count({
+                    where: { organizationId: { in: orgIds } },
+                }),
+                database_1.default.campaign.count({
+                    where: { organizationId: { in: orgIds } },
+                }),
+                database_1.default.chatbot.count({
+                    where: { organizationId: { in: orgIds } },
+                }),
+                database_1.default.automation.count({
+                    where: { organizationId: { in: orgIds } },
+                }),
+                // Campaign status breakdown
+                database_1.default.campaign.groupBy({
+                    by: ['status'],
+                    where: { organizationId: { in: orgIds } },
+                    _count: true,
+                }),
+                // Last 5 campaigns
+                database_1.default.campaign.findMany({
+                    where: { organizationId: { in: orgIds } },
+                    orderBy: { createdAt: 'desc' },
+                    take: 5,
+                    select: {
+                        id: true,
+                        name: true,
+                        status: true,
+                        totalContacts: true,
+                        sentCount: true,
+                        deliveredCount: true,
+                        readCount: true,
+                        failedCount: true,
+                        createdAt: true,
+                        completedAt: true,
+                    },
+                }),
+                // Message stats (total)
+                database_1.default.message.groupBy({
+                    by: ['status'],
+                    where: {
+                        conversation: {
+                            organizationId: { in: orgIds },
+                        },
+                        direction: 'OUTBOUND',
+                    },
+                    _count: true,
+                }),
+                // Messages last 30 days
+                database_1.default.message.count({
+                    where: {
+                        conversation: { organizationId: { in: orgIds } },
+                        direction: 'OUTBOUND',
+                        createdAt: { gte: last30Days },
+                    },
+                }),
+                // Messages last 7 days
+                database_1.default.message.count({
+                    where: {
+                        conversation: { organizationId: { in: orgIds } },
+                        direction: 'OUTBOUND',
+                        createdAt: { gte: last7Days },
+                    },
+                }),
+                // Recent activity logs
+                database_1.default.activityLog.findMany({
+                    where: {
+                        userId,
+                        createdAt: { gte: last30Days },
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    take: 10,
+                    select: {
+                        id: true,
+                        action: true,
+                        entity: true,
+                        entityId: true,
+                        metadata: true,
+                        createdAt: true,
+                    },
+                }),
+                // Contacts added last 30 days
+                database_1.default.contact.count({
+                    where: {
+                        organizationId: { in: orgIds },
+                        createdAt: { gte: last30Days },
+                    },
+                }),
+            ]);
+            // Message stats format karo
+            const msgByStatus = {};
+            messageStats.forEach((s) => {
+                msgByStatus[s.status] = s._count;
+            });
+            // Campaign status format karo
+            const campByStatus = {};
+            campaignsByStatus.forEach((s) => {
+                campByStatus[s.status] = s._count;
+            });
+            // Total messages
+            const totalMessages = Object.values(msgByStatus).reduce((a, b) => a + b, 0);
+            return sendSuccess(res, {
+                overview: {
+                    totalContacts,
+                    totalTemplates,
+                    totalCampaigns,
+                    totalMessages,
+                    totalChatbots,
+                    totalAutomations,
+                    contactsLast30Days,
+                },
+                campaigns: {
+                    byStatus: campByStatus,
+                    last5: last5Campaigns,
+                },
+                messages: {
+                    total: totalMessages,
+                    sent: msgByStatus['SENT'] || 0,
+                    delivered: msgByStatus['DELIVERED'] || 0,
+                    read: msgByStatus['READ'] || 0,
+                    failed: msgByStatus['FAILED'] || 0,
+                    last7Days: messagesLast7Days,
+                    last30Days: messagesLast30Days,
+                },
+                recentActivity,
+            }, 'User analytics fetched');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ============================================
+    // USER DETAIL VIEW - WALLET
+    // ============================================
+    async getUserWallet(req, res, next) {
+        try {
+            const userId = req.params.userId;
+            const page = parseQueryNumber(req.query.page, 1);
+            const limit = parseQueryNumber(req.query.limit, 20);
+            const txType = parseQueryString(req.query.type);
+            if (!userId)
+                throw new errorHandler_1.AppError('User ID is required', 400);
+            // User ki organization dhundo
+            const ownedOrg = await database_1.default.organization.findFirst({
+                where: { ownerId: userId },
+                select: { id: true, name: true },
+            });
+            if (!ownedOrg) {
+                return sendSuccess(res, {
+                    wallet: null,
+                    transactions: [],
+                    total: 0,
+                    message: 'User does not own any organization',
+                }, 'No wallet found');
+            }
+            // Wallet fetch karo
+            const wallet = await database_1.default.wallet.findUnique({
+                where: { organizationId: ownedOrg.id },
+                select: {
+                    id: true,
+                    isActive: true,
+                    balancePaise: true,
+                    reservedPaise: true,
+                    currency: true,
+                    creditEnabled: true,
+                    creditLimitPaise: true,
+                    creditUsedPaise: true,
+                    totalCreditedPaise: true,
+                    totalDebitedPaise: true,
+                    flagged: true,
+                    flagReason: true,
+                    flaggedAt: true,
+                    accessGrantedAt: true,
+                    lastTransactionAt: true,
+                    monthResetDate: true,
+                    currentMonthPaise: true,
+                    maxMonthlyPaise: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+            if (!wallet) {
+                return sendSuccess(res, {
+                    wallet: null,
+                    transactions: [],
+                    total: 0,
+                    organization: ownedOrg,
+                }, 'Wallet not created yet');
+            }
+            // Transactions fetch karo
+            const txWhere = { walletId: wallet.id };
+            if (txType)
+                txWhere.type = txType;
+            const [transactions, total] = await Promise.all([
+                database_1.default.walletTransaction.findMany({
+                    where: txWhere,
+                    skip: (page - 1) * limit,
+                    take: limit,
+                    orderBy: { createdAt: 'desc' },
+                    select: {
+                        id: true,
+                        transactionId: true,
+                        type: true,
+                        amountPaise: true,
+                        balanceBeforePaise: true,
+                        balanceAfterPaise: true,
+                        currency: true,
+                        description: true,
+                        status: true,
+                        metaService: true,
+                        razorpayOrderId: true,
+                        razorpayPaymentId: true,
+                        note: true,
+                        createdAt: true,
+                    },
+                }),
+                database_1.default.walletTransaction.count({ where: txWhere }),
+            ]);
+            // Wallet stats calculate karo
+            const walletStats = {
+                balanceRupees: wallet.balancePaise / 100,
+                reservedRupees: wallet.reservedPaise / 100,
+                totalCreditedRupees: wallet.totalCreditedPaise / 100,
+                totalDebitedRupees: wallet.totalDebitedPaise / 100,
+                creditLimitRupees: wallet.creditLimitPaise / 100,
+                creditUsedRupees: wallet.creditUsedPaise / 100,
+                currentMonthRupees: wallet.currentMonthPaise / 100,
+                maxMonthlyRupees: wallet.maxMonthlyPaise / 100,
+            };
+            return sendSuccess(res, {
+                wallet: { ...wallet, ...walletStats },
+                organization: ownedOrg,
+                transactions,
+                total,
+            }, 'User wallet fetched', 200, {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            });
+        }
+        catch (error) {
+            next(error);
+        }
+    }
 }
 exports.AdminController = AdminController;
 exports.adminController = new AdminController();

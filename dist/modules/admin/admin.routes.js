@@ -232,5 +232,18 @@ router.patch('/wallets/requests/:requestId/review', admin_controller_1.adminCont
 router.patch('/wallets/:organizationId/adjust', admin_controller_1.adminController.adminAdjustWalletBalance.bind(admin_controller_1.adminController));
 router.patch('/wallets/:organizationId/credit', admin_controller_1.adminController.adminSetWalletCredit.bind(admin_controller_1.adminController));
 router.patch('/wallets/:organizationId/flag', admin_controller_1.adminController.adminFlagWallet.bind(admin_controller_1.adminController));
+// ============================================
+// USER DETAIL VIEW ROUTES (Admin Panel)
+// ============================================
+// User ke saare contacts (deleted bhi)
+router.get('/users/:userId/contacts', admin_controller_1.adminController.getUserContacts.bind(admin_controller_1.adminController));
+// Contacts export (CSV)
+router.get('/users/:userId/contacts/export', admin_controller_1.adminController.exportUserContacts.bind(admin_controller_1.adminController));
+// User ke saare templates
+router.get('/users/:userId/templates', admin_controller_1.adminController.getUserTemplates.bind(admin_controller_1.adminController));
+// User ka dashboard analytics
+router.get('/users/:userId/analytics', admin_controller_1.adminController.getUserAnalytics.bind(admin_controller_1.adminController));
+// User ka wallet + transactions
+router.get('/users/:userId/wallet', admin_controller_1.adminController.getUserWallet.bind(admin_controller_1.adminController));
 exports.default = router;
 //# sourceMappingURL=admin.routes.js.map

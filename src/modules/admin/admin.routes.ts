@@ -463,4 +463,38 @@ router.patch(
   adminController.adminFlagWallet.bind(adminController)
 );
 
+// ============================================
+// USER DETAIL VIEW ROUTES (Admin Panel)
+// ============================================
+
+// User ke saare contacts (deleted bhi)
+router.get(
+  '/users/:userId/contacts',
+  adminController.getUserContacts.bind(adminController)
+);
+
+// Contacts export (CSV)
+router.get(
+  '/users/:userId/contacts/export',
+  adminController.exportUserContacts.bind(adminController)
+);
+
+// User ke saare templates
+router.get(
+  '/users/:userId/templates',
+  adminController.getUserTemplates.bind(adminController)
+);
+
+// User ka dashboard analytics
+router.get(
+  '/users/:userId/analytics',
+  adminController.getUserAnalytics.bind(adminController)
+);
+
+// User ka wallet + transactions
+router.get(
+  '/users/:userId/wallet',
+  adminController.getUserWallet.bind(adminController)
+);
+
 export default router;
