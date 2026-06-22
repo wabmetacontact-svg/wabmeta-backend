@@ -460,8 +460,13 @@ export class AdminController {
           planType: true,
           featureSimpleBulkUpload: true,
           featureCsvUpload: true,
-          featureOverrideByAdmin: true
-        }
+          featureOverrideByAdmin: true,
+          featureInboxLocked: true,
+          featureCampaignsLocked: true,
+          featureChatbotLocked: true,
+          featureAutomationLocked: true,
+          featureConnectionLocked: true,  // ✅ NEW
+        } as any,
       });
 
       if (!org) {
@@ -479,7 +484,8 @@ export class AdminController {
           inboxLocked: (org as any).featureInboxLocked ?? false,
           campaignsLocked: (org as any).featureCampaignsLocked ?? false,
           chatbotLocked: (org as any).featureChatbotLocked ?? false,
-          automationLocked: (org as any).featureAutomationLocked ?? false
+          automationLocked: (org as any).featureAutomationLocked ?? false,
+          connectionLocked: (org as any).featureConnectionLocked ?? false,  // ✅ NEW
         }
       }, 'Features fetched');
 
@@ -491,7 +497,16 @@ export class AdminController {
   async updateOrganizationFeatures(req: AdminRequest, res: Response, next: NextFunction) {
     try {
       const organizationId = getParamId(req.params.organizationId);
-      const { simpleBulkPaste, csvUpload, enableOverride, inboxLocked, campaignsLocked, chatbotLocked, automationLocked } = req.body;
+      const {
+        simpleBulkPaste,
+        csvUpload,
+        enableOverride,
+        inboxLocked,
+        campaignsLocked,
+        chatbotLocked,
+        automationLocked,
+        connectionLocked,  // ✅ NEW
+      } = req.body;
 
       const org = await prisma.organization.findUnique({
         where: { id: organizationId }
@@ -510,7 +525,8 @@ export class AdminController {
           featureInboxLocked: inboxLocked ?? false,
           featureCampaignsLocked: campaignsLocked ?? false,
           featureChatbotLocked: chatbotLocked ?? false,
-          featureAutomationLocked: automationLocked ?? false
+          featureAutomationLocked: automationLocked ?? false,
+          featureConnectionLocked: connectionLocked ?? false,  // ✅ NEW
         } as any
       });
 
@@ -523,7 +539,8 @@ export class AdminController {
           inboxLocked: (updated as any).featureInboxLocked,
           campaignsLocked: (updated as any).featureCampaignsLocked,
           chatbotLocked: (updated as any).featureChatbotLocked,
-          automationLocked: (updated as any).featureAutomationLocked
+          automationLocked: (updated as any).featureAutomationLocked,
+          connectionLocked: (updated as any).featureConnectionLocked,  // ✅ NEW
         }
       }, 'Features updated');
 

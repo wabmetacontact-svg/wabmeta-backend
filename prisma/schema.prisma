@@ -84,6 +84,7 @@ model Organization {
   featureCampaignsLocked  Boolean              @default(false)
   featureChatbotLocked    Boolean              @default(false)
   featureAutomationLocked Boolean              @default(false)
+  featureConnectionLocked Boolean              @default(false)
   customLabels            Json                 @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]

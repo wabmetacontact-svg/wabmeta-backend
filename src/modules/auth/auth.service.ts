@@ -365,7 +365,7 @@ const generateTokenPair = async (
 const getDefaultOrg = async (userId: string) => {
   const owned = await prisma.organization.findFirst({
     where: { ownerId: userId },
-    select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true },
+    select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true, featureConnectionLocked: true },
   });
   if (owned) return owned;
 
@@ -373,7 +373,7 @@ const getDefaultOrg = async (userId: string) => {
     where: { userId },
     include: {
       organization: {
-        select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true },
+        select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true, featureConnectionLocked: true },
       },
     },
   });

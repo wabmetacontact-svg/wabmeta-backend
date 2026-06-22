@@ -7,6 +7,7 @@ import { metaService } from './meta.service';
 import { sendSuccess } from '../../utils/response';
 import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
+import { checkConnectionLock } from '../../middleware/connectionLock';
 import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
 
@@ -215,7 +216,7 @@ router.post('/webhook', async (req, res) => {
 
 
 // /connect - Frontend FB.login Embedded Signup flow (NO state token)
-router.post('/connect', authenticate, async (req, res, next) => {
+router.post('/connect', authenticate, checkConnectionLock, async (req, res, next) => {
   try {
     const { code, organizationId, wabaId, phoneNumberId } = req.body;
     const userId = (req as any).user?.id;
@@ -363,9 +364,10 @@ router.get('/organizations/:organizationId/accounts/:accountId', async (req, res
   }
 });
 
-router.delete('/organizations/:organizationId/accounts/:accountId', async (req, res, next) => {
+router.delete('/organizations/:organizationId/accounts/:accountId', checkConnectionLock, async (req, res, next) => {
   try {
-    const { organizationId, accountId } = req.params;
+    const organizationId = req.params.organizationId as string;
+    const accountId = req.params.accountId as string;
     const userId = req.user?.id;
 
     if (!userId) {
@@ -600,9 +602,9 @@ router.post('/organizations/:organizationId/sync', async (req, res, next) => {
   }
 });
 
-router.delete('/organizations/:organizationId/disconnect', async (req, res, next) => {
+router.delete('/organizations/:organizationId/disconnect', checkConnectionLock, async (req, res, next) => {
   try {
-    const { organizationId } = req.params;
+    const organizationId = req.params.organizationId as string;
     const userId = req.user?.id;
 
     if (!userId) {
@@ -644,9 +646,9 @@ router.delete('/organizations/:organizationId/disconnect', async (req, res, next
 
 router.get('/accounts', metaController.getAccounts.bind(metaController));
 router.get('/accounts/:id', metaController.getAccount.bind(metaController));
-router.delete('/accounts/:id', metaController.disconnectAccount.bind(metaController));
+router.delete('/accounts/:id', checkConnectionLock, metaController.disconnectAccount.bind(metaController));
 // ✅ Also support POST /accounts/:id/disconnect (frontend uses this)
-router.post('/accounts/:id/disconnect', metaController.disconnectAccount.bind(metaController));
+router.post('/accounts/:id/disconnect', checkConnectionLock, metaController.disconnectAccount.bind(metaController));
 
 // ✅ Set default account shortcut (gets org from JWT context)
 router.post('/accounts/:id/set-default', async (req, res, next) => {

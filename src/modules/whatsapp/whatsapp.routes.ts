@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { whatsappController } from './whatsapp.controller';
 import { authenticate } from '../../middleware/auth';
 import { rateLimit } from '../../middleware/rateLimit';
+import { checkConnectionLock } from '../../middleware/connectionLock';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.post(
 
 router.delete(
   '/accounts/:accountId',
+  checkConnectionLock,
   whatsappController.disconnectAccount.bind(whatsappController)
 );
 

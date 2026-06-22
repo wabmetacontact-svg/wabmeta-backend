@@ -7,6 +7,7 @@ import {
   toggleDmAutomation,
   getAnalytics
 } from "./instagram.controller";
+import { checkConnectionLock } from '../../middleware/connectionLock';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ const router = Router();
 router.get("/accounts", getAccounts);
 
 // POST /api/instagram/connect
-router.post("/connect", connectAccount);
+router.post("/connect", checkConnectionLock, connectAccount);
 
 // GET /api/instagram/automations
 router.get("/automations", getDmAutomations);
