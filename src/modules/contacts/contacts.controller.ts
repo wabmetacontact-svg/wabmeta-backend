@@ -553,7 +553,34 @@ export class ContactsController {
         throw new AppError(`Maximum ${MAX_BULK} contacts per upload`, 400);
       }
 
-      // ✅ Get existing contacts (check duplicates)
+      // 1. Identify deleted contacts
+      const deletedContacts = await prisma.contact.findMany({
+        where: {
+          organizationId,
+          phone: { in: valid.map(p => p.fullNumber) },
+          status: 'DELETED'
+        },
+        select: { id: true, phone: true }
+      });
+
+      // 2. Restore deleted contacts
+      let restoredCount = 0;
+      if (deletedContacts.length > 0) {
+        const restored = await prisma.contact.updateMany({
+          where: {
+            id: { in: deletedContacts.map(c => c.id) }
+          },
+          data: {
+            status: 'ACTIVE',
+            deletedAt: null,
+            deletedBy: null,
+            source: 'BULK_PASTE'
+          }
+        });
+        restoredCount = restored.count;
+      }
+
+      // 3. Get existing contacts (check duplicates)
       const existingContacts = await prisma.contact.findMany({
         where: {
           organizationId,
@@ -565,7 +592,7 @@ export class ContactsController {
       const existingPhones = new Set(existingContacts.map(c => c.phone));
       const newContacts = valid.filter(p => !existingPhones.has(p.fullNumber));
 
-      // ✅ Create contacts
+      // 4. Create contacts
       const contactsToCreate = newContacts.map((parsed, index) => ({
         organizationId,
         phone: parsed.fullNumber,
@@ -586,23 +613,40 @@ export class ContactsController {
         createdCount = result.count;
       }
 
-      // ✅ Add to group if specified
-      if (groupId && createdCount > 0) {
-        const newContactIds = await prisma.contact.findMany({
+      // 5. Add to group if specified
+      const totalProcessedCount = createdCount + restoredCount;
+      if (groupId && totalProcessedCount > 0) {
+        const processedPhones = [
+          ...newContacts.map(p => p.fullNumber),
+          ...deletedContacts.map(c => c.phone)
+        ];
+
+        const contactIds = await prisma.contact.findMany({
           where: {
             organizationId,
-            phone: { in: newContacts.map(p => p.fullNumber) }
+            phone: { in: processedPhones }
           },
           select: { id: true }
         });
 
         await prisma.contactGroupMember.createMany({
-          data: newContactIds.map(c => ({
+          data: contactIds.map(c => ({
             groupId,
             contactId: c.id
           })),
           skipDuplicates: true
         });
+      }
+
+      let message = '';
+      if (createdCount > 0 && restoredCount > 0) {
+        message = `${createdCount} created, ${restoredCount} restored successfully`;
+      } else if (createdCount > 0) {
+        message = `${createdCount} contacts created successfully`;
+      } else if (restoredCount > 0) {
+        message = `${restoredCount} contacts restored successfully`;
+      } else {
+        message = 'All contacts already exist as active contacts';
       }
 
       return res.json({
@@ -611,11 +655,13 @@ export class ContactsController {
           totalInput: valid.length + invalid.length,
           validNumbers: valid.length,
           invalidNumbers: invalid.length,
-          created: createdCount,
-          duplicatesSkipped: valid.length - createdCount,
+          created: createdCount + restoredCount, // Sum to trigger onSuccess
+          newCreated: createdCount,
+          restored: restoredCount,
+          duplicatesSkipped: valid.length - createdCount - restoredCount,
           invalidDetails: invalid.slice(0, 10) // Return first 10 invalid
         },
-        message: `${createdCount} contacts created successfully`
+        message
       });
 
     } catch (error) {
