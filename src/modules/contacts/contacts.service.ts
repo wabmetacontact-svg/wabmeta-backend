@@ -1239,14 +1239,17 @@ export class ContactsService {
       data: { contactGroupId: null },
     });
 
-    // ✅ 2. Delete contacts that were members of this group
-    // We delete the contacts directly, which will also delete their group memberships due to cascade (if configured)
-    // or we delete them here to ensure total count decreases.
+    // ✅ 2. Soft delete contacts that were members of this group
     if (contactIds.length > 0) {
-      await prisma.contact.deleteMany({
+      await prisma.contact.updateMany({
         where: {
           id: { in: contactIds },
-          organizationId
+          organizationId,
+          status: { not: 'DELETED' }
+        },
+        data: {
+          status: 'DELETED',
+          deletedAt: new Date()
         }
       });
     }
