@@ -244,6 +244,15 @@ export class CampaignsService {
 
     if (targetContacts.length === 0) throw new AppError('No contacts found for selected audience.', 400);
 
+    // ✅ Deduplicate targetContacts by ID to prevent database unique constraint errors
+    const seenContactIds = new Set<string>();
+    targetContacts = targetContacts.filter(c => {
+      if (!c || !c.id) return false;
+      if (seenContactIds.has(c.id)) return false;
+      seenContactIds.add(c.id);
+      return true;
+    });
+
     const campaign = await prisma.$transaction(async (tx) => {
       const newCampaign = await tx.campaign.create({
         data: {
