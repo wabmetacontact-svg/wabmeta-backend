@@ -216,6 +216,16 @@ class CampaignsService {
         }
         if (targetContacts.length === 0)
             throw new errorHandler_1.AppError('No contacts found for selected audience.', 400);
+        // ✅ Deduplicate targetContacts by ID to prevent database unique constraint errors
+        const seenContactIds = new Set();
+        targetContacts = targetContacts.filter(c => {
+            if (!c || !c.id)
+                return false;
+            if (seenContactIds.has(c.id))
+                return false;
+            seenContactIds.add(c.id);
+            return true;
+        });
         const campaign = await database_1.default.$transaction(async (tx) => {
             const newCampaign = await tx.campaign.create({
                 data: {
@@ -1046,22 +1056,12 @@ class CampaignsService {
                         }
                     }
                     totalProcessed += chunk.length;
-                    // ✅ FLUSH TO DB every N messages
                     const batchTotal = batchSent.length + batchFailed.length;
                     if (batchTotal >= FLUSH_EVERY || i + CONCURRENCY >= contacts.length) {
                         await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
-                        // ✅ SAVE TO INBOX (sequential background tasks to avoid pool exhaustion)
+                        // ✅ SAVE TO INBOX IN BULK (non-blocking, running 3-5 queries instead of 500)
                         const sentCopy = [...batchSent];
-                        setImmediate(async () => {
-                            for (const s of sentCopy) {
-                                try {
-                                    await this.saveCampaignMessage(organizationId, campaignId, s.contactId, campaign.whatsappAccountId, s.waMessageId, template.name, template.language, [], template.id, campaign.name);
-                                }
-                                catch (err) {
-                                    // Silent catch for background task
-                                }
-                            }
-                        });
+                        this.saveCampaignMessagesBulk(organizationId, campaignId, campaign.whatsappAccountId, template.id, template.name, campaign.name, template, sentCopy.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))).catch(err => console.error('❌ Background bulk message save failed:', err));
                         batchSent = [];
                         batchFailed = [];
                     }
@@ -1093,12 +1093,9 @@ class CampaignsService {
             // ✅ Flush remaining
             if (batchSent.length > 0 || batchFailed.length > 0) {
                 await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
-                // Save remaining to inbox
-                for (const s of batchSent) {
-                    this.saveCampaignMessage(organizationId, campaignId, s.contactId, campaign.whatsappAccountId, s.waMessageId, template.name, template.language, [], template.id, campaign.name).catch(() => { });
-                    // Note: Here we don't strictly need await as it's the very end, but let's be safe
-                    await new Promise(r => setTimeout(r, 10));
-                }
+                // Save remaining to inbox in bulk
+                const sentCopy = [...batchSent];
+                this.saveCampaignMessagesBulk(organizationId, campaignId, campaign.whatsappAccountId, template.id, template.name, campaign.name, template, sentCopy.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))).catch(err => console.error('❌ Background bulk message save failed:', err));
             }
             // ✅ Final sync (HEAVY sync only at END)
             const finalCounters = await this.syncCampaignCounters(campaignId);
@@ -1259,6 +1256,95 @@ class CampaignsService {
             console.error('⚠️ flushBatchResults error:', err);
         }
     }
+    async saveCampaignMessagesBulk(orgId, campaignId, accId, tplId, tplName, campName, template, sentList) {
+        if (sentList.length === 0)
+            return;
+        try {
+            const now = new Date();
+            const contactIds = sentList.map(s => s.contactId);
+            // 1. Get existing conversations
+            const existingConversations = await database_1.default.conversation.findMany({
+                where: { organizationId: orgId, contactId: { in: contactIds } },
+                select: { id: true, contactId: true }
+            });
+            const conversationMap = new Map();
+            for (const conv of existingConversations) {
+                conversationMap.set(conv.contactId, conv.id);
+            }
+            // Find contacts that don't have conversations
+            const missingContactIds = contactIds.filter(cid => !conversationMap.has(cid));
+            if (missingContactIds.length > 0) {
+                // Bulk create missing conversations
+                await database_1.default.conversation.createMany({
+                    data: missingContactIds.map(cid => ({
+                        organizationId: orgId,
+                        contactId: cid,
+                        lastMessageAt: now,
+                        lastMessagePreview: `Template: ${tplName}`,
+                        isWindowOpen: true,
+                        unreadCount: 0,
+                        isRead: true,
+                    })),
+                    skipDuplicates: true
+                });
+                // Fetch them back to get IDs
+                const newConversations = await database_1.default.conversation.findMany({
+                    where: { organizationId: orgId, contactId: { in: missingContactIds } },
+                    select: { id: true, contactId: true }
+                });
+                for (const conv of newConversations) {
+                    conversationMap.set(conv.contactId, conv.id);
+                }
+            }
+            // Update existing conversations' last message timestamp/preview
+            const existingContactIds = existingConversations.map(c => c.contactId);
+            if (existingContactIds.length > 0) {
+                await database_1.default.conversation.updateMany({
+                    where: { organizationId: orgId, contactId: { in: existingContactIds } },
+                    data: {
+                        lastMessageAt: now,
+                        lastMessagePreview: `Template: ${tplName}`,
+                    }
+                });
+            }
+            // 2. Prepare messages for createMany
+            const messagesData = sentList.map(s => {
+                const convId = conversationMap.get(s.contactId);
+                if (!convId)
+                    return null;
+                return {
+                    conversationId: convId,
+                    direction: 'OUTBOUND',
+                    type: 'TEMPLATE',
+                    status: 'SENT',
+                    waMessageId: s.waMessageId,
+                    wamId: s.waMessageId,
+                    whatsappAccountId: accId,
+                    templateId: tplId,
+                    content: `Campaign: ${campName}\nTemplate: ${tplName}`,
+                    metadata: {
+                        campaignId,
+                        campaignName: campName,
+                        templateName: tplName,
+                        bodyText: template?.bodyText || undefined,
+                        footerText: template?.footerText || undefined,
+                        headerText: template?.headerContent || undefined,
+                        buttons: template?.buttons || undefined
+                    },
+                    sentAt: now,
+                };
+            }).filter(Boolean);
+            if (messagesData.length > 0) {
+                await database_1.default.message.createMany({
+                    data: messagesData,
+                    skipDuplicates: true
+                });
+            }
+        }
+        catch (e) {
+            console.error('⚠️ Save campaign messages bulk error:', e.message);
+        }
+    }
     // ✅ FIX: saveCampaignMessage - use upsert to prevent duplicate waMessageId error
     async saveCampaignMessage(orgId, campaignId, contactId, accId, waMessageId, tplName, tplLang, params, tplId, campName) {
         try {
@@ -1377,13 +1463,17 @@ class CampaignsService {
         // ✅ PRIORITY 1: Fresh numeric ID (< 25 days old)
         if (isNumericIdFresh) {
             console.log(`✅ Using cached numeric media ID: ${mediaId}`);
-            // Update last verified timestamp (background, non-blocking)
-            database_1.default.template
-                .update({
-                where: { id: template.id },
-                data: { headerMediaLastVerified: new Date() },
-            })
-                .catch(() => { });
+            // Update last verified timestamp (background, non-blocking) only if older than 1 hour
+            const lastVerified = template.headerMediaLastVerified;
+            const shouldUpdateLastVerified = !lastVerified || (Date.now() - new Date(lastVerified).getTime() > 60 * 60 * 1000);
+            if (shouldUpdateLastVerified) {
+                database_1.default.template
+                    .update({
+                    where: { id: template.id },
+                    data: { headerMediaLastVerified: new Date() },
+                })
+                    .catch(() => { });
+            }
             return mediaId;
         }
         // ✅ PRIORITY 2: Re-upload from permanent URL (Cloudinary or any HTTPS source)

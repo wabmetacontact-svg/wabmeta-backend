@@ -199,6 +199,35 @@ class ContactsService {
             },
         });
         if (existing) {
+            // ✅ Agar DELETED contact hai toh restore karo (re-add ho gaya)
+            if (existing.status === 'DELETED') {
+                const restored = await database_1.default.contact.update({
+                    where: { id: existing.id },
+                    data: {
+                        status: 'ACTIVE',
+                        deletedAt: null,
+                        deletedBy: null,
+                        firstName: input.firstName || existing.firstName || 'Unknown',
+                        lastName: input.lastName ?? existing.lastName,
+                        email: input.email ?? existing.email,
+                        tags: input.tags || existing.tags,
+                        customFields: (input.customFields || existing.customFields),
+                        updatedAt: new Date(),
+                    },
+                });
+                console.log(`♻️ Restored deleted contact: ${existing.id}`);
+                // Subscription count increment karo (re-add hua)
+                const subscription = await database_1.default.subscription.findFirst({
+                    where: { organizationId },
+                });
+                if (subscription) {
+                    await database_1.default.subscription.update({
+                        where: { id: subscription.id },
+                        data: { contactsUsed: { increment: 1 } },
+                    });
+                }
+                return formatContact(restored);
+            }
             throw new errorHandler_1.AppError('Contact with this phone number already exists', 409);
         }
         const org = await database_1.default.organization.findUnique({
@@ -267,7 +296,11 @@ class ContactsService {
         const { page = 1, limit = 20, search, status, tags, groupId, sortBy = 'createdAt', sortOrder = 'desc', hasWhatsAppProfile, } = query;
         const safeLimit = Math.min(limit, 10000);
         const skip = (page - 1) * safeLimit;
-        const where = { organizationId };
+        // ✅ Default: deleted contacts exclude karo
+        const where = {
+            organizationId,
+            status: { not: 'DELETED' },
+        };
         if (search) {
             where.OR = [
                 { phone: { contains: search, mode: 'insensitive' } },
@@ -276,6 +309,7 @@ class ContactsService {
                 { email: { contains: search, mode: 'insensitive' } },
             ];
         }
+        // ✅ Agar user specific status filter de (ACTIVE, BLOCKED, UNSUBSCRIBED) toh wo override karega
         if (status)
             where.status = status;
         if (tags && tags.length > 0)
@@ -303,7 +337,11 @@ class ContactsService {
     // ==========================================
     async getById(organizationId, contactId) {
         const contact = await database_1.default.contact.findFirst({
-            where: { id: contactId, organizationId },
+            where: {
+                id: contactId,
+                organizationId,
+                status: { not: 'DELETED' }, // ✅ Deleted contact user ko nahi dikhao
+            },
             include: {
                 groupMemberships: {
                     include: {
@@ -363,13 +401,26 @@ class ContactsService {
     // ==========================================
     // DELETE CONTACT
     // ==========================================
-    async delete(organizationId, contactId) {
+    async delete(organizationId, contactId, userId) {
         const contact = await database_1.default.contact.findFirst({
-            where: { id: contactId, organizationId },
+            where: {
+                id: contactId,
+                organizationId,
+                status: { not: 'DELETED' }, // ✅ Already deleted contact ko prevent karo
+            },
         });
         if (!contact)
             throw new errorHandler_1.AppError('Contact not found', 404);
-        await database_1.default.contact.delete({ where: { id: contactId } });
+        // ✅ Soft delete - sirf status change karo
+        await database_1.default.contact.update({
+            where: { id: contactId },
+            data: {
+                status: 'DELETED',
+                deletedAt: new Date(),
+                deletedBy: userId || null,
+            },
+        });
+        // Subscription count decrement karo (user ke liye limit calculation)
         const subscription = await database_1.default.subscription.findFirst({ where: { organizationId } });
         if (subscription && subscription.contactsUsed > 0) {
             await database_1.default.subscription.update({
@@ -377,6 +428,7 @@ class ContactsService {
                 data: { contactsUsed: { decrement: 1 } },
             });
         }
+        console.log(`🗑️ Contact soft-deleted: ${contactId} by user ${userId}`);
         return { message: 'Contact deleted successfully' };
     }
     // ==========================================
@@ -539,6 +591,32 @@ class ContactsService {
         const contactsToImport = validContacts.slice(0, availableSlots);
         if (validContacts.length > availableSlots) {
             console.warn(`⚠️ Limit exceeded: ${validContacts.length - availableSlots} contacts skipped`);
+        }
+        // ✅ Check for DELETED contacts and restore them
+        const phonesToImport = contactsToImport.map(c => c.phone);
+        const deletedContacts = await database_1.default.contact.findMany({
+            where: {
+                organizationId,
+                phone: { in: phonesToImport },
+                status: 'DELETED',
+            },
+            select: { id: true, phone: true },
+        });
+        let restoredCount = 0;
+        if (deletedContacts.length > 0) {
+            const restored = await database_1.default.contact.updateMany({
+                where: {
+                    id: { in: deletedContacts.map(c => c.id) },
+                },
+                data: {
+                    status: 'ACTIVE',
+                    deletedAt: null,
+                    deletedBy: null,
+                    source: 'import',
+                },
+            });
+            restoredCount = restored.count;
+            console.log(`♻️ Restored ${restoredCount} previously deleted contacts`);
         }
         // ✅ 5. CREATE CONTACTS
         let imported = 0;
@@ -742,9 +820,19 @@ class ContactsService {
     // ==========================================
     // BULK DELETE CONTACTS
     // ==========================================
-    async bulkDelete(organizationId, contactIds) {
-        const result = await database_1.default.contact.deleteMany({
-            where: { id: { in: contactIds }, organizationId },
+    async bulkDelete(organizationId, contactIds, userId) {
+        // ✅ Soft delete: updateMany use karo
+        const result = await database_1.default.contact.updateMany({
+            where: {
+                id: { in: contactIds },
+                organizationId,
+                status: { not: 'DELETED' }, // Already deleted skip karo
+            },
+            data: {
+                status: 'DELETED',
+                deletedAt: new Date(),
+                deletedBy: userId || null,
+            },
         });
         const subscription = await database_1.default.subscription.findFirst({ where: { organizationId } });
         if (subscription && result.count > 0) {
@@ -755,14 +843,24 @@ class ContactsService {
                 },
             });
         }
+        console.log(`🗑️ Bulk soft-deleted ${result.count} contacts`);
         return { message: 'Contacts deleted successfully', deleted: result.count };
     }
     // ==========================================
     // DELETE ALL CONTACTS
     // ==========================================
-    async deleteAll(organizationId) {
-        const result = await database_1.default.contact.deleteMany({
-            where: { organizationId },
+    async deleteAll(organizationId, userId) {
+        // ✅ Soft delete: updateMany use karo
+        const result = await database_1.default.contact.updateMany({
+            where: {
+                organizationId,
+                status: { not: 'DELETED' },
+            },
+            data: {
+                status: 'DELETED',
+                deletedAt: new Date(),
+                deletedBy: userId || null,
+            },
         });
         const subscription = await database_1.default.subscription.findFirst({ where: { organizationId } });
         if (subscription && result.count > 0) {
@@ -780,14 +878,16 @@ class ContactsService {
     // ==========================================
     async getStats(organizationId) {
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        // ✅ Base filter: DELETED exclude
+        const baseWhere = { organizationId, status: { not: 'DELETED' } };
         const [total, active, blocked, unsubscribed, recentlyAdded, withMessages, whatsappVerified] = await Promise.all([
-            database_1.default.contact.count({ where: { organizationId } }),
+            database_1.default.contact.count({ where: baseWhere }),
             database_1.default.contact.count({ where: { organizationId, status: 'ACTIVE' } }),
             database_1.default.contact.count({ where: { organizationId, status: 'BLOCKED' } }),
             database_1.default.contact.count({ where: { organizationId, status: 'UNSUBSCRIBED' } }),
-            database_1.default.contact.count({ where: { organizationId, createdAt: { gte: sevenDaysAgo } } }),
-            database_1.default.contact.count({ where: { organizationId, messageCount: { gt: 0 } } }),
-            database_1.default.contact.count({ where: { organizationId, whatsappProfileFetched: true } }),
+            database_1.default.contact.count({ where: { ...baseWhere, createdAt: { gte: sevenDaysAgo } } }),
+            database_1.default.contact.count({ where: { ...baseWhere, messageCount: { gt: 0 } } }),
+            database_1.default.contact.count({ where: { ...baseWhere, whatsappProfileFetched: true } }),
         ]);
         return {
             total,
@@ -804,7 +904,10 @@ class ContactsService {
     // ==========================================
     async getAllTags(organizationId) {
         const contacts = await database_1.default.contact.findMany({
-            where: { organizationId },
+            where: {
+                organizationId,
+                status: { not: 'DELETED' }, // ✅ Deleted contacts ke tags nahi
+            },
             select: { tags: true },
         });
         const tagCounts = new Map();
@@ -821,7 +924,10 @@ class ContactsService {
     // EXPORT CONTACTS
     // ==========================================
     async export(organizationId, groupId) {
-        const where = { organizationId };
+        const where = {
+            organizationId,
+            status: { not: 'DELETED' }, // ✅ User export mein deleted nahi dikhao
+        };
         if (groupId)
             where.groupMemberships = { some: { groupId } };
         const contacts = await database_1.default.contact.findMany({
@@ -924,14 +1030,17 @@ class ContactsService {
             where: { contactGroupId: groupId },
             data: { contactGroupId: null },
         });
-        // ✅ 2. Delete contacts that were members of this group
-        // We delete the contacts directly, which will also delete their group memberships due to cascade (if configured)
-        // or we delete them here to ensure total count decreases.
+        // ✅ 2. Soft delete contacts that were members of this group
         if (contactIds.length > 0) {
-            await database_1.default.contact.deleteMany({
+            await database_1.default.contact.updateMany({
                 where: {
                     id: { in: contactIds },
-                    organizationId
+                    organizationId,
+                    status: { not: 'DELETED' }
+                },
+                data: {
+                    status: 'DELETED',
+                    deletedAt: new Date()
                 }
             });
         }

@@ -20,6 +20,8 @@ export declare class WebhookService {
     private processIncomingMessage;
     private runAutomations;
     private processStatusUpdate;
+    private updateChatMessageStatus;
+    private retryUpdateChatMessageStatusInBackground;
     private updateCampaignContactStatus;
     verifyWebhook(mode: string, token: string, challenge: string): string | null;
     logWebhook(payload: any, status: string, error?: string): Promise<void>;

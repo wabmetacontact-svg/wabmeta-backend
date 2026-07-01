@@ -116,6 +116,7 @@ export declare class AdminBillingService {
                 featureCampaignsLocked: boolean;
                 featureChatbotLocked: boolean;
                 featureAutomationLocked: boolean;
+                featureConnectionLocked: boolean;
                 customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
@@ -193,6 +194,7 @@ export declare class AdminBillingService {
                 featureCampaignsLocked: boolean;
                 featureChatbotLocked: boolean;
                 featureAutomationLocked: boolean;
+                featureConnectionLocked: boolean;
                 customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
@@ -277,6 +279,7 @@ export declare class AdminBillingService {
                 featureCampaignsLocked: boolean;
                 featureChatbotLocked: boolean;
                 featureAutomationLocked: boolean;
+                featureConnectionLocked: boolean;
                 customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {

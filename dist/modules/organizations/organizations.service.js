@@ -27,6 +27,7 @@ const formatOrganization = (org) => ({
     featureCampaignsLocked: org.featureCampaignsLocked,
     featureChatbotLocked: org.featureChatbotLocked,
     featureAutomationLocked: org.featureAutomationLocked,
+    featureConnectionLocked: org.featureConnectionLocked,
     createdAt: org.createdAt,
     updatedAt: org.updatedAt,
 });

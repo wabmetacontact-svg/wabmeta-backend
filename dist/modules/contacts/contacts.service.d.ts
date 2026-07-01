@@ -18,7 +18,7 @@ export declare class ContactsService {
     getList(organizationId: string, query: ContactsQueryInput): Promise<ContactsListResponse>;
     getById(organizationId: string, contactId: string): Promise<ContactWithGroups>;
     update(organizationId: string, contactId: string, input: UpdateContactInput): Promise<ContactResponse>;
-    delete(organizationId: string, contactId: string): Promise<{
+    delete(organizationId: string, contactId: string, userId?: string): Promise<{
         message: string;
     }>;
     import(organizationId: string, input: ImportContactsInput & {
@@ -31,11 +31,11 @@ export declare class ContactsService {
         message: string;
         updated: number;
     }>;
-    bulkDelete(organizationId: string, contactIds: string[]): Promise<{
+    bulkDelete(organizationId: string, contactIds: string[], userId?: string): Promise<{
         message: string;
         deleted: number;
     }>;
-    deleteAll(organizationId: string): Promise<{
+    deleteAll(organizationId: string, userId?: string): Promise<{
         message: string;
         deleted: number;
     }>;

@@ -390,8 +390,13 @@ class AdminController {
                     planType: true,
                     featureSimpleBulkUpload: true,
                     featureCsvUpload: true,
-                    featureOverrideByAdmin: true
-                }
+                    featureOverrideByAdmin: true,
+                    featureInboxLocked: true,
+                    featureCampaignsLocked: true,
+                    featureChatbotLocked: true,
+                    featureAutomationLocked: true,
+                    featureConnectionLocked: true, // ✅ NEW
+                },
             });
             if (!org) {
                 throw new errorHandler_1.AppError('Organization not found', 404);
@@ -407,7 +412,8 @@ class AdminController {
                     inboxLocked: org.featureInboxLocked ?? false,
                     campaignsLocked: org.featureCampaignsLocked ?? false,
                     chatbotLocked: org.featureChatbotLocked ?? false,
-                    automationLocked: org.featureAutomationLocked ?? false
+                    automationLocked: org.featureAutomationLocked ?? false,
+                    connectionLocked: org.featureConnectionLocked ?? false, // ✅ NEW
                 }
             }, 'Features fetched');
         }
@@ -418,7 +424,8 @@ class AdminController {
     async updateOrganizationFeatures(req, res, next) {
         try {
             const organizationId = getParamId(req.params.organizationId);
-            const { simpleBulkPaste, csvUpload, enableOverride, inboxLocked, campaignsLocked, chatbotLocked, automationLocked } = req.body;
+            const { simpleBulkPaste, csvUpload, enableOverride, inboxLocked, campaignsLocked, chatbotLocked, automationLocked, connectionLocked, // ✅ NEW
+             } = req.body;
             const org = await database_1.default.organization.findUnique({
                 where: { id: organizationId }
             });
@@ -434,7 +441,8 @@ class AdminController {
                     featureInboxLocked: inboxLocked ?? false,
                     featureCampaignsLocked: campaignsLocked ?? false,
                     featureChatbotLocked: chatbotLocked ?? false,
-                    featureAutomationLocked: automationLocked ?? false
+                    featureAutomationLocked: automationLocked ?? false,
+                    featureConnectionLocked: connectionLocked ?? false, // ✅ NEW
                 }
             });
             return sendSuccess(res, {
@@ -446,7 +454,8 @@ class AdminController {
                     inboxLocked: updated.featureInboxLocked,
                     campaignsLocked: updated.featureCampaignsLocked,
                     chatbotLocked: updated.featureChatbotLocked,
-                    automationLocked: updated.featureAutomationLocked
+                    automationLocked: updated.featureAutomationLocked,
+                    connectionLocked: updated.featureConnectionLocked, // ✅ NEW
                 }
             }, 'Features updated');
         }
@@ -925,10 +934,12 @@ class AdminController {
                     { email: { contains: search, mode: 'insensitive' } },
                 ];
             }
-            // includeDeleted = false hone par sirf ACTIVE contacts
+            // ✅ includeDeleted = false → sirf non-deleted (ACTIVE, BLOCKED, UNSUBSCRIBED)
+            // ✅ includeDeleted = true → SAB dikhao including DELETED
             if (!includeDeleted) {
-                where.status = 'ACTIVE';
+                where.status = { not: 'DELETED' };
             }
+            // Agar includeDeleted = true, koi status filter mat lagao - sab dikhega
             const [contacts, total] = await Promise.all([
                 database_1.default.contact.findMany({
                     where,
@@ -948,6 +959,8 @@ class AdminController {
                         messageCount: true,
                         lastMessageAt: true,
                         createdAt: true,
+                        deletedAt: true, // ✅ NEW
+                        deletedBy: true, // ✅ NEW
                         organization: {
                             select: { id: true, name: true },
                         },
@@ -1002,6 +1015,7 @@ class AdminController {
                     source: true,
                     messageCount: true,
                     createdAt: true,
+                    deletedAt: true, // ✅ NEW
                     organization: { select: { name: true } },
                 },
             });
@@ -1018,6 +1032,7 @@ class AdminController {
                 'Message Count',
                 'Organization',
                 'Created At',
+                'Deleted At', // ✅ NEW
             ];
             const rows = contacts.map((c) => [
                 c.phone,
@@ -1031,6 +1046,7 @@ class AdminController {
                 c.messageCount,
                 c.organization?.name || '',
                 new Date(c.createdAt).toISOString(),
+                c.deletedAt ? new Date(c.deletedAt).toISOString() : '', // ✅ NEW
             ]);
             const csvContent = [headers, ...rows]
                 .map((row) => row
@@ -1100,14 +1116,28 @@ class AdminController {
                         language: true,
                         category: true,
                         headerType: true,
+                        headerContent: true, // ✅ NEW
                         bodyText: true,
                         footerText: true,
+                        buttons: true, // ✅ NEW
+                        variables: true, // ✅ NEW
                         status: true,
                         rejectionReason: true,
+                        qualityScore: true, // ✅ NEW
+                        headerMediaId: true, // ✅ NEW
+                        metaTemplateId: true, // ✅ NEW
+                        wabaId: true, // ✅ NEW
                         createdAt: true,
                         updatedAt: true,
                         organization: {
                             select: { id: true, name: true },
+                        },
+                        whatsappAccount: {
+                            select: {
+                                id: true,
+                                phoneNumber: true,
+                                displayName: true,
+                            },
                         },
                         _count: {
                             select: { campaigns: true },

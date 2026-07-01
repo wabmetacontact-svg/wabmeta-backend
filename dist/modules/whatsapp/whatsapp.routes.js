@@ -4,6 +4,7 @@ const express_1 = require("express");
 const whatsapp_controller_1 = require("./whatsapp.controller");
 const auth_1 = require("../../middleware/auth");
 const rateLimit_1 = require("../../middleware/rateLimit");
+const connectionLock_1 = require("../../middleware/connectionLock");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
 // ============================================
@@ -12,7 +13,7 @@ router.use(auth_1.authenticate);
 router.get('/accounts', whatsapp_controller_1.whatsappController.getAccounts.bind(whatsapp_controller_1.whatsappController));
 router.get('/accounts/:accountId', whatsapp_controller_1.whatsappController.getAccount.bind(whatsapp_controller_1.whatsappController));
 router.post('/accounts/:accountId/default', whatsapp_controller_1.whatsappController.setDefaultAccount.bind(whatsapp_controller_1.whatsappController));
-router.delete('/accounts/:accountId', whatsapp_controller_1.whatsappController.disconnectAccount.bind(whatsapp_controller_1.whatsappController));
+router.delete('/accounts/:accountId', connectionLock_1.checkConnectionLock, whatsapp_controller_1.whatsappController.disconnectAccount.bind(whatsapp_controller_1.whatsappController));
 // ✅ NEW: Quality Rating Sync Routes
 const syncRateLimit = (0, rateLimit_1.rateLimit)({
     windowMs: 60 * 1000,

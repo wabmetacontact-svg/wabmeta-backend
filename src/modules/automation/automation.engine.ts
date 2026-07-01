@@ -257,14 +257,25 @@ class AutomationEngine {
 
         console.log(`🤖 Found ${contacts.length} candidate contacts for schedule`);
 
-        // Trigger sequence for each contact
-        for (const contact of contacts) {
-          // Check if already completed this automation to prevent loops
-          const existing = await prisma.automationSequence.findFirst({
-            where: { automationId: automation.id, contactId: contact.id }
-          });
+        // Trigger sequence for each contact (optimized with bulk check)
+        const contactIds = contacts.map(c => c.id);
+        const existingSequences = contactIds.length > 0 ? await prisma.automationSequence.findMany({
+          where: {
+            automationId: automation.id,
+            contactId: { in: contactIds }
+          },
+          select: { contactId: true, status: true }
+        }) : [];
 
-          if (!existing || existing.status === 'COMPLETED') {
+        const existingMap = new Map<string, string>();
+        for (const seq of existingSequences) {
+          existingMap.set(seq.contactId, seq.status);
+        }
+
+        for (const contact of contacts) {
+          const status = existingMap.get(contact.id);
+
+          if (!status || status === 'COMPLETED') {
             this.executeSequence(automation.id, automation.actions as any, {
               organizationId: automation.organizationId,
               contactId: contact.id,

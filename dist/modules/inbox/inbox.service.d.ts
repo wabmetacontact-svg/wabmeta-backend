@@ -37,6 +37,8 @@ export declare class InboxService {
             customFields: Prisma.JsonValue;
             messageCount: number;
             source: string | null;
+            deletedAt: Date | null;
+            deletedBy: string | null;
         };
     } & {
         organizationId: string;
@@ -296,6 +298,8 @@ export declare class InboxService {
                     customFields: Prisma.JsonValue;
                     messageCount: number;
                     source: string | null;
+                    deletedAt: Date | null;
+                    deletedBy: string | null;
                 };
             } & {
                 organizationId: string;
@@ -433,6 +437,8 @@ export declare class InboxService {
             customFields: Prisma.JsonValue;
             messageCount: number;
             source: string | null;
+            deletedAt: Date | null;
+            deletedBy: string | null;
         };
     } & {
         organizationId: string;

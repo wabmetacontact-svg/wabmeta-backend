@@ -11,6 +11,7 @@ const meta_service_1 = require("./meta.service");
 const response_1 = require("../../utils/response");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
+const connectionLock_1 = require("../../middleware/connectionLock");
 const client_1 = require("@prisma/client");
 const config_1 = require("../../config");
 const router = (0, express_1.Router)();
@@ -197,7 +198,7 @@ router.post('/webhook', async (req, res) => {
 // These use state token verification instead of JWT
 // ============================================
 // /connect - Frontend FB.login Embedded Signup flow (NO state token)
-router.post('/connect', auth_1.authenticate, async (req, res, next) => {
+router.post('/connect', auth_1.authenticate, connectionLock_1.checkConnectionLock, async (req, res, next) => {
     try {
         const { code, organizationId, wabaId, phoneNumberId } = req.body;
         const userId = req.user?.id;
@@ -312,9 +313,10 @@ router.get('/organizations/:organizationId/accounts/:accountId', async (req, res
         next(error);
     }
 });
-router.delete('/organizations/:organizationId/accounts/:accountId', async (req, res, next) => {
+router.delete('/organizations/:organizationId/accounts/:accountId', connectionLock_1.checkConnectionLock, async (req, res, next) => {
     try {
-        const { organizationId, accountId } = req.params;
+        const organizationId = req.params.organizationId;
+        const accountId = req.params.accountId;
         const userId = req.user?.id;
         if (!userId) {
             throw new errorHandler_1.AppError('Authentication required', 401);
@@ -514,9 +516,9 @@ router.post('/organizations/:organizationId/sync', async (req, res, next) => {
         next(error);
     }
 });
-router.delete('/organizations/:organizationId/disconnect', async (req, res, next) => {
+router.delete('/organizations/:organizationId/disconnect', connectionLock_1.checkConnectionLock, async (req, res, next) => {
     try {
-        const { organizationId } = req.params;
+        const organizationId = req.params.organizationId;
         const userId = req.user?.id;
         if (!userId) {
             throw new errorHandler_1.AppError('Authentication required', 401);
@@ -548,9 +550,9 @@ router.delete('/organizations/:organizationId/disconnect', async (req, res, next
 // ============================================
 router.get('/accounts', meta_controller_1.metaController.getAccounts.bind(meta_controller_1.metaController));
 router.get('/accounts/:id', meta_controller_1.metaController.getAccount.bind(meta_controller_1.metaController));
-router.delete('/accounts/:id', meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
+router.delete('/accounts/:id', connectionLock_1.checkConnectionLock, meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
 // ✅ Also support POST /accounts/:id/disconnect (frontend uses this)
-router.post('/accounts/:id/disconnect', meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
+router.post('/accounts/:id/disconnect', connectionLock_1.checkConnectionLock, meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
 // ✅ Set default account shortcut (gets org from JWT context)
 router.post('/accounts/:id/set-default', async (req, res, next) => {
     try {

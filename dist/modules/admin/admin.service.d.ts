@@ -268,6 +268,7 @@ export declare class AdminService {
             featureCampaignsLocked: boolean;
             featureChatbotLocked: boolean;
             featureAutomationLocked: boolean;
+            featureConnectionLocked: boolean;
             customLabels: import("@prisma/client/runtime/library").JsonValue;
         })[];
         total: number;
@@ -371,6 +372,7 @@ export declare class AdminService {
         featureCampaignsLocked: boolean;
         featureChatbotLocked: boolean;
         featureAutomationLocked: boolean;
+        featureConnectionLocked: boolean;
         customLabels: import("@prisma/client/runtime/library").JsonValue;
     }>;
     updateOrganization(id: string, data: any): Promise<{
@@ -392,6 +394,7 @@ export declare class AdminService {
         featureCampaignsLocked: boolean;
         featureChatbotLocked: boolean;
         featureAutomationLocked: boolean;
+        featureConnectionLocked: boolean;
         customLabels: import("@prisma/client/runtime/library").JsonValue;
     }>;
     deleteOrganization(id: string): Promise<{
@@ -496,6 +499,7 @@ export declare class AdminService {
         featureCampaignsLocked: boolean;
         featureChatbotLocked: boolean;
         featureAutomationLocked: boolean;
+        featureConnectionLocked: boolean;
         customLabels: import("@prisma/client/runtime/library").JsonValue;
     }>;
     getPlans(): Promise<({

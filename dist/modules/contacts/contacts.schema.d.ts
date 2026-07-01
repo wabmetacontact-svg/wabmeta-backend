@@ -64,11 +64,12 @@ export declare const updateContactSchema: z.ZodObject<{
             ACTIVE: "ACTIVE";
             BLOCKED: "BLOCKED";
             UNSUBSCRIBED: "UNSUBSCRIBED";
+            DELETED: "DELETED";
         }>>;
     }, "strip", z.ZodTypeAny, {
         email?: string | undefined;
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
@@ -77,7 +78,7 @@ export declare const updateContactSchema: z.ZodObject<{
     }, {
         email?: unknown;
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: unknown;
@@ -88,7 +89,7 @@ export declare const updateContactSchema: z.ZodObject<{
     body: {
         email?: string | undefined;
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
@@ -99,7 +100,7 @@ export declare const updateContactSchema: z.ZodObject<{
     body: {
         email?: unknown;
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: unknown;
@@ -202,30 +203,31 @@ export declare const bulkUpdateSchema: z.ZodObject<{
             ACTIVE: "ACTIVE";
             BLOCKED: "BLOCKED";
             UNSUBSCRIBED: "UNSUBSCRIBED";
+            DELETED: "DELETED";
         }>>;
     }, "strip", z.ZodTypeAny, {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     }, {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     };
 }, {
     body: {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     };
 }>;

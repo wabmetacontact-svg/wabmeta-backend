@@ -189,13 +189,22 @@ class AutomationEngine {
                     });
                 }
                 console.log(`🤖 Found ${contacts.length} candidate contacts for schedule`);
-                // Trigger sequence for each contact
+                // Trigger sequence for each contact (optimized with bulk check)
+                const contactIds = contacts.map(c => c.id);
+                const existingSequences = contactIds.length > 0 ? await database_1.default.automationSequence.findMany({
+                    where: {
+                        automationId: automation.id,
+                        contactId: { in: contactIds }
+                    },
+                    select: { contactId: true, status: true }
+                }) : [];
+                const existingMap = new Map();
+                for (const seq of existingSequences) {
+                    existingMap.set(seq.contactId, seq.status);
+                }
                 for (const contact of contacts) {
-                    // Check if already completed this automation to prevent loops
-                    const existing = await database_1.default.automationSequence.findFirst({
-                        where: { automationId: automation.id, contactId: contact.id }
-                    });
-                    if (!existing || existing.status === 'COMPLETED') {
+                    const status = existingMap.get(contact.id);
+                    if (!status || status === 'COMPLETED') {
                         this.executeSequence(automation.id, automation.actions, {
                             organizationId: automation.organizationId,
                             contactId: contact.id,

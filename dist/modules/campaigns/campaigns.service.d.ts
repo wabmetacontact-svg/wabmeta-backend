@@ -91,6 +91,7 @@ export declare class CampaignsService {
     getDetailedStats(organizationId: string, campaignId: string): Promise<any>;
     private processCampaignContacts;
     private flushBatchResults;
+    private saveCampaignMessagesBulk;
     private saveCampaignMessage;
     private getCampaignStats;
     private resolveMediaId;

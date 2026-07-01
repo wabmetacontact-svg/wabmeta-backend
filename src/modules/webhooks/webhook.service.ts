@@ -901,8 +901,20 @@ export class WebhookService {
 
       console.log(`📬 Processing status update: ${waMessageId} -> ${st}`);
 
-      // ✅ Find message by waMessageId OR wamId
-      let message = await prisma.message.findFirst({
+      let newStatus: MessageStatus = 'SENT';
+      if (st === 'sent') newStatus = 'SENT';
+      if (st === 'delivered') newStatus = 'DELIVERED';
+      if (st === 'read') newStatus = 'READ';
+      if (st === 'failed') newStatus = 'FAILED';
+
+      const failureReason = st === 'failed' ? (statusObj?.errors?.[0]?.message || 'Unknown error') : undefined;
+
+      // Always update CampaignContact first, because it's independent of the chat Message table!
+      // This ensures campaign stats are updated immediately and reliably.
+      await this.updateCampaignContactStatus(waMessageId, newStatus, statusTime, failureReason);
+
+      // Find the message in the Message table
+      const message = await prisma.message.findFirst({
         where: {
           OR: [
             { waMessageId },
@@ -920,93 +932,104 @@ export class WebhookService {
         },
       });
 
-      // ✅ Race Condition Fix: If message not found, wait and retry
-      // (Meta sometimes sends status updates faster than we can save the message)
-      let retries = 3;
-      while (!message && retries > 0) {
-        console.log(`⏳ Message not found yet, retrying in 1s for waMessageId: ${waMessageId} (${retries} retries left)`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        message = await prisma.message.findFirst({
-          where: {
-            OR: [
-              { waMessageId },
-              { wamId: waMessageId },
-            ],
-          },
-          include: {
-            conversation: {
-              select: {
-                id: true,
-                contactId: true,
-                organizationId: true,
-              },
-            },
-          },
-        });
-        retries--;
+      if (message) {
+        await this.updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId);
+      } else {
+        // If message is not found, it might be saving right now (from a campaign bulk save).
+        // Let's retry in the background so we don't block the webhook response.
+        this.retryUpdateChatMessageStatusInBackground(waMessageId, newStatus, statusTime, statusObj, organizationId)
+          .catch(() => {});
       }
-
-      if (!message) {
-        console.log(`⚠️ Message still not found for waMessageId: ${waMessageId}`);
-        // Optionally: We could "stub" the message here if we had recipient_id
-        return;
-      }
-
-      // Map status
-      let newStatus: MessageStatus = 'SENT';
-      if (st === 'sent') newStatus = 'SENT';
-      if (st === 'delivered') newStatus = 'DELIVERED';
-      if (st === 'read') newStatus = 'READ';
-      if (st === 'failed') newStatus = 'FAILED';
-
-      // ✅ Update message
-      const updatedMessage = await prisma.message.update({
-        where: { id: message.id },
-        data: {
-          status: newStatus,
-          statusUpdatedAt: statusTime,
-          ...(st === 'sent' ? { sentAt: statusTime } : {}),
-          ...(st === 'delivered' ? { deliveredAt: statusTime } : {}),
-          ...(st === 'read' ? { readAt: statusTime } : {}),
-          ...(st === 'failed'
-            ? {
-              failedAt: statusTime,
-              failureReason: statusObj?.errors?.[0]?.message || 'Unknown error',
-            }
-            : {}),
-        },
-      });
-
-      console.log(`✅ Message status updated: ${message.id} -> ${newStatus}`);
-
-      if (newStatus === 'FAILED') {
-        console.error(`❌ Message ${message.id} failed. Meta Error:`, JSON.stringify(statusObj?.errors || [], null, 2));
-      }
-
-      // Retrieve metadata for tempId/clientMsgId
-      const metadata = (message.metadata as any) || {};
-
-      // ✅ CRITICAL: Emit socket event for real-time update
-      webhookEvents.emit('messageStatus', {
-        organizationId: message.conversation?.organizationId || organizationId,
-        conversationId: message.conversationId,
-        messageId: message.id,
-        waMessageId: message.waMessageId,
-        wamId: message.wamId,
-        status: newStatus,
-        failureReason: updatedMessage.failureReason,
-        timestamp: statusTime.toISOString(),
-        tempId: metadata.tempId,
-        clientMsgId: metadata.clientMsgId
-      });
-
-      // ✅ Update CampaignContact if this is a campaign message
-      await this.updateCampaignContactStatus(waMessageId, newStatus, statusTime, updatedMessage.failureReason || undefined);
 
     } catch (e) {
       console.error('processStatusUpdate error:', e);
     }
+  }
+
+  private async updateChatMessageStatus(
+    message: any,
+    newStatus: MessageStatus,
+    statusTime: Date,
+    statusObj: any,
+    organizationId: string
+  ) {
+    const updatedMessage = await prisma.message.update({
+      where: { id: message.id },
+      data: {
+        status: newStatus,
+        statusUpdatedAt: statusTime,
+        ...(newStatus === 'SENT' ? { sentAt: statusTime } : {}),
+        ...(newStatus === 'DELIVERED' ? { deliveredAt: statusTime } : {}),
+        ...(newStatus === 'READ' ? { readAt: statusTime } : {}),
+        ...(newStatus === 'FAILED'
+          ? {
+              failedAt: statusTime,
+              failureReason: statusObj?.errors?.[0]?.message || 'Unknown error',
+            }
+          : {}),
+      },
+    });
+
+    console.log(`✅ Message status updated: ${message.id} -> ${newStatus}`);
+
+    if (newStatus === 'FAILED') {
+      console.error(`❌ Message ${message.id} failed. Meta Error:`, JSON.stringify(statusObj?.errors || [], null, 2));
+    }
+
+    const metadata = (message.metadata as any) || {};
+
+    // ✅ CRITICAL: Emit socket event for real-time update
+    webhookEvents.emit('messageStatus', {
+      organizationId: message.conversation?.organizationId || organizationId,
+      conversationId: message.conversationId,
+      messageId: message.id,
+      waMessageId: message.waMessageId,
+      wamId: message.wamId,
+      status: newStatus,
+      failureReason: updatedMessage.failureReason,
+      timestamp: statusTime.toISOString(),
+      tempId: metadata.tempId,
+      clientMsgId: metadata.clientMsgId
+    });
+  }
+
+  private async retryUpdateChatMessageStatusInBackground(
+    waMessageId: string,
+    newStatus: MessageStatus,
+    statusTime: Date,
+    statusObj: any,
+    organizationId: string
+  ) {
+    let retries = 3;
+    while (retries > 0) {
+      // Wait 1 second before retrying
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const message = await prisma.message.findFirst({
+        where: {
+          OR: [
+            { waMessageId },
+            { wamId: waMessageId },
+          ],
+        },
+        include: {
+          conversation: {
+            select: {
+              id: true,
+              contactId: true,
+              organizationId: true,
+            },
+          },
+        },
+      });
+
+      if (message) {
+        await this.updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId);
+        return;
+      }
+      retries--;
+    }
+    console.log(`⚠️ Message still not found for waMessageId: ${waMessageId} after background retries`);
   }
 
   // ✅ Campaign contact status sync

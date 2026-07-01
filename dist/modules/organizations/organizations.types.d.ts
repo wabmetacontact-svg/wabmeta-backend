@@ -36,6 +36,7 @@ export interface OrganizationResponse {
     featureCampaignsLocked?: boolean;
     featureChatbotLocked?: boolean;
     featureAutomationLocked?: boolean;
+    featureConnectionLocked?: boolean;
     createdAt: Date;
     updatedAt: Date;
 }

@@ -1260,31 +1260,26 @@ export class CampaignsService {
 
           totalProcessed += chunk.length;
 
-          // ✅ FLUSH TO DB every N messages
           const batchTotal = batchSent.length + batchFailed.length;
           if (batchTotal >= FLUSH_EVERY || i + CONCURRENCY >= contacts.length) {
             await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
 
-            // ✅ SAVE TO INBOX (sequential background tasks to avoid pool exhaustion)
+            // ✅ SAVE TO INBOX IN BULK (non-blocking, running 3-5 queries instead of 500)
             const sentCopy = [...batchSent];
-            setImmediate(async () => {
-              for (const s of sentCopy) {
-                try {
-                  await this.saveCampaignMessage(
-                    organizationId, campaignId, s.contactId,
-                    campaign.whatsappAccountId, s.waMessageId,
-                    template.name, template.language, [], template.id, campaign.name
-                  );
-                } catch (err) {
-                  // Silent catch for background task
-                }
-              }
-            });
+            this.saveCampaignMessagesBulk(
+              organizationId,
+              campaignId,
+              campaign.whatsappAccountId,
+              template.id,
+              template.name,
+              campaign.name,
+              template,
+              sentCopy.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
+            ).catch(err => console.error('❌ Background bulk message save failed:', err));
 
             batchSent = [];
             batchFailed = [];
           }
-
           // ✅ EMIT PROGRESS (lightweight, no DB query)
           if (totalProcessed - lastProgressEmit >= EMIT_PROGRESS_EVERY) {
             lastProgressEmit = totalProcessed;
@@ -1317,16 +1312,18 @@ export class CampaignsService {
       if (batchSent.length > 0 || batchFailed.length > 0) {
         await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
 
-        // Save remaining to inbox
-        for (const s of batchSent) {
-          this.saveCampaignMessage(
-            organizationId, campaignId, s.contactId,
-            campaign.whatsappAccountId, s.waMessageId,
-            template.name, template.language, [], template.id, campaign.name
-          ).catch(() => {});
-          // Note: Here we don't strictly need await as it's the very end, but let's be safe
-          await new Promise(r => setTimeout(r, 10)); 
-        }
+        // Save remaining to inbox in bulk
+        const sentCopy = [...batchSent];
+        this.saveCampaignMessagesBulk(
+          organizationId,
+          campaignId,
+          campaign.whatsappAccountId,
+          template.id,
+          template.name,
+          campaign.name,
+          template,
+          sentCopy.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
+        ).catch(err => console.error('❌ Background bulk message save failed:', err));
       }
 
       // ✅ Final sync (HEAVY sync only at END)
@@ -1525,6 +1522,115 @@ export class CampaignsService {
   }
 
 
+  private async saveCampaignMessagesBulk(
+    orgId: string,
+    campaignId: string,
+    accId: string,
+    tplId: string,
+    tplName: string,
+    campName: string,
+    template: any,
+    sentList: { contactId: string; waMessageId: string }[]
+  ): Promise<void> {
+    if (sentList.length === 0) return;
+
+    try {
+      const now = new Date();
+      const contactIds = sentList.map(s => s.contactId);
+
+      // 1. Get existing conversations
+      const existingConversations = await prisma.conversation.findMany({
+        where: { organizationId: orgId, contactId: { in: contactIds } },
+        select: { id: true, contactId: true }
+      });
+
+      const conversationMap = new Map<string, string>();
+      for (const conv of existingConversations) {
+        conversationMap.set(conv.contactId, conv.id);
+      }
+
+      // Find contacts that don't have conversations
+      const missingContactIds = contactIds.filter(cid => !conversationMap.has(cid));
+
+      if (missingContactIds.length > 0) {
+        // Bulk create missing conversations
+        await prisma.conversation.createMany({
+          data: missingContactIds.map(cid => ({
+            organizationId: orgId,
+            contactId: cid,
+            lastMessageAt: now,
+            lastMessagePreview: `Template: ${tplName}`,
+            isWindowOpen: true,
+            unreadCount: 0,
+            isRead: true,
+          })),
+          skipDuplicates: true
+        });
+
+        // Fetch them back to get IDs
+        const newConversations = await prisma.conversation.findMany({
+          where: { organizationId: orgId, contactId: { in: missingContactIds } },
+          select: { id: true, contactId: true }
+        });
+
+        for (const conv of newConversations) {
+          conversationMap.set(conv.contactId, conv.id);
+        }
+      }
+
+      // Update existing conversations' last message timestamp/preview
+      const existingContactIds = existingConversations.map(c => c.contactId);
+      if (existingContactIds.length > 0) {
+        await prisma.conversation.updateMany({
+          where: { organizationId: orgId, contactId: { in: existingContactIds } },
+          data: {
+            lastMessageAt: now,
+            lastMessagePreview: `Template: ${tplName}`,
+          }
+        });
+      }
+
+      // 2. Prepare messages for createMany
+      const messagesData = sentList.map(s => {
+        const convId = conversationMap.get(s.contactId);
+        if (!convId) return null;
+
+        return {
+          conversationId: convId,
+          direction: 'OUTBOUND' as const,
+          type: 'TEMPLATE' as const,
+          status: 'SENT' as const,
+          waMessageId: s.waMessageId,
+          wamId: s.waMessageId,
+          whatsappAccountId: accId,
+          templateId: tplId,
+          content: `Campaign: ${campName}\nTemplate: ${tplName}`,
+          metadata: { 
+            campaignId, 
+            campaignName: campName, 
+            templateName: tplName,
+            bodyText: template?.bodyText || undefined,
+            footerText: template?.footerText || undefined,
+            headerText: template?.headerContent || undefined,
+            buttons: template?.buttons || undefined
+          } as any,
+          sentAt: now,
+        };
+      }).filter(Boolean);
+
+      if (messagesData.length > 0) {
+        await prisma.message.createMany({
+          data: messagesData as any,
+          skipDuplicates: true
+        });
+      }
+
+    } catch (e: any) {
+      console.error('⚠️ Save campaign messages bulk error:', e.message);
+    }
+  }
+
+
   // ✅ FIX: saveCampaignMessage - use upsert to prevent duplicate waMessageId error
   private async saveCampaignMessage(
     orgId: string,
@@ -1669,13 +1775,18 @@ export class CampaignsService {
     if (isNumericIdFresh) {
       console.log(`✅ Using cached numeric media ID: ${mediaId}`);
       
-      // Update last verified timestamp (background, non-blocking)
-      prisma.template
-        .update({
-          where: { id: template.id },
-          data: { headerMediaLastVerified: new Date() } as any,
-        })
-        .catch(() => {});
+      // Update last verified timestamp (background, non-blocking) only if older than 1 hour
+      const lastVerified = template.headerMediaLastVerified;
+      const shouldUpdateLastVerified = !lastVerified || (Date.now() - new Date(lastVerified).getTime() > 60 * 60 * 1000);
+      
+      if (shouldUpdateLastVerified) {
+        prisma.template
+          .update({
+            where: { id: template.id },
+            data: { headerMediaLastVerified: new Date() } as any,
+          })
+          .catch(() => {});
+      }
       
       return mediaId;
     }

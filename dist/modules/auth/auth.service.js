@@ -268,7 +268,7 @@ const generateTokenPair = async (userId, email, organizationId) => {
 const getDefaultOrg = async (userId) => {
     const owned = await database_1.default.organization.findFirst({
         where: { ownerId: userId },
-        select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true },
+        select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true, featureConnectionLocked: true },
     });
     if (owned)
         return owned;
@@ -276,7 +276,7 @@ const getDefaultOrg = async (userId) => {
         where: { userId },
         include: {
             organization: {
-                select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true },
+                select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true, featureConnectionLocked: true },
             },
         },
     });

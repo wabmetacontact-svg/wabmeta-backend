@@ -437,6 +437,8 @@ export declare class CRMService {
             customFields: Prisma.JsonValue;
             messageCount: number;
             source: string | null;
+            deletedAt: Date | null;
+            deletedBy: string | null;
         } | null;
         pipeline: ({
             stages: {
@@ -569,6 +571,8 @@ export declare class CRMService {
             customFields: Prisma.JsonValue;
             messageCount: number;
             source: string | null;
+            deletedAt: Date | null;
+            deletedBy: string | null;
         } | null;
         pipeline: {
             name: string;
@@ -655,6 +659,8 @@ export declare class CRMService {
             customFields: Prisma.JsonValue;
             messageCount: number;
             source: string | null;
+            deletedAt: Date | null;
+            deletedBy: string | null;
         } | null;
         pipeline: {
             name: string;

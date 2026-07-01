@@ -106,11 +106,12 @@ class ContactsController {
     async delete(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
+            const userId = req.user?.id; // ✅ NEW
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             }
             const id = req.params.id;
-            const result = await contacts_service_1.contactsService.delete(organizationId, id);
+            const result = await contacts_service_1.contactsService.delete(organizationId, id, userId); // ✅ Pass userId
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -200,11 +201,12 @@ class ContactsController {
     async bulkDelete(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
+            const userId = req.user?.id; // ✅ NEW
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             }
             const { contactIds } = req.body;
-            const result = await contacts_service_1.contactsService.bulkDelete(organizationId, contactIds);
+            const result = await contacts_service_1.contactsService.bulkDelete(organizationId, contactIds, userId); // ✅
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -217,10 +219,11 @@ class ContactsController {
     async deleteAll(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
+            const userId = req.user?.id; // ✅ NEW
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             }
-            const result = await contacts_service_1.contactsService.deleteAll(organizationId);
+            const result = await contacts_service_1.contactsService.deleteAll(organizationId, userId); // ✅
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -487,7 +490,32 @@ class ContactsController {
             if (valid.length > MAX_BULK) {
                 throw new errorHandler_1.AppError(`Maximum ${MAX_BULK} contacts per upload`, 400);
             }
-            // ✅ Get existing contacts (check duplicates)
+            // 1. Identify deleted contacts
+            const deletedContacts = await database_1.default.contact.findMany({
+                where: {
+                    organizationId,
+                    phone: { in: valid.map(p => p.fullNumber) },
+                    status: 'DELETED'
+                },
+                select: { id: true, phone: true }
+            });
+            // 2. Restore deleted contacts
+            let restoredCount = 0;
+            if (deletedContacts.length > 0) {
+                const restored = await database_1.default.contact.updateMany({
+                    where: {
+                        id: { in: deletedContacts.map(c => c.id) }
+                    },
+                    data: {
+                        status: 'ACTIVE',
+                        deletedAt: null,
+                        deletedBy: null,
+                        source: 'BULK_PASTE'
+                    }
+                });
+                restoredCount = restored.count;
+            }
+            // 3. Get existing contacts (check duplicates)
             const existingContacts = await database_1.default.contact.findMany({
                 where: {
                     organizationId,
@@ -497,7 +525,7 @@ class ContactsController {
             });
             const existingPhones = new Set(existingContacts.map(c => c.phone));
             const newContacts = valid.filter(p => !existingPhones.has(p.fullNumber));
-            // ✅ Create contacts
+            // 4. Create contacts
             const contactsToCreate = newContacts.map((parsed, index) => ({
                 organizationId,
                 phone: parsed.fullNumber,
@@ -515,22 +543,40 @@ class ContactsController {
                 });
                 createdCount = result.count;
             }
-            // ✅ Add to group if specified
-            if (groupId && createdCount > 0) {
-                const newContactIds = await database_1.default.contact.findMany({
+            // 5. Add to group if specified
+            const totalProcessedCount = createdCount + restoredCount;
+            if (groupId && totalProcessedCount > 0) {
+                const processedPhones = [
+                    ...newContacts.map(p => p.fullNumber),
+                    ...deletedContacts.map(c => c.phone)
+                ];
+                const contactIds = await database_1.default.contact.findMany({
                     where: {
                         organizationId,
-                        phone: { in: newContacts.map(p => p.fullNumber) }
+                        phone: { in: processedPhones }
                     },
                     select: { id: true }
                 });
                 await database_1.default.contactGroupMember.createMany({
-                    data: newContactIds.map(c => ({
+                    data: contactIds.map(c => ({
                         groupId,
                         contactId: c.id
                     })),
                     skipDuplicates: true
                 });
+            }
+            let message = '';
+            if (createdCount > 0 && restoredCount > 0) {
+                message = `${createdCount} created, ${restoredCount} restored successfully`;
+            }
+            else if (createdCount > 0) {
+                message = `${createdCount} contacts created successfully`;
+            }
+            else if (restoredCount > 0) {
+                message = `${restoredCount} contacts restored successfully`;
+            }
+            else {
+                message = 'All contacts already exist as active contacts';
             }
             return res.json({
                 success: true,
@@ -538,11 +584,13 @@ class ContactsController {
                     totalInput: valid.length + invalid.length,
                     validNumbers: valid.length,
                     invalidNumbers: invalid.length,
-                    created: createdCount,
-                    duplicatesSkipped: valid.length - createdCount,
+                    created: createdCount + restoredCount, // Sum to trigger onSuccess
+                    newCreated: createdCount,
+                    restored: restoredCount,
+                    duplicatesSkipped: valid.length - createdCount - restoredCount,
                     invalidDetails: invalid.slice(0, 10) // Return first 10 invalid
                 },
-                message: `${createdCount} contacts created successfully`
+                message
             });
         }
         catch (error) {
