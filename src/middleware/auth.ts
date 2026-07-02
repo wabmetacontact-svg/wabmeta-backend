@@ -1,4 +1,7 @@
 // src/middleware/auth.ts - FIXED VERSION
+// ✅ FIX: now imports shared getCookieOptions from utils/cookies.ts instead of
+// defining its own conflicting cookieOptions() (was causing SameSite/Secure mismatch
+// vs auth.controller.ts, which broke cookies cross-domain wabmeta.com <-> onrender.com)
 
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types/express';
@@ -7,29 +10,18 @@ import { AppError } from './errorHandler';
 import prisma from '../config/database';
 import { getRedis } from '../config/redis';
 import { authService } from '../modules/auth/auth.service';
-
-// ✅ REMOVED: const redis = getRedis(); ← YE WALI LINE HATAO
-// Module level pe Redis capture NAHI karna - stale ho jaati hai
+import { getCookieOptions } from '../utils/cookies'; // ✅ FIX: shared cookie options
 
 const USER_CACHE_PREFIX = 'user:auth:';
 const CACHE_TTL = 120;
 
-const cookieOptions = (isRefresh: boolean = false) => ({
-  httpOnly: true,
-  secure: true,
-  sameSite: 'none' as const,
-  maxAge: isRefresh ? 7 * 24 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000,
-  path: '/',
-});
-
 // ✅ Safe Redis cache get - kabhi throw nahi karega
 const safeRedisGet = async (key: string): Promise<string | null> => {
   try {
-    const redis = getRedis(); // ✅ Har baar fresh call
+    const redis = getRedis();
     if (!redis) return null;
     return await redis.get(key);
   } catch (err: any) {
-    // Silent fail - Redis down hone pe auth kaam karta rahe
     return null;
   }
 };
@@ -41,7 +33,7 @@ const safeRedisSet = async (
   ttl: number
 ): Promise<void> => {
   try {
-    const redis = getRedis(); // ✅ Har baar fresh call
+    const redis = getRedis();
     if (!redis) return;
     await redis.set(key, value, 'EX', ttl);
   } catch (err: any) {
@@ -95,8 +87,8 @@ export const authenticate = async (
           req.cookies.refreshToken
         );
 
-        res.cookie('refreshToken', newTokens.refreshToken, cookieOptions(true));
-        res.cookie('accessToken', newTokens.accessToken, cookieOptions(false));
+        res.cookie('refreshToken', newTokens.refreshToken, getCookieOptions(true));
+        res.cookie('accessToken', newTokens.accessToken, getCookieOptions(false));
         res.setHeader('x-new-access-token', newTokens.accessToken);
         res.setHeader('x-token-refreshed', 'true');
         res.setHeader(
@@ -193,7 +185,6 @@ export const authenticate = async (
     // ✅ User cache - Redis optional, DB fallback guaranteed
     let user: any = null;
 
-    // Try Redis cache first (safe - never throws)
     const cacheKey = `${USER_CACHE_PREFIX}${decoded.userId}`;
     const cachedUser = await safeRedisGet(cacheKey);
 
@@ -201,11 +192,10 @@ export const authenticate = async (
       try {
         user = JSON.parse(cachedUser);
       } catch {
-        user = null; // JSON parse fail → DB se lo
+        user = null;
       }
     }
 
-    // Cache miss ya Redis down → DB se lo
     if (!user) {
       user = await prisma.user.findUnique({
         where: { id: decoded.userId },
@@ -214,11 +204,10 @@ export const authenticate = async (
           email: true,
           status: true,
           emailVerified: true,
-          tokenVersion: true, // ✅ NEW: tokenVersion bhi fetch karo
+          tokenVersion: true,
         },
       });
 
-      // Cache mein store karo (without tokenVersion for security)
       if (user) {
         await safeRedisSet(
           cacheKey,
@@ -227,7 +216,7 @@ export const authenticate = async (
             email: user.email,
             status: user.status,
             emailVerified: user.emailVerified,
-            tokenVersion: user.tokenVersion, // ✅ Cache me bhi store karo
+            tokenVersion: user.tokenVersion,
           }),
           CACHE_TTL
         );
@@ -238,9 +227,7 @@ export const authenticate = async (
       throw new AppError('User not found', 401);
     }
 
-    // ✅ NEW: tokenVersion check - admin ne password change kiya?
-    // JWT me tokenVersion hoga (naya login pe), DB me current version hai
-    // Agar mismatch → token invalid → logout force karo
+    // tokenVersion check - password change / logoutAll ke baad purane tokens invalid
     if (
       decoded.tokenVersion !== undefined &&
       user.tokenVersion !== undefined &&
@@ -250,10 +237,9 @@ export const authenticate = async (
         `🚨 Token version mismatch for user ${decoded.userId}: ` +
         `JWT=${decoded.tokenVersion}, DB=${user.tokenVersion}`
       );
-      
-      // Redis cache invalidate karo
+
       await safeRedisDel(cacheKey);
-      
+
       throw new AppError('Session expired. Please login again.', 401);
     }
 

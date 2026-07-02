@@ -1,4 +1,6 @@
 // src/utils/jwt.ts
+// ✅ FIXED: generateAccessToken was using config.jwt.expiresIn (7d) instead of
+// config.jwt.accessExpiresIn (15m) — access tokens were living 7 days instead of 15 minutes.
 
 import jwt, { SignOptions, Secret } from 'jsonwebtoken';
 import { config } from '../config';
@@ -7,14 +9,14 @@ export interface TokenPayload {
   userId: string;
   email: string;
   organizationId?: string;
-  tokenVersion?: number; // ✅ NEW
+  tokenVersion?: number;
   type?: 'access' | 'refresh';
 }
 
 // Helper to get expiry in seconds
 const getExpirySeconds = (expiryString: string): number => {
   const match = expiryString.match(/^(\d+)([smhdw])$/);
-  
+
   if (!match) {
     // Default to 7 days in seconds
     return 7 * 24 * 60 * 60;
@@ -37,9 +39,10 @@ const getExpirySeconds = (expiryString: string): number => {
 export const generateAccessToken = (payload: Omit<TokenPayload, 'type'>): string => {
   const secret: Secret = config.jwt.secret;
   const options: SignOptions = {
-    expiresIn: getExpirySeconds(config.jwt.expiresIn),
+    // ✅ FIX: use accessExpiresIn (15m), NOT expiresIn (7d)
+    expiresIn: getExpirySeconds(config.jwt.accessExpiresIn),
   };
-  
+
   return jwt.sign(
     { tokenVersion: 0, ...payload, type: 'access' },
     secret,
@@ -53,7 +56,7 @@ export const generateRefreshToken = (payload: Omit<TokenPayload, 'type'>): strin
   const options: SignOptions = {
     expiresIn: getExpirySeconds(config.jwt.refreshExpiresIn),
   };
-  
+
   return jwt.sign(
     { tokenVersion: 0, ...payload, type: 'refresh' },
     secret,

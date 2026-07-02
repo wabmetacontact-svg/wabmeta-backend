@@ -1,4 +1,8 @@
-// src/modules/auth/auth.service.ts - FINAL VERSION
+// src/modules/auth/auth.service.ts - FIXED VERSION
+// ✅ FIX 1: generateTokenPair now returns correct accessExpiresIn (was returning 7d refresh expiry)
+// ✅ FIX 2: changePassword now increments tokenVersion (invalidates old access tokens immediately)
+// ✅ FIX 3: resetPassword now increments tokenVersion (invalidates old access tokens immediately)
+// ✅ FIX 4: logoutAll now increments tokenVersion in a transaction (invalidates in-flight access tokens too)
 
 import prisma from '../../config/database';
 import { config } from '../../config';
@@ -40,9 +44,6 @@ const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // 1 minute
 // ============================================
 
 const googleClient = new OAuth2Client(config.google.clientId);
-
-// ✅ NOTE: redis variable HATAYA gaya hai top se
-// Har function me getRedis() call hoga jab zaroorat ho
 
 // ============================================
 // HELPER: Phone Normalizers
@@ -97,7 +98,6 @@ const sendWhatsAppTemplate = (
 
   const waPhone = toWhatsAppPhone(phone);
 
-  // Fetch the template from DB to check for header configuration dynamically
   prisma.template
     .findFirst({
       where: {
@@ -175,29 +175,6 @@ const sendWhatsAppTemplate = (
       }
     });
 };
-// ============================================
-// HELPER: Safe Redis operation wrapper
-// ============================================
-
-// ✅ NEW: Redis operations ko safely execute karo
-const safeRedisOp = async <T>(
-  operation: (redis: any) => Promise<T>,
-  fallback: T,
-  operationName = 'Redis op'
-): Promise<T> => {
-  const redis = getRedis();
-  if (!redis) {
-    console.warn(`⚠️  ${operationName}: Redis not available, using fallback`);
-    return fallback;
-  }
-
-  try {
-    return await operation(redis);
-  } catch (err: any) {
-    console.warn(`⚠️  ${operationName} failed: ${err.message}`);
-    return fallback;
-  }
-};
 
 // ============================================
 // IN-MEMORY OTP FALLBACK (jab Redis nahi ho)
@@ -210,11 +187,8 @@ interface OtpData {
   expiresAt: number;
 }
 
-// ✅ In-memory store - Redis down hone pe kaam aayega
-// Note: Multi-instance pe kaam nahi karega, but single Render instance pe theek hai
 const memoryOtpStore = new Map<string, OtpData>();
 
-// Expired OTPs cleanup (memory leak prevent karo)
 setInterval(() => {
   const now = Date.now();
   for (const [key, data] of memoryOtpStore.entries()) {
@@ -222,7 +196,7 @@ setInterval(() => {
       memoryOtpStore.delete(key);
     }
   }
-}, 5 * 60 * 1000); // Har 5 min pe cleanup
+}, 5 * 60 * 1000);
 
 // ─── OTP Store (Redis + Memory Fallback) ─────────────────────────
 
@@ -239,7 +213,6 @@ const storeOTP = async (key: string, data: OtpData): Promise<void> => {
     }
   }
 
-  // ✅ Memory fallback
   memoryOtpStore.set(key, data);
 };
 
@@ -255,11 +228,9 @@ const getOTP = async (key: string): Promise<OtpData | null> => {
     }
   }
 
-  // ✅ Memory fallback
   const memData = memoryOtpStore.get(key);
   if (!memData) return null;
 
-  // Expiry check
   if (Date.now() > memData.expiresAt) {
     memoryOtpStore.delete(key);
     return null;
@@ -279,7 +250,6 @@ const deleteOTP = async (key: string): Promise<void> => {
     }
   }
 
-  // Memory se bhi delete karo
   memoryOtpStore.delete(key);
 };
 
@@ -327,7 +297,6 @@ const generateTokenPair = async (
   email: string,
   organizationId?: string
 ): Promise<AuthTokens> => {
-  // ✅ User ka current tokenVersion fetch karo
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { tokenVersion: true },
@@ -337,7 +306,7 @@ const generateTokenPair = async (
     userId,
     email,
     organizationId,
-    tokenVersion: user?.tokenVersion ?? 0, // ✅ JWT me include karo
+    tokenVersion: user?.tokenVersion ?? 0,
   };
 
   const accessToken = generateAccessToken(payload);
@@ -354,7 +323,10 @@ const generateTokenPair = async (
   return {
     accessToken,
     refreshToken,
-    expiresIn: parseExpiryTime(config.jwt.expiresIn),
+    // ✅ FIX: this was config.jwt.expiresIn (7d) which described the REFRESH token,
+    // not the access token. Frontend uses this value to know when the access token
+    // actually expires, so it must reflect accessExpiresIn (15m).
+    expiresIn: parseExpiryTime(config.jwt.accessExpiresIn),
   };
 };
 
@@ -454,7 +426,6 @@ export class AuthService {
     const waPhone = toWhatsAppPhone(phone);
     const key = `${PHONE_OTP_PREFIX}${waPhone}`;
 
-    // Cooldown check (Redis ya memory se)
     const existing = await getOTP(key);
     if (existing) {
       const elapsed = Date.now() - (existing.createdAt || 0);
@@ -475,7 +446,6 @@ export class AuthService {
       expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
     };
 
-    // ✅ Redis ya memory me store karo - koi bhi down ho chalega
     await storeOTP(key, otpData);
 
     if (config.nodeEnv === 'development') {
@@ -520,7 +490,6 @@ export class AuthService {
     const phoneE164 = toE164(phone);
     const key = `${PHONE_OTP_PREFIX}${waPhone}`;
 
-    // ✅ Redis ya memory se OTP lo
     const storedData = await getOTP(key);
 
     if (!storedData) {
@@ -545,17 +514,14 @@ export class AuthService {
       await updateOTPAttempts(key, storedData, newAttempts);
 
       throw new AppError(
-        `Invalid OTP. ${remaining} attempt${
-          remaining !== 1 ? 's' : ''
+        `Invalid OTP. ${remaining} attempt${remaining !== 1 ? 's' : ''
         } remaining.`,
         400
       );
     }
 
-    // OTP verified - delete from Redis
     await deleteOTP(key);
 
-    // Email duplicate check
     const normalizedEmail = userData.email.trim().toLowerCase();
 
     const existingUser = await prisma.user.findUnique({
@@ -569,10 +535,8 @@ export class AuthService {
       );
     }
 
-    // Hash password
     const hashedPassword = await hashPassword(userData.password);
 
-    // Create user + org + subscription
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -595,14 +559,12 @@ export class AuthService {
       return { user, organization };
     });
 
-    // Generate tokens
     const tokens = await generateTokenPair(
       result.user.id,
       result.user.email,
       result.organization.id
     );
 
-    // Send welcome messages (non-blocking)
     sendWhatsAppTemplate(
       waPhone,
       config.platform.whatsapp.welcomeTemplate,
@@ -634,22 +596,20 @@ export class AuthService {
   // ────────────────────────────────────────────
   // REGISTER (Email based)
   // ────────────────────────────────────────────
-  async register(input: RegisterInput): Promise<{ 
-    message: string; 
+  async register(input: RegisterInput): Promise<{
+    message: string;
     email: string;
     requiresVerification: boolean;
   }> {
     const { email, password, firstName, lastName, phone, organizationName } = input;
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Email duplicate check
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
     if (existingUser) {
       if (!existingUser.emailVerified) {
-        // User exists but not verified - resend OTP
         const otp = generateOTP(6);
         const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
 
@@ -678,10 +638,8 @@ export class AuthService {
       throw new AppError('Email already registered. Please login instead.', 409);
     }
 
-    // Hash password
     const hashedPassword = await hashPassword(password);
 
-    // Create user + organization in transaction
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -701,7 +659,6 @@ export class AuthService {
       return { user, organization };
     });
 
-    // ✅ Generate OTP & send to EMAIL
     const otp = generateOTP(6);
     const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
 
@@ -714,7 +671,6 @@ export class AuthService {
 
     await storeOTP(key, otpData);
 
-    // ✅ Send OTP Email
     const tpl = emailTemplates.otp(result.user.firstName, otp);
     sendEmailNonBlocking({
       to: normalizedEmail,
@@ -723,9 +679,6 @@ export class AuthService {
     });
 
     console.log(`📧 Signup OTP sent to: ${normalizedEmail}`);
-
-    // ❌ NO WhatsApp message yet
-    // ❌ NO tokens yet (user not verified)
 
     return {
       message: 'Account created! Please check your email for verification OTP.',
@@ -808,7 +761,6 @@ export class AuthService {
   // ────────────────────────────────────────────
   // VERIFY EMAIL
   // ────────────────────────────────────────────
-  // ✅ FIXED verifyEmail - welcome messages add kiye
   async verifyEmail(token: string): Promise<{ message: string }> {
     const user = await prisma.user.findFirst({
       where: {
@@ -834,14 +786,12 @@ export class AuthService {
       },
     });
 
-    // ✅ Welcome Email
     sendEmailNonBlocking({
       to: user.email,
       subject: '🎉 Welcome to WabMeta!',
       html: emailTemplates.welcome(user.firstName).html,
     });
 
-    // ✅ Welcome WhatsApp (agar phone ho)
     if (user.phone) {
       sendWhatsAppTemplate(
         user.phone,
@@ -950,16 +900,18 @@ export class AuthService {
 
     const hashed = await hashPassword(newPassword);
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        password: hashed,
-        passwordResetToken: null,
-        passwordResetExpires: null,
-      },
-    });
-
-    await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          password: hashed,
+          passwordResetToken: null,
+          passwordResetExpires: null,
+          tokenVersion: { increment: 1 }, // ✅ FIX: invalidate any still-live access tokens immediately
+        },
+      }),
+      prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+    ]);
 
     return { message: 'Password reset successfully' };
   }
@@ -994,9 +946,6 @@ export class AuthService {
       html: tpl.html,
     });
 
-    // ❌ Resend pe WhatsApp mat bhejo - sirf email
-    // (Phone OTP wala alag flow था पहले)
-
     console.log(`📧 OTP resent to: ${normalizedEmail}`);
 
     return { message: 'OTP sent to your email' };
@@ -1030,7 +979,6 @@ export class AuthService {
       );
     }
 
-    // OTP verified
     await deleteOTP(key);
 
     const user = await prisma.user.findUnique({
@@ -1038,10 +986,8 @@ export class AuthService {
     });
     if (!user) throw new AppError('User not found', 404);
 
-    // ✅ Check if first verification
     const isFirstVerification = !user.emailVerified;
 
-    // Update user as verified + active
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -1051,20 +997,15 @@ export class AuthService {
       },
     });
 
-    // Get organization
     const organization = await getDefaultOrg(user.id);
-    
-    // Generate tokens
+
     const tokens = await generateTokenPair(
       user.id,
       user.email,
       organization?.id
     );
 
-    // ✅ FIRST TIME VERIFICATION - send welcome messages
     if (isFirstVerification) {
-      
-      // ✅ Welcome Email
       sendEmailNonBlocking({
         to: normalizedEmail,
         subject: '🎉 Welcome to WabMeta!',
@@ -1072,7 +1013,6 @@ export class AuthService {
       });
       console.log(`📧 Welcome email sent → ${normalizedEmail}`);
 
-      // ✅ Welcome WhatsApp (jo phone signup me diya tha)
       if (user.phone) {
         sendWhatsAppTemplate(
           user.phone,
@@ -1087,7 +1027,6 @@ export class AuthService {
       console.log(`✅ Account activated: ${normalizedEmail}`);
     }
 
-    // Get fresh user data after update
     const updatedUser = await prisma.user.findUnique({
       where: { id: user.id },
     });
@@ -1210,9 +1149,6 @@ export class AuthService {
     });
 
     if (!stored) {
-      // 🚨 TOKEN REUSE DETECTION
-      // Token is valid JWT but not in DB -> it was already used and deleted.
-      // This means a compromised token is being reused. Revoke all sessions!
       if (payload && payload.userId) {
         console.warn(`🚨 TOKEN REUSE DETECTED! Revoking all sessions for user: ${payload.userId}`);
         await prisma.refreshToken.deleteMany({ where: { userId: payload.userId } });
@@ -1246,7 +1182,15 @@ export class AuthService {
   // LOGOUT ALL DEVICES
   // ────────────────────────────────────────────
   async logoutAll(userId: string): Promise<{ message: string }> {
-    await prisma.refreshToken.deleteMany({ where: { userId } });
+    // ✅ FIX: bump tokenVersion too, otherwise any access token issued before this
+    // call stays valid (up to 15m) even after "logout all devices"
+    await prisma.$transaction([
+      prisma.refreshToken.deleteMany({ where: { userId } }),
+      prisma.user.update({
+        where: { id: userId },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+    ]);
     return { message: 'Logged out from all devices' };
   }
 
@@ -1284,12 +1228,16 @@ export class AuthService {
 
     const hashed = await hashPassword(newPassword);
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { password: hashed },
-    });
-
-    await prisma.refreshToken.deleteMany({ where: { userId } });
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: {
+          password: hashed,
+          tokenVersion: { increment: 1 }, // ✅ FIX: invalidate all live access tokens immediately
+        },
+      }),
+      prisma.refreshToken.deleteMany({ where: { userId } }),
+    ]);
 
     return { message: 'Password changed successfully' };
   }

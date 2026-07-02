@@ -1,4 +1,8 @@
-// src/app.ts - COMPLETE FINAL VERSION WITH WEBHOOK FIX
+// src/app.ts - FIXED VERSION
+// ✅ FIX: added META_APP_SECRET signature verification on POST /api/webhooks/meta.
+// Previously ANYONE could POST fake payloads to this endpoint (no signature check),
+// which could inject fake message/status events into CRM leads, wallet deductions,
+// campaign stats, etc.
 
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -7,6 +11,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto'; // ✅ NEW
 import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { logger } from './utils/logger';
@@ -72,7 +77,7 @@ app.use(
       },
     },
     crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow loading media on different domains
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
 
@@ -91,7 +96,6 @@ console.log('🔒 CORS Allowed Origins:', allowedOrigins);
 app.use(
   cors({
     origin: (origin, callback) => {
-      // ✅ No origin (mobile apps, postman, Meta webhooks)
       if (!origin) return callback(null, true);
 
       const isVercel = origin.endsWith('.vercel.app') || origin.includes('vercel.app');
@@ -137,7 +141,13 @@ app.options('*', cors());
 // ============================================
 // BODY PARSING
 // ============================================
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  // ✅ NEW: capture raw request bytes so we can verify Meta's HMAC signature later
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
@@ -148,9 +158,7 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// Custom request logger (skip webhook to reduce noise)
 app.use((req: Request, res: Response, next: NextFunction) => {
-  // Skip detailed logging for webhooks
   if (req.path.includes('/webhooks/')) {
     return next();
   }
@@ -162,7 +170,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ============================================
 const uploadsDir = path.join(process.cwd(), 'uploads');
 
-// Create if not exists
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
   console.log('📁 Created uploads directory:', uploadsDir);
@@ -171,7 +178,6 @@ if (!fs.existsSync(uploadsDir)) {
 console.log('📁 Uploads dir:', uploadsDir);
 console.log('📁 Uploads exists:', fs.existsSync(uploadsDir));
 
-// ✅ Serve with CORS
 app.use('/uploads', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
@@ -190,7 +196,6 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-// ✅ Health check - sabse upar hona chahiye
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
@@ -208,6 +213,34 @@ app.get('/health', (req: Request, res: Response) => {
     environment: process.env.NODE_ENV || 'development',
   });
 });
+
+// ============================================
+// ✅ NEW: WEBHOOK SIGNATURE VERIFICATION
+// ============================================
+const verifyMetaSignature = (req: Request): boolean => {
+  const signature = req.headers['x-hub-signature-256'] as string;
+  const appSecret = process.env.META_APP_SECRET;
+
+  if (!appSecret) {
+    console.warn('⚠️ META_APP_SECRET missing — webhook signature check SKIPPED (set this in production!)');
+    return true; // dev-only fallback; ALWAYS set META_APP_SECRET in Render env vars
+  }
+
+  if (!signature) return false;
+
+  const rawBody = (req as any).rawBody;
+  if (!rawBody) return false;
+
+  const expected =
+    'sha256=' +
+    crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+};
 
 // ============================================
 // INLINE WEBHOOK HANDLERS (GUARANTEED TO WORK)
@@ -241,28 +274,30 @@ app.get('/api/webhooks/meta', (req: Request, res: Response) => {
 
 // POST /api/webhooks/meta - Receive WhatsApp Messages
 app.post('/api/webhooks/meta', async (req: Request, res: Response) => {
+  // ✅ FIX: reject spoofed requests before doing any processing
+  if (!verifyMetaSignature(req)) {
+    console.error('🚨 Invalid webhook signature — possible spoofed request!');
+    return res.status(403).send('Forbidden');
+  }
+
   console.log('📥 POST /api/webhooks/meta - Webhook received');
 
   // Respond immediately to Meta (required within 5 seconds)
   res.status(200).send('EVENT_RECEIVED');
 
   try {
-    // Import webhook service dynamically to avoid circular dependency issues
     const { webhookService } = await import('./modules/webhooks/webhook.service');
 
     console.log('📨 Processing webhook payload...');
 
-    // Process webhook
     const result = await webhookService.handleWebhook(req.body);
 
-    // Log webhook
     await webhookService.logWebhook(req.body, result.status, result.error || result.reason);
 
     console.log('✅ Webhook processed:', result);
   } catch (error: any) {
     console.error('❌ Webhook processing error:', error.message);
 
-    // Try to log the error
     try {
       const { webhookService } = await import('./modules/webhooks/webhook.service');
       await webhookService.logWebhook(req.body, 'failed', error.message);
@@ -288,7 +323,6 @@ console.log('✅ Inline webhook handlers registered');
 // API ROUTES
 // ============================================
 
-// Support for legacy/misconfigured frontend paths (/api/v1/api/* -> /api/*)
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (req.url.startsWith('/api/v1/api')) {
     req.url = req.url.replace('/api/v1/api', '/api');
@@ -299,24 +333,19 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 console.log('🔧 Registering API routes...');
 
 try {
-  // Test route
   app.get('/api/test', (req: Request, res: Response) => {
     res.json({ success: true, message: 'API is working' });
   });
   console.log('  ✅ /api/test');
 
-  // Public routes
   app.use('/api/auth', authRoutes);
   console.log('  ✅ /api/auth');
 
-  // Note: /api/webhooks is handled by inline handlers above
-  // But we still mount the router for any additional routes
   if (webhookRoutes !== undefined) {
     app.use('/api/webhooks', webhookRoutes);
     console.log('  ✅ /api/webhooks (router)');
   }
 
-  // Protected routes
   app.use('/api/contacts', contactsRoutes);
   console.log('  ✅ /api/contacts');
 
@@ -340,7 +369,6 @@ try {
 
   app.use('/api/whatsapp', whatsappRoutes);
   console.log('  ✅ /api/whatsapp');
-
 
   app.use('/api/inbox', inboxRoutes);
   console.log('  ✅ /api/inbox');
@@ -383,7 +411,6 @@ try {
 app.use((req: Request, res: Response) => {
   console.warn(`⚠️ 404: ${req.method} ${req.path}`);
 
-  // Special logging for webhook 404s (should not happen now)
   if (req.path.includes('/webhooks/')) {
     console.error('🔥 WEBHOOK 404 - THIS SHOULD NOT HAPPEN!');
     console.error('Request details:', {

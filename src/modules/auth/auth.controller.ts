@@ -1,8 +1,12 @@
-// src/modules/auth/auth.controller.ts - FINAL VERSION
+// src/modules/auth/auth.controller.ts - FIXED VERSION
+// ✅ FIX: now imports shared getCookieOptions/getClearCookieOptions from utils/cookies.ts
+// instead of its own conflicting local versions (was causing cross-domain cookie issues
+// and clearCookie not matching original cookie attributes)
 
 import { Request, Response, NextFunction } from 'express';
 import { authService } from './auth.service';
 import { sendSuccess } from '../../utils/response';
+import { getCookieOptions, getClearCookieOptions } from '../../utils/cookies'; // ✅ FIX
 import {
   RegisterInput,
   LoginInput,
@@ -22,25 +26,6 @@ interface AuthRequest extends Request {
     organizationId?: string;
   };
 }
-
-// ✅ Cookie options for setting cookies (with maxAge)
-const cookieOptions = (isRefresh: boolean = false) => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production', // Use secure cookies in production, false for local dev over http
-  sameSite: 'lax' as const, // Changed from 'none' to 'lax' to prevent CSRF
-  maxAge: isRefresh
-    ? 7 * 24 * 60 * 60 * 1000  // 7 days
-    : 1 * 60 * 60 * 1000,       // 1 hour
-  path: '/',
-});
-
-// ✅ FIX: Cookie options for clearing cookies (NO maxAge)
-const clearCookieOptions = () => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  path: '/',
-});
 
 export class AuthController {
   // ────────────────────────────────────────────
@@ -122,16 +107,8 @@ export class AuthController {
         organizationName: organizationName?.trim(),
       });
 
-      res.cookie(
-        'refreshToken',
-        result.tokens.refreshToken,
-        cookieOptions(true)
-      );
-      res.cookie(
-        'accessToken',
-        result.tokens.accessToken,
-        cookieOptions(false)
-      );
+      res.cookie('refreshToken', result.tokens.refreshToken, getCookieOptions(true));
+      res.cookie('accessToken', result.tokens.accessToken, getCookieOptions(false));
 
       return sendSuccess(
         res,
@@ -153,14 +130,7 @@ export class AuthController {
       const result = await authService.register(input);
 
       // ❌ Cookies mat set karo - user verified nahi hai abhi
-      // ✅ Sirf success message return karo
-
-      return sendSuccess(
-        res,
-        result,
-        result.message,
-        201
-      );
+      return sendSuccess(res, result, result.message, 201);
     } catch (error) {
       next(error);
     }
@@ -174,16 +144,8 @@ export class AuthController {
       const input: LoginInput = req.body;
       const result = await authService.login(input);
 
-      res.cookie(
-        'refreshToken',
-        result.tokens.refreshToken,
-        cookieOptions(true)
-      );
-      res.cookie(
-        'accessToken',
-        result.tokens.accessToken,
-        cookieOptions(false)
-      );
+      res.cookie('refreshToken', result.tokens.refreshToken, getCookieOptions(true));
+      res.cookie('accessToken', result.tokens.accessToken, getCookieOptions(false));
 
       return sendSuccess(res, result, 'Login successful');
     } catch (error) {
@@ -268,16 +230,8 @@ export class AuthController {
       const { email, otp }: VerifyOTPInput = req.body;
       const result = await authService.verifyOTP(email, otp);
 
-      res.cookie(
-        'refreshToken',
-        result.tokens.refreshToken,
-        cookieOptions(true)
-      );
-      res.cookie(
-        'accessToken',
-        result.tokens.accessToken,
-        cookieOptions(false)
-      );
+      res.cookie('refreshToken', result.tokens.refreshToken, getCookieOptions(true));
+      res.cookie('accessToken', result.tokens.accessToken, getCookieOptions(false));
 
       return sendSuccess(res, result, 'OTP verified successfully');
     } catch (error) {
@@ -293,16 +247,8 @@ export class AuthController {
       const { credential }: GoogleAuthInput = req.body;
       const result = await authService.googleAuth(credential);
 
-      res.cookie(
-        'refreshToken',
-        result.tokens.refreshToken,
-        cookieOptions(true)
-      );
-      res.cookie(
-        'accessToken',
-        result.tokens.accessToken,
-        cookieOptions(false)
-      );
+      res.cookie('refreshToken', result.tokens.refreshToken, getCookieOptions(true));
+      res.cookie('accessToken', result.tokens.accessToken, getCookieOptions(false));
 
       return sendSuccess(res, result, 'Google authentication successful');
     } catch (error) {
@@ -328,8 +274,8 @@ export class AuthController {
 
       const tokens = await authService.refreshToken(refreshToken);
 
-      res.cookie('refreshToken', tokens.refreshToken, cookieOptions(true));
-      res.cookie('accessToken', tokens.accessToken, cookieOptions(false));
+      res.cookie('refreshToken', tokens.refreshToken, getCookieOptions(true));
+      res.cookie('accessToken', tokens.accessToken, getCookieOptions(false));
 
       return sendSuccess(res, tokens, 'Token refreshed');
     } catch (error) {
@@ -338,7 +284,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // LOGOUT - ✅ FIXED clearCookie warning
+  // LOGOUT
   // ────────────────────────────────────────────
   async logout(req: Request, res: Response, next: NextFunction) {
     try {
@@ -349,9 +295,8 @@ export class AuthController {
         await authService.logout(refreshToken);
       }
 
-      // ✅ FIX: Use clearCookieOptions (no maxAge)
-      res.clearCookie('refreshToken', clearCookieOptions());
-      res.clearCookie('accessToken', clearCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions());
+      res.clearCookie('accessToken', getClearCookieOptions());
 
       return sendSuccess(res, null, 'Logged out successfully');
     } catch (error) {
@@ -360,16 +305,15 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // LOGOUT ALL - ✅ FIXED clearCookie warning
+  // LOGOUT ALL
   // ────────────────────────────────────────────
   async logoutAll(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const userId = req.user!.id;
       const result = await authService.logoutAll(userId);
 
-      // ✅ FIX: Use clearCookieOptions (no maxAge)
-      res.clearCookie('refreshToken', clearCookieOptions());
-      res.clearCookie('accessToken', clearCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions());
+      res.clearCookie('accessToken', getClearCookieOptions());
 
       return sendSuccess(res, result, result.message);
     } catch (error) {
@@ -391,7 +335,7 @@ export class AuthController {
   }
 
   // ────────────────────────────────────────────
-  // CHANGE PASSWORD - ✅ FIXED clearCookie warning
+  // CHANGE PASSWORD
   // ────────────────────────────────────────────
   async changePassword(
     req: AuthRequest,
@@ -407,8 +351,10 @@ export class AuthController {
         newPassword
       );
 
-      // ✅ FIX: Use clearCookieOptions (no maxAge)
-      res.clearCookie('refreshToken', clearCookieOptions());
+      // ✅ FIX: clear BOTH cookies (access token was still valid for up to 15m/7d
+      // before the tokenVersion fix — now also clear accessToken cookie for safety)
+      res.clearCookie('refreshToken', getClearCookieOptions());
+      res.clearCookie('accessToken', getClearCookieOptions());
 
       return sendSuccess(res, result, result.message);
     } catch (error) {
