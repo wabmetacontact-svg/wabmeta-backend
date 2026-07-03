@@ -1,4 +1,11 @@
-// 📁 src/modules/whatsapp/whatsapp.service.ts - COMPLETE FINAL VERSION
+// 📁 src/modules/whatsapp/whatsapp.service.ts - FIXED VERSION
+// ✅ FIX 1: getAccountWithToken now delegates to shared getAccountWithDecryptedToken()
+//    (same helper meta.service.ts uses). Previously this file had its own copy that
+//    would throw errors but never mark the account as DISCONNECTED — so message
+//    sending would silently fail while the dashboard still showed "Connected".
+// ✅ FIX 2: sendTemplateMessage now does a wallet pre-check BEFORE hitting Meta,
+//    so single sends can't push a wallet into deep negative when a customer's
+//    balance is already at zero.
 
 import {
   PrismaClient,
@@ -8,9 +15,13 @@ import {
   WhatsAppAccountStatus,
 } from '@prisma/client';
 import { metaApi } from '../meta/meta.api';
-import { safeDecrypt, maskToken } from '../../utils/encryption';
+import { maskToken } from '../../utils/encryption';
+import { getAccountWithDecryptedToken } from '../../utils/tokenDecryption'; // ✅ FIX: shared helper
 import prisma from '../../config/database';
-import { deductWalletForTemplate, getRateForCategory } from '../wallet/wallet.deduction.service';
+import {
+  deductWalletForTemplate,
+  getRateForCategory,
+} from '../wallet/wallet.deduction.service';
 
 // ============================================
 // INTERFACES
@@ -25,8 +36,8 @@ interface SendMessageOptions {
   organizationId?: string;
   tempId?: string;
   clientMsgId?: string;
-  mediaUrl?: string;  // ✅ ADD THIS
-  skipWindowCheck?: boolean;  // ✅ ADD THIS
+  mediaUrl?: string;
+  skipWindowCheck?: boolean;
 }
 
 interface SendTemplateOptions {
@@ -62,21 +73,6 @@ class WhatsAppService {
   // HELPER METHODS
   // ============================================
 
-  /**
-   * Check if a string looks like a Meta access token
-   */
-  private looksLikeAccessToken(value: string): boolean {
-    if (!value || typeof value !== 'string') return false;
-    return (
-      value.startsWith('EAA') ||
-      value.startsWith('EAAG') ||
-      value.startsWith('EAAI')
-    );
-  }
-
-  /**
-   * Extract plain text content from message payload
-   */
   private extractMessageContent(type: string, content: any): string {
     if (typeof content === 'string') {
       return content;
@@ -84,12 +80,8 @@ class WhatsAppService {
 
     switch (type.toLowerCase()) {
       case 'text':
-        if (content?.text?.body) {
-          return content.text.body;
-        }
-        if (content?.body) {
-          return content.body;
-        }
+        if (content?.text?.body) return content.text.body;
+        if (content?.body) return content.body;
         return JSON.stringify(content);
 
       case 'template':
@@ -97,24 +89,19 @@ class WhatsAppService {
         return `📋 Template: ${templateName}`;
 
       case 'image':
-        const imageCaption = content?.image?.caption || '';
-        return imageCaption || '📷 Image';
+        return content?.image?.caption || '📷 Image';
 
       case 'video':
-        const videoCaption = content?.video?.caption || '';
-        return videoCaption || '🎥 Video';
+        return content?.video?.caption || '🎥 Video';
 
       case 'document':
-        const docCaption = content?.document?.caption || '';
-        const fileName = content?.document?.filename || '';
-        return docCaption || fileName || '📄 Document';
+        return content?.document?.caption || content?.document?.filename || '📄 Document';
 
       case 'audio':
         return '🎵 Audio';
 
       case 'location':
-        const locationName = content?.location?.name || '';
-        return locationName || '📍 Location';
+        return content?.location?.name || '📍 Location';
 
       case 'sticker':
         return '🎭 Sticker';
@@ -131,67 +118,29 @@ class WhatsAppService {
   }
 
   /**
-   * Get account with safe token decryption
+   * ✅ FIX: delegates to the shared getAccountWithDecryptedToken() helper.
+   * Previously this method had its own logic that would throw an error but
+   * leave the account status as CONNECTED — so message sending would fail
+   * while the dashboard showed the account as healthy. Now, if a token
+   * can't be decrypted, the shared helper marks the account DISCONNECTED
+   * and both the UI and the sending code agree.
    */
   private async getAccountWithToken(accountId: string): Promise<{
     account: any;
     accessToken: string;
   }> {
-    const account = await prisma.whatsAppAccount.findUnique({
-      where: { id: accountId },
-      include: { organization: true },
-    });
-
-    if (!account) {
-      console.error(`❌ Account not found: ${accountId}`);
-      throw new Error('WhatsApp account not found');
+    const result = await getAccountWithDecryptedToken(accountId);
+    if (!result) {
+      // The helper has already marked the account as DISCONNECTED if needed.
+      // We convert to an exception here because most callers of this method
+      // depend on the presence of a valid token to proceed.
+      throw new Error(
+        'WhatsApp account is not connected or the access token is invalid. Please reconnect your WhatsApp account.'
+      );
     }
-
-    if (account.status !== WhatsAppAccountStatus.CONNECTED) {
-      console.error(`❌ Account not connected: ${accountId}, status: ${account.status}`);
-      throw new Error('WhatsApp account is not connected');
-    }
-
-    if (!account.accessToken) {
-      console.error(`❌ No access token for account: ${accountId}`);
-      throw new Error('No access token found for this account');
-    }
-
-    console.log(`🔐 Decrypting token for account ${accountId}...`);
-
-    let accessToken: string | null = null;
-
-    try {
-      if (this.looksLikeAccessToken(account.accessToken)) {
-        console.log(`📝 Token is already plain text (starts with EAA)`);
-        accessToken = account.accessToken;
-      } else {
-        console.log(`🔓 Attempting to decrypt token...`);
-        accessToken = safeDecrypt(account.accessToken);
-      }
-    } catch (decryptError: any) {
-      console.error(`❌ Decryption error:`, decryptError.message);
-      throw new Error('Failed to decrypt access token. Please reconnect your WhatsApp account.');
-    }
-
-    if (!accessToken) {
-      console.error(`❌ Token is null after decryption attempt`);
-      throw new Error('Failed to decrypt access token. Please reconnect your WhatsApp account.');
-    }
-
-    if (!this.looksLikeAccessToken(accessToken)) {
-      console.error(`❌ Decrypted token doesn't look like a Meta token`);
-      console.warn('⚠️ Token format suspicious, attempting to use anyway...');
-    }
-
-    console.log(`✅ Token ready: ${maskToken(accessToken)}`);
-
-    return { account, accessToken };
+    return result;
   }
 
-  /**
-   * Format phone number for WhatsApp API
-   */
   private formatPhoneNumber(phone: string): string {
     const digits = phone.replace(/[^0-9]/g, '');
 
@@ -202,19 +151,16 @@ class WhatsAppService {
     return digits;
   }
 
-  /**
-   * Get or create contact — always stores in canonical E.164 format: +919XXXXXXXXX
-   */
   private async getOrCreateContact(
     organizationId: string,
     phone: string
   ): Promise<any> {
     const digits = phone.replace(/[^0-9]/g, '');
-    const normalized = digits; // Meta always sends inbound phone with country code
+    const normalized = digits;
 
-    const canonical = `+${normalized}`;       // +919340103340
-    const withoutPlus = normalized;           // 919340103340
-    const tenDigit = normalized.slice(-10);   // 9340103340
+    const canonical = `+${normalized}`;
+    const withoutPlus = normalized;
+    const tenDigit = normalized.slice(-10);
 
     let contact = await prisma.contact.findFirst({
       where: {
@@ -231,7 +177,7 @@ class WhatsAppService {
       contact = await prisma.contact.create({
         data: {
           organizationId,
-          phone: canonical,   // ✅ Always store canonical format
+          phone: canonical,
           source: 'WHATSAPP',
           firstName: 'Unknown',
           status: 'ACTIVE',
@@ -239,11 +185,10 @@ class WhatsAppService {
       });
       console.log(`👤 Created new contact: ${canonical}`);
     } else if (contact.phone !== canonical) {
-      // ✅ Silent migration: update old-format phone to canonical
       await prisma.contact.update({
         where: { id: contact.id },
         data: { phone: canonical },
-      }).catch(() => {});
+      }).catch(() => { });
       contact.phone = canonical;
       console.log(`🔄 Migrated contact phone → ${canonical}`);
     }
@@ -251,26 +196,21 @@ class WhatsAppService {
     return contact;
   }
 
-  /**
-   * Get or create conversation
-   */
   private async getOrCreateConversation(
     organizationId: string,
     contactId: string,
-    phoneNumberId: string, // This is the Meta Phone ID
+    phoneNumberId: string,
     messagePreview: string,
     existingConversationId?: string
   ): Promise<any> {
     let conversation = null;
 
-    // 1. Try by ID if provided
     if (existingConversationId) {
       conversation = await prisma.conversation.findUnique({
         where: { id: existingConversationId },
       });
     }
 
-    // 2. Fallback or primary check by Org + Contact
     if (!conversation) {
       conversation = await prisma.conversation.findUnique({
         where: {
@@ -291,13 +231,12 @@ class WhatsAppService {
             lastMessageAt: new Date(),
             lastMessagePreview: messagePreview,
             unreadCount: 0,
-            isWindowOpen: false, // ✅ Outbound-initiated: no inbound yet, window closed
+            isWindowOpen: false,
             isRead: true
           },
         });
         console.log(`💬 Created new conversation: ${conversation.id}`);
       } catch (err) {
-        // Double check if it was created in the meantime (race condition)
         conversation = await prisma.conversation.findUnique({
           where: {
             organizationId_contactId: { organizationId, contactId },
@@ -306,7 +245,6 @@ class WhatsAppService {
         if (!conversation) throw err;
       }
     } else {
-      // ✅ Only update preview/time — do NOT touch isWindowOpen (preserve real state)
       if (messagePreview) {
         await prisma.conversation.update({
           where: { id: conversation.id },
@@ -323,9 +261,6 @@ class WhatsAppService {
     return conversation;
   }
 
-  /**
-   * Map string type to MessageType enum
-   */
   private mapMessageType(type: string): MessageType {
     const map: Record<string, MessageType> = {
       text: MessageType.TEXT,
@@ -345,12 +280,70 @@ class WhatsAppService {
   }
 
   // ============================================
-  // CONTACT VALIDATION
+  // ✅ NEW: single-send wallet pre-check
   // ============================================
 
   /**
-   * Check if a phone number has WhatsApp
+   * Pre-check: does the wallet have enough balance to cover ONE template send?
+   * Returns true if we should proceed, false to block.
+   * Wallets that don't exist / are flagged / are inactive fall through to Meta's
+   * own billing — same behavior as deductWalletForTemplate's skip conditions.
    */
+  private async canAffordSingleTemplateSend(
+    organizationId: string,
+    templateName: string,
+    templateCategory: string | undefined,
+    templateLanguage: string | undefined,
+    recipientPhone: string
+  ): Promise<{ ok: boolean; reason?: string }> {
+    try {
+      const wallet = await prisma.wallet.findUnique({
+        where: { organizationId },
+      });
+
+      // No wallet, or flagged, or explicitly deactivated → skip pre-check
+      if (!wallet || wallet.flagged || !wallet.isActive) {
+        return { ok: true };
+      }
+
+      // Resolve category if not provided (mirrors deductWalletForTemplate)
+      let category = templateCategory;
+      if (!category) {
+        const template = await prisma.template.findFirst({
+          where: { organizationId, name: templateName },
+          select: { category: true },
+        });
+        category = template?.category || 'MARKETING';
+      }
+
+      const rateRupees = getRateForCategory(category, recipientPhone, templateLanguage);
+      const amountPaise = Math.round(rateRupees * 100);
+
+      const availablePaise =
+        wallet.balancePaise +
+        (wallet.creditEnabled
+          ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+          : 0);
+
+      if (availablePaise < amountPaise) {
+        return {
+          ok: false,
+          reason: `Insufficient wallet balance (₹${(availablePaise / 100).toFixed(2)} available, ₹${rateRupees.toFixed(2)} required for this ${category} message).`,
+        };
+      }
+
+      return { ok: true };
+    } catch (err: any) {
+      // Never block a send on a pre-check bug — log and proceed
+      console.error('❌ Wallet pre-check errored (allowing send):', err.message);
+      return { ok: true };
+    }
+  }
+
+  // ============================================
+  // CONTACT VALIDATION
+  // ============================================
+
   async checkContact(
     accountId: string,
     phone: string
@@ -390,9 +383,6 @@ class WhatsAppService {
   // MESSAGE SENDING METHODS
   // ============================================
 
-  /**
-   * Send a text message
-   */
   async sendTextMessage(
     accountId: string,
     to: string,
@@ -401,7 +391,7 @@ class WhatsAppService {
     organizationId?: string,
     tempId?: string,
     clientMsgId?: string,
-    skipWindowCheck?: boolean  // ✅ ADD THIS
+    skipWindowCheck?: boolean
   ) {
     return this.sendMessage({
       accountId,
@@ -412,17 +402,14 @@ class WhatsAppService {
       organizationId,
       tempId,
       clientMsgId,
-      skipWindowCheck,  // ✅ PASS KARO
+      skipWindowCheck,
     });
   }
 
-  // Helper function to hydrate template text
   private hydrateTemplate(bodyText: string, params: any[]): string {
     let text = bodyText;
     if (!params || params.length === 0) return text;
 
-    // Convert components to parameter array
-    // Components array structure: [{ type: 'body', parameters: [{ type: 'text', text: 'Value' }] }]
     let flatParams: any[] = [];
     if (params.length > 0) {
       if (params[0]?.type === 'body' || params[0]?.parameters) {
@@ -436,16 +423,12 @@ class WhatsAppService {
     }
 
     flatParams.forEach((param, index) => {
-      // Replace {{1}}, {{2}} etc with params
       const paramValue = typeof param === 'string' ? param : param?.text || JSON.stringify(param);
       text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, 'g'), paramValue);
     });
     return text;
   }
 
-  /**
-   * Send a template message
-   */
   async sendTemplateMessage(options: SendTemplateOptions) {
     const {
       accountId,
@@ -469,22 +452,36 @@ class WhatsAppService {
 
       const { account, accessToken } = accountData;
 
-      // ✅ 1. Get Template Details from DB to get Body Text
       const template = await prisma.template.findFirst({
         where: {
           organizationId: account.organizationId,
           name: templateName,
-          status: 'APPROVED' // Optional
+          status: 'APPROVED'
         }
       });
 
-      // ✅ 2. Hydrate text (Fill variables)
       let fullContent = templateName;
       if (template?.bodyText) {
         fullContent = this.hydrateTemplate(template.bodyText, components || []);
       }
 
-      // Formatted phone
+      const orgId = organizationId || account.organizationId;
+
+      // ✅ FIX: wallet pre-check BEFORE hitting Meta. If wallet is empty/insufficient,
+      // block here — otherwise we'd send the message, get billed by Meta, and then
+      // fire-and-forget deduction would silently fail with no user-visible signal.
+      const walletCheck = await this.canAffordSingleTemplateSend(
+        orgId,
+        templateName,
+        template?.category,
+        templateLanguage,
+        to
+      );
+      if (!walletCheck.ok) {
+        console.warn(`💳 Blocking send: ${walletCheck.reason}`);
+        throw new Error(walletCheck.reason || 'Wallet balance insufficient for this message.');
+      }
+
       const formattedTo = this.formatPhoneNumber(to);
       const messagePayload: any = {
         messaging_product: 'whatsapp',
@@ -498,7 +495,6 @@ class WhatsAppService {
         },
       };
 
-      // Send to Meta
       const response = await metaApi.sendMessage(
         account.phoneNumberId,
         accessToken,
@@ -509,24 +505,13 @@ class WhatsAppService {
       const waMessageId = (response as any)?.messages?.[0]?.id || response?.messageId;
       if (!waMessageId) throw new Error('No message ID returned');
 
-      // ✅ ── WALLET DEDUCTION (Meta send ke BAAD, non-blocking) ─────────────────
-      const orgId = organizationId || account.organizationId;
-      
-      // Template category & language DB se fetch karo
-      const templateForCategory = await prisma.template.findFirst({
-        where: {
-          organizationId: orgId,
-          name: templateName,
-        },
-        select: { category: true, language: true },
-      });
-
-      // Fire & forget - message blocking nahi hoga
+      // Wallet deduction (still fire-and-forget; the pre-check above guarantees
+      // we won't push balance below zero on the happy path)
       deductWalletForTemplate({
         organizationId: orgId,
         templateName,
-        templateCategory: templateForCategory?.category,
-        templateLanguage: templateForCategory?.language,
+        templateCategory: template?.category,
+        templateLanguage: templateLanguage,
         recipientPhone: to,
         waMessageId,
       }).then(result => {
@@ -538,17 +523,14 @@ class WhatsAppService {
       }).catch(err => {
         console.error('💳 Wallet deduction failed (non-blocking):', err.message);
       });
-      // ✅ ── END WALLET DEDUCTION ────────────────────────────────────────────────
 
-      // ✅ 2.5 Extract Media URL for saving
       let mediaUrlForDB = null;
       const headerComp = components?.find((c: any) => c.type === 'header');
       if (headerComp && headerComp.parameters && headerComp.parameters[0]) {
-          const param = headerComp.parameters[0];
-          mediaUrlForDB = param.image?.link || param.video?.link || param.document?.link || null;
+        const param = headerComp.parameters[0];
+        mediaUrlForDB = param.image?.link || param.video?.link || param.document?.link || null;
       }
 
-      // ✅ 3. Save FULL CONTENT to Database
       let savedMessage = null;
       if (conversationId && organizationId) {
         const now = new Date();
@@ -561,7 +543,7 @@ class WhatsAppService {
             direction: 'OUTBOUND',
             type: 'TEMPLATE',
             content: fullContent,
-            mediaUrl: mediaUrlForDB, // ✅ Save media URL if present
+            mediaUrl: mediaUrlForDB,
             status: 'SENT',
             sentAt: now,
             timestamp: now,
@@ -575,7 +557,6 @@ class WhatsAppService {
           },
         });
 
-        // Update conversation
         await prisma.conversation.update({
           where: { id: conversationId },
           data: {
@@ -586,7 +567,6 @@ class WhatsAppService {
           },
         });
 
-        // Emit Socket Event
         const { webhookEvents } = await import('../webhooks/webhook.service');
         webhookEvents.emit('newMessage', {
           organizationId,
@@ -618,9 +598,6 @@ class WhatsAppService {
     }
   }
 
-  /**
-   * Send a media message
-   */
   async sendMediaMessage(
     accountId: string,
     to: string,
@@ -654,24 +631,20 @@ class WhatsAppService {
     });
   }
 
-  /**
-   * Core send message function
-   */
   async sendMessage(options: SendMessageOptions) {
-  const {
-    accountId, to, type, content,
-    conversationId, organizationId, tempId, clientMsgId,
-    mediaUrl, skipWindowCheck,
-  } = options;
+    const {
+      accountId, to, type, content,
+      conversationId, organizationId, tempId, clientMsgId,
+      mediaUrl, skipWindowCheck,
+    } = options;
 
-  const startTime = Date.now();
-  console.log(`📤 sendMessage START: type=${type} to=${to}`);
+    const startTime = Date.now();
+    console.log(`📤 sendMessage START: type=${type} to=${to}`);
 
-  // ✅ PARALLEL FETCH - Account + Conversation
-  const [accountData, conversationData] = await Promise.all([
-    this.getAccountWithToken(accountId),
-    conversationId
-      ? prisma.conversation.findUnique({
+    const [accountData, conversationData] = await Promise.all([
+      this.getAccountWithToken(accountId),
+      conversationId
+        ? prisma.conversation.findUnique({
           where: { id: conversationId },
           select: {
             id: true, contactId: true,
@@ -679,180 +652,170 @@ class WhatsAppService {
             lastCustomerMessageAt: true,
           },
         })
-      : Promise.resolve(null),
-  ]);
+        : Promise.resolve(null),
+    ]);
 
-  const { account, accessToken } = accountData;
-  const orgId = organizationId || account.organizationId;
-  const formattedTo = this.formatPhoneNumber(to);
+    const { account, accessToken } = accountData;
+    const orgId = organizationId || account.organizationId;
+    const formattedTo = this.formatPhoneNumber(to);
 
-  // ✅ Quick window check (in-memory)
-  if (type !== 'template' && !skipWindowCheck && conversationData) {
-    const now = new Date();
-    let expired = false;
+    if (type !== 'template' && !skipWindowCheck && conversationData) {
+      const now = new Date();
+      let expired = false;
 
-    if (conversationData.windowExpiresAt) {
-      expired = new Date(conversationData.windowExpiresAt) <= now;
-    } else if (conversationData.isWindowOpen === false) {
-      expired = true;
-    } else if (conversationData.lastCustomerMessageAt) {
-      expired = now.getTime() - new Date(conversationData.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
+      if (conversationData.windowExpiresAt) {
+        expired = new Date(conversationData.windowExpiresAt) <= now;
+      } else if (conversationData.isWindowOpen === false) {
+        expired = true;
+      } else if (conversationData.lastCustomerMessageAt) {
+        expired = now.getTime() - new Date(conversationData.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
+      }
+
+      if (expired) {
+        throw new Error('User session expired (24h window closed). Send a Template Message to re-engage.');
+      }
     }
 
-    if (expired) {
-      throw new Error('User session expired (24h window closed). Send a Template Message to re-engage.');
-    }
-  }
+    const metaStart = Date.now();
+    const messagePayload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: formattedTo,
+      type,
+      ...content,
+    };
 
-  // ✅ Meta API call
-  const metaStart = Date.now();
-  const messagePayload: any = {
-    messaging_product: 'whatsapp',
-    recipient_type:    'individual',
-    to:                formattedTo,
-    type,
-    ...content,
-  };
-
-  const result = await metaApi.sendMessage(
-    account.phoneNumberId, accessToken, formattedTo, messagePayload
-  );
-
-  console.log(`⏱️ Meta API: ${Date.now() - metaStart}ms`);
-
-  const waMessageId    = result.messageId;
-  const now            = new Date();
-  const messageContent = this.extractMessageContent(type, content);
-
-  // Media URL extract
-  let mediaUrlForDB: string | null = null;
-  const mediaTypes = ['image', 'video', 'audio', 'document', 'sticker'];
-  if (mediaTypes.includes(type)) {
-    mediaUrlForDB = content?.[type]?.link || content?.[type]?.url ||
-                    content?.link || mediaUrl || null;
-  }
-
-  // ✅ Contact + Conversation (need IDs for message save)
-  const contact = await this.getOrCreateContact(orgId, to);
-  let conversation = conversationData;
-  if (!conversation) {
-    conversation = await this.getOrCreateConversation(
-      orgId, contact.id, account.phoneNumberId,
-      messageContent.substring(0, 100), conversationId
+    const result = await metaApi.sendMessage(
+      account.phoneNumberId, accessToken, formattedTo, messagePayload
     );
+
+    console.log(`⏱️ Meta API: ${Date.now() - metaStart}ms`);
+
+    const waMessageId = result.messageId;
+    const now = new Date();
+    const messageContent = this.extractMessageContent(type, content);
+
+    let mediaUrlForDB: string | null = null;
+    const mediaTypes = ['image', 'video', 'audio', 'document', 'sticker'];
+    if (mediaTypes.includes(type)) {
+      mediaUrlForDB = content?.[type]?.link || content?.[type]?.url ||
+        content?.link || mediaUrl || null;
+    }
+
+    const contact = await this.getOrCreateContact(orgId, to);
+    let conversation = conversationData;
+    if (!conversation) {
+      conversation = await this.getOrCreateConversation(
+        orgId, contact.id, account.phoneNumberId,
+        messageContent.substring(0, 100), conversationId
+      );
+    }
+
+    const savedMessage = await prisma.message.create({
+      data: {
+        conversationId: conversation!.id,
+        whatsappAccountId: accountId,
+        wamId: waMessageId,
+        waMessageId: waMessageId,
+        direction: MessageDirection.OUTBOUND,
+        type: this.mapMessageType(type),
+        content: messageContent,
+        mediaUrl: mediaUrlForDB,
+        status: MessageStatus.SENT,
+        timestamp: now,
+        sentAt: now,
+        createdAt: now,
+        metadata: {
+          ...(tempId ? { tempId } : {}),
+          ...(clientMsgId ? { clientMsgId } : {}),
+        } as any,
+      },
+    });
+
+    setImmediate(async () => {
+      try {
+        await prisma.conversation.update({
+          where: { id: conversation!.id },
+          data: {
+            lastMessageAt: now,
+            lastMessagePreview: messageContent.substring(0, 100),
+            isRead: true,
+            unreadCount: 0,
+          },
+        });
+
+        const { inboxService } = await import('../inbox/inbox.service');
+        await inboxService.clearCache(orgId);
+
+        const { webhookEvents } = await import('../webhooks/webhook.service');
+        const contactData = await prisma.contact.findUnique({
+          where: { id: contact.id },
+          select: {
+            id: true, phone: true, firstName: true, lastName: true,
+            whatsappProfileName: true, avatar: true,
+          },
+        });
+
+        webhookEvents.emit('conversationUpdated', {
+          organizationId: orgId,
+          conversation: {
+            id: conversation!.id,
+            lastMessageAt: now.toISOString(),
+            lastMessagePreview: messageContent.substring(0, 100),
+            unreadCount: 0,
+            isRead: true,
+            isWindowOpen: conversation!.isWindowOpen,
+            windowExpiresAt: conversation!.windowExpiresAt instanceof Date
+              ? conversation!.windowExpiresAt.toISOString()
+              : conversation!.windowExpiresAt,
+            contact: contactData,
+          },
+        });
+      } catch (e) {
+        console.error('Background task error:', e);
+      }
+    });
+
+    console.log(`✅ sendMessage TOTAL: ${Date.now() - startTime}ms`);
+
+    return {
+      success: true,
+      messageId: waMessageId,
+      message: {
+        ...savedMessage,
+        tempId,
+        clientMsgId,
+      },
+    };
   }
 
-  // ✅ Save message (must await for response)
-  const savedMessage = await prisma.message.create({
-    data: {
-      conversationId:    conversation!.id,
-      whatsappAccountId: accountId,
-      wamId:             waMessageId,
-      waMessageId:       waMessageId,
-      direction:         MessageDirection.OUTBOUND,
-      type:              this.mapMessageType(type),
-      content:           messageContent,
-      mediaUrl:          mediaUrlForDB,
-      status:            MessageStatus.SENT,
-      timestamp:         now,
-      sentAt:            now,
-      createdAt:         now,
-      metadata: {
-        ...(tempId      ? { tempId }      : {}),
-        ...(clientMsgId ? { clientMsgId } : {}),
-      } as any,
-    },
-  });
-
-  // ✅ BACKGROUND TASKS - Non-blocking
-  setImmediate(async () => {
-    try {
-      // Conversation update
-      await prisma.conversation.update({
-        where: { id: conversation!.id },
-        data: {
-          lastMessageAt:      now,
-          lastMessagePreview: messageContent.substring(0, 100),
-          isRead:             true,
-          unreadCount:        0,
-        },
-      });
-
-      // Cache clear
-      const { inboxService } = await import('../inbox/inbox.service');
-      await inboxService.clearCache(orgId);
-
-      // Socket emit
-      const { webhookEvents } = await import('../webhooks/webhook.service');
-      const contactData = await prisma.contact.findUnique({
-        where:  { id: contact.id },
-        select: {
-          id: true, phone: true, firstName: true, lastName: true,
-          whatsappProfileName: true, avatar: true,
-        },
-      });
-
-      webhookEvents.emit('conversationUpdated', {
-        organizationId: orgId,
-        conversation: {
-          id:                 conversation!.id,
-          lastMessageAt:      now.toISOString(),
-          lastMessagePreview: messageContent.substring(0, 100),
-          unreadCount:        0,
-          isRead:             true,
-          isWindowOpen:       conversation!.isWindowOpen,
-          windowExpiresAt:    conversation!.windowExpiresAt instanceof Date
-            ? conversation!.windowExpiresAt.toISOString()
-            : conversation!.windowExpiresAt,
-          contact:            contactData,
-        },
-      });
-    } catch (e) {
-      console.error('Background task error:', e);
-    }
-  });
-
-  console.log(`✅ sendMessage TOTAL: ${Date.now() - startTime}ms`);
-
-  return {
-    success:   true,
-    messageId: waMessageId,
-    message: {
-      ...savedMessage,
-      tempId,
-      clientMsgId,
-    },
-  };
-}
-
-  /**
-   * 24h window check — throws if window is expired
-   */
+  // ============================================
+  // 24h window check — kept for backward compat (dead code, called nowhere internally)
+  // ============================================
   private async checkWindowOrThrow(
     organizationId: string,
     conversationId: string | undefined,
-    to:             string,
-    accountId:      string,
-    type:           string,
-    content:        any
+    to: string,
+    accountId: string,
+    type: string,
+    content: any
   ) {
     try {
       let conv: any = null;
 
       if (conversationId) {
         conv = await prisma.conversation.findUnique({
-          where:  { id: conversationId },
+          where: { id: conversationId },
           select: {
-            id:                   true,
-            isWindowOpen:         true,
-            windowExpiresAt:      true,
+            id: true,
+            isWindowOpen: true,
+            windowExpiresAt: true,
             lastCustomerMessageAt: true,
           },
         });
       }
 
       if (!conv) {
-        // Try to find by contact + org
         const digits = to.replace(/[^0-9]/g, '');
         const contact = await prisma.contact.findFirst({
           where: {
@@ -870,16 +833,15 @@ class WhatsAppService {
           conv = await prisma.conversation.findUnique({
             where: { organizationId_contactId: { organizationId, contactId: contact.id } },
             select: {
-              id:                   true,
-              isWindowOpen:         true,
-              windowExpiresAt:      true,
+              id: true,
+              isWindowOpen: true,
+              windowExpiresAt: true,
               lastCustomerMessageAt: true,
             },
           });
         }
       }
 
-      // No conversation yet → block, need template first
       if (!conv) {
         throw new Error(
           'No inbound message from user yet. You must start with a Template Message.'
@@ -898,7 +860,6 @@ class WhatsAppService {
           now.getTime() - new Date(conv.lastCustomerMessageAt).getTime() >
           24 * 60 * 60 * 1000;
       } else {
-        // Count inbound
         const inboundCount = await prisma.message.count({
           where: { conversationId: conv.id, direction: MessageDirection.INBOUND },
         });
@@ -910,35 +871,32 @@ class WhatsAppService {
           ? 'User session expired (24h window closed). Send a Template Message to re-engage.'
           : 'No inbound message from user yet. You must start with a Template Message.';
 
-        // Save failed message (non-blocking)
         if (conv.id) {
           prisma.message.create({
             data: {
-              conversationId:    conv.id,
+              conversationId: conv.id,
               whatsappAccountId: accountId,
-              direction:         MessageDirection.OUTBOUND,
-              type:              this.mapMessageType(type),
-              content:           this.extractMessageContent(type, content),
-              status:            MessageStatus.FAILED,
-              failureReason:     errorMsg,
-              sentAt:            new Date(),
-              failedAt:          new Date(),
+              direction: MessageDirection.OUTBOUND,
+              type: this.mapMessageType(type),
+              content: this.extractMessageContent(type, content),
+              status: MessageStatus.FAILED,
+              failureReason: errorMsg,
+              sentAt: new Date(),
+              failedAt: new Date(),
             },
-          }).catch(() => {});
+          }).catch(() => { });
         }
 
         throw new Error(errorMsg);
       }
     } catch (err: any) {
-      // Re-throw only real window errors
       if (
         err.message?.includes('Template Message') ||
-        err.message?.includes('window closed')    ||
+        err.message?.includes('window closed') ||
         err.message?.includes('session expired')
       ) {
         throw err;
       }
-      // DB lookup failed silently
       console.warn('Window check error (non-critical):', err.message);
     }
   }
@@ -947,9 +905,6 @@ class WhatsAppService {
   // CAMPAIGN METHODS
   // ============================================
 
-  /**
-   * Send bulk campaign messages - WITH CONTACT CHECK
-   */
   async sendCampaignMessages(
     campaignId: string,
     batchSize: number = 500,
@@ -1003,11 +958,10 @@ class WhatsAppService {
       );
     }
 
-    // ✅ ── WALLET PRE-CHECK for Campaign ────────────────────────────────────────
     const orgId = campaign.whatsappAccount.organizationId;
-    
+
     const { deductWalletForCampaign } = await import('../wallet/wallet.deduction.service');
-    
+
     const walletCheck = await deductWalletForCampaign({
       organizationId: orgId,
       templateName: campaign.template.name,
@@ -1016,19 +970,16 @@ class WhatsAppService {
       campaignId,
     });
 
-    // Log wallet status
     if (walletCheck.walletActive) {
       console.log(`💳 Wallet check for campaign:`);
       console.log(`   Estimated cost: ₹${walletCheck.estimatedCost.toFixed(2)}`);
       console.log(`   Available: ₹${walletCheck.availableBalance.toFixed(2)}`);
-      
+
       if (!walletCheck.canProceed) {
         console.warn(`⚠️ Wallet balance low! Shortfall: ₹${walletCheck.shortfall.toFixed(2)}`);
         console.warn(`⚠️ Campaign will continue but wallet may run out`);
-        // Note: Campaign block nahi karte, user ko notification jayega
       }
     }
-    // ✅ ── END WALLET PRE-CHECK ──────────────────────────────────────────────────
 
     const results: CampaignSendResult = {
       sent: 0,
@@ -1036,7 +987,6 @@ class WhatsAppService {
       errors: [],
     };
 
-    // ✅ Accumulate country-wise cost per sent message (paise)
     let totalSentAmountPaise = 0;
     const templateCategory = campaign.template?.category || 'MARKETING';
 
@@ -1044,18 +994,8 @@ class WhatsAppService {
       try {
         const formattedPhone = this.formatPhoneNumber(recipient.contact.phone);
 
-        // ✅ Skip contact check to reduce latency
-        /*
-        try {
-          console.log(`📞 Checking contact: ${formattedPhone}`);
-          ...
-        } catch (checkError: any) { ... }
-        */
-
-        // Build template components
         const components = this.buildTemplateComponents(campaign.template, {});
 
-        // Send message
         const messagePayload = {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
@@ -1075,7 +1015,6 @@ class WhatsAppService {
           messagePayload
         );
 
-        // Update contact status
         await this.updateContactStatus(
           campaignId,
           recipient.contactId,
@@ -1084,7 +1023,6 @@ class WhatsAppService {
         );
 
         results.sent++;
-        // ✅ Add country-wise rate for this recipient
         totalSentAmountPaise += Math.round(
           getRateForCategory(templateCategory, recipient.contact.phone) * 100
         );
@@ -1093,7 +1031,6 @@ class WhatsAppService {
           `✅ Sent to ${recipient.contact.phone} (${messageResult.messageId})`
         );
 
-        // Delay between messages
         if (delayMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
@@ -1106,10 +1043,9 @@ class WhatsAppService {
         const errorData = error.response?.data?.error || {};
         const errorCode = errorData.code;
         const errorMessage = errorData.message || error.message;
-        
-        // Human-readable mapping for common Meta errors
+
         let failureReason = errorMessage;
-        
+
         if (errorCode === 131030 || errorMessage.includes('not a WhatsApp user')) {
           failureReason = 'Phone number is not registered on WhatsApp';
         } else if (errorCode === 131048 || errorCode === 131021 || errorMessage.includes('rate limit')) {
@@ -1137,12 +1073,10 @@ class WhatsAppService {
 
     await this.checkCampaignCompletion(campaignId);
 
-    // COUNTRY-AWARE BULK WALLET DEDUCTION
-    // totalSentAmountPaise = sum of each recipient's individual country rate
     if (walletCheck.walletActive && results.sent > 0 && totalSentAmountPaise > 0) {
       try {
         const totalAmountRupees = totalSentAmountPaise / 100;
-        const avgRateRupees     = totalAmountRupees / results.sent;
+        const avgRateRupees = totalAmountRupees / results.sent;
 
         console.log(
           `Wallet country-aware bulk deduction: ${results.sent} msgs, total Rs${totalAmountRupees.toFixed(2)} ` +
@@ -1163,9 +1097,9 @@ class WhatsAppService {
             : 0;
           const availablePaise = wallet.balancePaise + creditHeadroom;
 
-          const actualDeductPaise   = Math.min(totalSentAmountPaise, availablePaise);
+          const actualDeductPaise = Math.min(totalSentAmountPaise, availablePaise);
           const creditDeductedPaise = Math.max(0, actualDeductPaise - wallet.balancePaise);
-          const newBalancePaise     = Math.max(0, wallet.balancePaise - actualDeductPaise);
+          const newBalancePaise = Math.max(0, wallet.balancePaise - actualDeductPaise);
 
           await tx.wallet.update({
             where: { id: wallet.id },
@@ -1212,9 +1146,7 @@ class WhatsAppService {
 
     return results;
   }
-  /**
-   * Update campaign contact status
-   */
+
   async updateContactStatus(
     campaignId: string,
     contactId: string,
@@ -1278,9 +1210,6 @@ class WhatsAppService {
     }
   }
 
-  /**
-   * Check if campaign is complete
-   */
   async checkCampaignCompletion(campaignId: string): Promise<boolean> {
     const remainingRecipients = await prisma.campaignContact.count({
       where: {
@@ -1316,18 +1245,12 @@ class WhatsAppService {
   // TEMPLATE HELPER METHODS
   // ============================================
 
-  /**
-   * Build template components with variables
-   */
   private buildTemplateComponents(
     template: any,
     variables: Record<string, string>
   ): any[] {
     const components: any[] = [];
 
-    // ============================================
-    // ✅ Same helpers as automation engine
-    // ============================================
     const isValidHttpUrl = (str: string): boolean => {
       try {
         const url = new URL(str);
@@ -1339,10 +1262,10 @@ class WhatsAppService {
 
     const isWhatsAppMediaId = (str: string): boolean => {
       if (!str) return false;
-      if (/^\d{10,}$/.test(str)) return true;                          // Pure digits
-      if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(str)) return true;          // Colon format
-      if (str.length > 20 && !str.includes('http') && 
-          !str.includes('.') && /^[A-Za-z0-9+/=_-]+$/.test(str)) {   // Base64
+      if (/^\d{10,}$/.test(str)) return true;
+      if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(str)) return true;
+      if (str.length > 20 && !str.includes('http') &&
+        !str.includes('.') && /^[A-Za-z0-9+/=_-]+$/.test(str)) {
         return true;
       }
       return false;
@@ -1355,12 +1278,9 @@ class WhatsAppService {
       } else if (isWhatsAppMediaId(mediaValue)) {
         return { type, [type]: { id: mediaValue } };
       }
-      return { type, [type]: { link: mediaValue } }; // Fallback
+      return { type, [type]: { link: mediaValue } };
     };
 
-    // ============================================
-    // HEADER
-    // ============================================
     if (template.headerType) {
       const hType = String(template.headerType).toUpperCase();
 
@@ -1371,7 +1291,6 @@ class WhatsAppService {
         }
 
       } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-        // ✅ Priority: variables > header_media > headerMediaId > headerMediaUrl > headerContent
         const mediaValue =
           variables.header_media ||
           template.headerMediaId ||
@@ -1387,9 +1306,6 @@ class WhatsAppService {
       }
     }
 
-    // ============================================
-    // BODY
-    // ============================================
     const bodyVarNames = this.extractVariablesFromText(template.bodyText);
     if (bodyVarNames.length > 0) {
       const bodyParams = bodyVarNames.map((_: string, index: number) => ({
@@ -1397,14 +1313,11 @@ class WhatsAppService {
         text:
           variables[`var_${index + 1}`] ||
           variables[`body_${index + 1}`] ||
-          'Customer', // ✅ Fallback instead of {{1}}
+          'Customer',
       }));
       components.push({ type: 'body', parameters: bodyParams });
     }
 
-    // ============================================
-    // BUTTONS
-    // ============================================
     if (template.buttons) {
       const buttons = typeof template.buttons === 'string'
         ? JSON.parse(template.buttons)
@@ -1451,9 +1364,6 @@ class WhatsAppService {
   // MESSAGE STATUS METHODS
   // ============================================
 
-  /**
-   * Mark message as read
-   */
   async markAsRead(accountId: string, messageId: string) {
     try {
       const { account, accessToken } = await this.getAccountWithToken(accountId);
@@ -1480,20 +1390,16 @@ class WhatsAppService {
     }
   }
 
-  /**
-   * Send typing indicator
-   */
   async sendTypingIndicator(conversationId: string) {
     try {
-      // Find the last incoming message for this conversation
       const lastIncoming = await prisma.message.findFirst({
-         where: { conversationId, direction: 'INBOUND' },
-         orderBy: { createdAt: 'desc' }
+        where: { conversationId, direction: 'INBOUND' },
+        orderBy: { createdAt: 'desc' }
       });
       if (!lastIncoming || !lastIncoming.wamId) return { success: false, reason: 'No incoming message' };
 
       const conversation = await prisma.conversation.findUnique({
-          where: { id: conversationId },
+        where: { id: conversationId },
       });
       if (!conversation) return { success: false, reason: 'Conversation not found' };
 
@@ -1502,14 +1408,13 @@ class WhatsAppService {
 
       const { account, accessToken } = await this.getAccountWithToken(defaultAccount.id);
 
-      // markAsRead with typing=true
       await metaApi.markMessageAsRead(
         account.phoneNumberId,
         accessToken,
         lastIncoming.wamId,
         true
       );
-      
+
       return { success: true };
     } catch (error: any) {
       console.error('❌ Failed to send typing indicator:', error);
@@ -1568,12 +1473,9 @@ class WhatsAppService {
   }
 
   // ============================================
-  // QUALITY RATING SYNC METHODS (NEW)
+  // QUALITY RATING SYNC METHODS
   // ============================================
 
-  /**
-   * Single account ka quality rating Meta se fetch karke DB update karo
-   */
   async syncAccountQuality(accountId: string): Promise<{
     success: boolean;
     account?: any;
@@ -1586,7 +1488,6 @@ class WhatsAppService {
         accountId
       );
 
-      // Meta API se fresh data fetch karo
       const phoneInfo = await metaApi.getPhoneNumberInfo(
         account.phoneNumberId,
         accessToken
@@ -1599,7 +1500,6 @@ class WhatsAppService {
         platform_type: phoneInfo?.platform_type,
       });
 
-      // ✅ DB update karo
       const updated = await prisma.whatsAppAccount.update({
         where: { id: accountId },
         data: {
@@ -1630,9 +1530,6 @@ class WhatsAppService {
     }
   }
 
-  /**
-   * Organization ke saare accounts sync karo (bulk)
-   */
   async syncAllAccountsQuality(organizationId: string): Promise<{
     total: number;
     synced: number;
@@ -1680,8 +1577,8 @@ class WhatsAppService {
           r.status === 'rejected'
             ? r.reason?.message
             : r.status === 'fulfilled' && !r.value.success
-            ? r.value.error
-            : undefined,
+              ? r.value.error
+              : undefined,
       })),
     };
   }

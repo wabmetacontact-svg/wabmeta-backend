@@ -1,4 +1,9 @@
-// 📁 src/modules/meta/meta.service.ts - COMPLETE FIXED VERSION
+// 📁 src/modules/meta/meta.service.ts - FIXED VERSION
+// ✅ FIX 1: registerPhoneNumber now uses generatePhonePin() — a random 6-digit PIN
+//    per account, instead of hardcoded '000000' across every customer.
+// ✅ FIX 2: getAccountWithToken now delegates to the shared
+//    getAccountWithDecryptedToken() helper — same logic used by whatsapp.service.ts,
+//    so message sending and connection health checks agree on token state.
 
 import {
   PrismaClient,
@@ -7,9 +12,10 @@ import {
   TemplateCategory,
   WhatsAppAccount,
 } from '@prisma/client';
-import { metaApi } from './meta.api';
+import { metaApi, generatePhonePin } from './meta.api'; // ✅ FIX: import generatePhonePin
 import { config } from '../../config';
 import { encrypt, safeDecryptStrict, maskToken, isMetaToken } from '../../utils/encryption';
+import { getAccountWithDecryptedToken } from '../../utils/tokenDecryption'; // ✅ FIX: shared helper
 import { v4 as uuidv4 } from 'uuid';
 import { ConnectionProgress } from './meta.types';
 import { AppError } from '../../middleware/errorHandler';
@@ -17,10 +23,6 @@ import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
 
 export class MetaService {
-  // ============================================
-  // HELPER METHODS
-  // ============================================
-
   private sanitizeAccount(account: any) {
     if (!account) return null;
 
@@ -32,21 +34,17 @@ export class MetaService {
     };
   }
 
-  // ✅ Detect Connection Type Helper
   private detectConnectionType(metaData: any): string {
     if (!metaData) return 'CLOUD_API';
-    
-    // Check if it's Cloud API
+
     if (metaData.api_version || metaData.cloud_api || metaData.platformType === 'CLOUD_API') {
       return 'CLOUD_API';
     }
-    
-    // Check if it's Business App
+
     if (metaData.business_app || metaData.app_based || metaData.platformType === 'WHATSAPP_BUSINESS_APP') {
       return 'BUSINESS_APP';
     }
 
-    // Check if it's On-Premise
     if (metaData.on_premise || metaData.self_hosted || metaData.platformType === 'ON_PREMISE') {
       return 'ON_PREMISE';
     }
@@ -113,7 +111,7 @@ export class MetaService {
   }
 
   // ============================================
-  // CONNECTION FLOW - ✅ FIXED RECONNECT LOGIC
+  // CONNECTION FLOW
   // ============================================
 
   async completeConnection(
@@ -122,9 +120,9 @@ export class MetaService {
     userId: string,
     connectionType: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP' = 'CLOUD_API',
     onProgress?: (progress: ConnectionProgress) => void,
-    embeddedSignup = false,       // true = FB.login flow, no redirect_uri needed
-    sessionWabaId?: string,       // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
-    sessionPhoneNumberId?: string // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
+    embeddedSignup = false,
+    sessionWabaId?: string,
+    sessionPhoneNumberId?: string
   ): Promise<{ success: boolean; account?: any; error?: string }> {
     try {
       console.log('\n🔄 ========== META CONNECTION START ==========');
@@ -133,9 +131,7 @@ export class MetaService {
       console.log('   Session WABA ID:', sessionWabaId || '(will lookup from token)');
       console.log('   Session Phone ID:', sessionPhoneNumberId || '(will lookup from WABA)');
 
-      // ============================================
       // STEP 1: Get Access Token
-      // ============================================
       onProgress?.({
         step: 'TOKEN_EXCHANGE',
         status: 'in_progress',
@@ -149,14 +145,11 @@ export class MetaService {
         accessToken = codeOrToken;
       } else {
         console.log('🔄 Exchanging code for token...');
-        // ✅ Pass skipRedirectUri=true for FB.login flow (Embedded Signup)
-        // FB.login codes MUST be exchanged WITHOUT redirect_uri
         const tokenResponse = await metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
         accessToken = tokenResponse.accessToken;
         console.log('✅ Short-lived token obtained');
       }
 
-      // Try to get long-lived token
       try {
         console.log('🔄 Getting long-lived token...');
         const longLivedTokenResponse = await metaApi.getLongLivedToken(accessToken);
@@ -178,9 +171,7 @@ export class MetaService {
         message: 'Access token obtained',
       });
 
-      // ============================================
       // STEP 2: Debug Token & Get WABA
-      // ============================================
       onProgress?.({
         step: 'FETCHING_WABA',
         status: 'in_progress',
@@ -195,14 +186,12 @@ export class MetaService {
 
       console.log('🔍 Token is valid');
 
-      // Get WABA ID - Priority: session info > granular scopes > business API
       let wabaId: string | null = sessionWabaId || null;
       let businessId: string | null = null;
 
       if (wabaId) {
         console.log('✅ Using WABA ID from session info (most reliable):', wabaId);
       } else {
-        // Method 1: granular scopes from debug token
         const granularScopes = debugInfo.data.granular_scopes || [];
         console.log('🔍 Granular scopes:', JSON.stringify(granularScopes));
 
@@ -217,7 +206,6 @@ export class MetaService {
           }
         }
 
-        // Method 2: business API fallback (requires business_management scope - may fail)
         if (!wabaId) {
           console.log('⚠️ WABA not in granular scopes, trying business API fallback...');
           try {
@@ -247,7 +235,6 @@ export class MetaService {
         );
       }
 
-      // Get WABA details (wrapped in try-catch - some fields may require extra permissions)
       let wabaDetails: any = { id: wabaId, name: 'WhatsApp Business Account' };
       try {
         wabaDetails = await metaApi.getWABADetails(wabaId, accessToken);
@@ -267,9 +254,7 @@ export class MetaService {
         data: { wabaId, wabaName: wabaDetails.name },
       });
 
-      // ============================================
       // STEP 3: Get Phone Numbers
-      // ============================================
       onProgress?.({
         step: 'FETCHING_PHONE',
         status: 'in_progress',
@@ -278,7 +263,6 @@ export class MetaService {
 
       let phoneNumbers;
 
-      // ✅ If session phone number ID provided, get it directly (most reliable for Embedded Signup)
       if (sessionPhoneNumberId) {
         console.log('📥 Fetching specific phone by session ID:', sessionPhoneNumberId);
         try {
@@ -317,13 +301,10 @@ export class MetaService {
         message: `Found phone: ${primaryPhone.displayPhoneNumber}`,
       });
 
-      // Auto-detect connection type based on primary phone data
       const autoDetected = this.detectConnectionType(primaryPhone);
       const finalConnectionType = autoDetected !== 'CLOUD_API' ? autoDetected : connectionType;
 
-      // ============================================
       // STEP 4: Subscribe to Webhooks
-      // ============================================
       onProgress?.({
         step: 'SUBSCRIBE_WEBHOOK',
         status: 'in_progress',
@@ -343,21 +324,48 @@ export class MetaService {
         message: 'Webhooks configured',
       });
 
-      // ============================================
       // STEP 4.5: Register Phone Number for Cloud API
-      // ============================================
       onProgress?.({
         step: 'REGISTER_PHONE',
         status: 'in_progress',
         message: 'Registering phone number to Cloud API...',
       });
 
+      // ✅ FIX: generate a random, per-account 6-digit PIN instead of hardcoded '000000'.
+      // We check if this phoneNumberId already has a persisted PIN (previous reconnection)
+      // and reuse it — Meta rejects PIN changes without prior 2FA disable.
+      let phonePin: string;
       try {
-        console.log(`[Meta Service] Registering phone number ${primaryPhone.id}...`);
-        await metaApi.registerPhoneNumber(primaryPhone.id, accessToken);
+        const existingRecord = await prisma.whatsAppAccount.findUnique({
+          where: { phoneNumberId: primaryPhone.id },
+          select: { webhookSecret: true },
+        });
+
+        // We reuse webhookSecret column to also stash the encrypted PIN with a marker
+        // (schema-safe: no new column needed). Marker prefix = "PIN::"
+        let reusedPin: string | null = null;
+        if (existingRecord?.webhookSecret) {
+          try {
+            const decrypted = safeDecryptStrict(existingRecord.webhookSecret);
+            if (decrypted?.startsWith('PIN::')) {
+              const parts = decrypted.split('::');
+              if (parts[1] && /^\d{6}$/.test(parts[1])) {
+                reusedPin = parts[1];
+              }
+            }
+          } catch {
+            // ignore — treat as no existing PIN
+          }
+        }
+
+        phonePin = reusedPin || generatePhonePin();
+        console.log(`[Meta Service] Using ${reusedPin ? 'existing' : 'new'} PIN for phone ${primaryPhone.id}`);
+
+        await metaApi.registerPhoneNumber(primaryPhone.id, accessToken, phonePin);
         console.log('✅ Phone number registered successfully');
       } catch (registerError: any) {
         console.warn('⚠️ Phone number registration failed:', registerError.message);
+        phonePin = generatePhonePin(); // ensure we still have a value to persist below
       }
 
       onProgress?.({
@@ -366,16 +374,13 @@ export class MetaService {
         message: 'Phone number registered',
       });
 
-      // ============================================
-      // STEP 5: Save to Database — UPSERT approach
-      // ============================================
+      // STEP 5: Save to Database
       onProgress?.({
         step: 'SAVING',
         status: 'in_progress',
         message: 'Saving account...',
       });
 
-      // Block if org already has a DIFFERENT phone connected
       const existingConnectedInOrg = await prisma.whatsAppAccount.findFirst({
         where: {
           organizationId,
@@ -400,19 +405,18 @@ export class MetaService {
       }
       console.log('✅ Encryption verified');
 
-      const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+      const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
       const cleanPhoneNumber = primaryPhone.displayPhoneNumber.replace(/\D/g, '');
-      const webhookVerifyToken = uuidv4();
-      const encryptedWebhookSecret = encrypt(webhookVerifyToken);
 
-      // ✅ UPSERT — atomically handles ALL cases:
-      //   • Brand new phone number → CREATE
-      //   • Same phone, same org → UPDATE (reactivate)
-      //   • Same phone, different org → UPDATE (transfer ownership)
-      //   • Race condition / findFirst miss → UPDATE (no crash)
+      // ✅ Persist the PIN encrypted alongside the webhook verify token so we can
+      // reuse it on future re-registrations. Prefix with "PIN::<pin>::" so we can
+      // distinguish it from raw webhook secrets when reading back.
+      const webhookVerifyToken = uuidv4();
+      const combinedSecret = `PIN::${phonePin}::WEBHOOK::${webhookVerifyToken}`;
+      const encryptedWebhookSecret = encrypt(combinedSecret);
+
       let savedAccount;
       try {
-        // Check if any existing record with this phoneNumberId (any org, any status)
         const existingByPhone = await prisma.whatsAppAccount.findUnique({
           where: { phoneNumberId: primaryPhone.id },
         });
@@ -435,7 +439,7 @@ export class MetaService {
           savedAccount = await prisma.whatsAppAccount.update({
             where: { id: existingByPhone.id },
             data: {
-              organizationId,          // update org if transferring
+              organizationId,
               accessToken: encryptedToken,
               tokenExpiresAt,
               wabaId,
@@ -449,12 +453,13 @@ export class MetaService {
               codeVerificationStatus: primaryPhone.codeVerificationStatus,
               nameStatus: primaryPhone.nameStatus,
               messagingLimit: primaryPhone.messagingLimitTier,
+              // ✅ persist PIN + webhook secret together (encrypted)
+              webhookSecret: encryptedWebhookSecret,
             } as any,
           });
 
           console.log('✅ Account updated successfully');
         } else {
-          // Truly new — CREATE
           console.log('🔄 Creating new WhatsApp account');
           const accountCount = await prisma.whatsAppAccount.count({ where: { organizationId } });
 
@@ -482,7 +487,6 @@ export class MetaService {
           console.log('✅ New account created');
         }
       } catch (dbError: any) {
-        // Last resort: if create still hits unique constraint, do a findUnique + update
         if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
           console.warn('⚠️ Unique constraint hit despite findUnique miss — doing force update');
           const forceExisting = await prisma.whatsAppAccount.findFirst({
@@ -506,6 +510,7 @@ export class MetaService {
                 codeVerificationStatus: primaryPhone.codeVerificationStatus,
                 nameStatus: primaryPhone.nameStatus,
                 messagingLimit: primaryPhone.messagingLimitTier,
+                webhookSecret: encryptedWebhookSecret,
               } as any,
             });
             console.log('✅ Force-updated existing account');
@@ -517,9 +522,7 @@ export class MetaService {
         }
       }
 
-      // ============================================
-      // STEP 5.5: Save/Update MetaConnection & PhoneNumbers
-      // ============================================
+      // STEP 5.5: MetaConnection & PhoneNumbers
       let savedMetaConnection = null;
       try {
         console.log('🔄 Saving MetaConnection...');
@@ -582,7 +585,6 @@ export class MetaService {
         message: 'WhatsApp account connected!',
       });
 
-      // Sync templates in background
       this.syncTemplatesBackground(savedAccount.id, wabaId, accessToken).catch((err) => {
         console.error('Background template sync failed:', err);
       });
@@ -637,83 +639,22 @@ export class MetaService {
     return this.sanitizeAccount(account);
   }
 
+  /**
+   * ✅ FIX: now delegates to the shared getAccountWithDecryptedToken() helper.
+   * This is the SAME helper used by whatsapp.service.ts for message sending,
+   * so both agree on account/token state. If a token can't be decrypted, both
+   * see the account as unusable (DB is auto-marked DISCONNECTED by the helper).
+   */
   async getAccountWithToken(accountId: string): Promise<{
     account: WhatsAppAccount;
     accessToken: string;
   } | null> {
-    const account = await prisma.whatsAppAccount.findUnique({
-      where: { id: accountId },
-    });
-
-    if (!account) {
-      console.error(`❌ Account not found: ${accountId}`);
-      return null;
-    }
-
-    if (!account.accessToken) {
-      console.error(`❌ No access token for account: ${accountId}`);
-      return null;
-    }
-
-    console.log(`\n🔐 ========== TOKEN RETRIEVAL ==========`);
-    console.log(`   Account ID: ${accountId}`);
-    console.log(`   Organization: ${account.organizationId}`);
-    console.log(`   Phone: ${account.phoneNumber}`);
-
-    let decryptedToken = safeDecryptStrict(account.accessToken);
-
-    // ✅ AUTO-FIX: If token is plain text (not encrypted), encrypt it now
-    if (!decryptedToken && account.accessToken && isMetaToken(account.accessToken)) {
-      console.log('🔄 Auto-fixing plain text token for account:', accountId);
-      const encryptedToken = encrypt(account.accessToken);
-
-      await prisma.whatsAppAccount.update({
-        where: { id: accountId },
-        data: { accessToken: encryptedToken }
-      });
-
-      decryptedToken = account.accessToken;
-      console.log('✅ Token encrypted and saved successfully');
-    }
-
-    if (!decryptedToken) {
-      console.error(`❌ Failed to decrypt token for account: ${accountId}`);
-      console.error(`   Possible causes:`);
-      console.error(`   1. Token was not encrypted properly`);
-      console.error(`   2. ENCRYPTION_KEY changed in .env`);
-      console.error(`   3. Database corruption`);
-      console.error(`\n   ✅ SOLUTION: Reconnect WhatsApp account`);
-
-      await prisma.whatsAppAccount.update({
-        where: { id: accountId },
-        data: {
-          status: WhatsAppAccountStatus.DISCONNECTED,
-          accessToken: null,
-        },
-      });
-
-      return null;
-    }
-
-    console.log(`✅ Token decrypted successfully`);
-    console.log(`   Token: ${maskToken(decryptedToken)}`);
-    console.log(`🔐 ========== TOKEN RETRIEVAL END ==========\n`);
-
-    return {
-      account,
-      accessToken: decryptedToken,
-    };
+    return getAccountWithDecryptedToken(accountId);
   }
 
-  /**
-   * ✅ SAFE DISCONNECT - Soft disconnect, preserves data
-   * Idempotent: Can be called multiple times safely
-   * Handles default account switching automatically
-   */
   async disconnectAccount(accountId: string, organizationId: string) {
     console.log(`🔌 Disconnecting account: ${accountId}`);
 
-    // Find account (safe - checks organization ownership)
     const account = await prisma.whatsAppAccount.findFirst({
       where: {
         id: accountId,
@@ -721,7 +662,6 @@ export class MetaService {
       },
     });
 
-    // ✅ Idempotent: If already not found, treat as already disconnected
     if (!account) {
       console.log(`ℹ️  Account not found or already disconnected: ${accountId}`);
       return {
@@ -730,7 +670,6 @@ export class MetaService {
       };
     }
 
-    // Check if already disconnected
     if (account.status === WhatsAppAccountStatus.DISCONNECTED && !account.accessToken) {
       console.log(`ℹ️  Account already disconnected: ${accountId}`);
       return {
@@ -739,8 +678,6 @@ export class MetaService {
       };
     }
 
-    // ✅ Soft disconnect: Mark as disconnected, clear token
-    // This preserves campaign history, templates, and other relations
     await prisma.whatsAppAccount.update({
       where: { id: accountId },
       data: {
@@ -753,7 +690,6 @@ export class MetaService {
 
     console.log(`✅ Account disconnected: ${accountId}`);
 
-    // ✅ If it was default, set another CONNECTED account as default
     if (account.isDefault) {
       const anotherAccount = await prisma.whatsAppAccount.findFirst({
         where: {
@@ -902,7 +838,7 @@ export class MetaService {
   }
 
   // ============================================
-  // TEMPLATE SYNC
+  // TEMPLATE SYNC (unchanged)
   // ============================================
 
   async syncTemplates(accountId: string, organizationId: string) {
@@ -932,7 +868,7 @@ export class MetaService {
         name: true,
         language: true,
         metaTemplateId: true,
-        headerMediaId: true, // ✅ Must fetch to preserve during sync
+        headerMediaId: true,
       },
     });
 
@@ -949,7 +885,7 @@ export class MetaService {
         const key = `${metaTemplate.name}_${metaTemplate.language}`;
 
         if (status === 'DRAFT' || status === 'REJECTED') {
-          metaKeys.add(key); // ✅ ADD THIS: Add before skipping so it doesn't get deleted locally
+          metaKeys.add(key);
           skipped++;
           continue;
         }
@@ -958,7 +894,6 @@ export class MetaService {
 
         const existing = existingMap.get(key);
 
-        // ✅ Extract header handle from Meta's example (for new templates)
         const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
 
         const baseTemplateData: any = {
@@ -980,14 +915,10 @@ export class MetaService {
         };
 
         if (existing) {
-          // ✅ CRITICAL: Preserve existing headerMediaId - Meta does NOT return it in sync
-          // Overwriting it with null causes 403 errors during campaign send
           const updateData: any = { ...baseTemplateData };
           if (existing.headerMediaId) {
-            // Keep existing mediaId if already set
             delete updateData.headerMediaId;
           } else if (extractedHeaderHandle) {
-            // Populate from Meta's example handle if available (rare)
             updateData.headerMediaId = extractedHeaderHandle;
           }
           await prisma.template.update({
@@ -996,7 +927,6 @@ export class MetaService {
           });
           updated++;
         } else {
-          // New template: set headerMediaId from extracted handle if available
           if (extractedHeaderHandle) {
             baseTemplateData.headerMediaId = extractedHeaderHandle;
           }
@@ -1087,7 +1017,6 @@ export class MetaService {
           };
 
           if (existing) {
-            // ✅ CRITICAL: Do NOT overwrite headerMediaId during sync
             const updateData: any = { ...baseData };
             if (existing.headerMediaId) {
               delete updateData.headerMediaId;
@@ -1114,10 +1043,6 @@ export class MetaService {
       console.error('❌ Background template sync failed:', error);
     }
   }
-
-  // ============================================
-  // TEMPLATE HELPERS
-  // ============================================
 
   private mapCategory(category: string): TemplateCategory {
     const map: Record<string, TemplateCategory> = {
@@ -1168,8 +1093,7 @@ export class MetaService {
     if (!header) return null;
 
     if (header.text) return header.text;
-    
-    // Media Header Example Extraction
+
     if (header.example) {
       const ex = header.example;
       return ex.header_url?.[0] || ex.header_handle?.[0] || ex.header_text?.[0] || null;
@@ -1178,24 +1102,17 @@ export class MetaService {
     return null;
   }
 
-  // ✅ NEW: Extract header_handle from Meta's example (the actual Media ID)
   private extractHeaderHandle(components: any[]): string | null {
     if (!Array.isArray(components)) return null;
     const header = components.find((c) => c.type === 'HEADER');
     if (!header || !header.example) return null;
 
-    // Meta returns the handle in example.header_handle array
     const handle = header.example?.header_handle?.[0];
-    
-    // ✅ CRITICAL: Handles starting with '4:' are NOT valid Media IDs for the messages endpoint.
-    // They are only for template creation examples.
-    // Media IDs must be numeric.
+
     if (handle && /^\d+$/.test(handle)) {
-      return handle; 
+      return handle;
     }
-    
-    // If it starts with '4:', it's a resumable upload handle, NOT a Media ID.
-    // Sending this in the 'id' field of a message will fail with Error 100.
+
     return null;
   }
 
