@@ -349,6 +349,7 @@ const buildMetaTemplatePayload = (t: {
   footerText?: string | null;
   buttons?: TemplateButton[];
   variables?: TemplateVariable[];
+  headerVariables?: Record<string, string>;
 }) => {
   const components: any[] = [];
   const headerType = normalizeHeaderType(t.headerType);
@@ -374,17 +375,37 @@ const buildMetaTemplatePayload = (t: {
       };
 
       if (headerVars.length > 0) {
-        const samples = headerVars.map(idx => {
-          const v = t.variables?.find(var_item => var_item.index === idx);
-          return (v as any)?.example || `Example${idx}`;
+        // ✅ FIX A2: headerVariables use karo agar available ho
+        // Otherwise variables array mein se header type dhundho
+        const samples = headerVars.map((idx) => {
+          // Method 1: headerVariables object se (frontend ne bheja)
+          const fromHeaderVars = (t as any).headerVariables?.[String(idx)];
+          if (fromHeaderVars) return fromHeaderVars;
+
+          // Method 2: variables array mein 'header' type se
+          const fromVarsArray = (t.variables as any[])?.find(
+            (v) => v.index === idx && v.type === 'header'
+          );
+          if (fromVarsArray?.example) return fromVarsArray.example;
+
+          // Method 3: Generic variables se
+          const fromGeneric = (t.variables as any[])?.find(
+            (v) => v.index === idx
+          );
+          if (fromGeneric?.example) return fromGeneric.example;
+
+          return `Example${idx}`;
         });
+
+        // ✅ Meta expects: header_text: ["value1", "value2"]
+        // (flat array, ek entry per variable)
         headerComp.example = {
           header_text: samples,
         };
       }
 
       components.push(headerComp);
-      console.log('✅ TEXT header added');
+      console.log('✅ TEXT header added', { vars: headerVars.length });
     }
     // ✅ FIXED: MEDIA Headers (IMAGE, VIDEO, DOCUMENT)
     else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
@@ -469,16 +490,34 @@ const buildMetaTemplatePayload = (t: {
           text: String(b.text || '').trim().substring(0, 25), // Max 25 chars
         };
 
-        // ✅ URL button
+        // ✅ FIX A3: URL button with dynamic variables
         if (metaType === 'URL') {
           const url = b.url || b.website_url || '';
           if (!url || !url.startsWith('http')) {
             throw new AppError(
-              `URL button "${btn.text}" requires a valid URL starting with http/https`,
+              `URL button "${btn.text}" requires a valid URL`,
               400
             );
           }
           btn.url = url.trim();
+
+          // ✅ FIX A3: Agar URL mein {{1}} hai toh example REQUIRED hai
+          const urlVars = extractVariables(url);
+          if (urlVars.length > 0) {
+            // Dynamic URL ka example banana padega
+            // Replace {{1}} with a sample value
+            const exampleUrl = url.replace(
+              /\{\{(\d+)\}\}/g,
+              (_match: string, idx: string) => {
+                // Button ke saath stored example use karo
+                return (b as any).urlExample || 
+                       `https://example.com/sample`;
+              }
+            );
+            
+            btn.example = [exampleUrl];
+            console.log(`  ✅ URL button example added: ${exampleUrl}`);
+          }
         }
 
         // ✅ Phone button - Meta requires 'phone_number' (underscore format)
@@ -869,15 +908,36 @@ export class TemplatesService {
   async create(
     organizationId: string,
     input: CreateTemplateInput & {
-      whatsappAccountId?: string;
+      whatsappAccountId?: string | null;
       headerMediaId?: string;
       headerContent?: string;
       // ✅ NEW: Clean fields from updated upload
       metaNumericId?: string | null;
       cloudinaryUrl?: string | null;
       permanentUrl?: string | null;
+      headerVariables?: Record<string, string>;
     }
   ): Promise<TemplateResponse> {
+
+    // ✅ FIX C: whatsappAccountId null/undefined check PEHLE karo
+    // Cryptic Prisma error ki jagah helpful message do
+    if (
+      input.whatsappAccountId !== undefined && 
+      input.whatsappAccountId !== null &&
+      input.whatsappAccountId.trim() === ''
+    ) {
+      // Empty string → undefined treat karo
+      input.whatsappAccountId = undefined;
+    }
+
+    // Agar explicitly null bheja (not undefined), toh helpful error
+    if (input.whatsappAccountId === null) {
+      throw new AppError(
+        'Please connect a WhatsApp Business Account first. ' +
+        'Go to Settings → WhatsApp to connect.',
+        400
+      );
+    }
 
     const headerType = normalizeHeaderType(input.headerType);
 
@@ -1055,6 +1115,7 @@ export class TemplatesService {
           footerText: input.footerText || null,
           buttons: (input.buttons || []) as any,
           variables: finalVariables,
+          headerVariables: input.headerVariables,
         });
 
         console.log('📤 Submitting template to Meta WABA:', waData.wabaId);
@@ -1279,13 +1340,26 @@ export class TemplatesService {
             }
           }
 
+         // ✅ FIX: wabaId bhi match karo, whatsappAccountId fix karo
          const existing = await prisma.template.findFirst({
-          where: {
-            whatsappAccountId: waData.account?.id || waData.account?.id, // Use ID from waData
-            name: metaName,
-            language: metaLang,
-          },
-        });
+           where: {
+             OR: [
+               // Primary: exact account match
+               {
+                 whatsappAccountId: waData.account?.id,
+                 name: metaName,
+                 language: metaLang,
+               },
+               // Fallback: same org + same waba
+               {
+                 organizationId,
+                 wabaId: waData.wabaId,
+                 name: metaName,
+                 language: metaLang,
+               },
+             ],
+           },
+         });
 
         // ✅ CRITICAL BUG FIX: Don't let Meta's expiring scontent CDN wipe out our permanent Cloudinary URL
         // NEVER save scontent URLs as permanent headerContent.
