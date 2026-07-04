@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import { inboxService } from '../inbox/inbox.service';
 import prisma from '../../config/database';
+import axios from 'axios';
 import { 
   deductWalletForCampaign, 
   getRateForCategory,
@@ -1036,16 +1037,17 @@ export class CampaignsService {
       if (template.headerType && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType.toUpperCase())) {
         try {
           console.log(`🖼️ Pre-resolving media for template ${template.name}...`);
-          const resolvedMediaId = await this.resolveMediaId(
-            template,
-            phoneNumberId,
-            accessToken,
-            campaign.whatsappAccount.wabaId
-          );
+          const resolvedMediaId = await resolveTemplateMedia(template);
+          
+          if (!resolvedMediaId) {
+            throw new Error('Could not resolve template media ID.');
+          }
+
           // Update the in-memory template object so the loop uses the fresh cached ID
           // instead of trying to download and re-upload the media 1000 times concurrently!
           template.headerMediaId = resolvedMediaId;
           template.headerMediaUploadedAt = new Date();
+          template.headerMediaLastVerified = new Date();
         } catch (err: any) {
           console.error(`❌ Failed to pre-resolve media:`, err.message);
           throw new Error(`Failed to prepare template media: ${err.message}`);
@@ -1950,71 +1952,20 @@ export class CampaignsService {
     accessToken: string,
     wabaId: string
   ): Promise<any> {
-    const components: any[] = [];
-
-    if (template.headerType && template.headerType !== 'NONE') {
-      const hType = template.headerType.toUpperCase();
-
-      if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-        // ✅ resolveMediaId() handle karega
-        const resolvedId = await this.resolveMediaId(
-          template,
-          phoneNumberId,
-          accessToken,
-          wabaId
-        );
-
-        // Numeric ID check
-        if (/^\d+$/.test(resolvedId)) {
-          components.push({
-            type: 'header',
-            parameters: [{
-              type: hType.toLowerCase(),
-              [hType.toLowerCase()]: { id: resolvedId },
-            }],
-          });
-        } else {
-          // URL (link field)
-          components.push({
-            type: 'header',
-            parameters: [{
-              type: hType.toLowerCase(),
-              [hType.toLowerCase()]: { link: resolvedId },
-            }],
-          });
-        }
-      }
-      // TEXT header (unchanged)
-      else if (hType === 'TEXT') {
-        const matches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
-        if (matches.length > 0) {
-          const params = buildParamsFromContact(cc, matches.length);
-          components.push({
-            type: 'header',
-            parameters: params.map((p: string) => ({ type: 'text', text: String(p) })),
-          });
-        }
-      }
-    }
-
-    // Body (unchanged)
+    const headerMatches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
     const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
-    if (bodyMatches.length > 0) {
-      const params = buildParamsFromContact(cc, bodyMatches.length);
-      components.push({
-        type: 'body',
-        parameters: params.map((p: string) => ({ type: 'text', text: String(p) })),
-      });
+    const maxIdx = Math.max(
+      0,
+      ...headerMatches.map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10)),
+      ...bodyMatches.map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10))
+    );
+    const params = buildParamsFromContact(cc, maxIdx);
+    const variables: Record<string, string> = {};
+    for (let i = 0; i < params.length; i++) {
+      variables[String(i + 1)] = params[i];
     }
 
-    return {
-      type: 'template',
-      template: {
-        name: template.name,
-        language: { code: toMetaLang(template.language) },
-        ...(components.length > 0 ? { components } : {}),
-      },
-    };
+    return buildTemplateMessage(template, variables);
   }
 
   // ✅ IMPROVED: Extract failure reason with better Meta error mapping
@@ -2053,6 +2004,166 @@ export class CampaignsService {
     const stats = await prisma.campaign.aggregate({ where: { organizationId }, _count: { id: true }, _sum: { totalContacts: true, sentCount: true, deliveredCount: true, readCount: true, failedCount: true } });
     return { total: stats._count.id || 0, totalSent: stats._sum.sentCount || 0, totalDelivered: stats._sum.deliveredCount || 0, totalRead: stats._sum.readCount || 0, replied: 0, totalRecipients: stats._sum.totalContacts || 0 };
   }
+}
+
+// ✅ CRITICAL HELPER: Resolve media ID from Cloudinary URL
+async function resolveTemplateMedia(template: any): Promise<string | null> {
+  // Check cache first (last verified within 25 days)
+  if (template.headerMediaId && template.headerMediaLastVerified) {
+    const daysSinceVerified = 
+      (Date.now() - new Date(template.headerMediaLastVerified).getTime()) / 
+      (1000 * 60 * 60 * 24);
+    
+    if (daysSinceVerified < 25) {
+      // Media ID still valid
+      return template.headerMediaId;
+    }
+  }
+
+  // ✅ Need fresh media ID - upload from Cloudinary
+  if (!template.headerContent || !template.headerContent.startsWith('http')) {
+    console.error('❌ Template has no valid Cloudinary URL to refresh from');
+    return null;
+  }
+
+  try {
+    console.log(`🔄 Refreshing media for template: ${template.name}`);
+    
+    const waAccount = await prisma.whatsAppAccount.findUnique({
+      where: { id: template.whatsappAccountId },
+    });
+    
+    if (!waAccount) return null;
+
+    const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
+    if (!accountWithToken) return null;
+
+    // Download from Cloudinary
+    const response = await axios.get(template.headerContent, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+    });
+    
+    const buffer = Buffer.from(response.data);
+    const mimeType = response.headers['content-type']?.split(';')[0] ||
+      (template.headerType === 'IMAGE' ? 'image/jpeg' :
+       template.headerType === 'VIDEO' ? 'video/mp4' :
+       'application/pdf');
+    
+    const filename = template.headerContent.split('/').pop()?.split('?')[0] || 'media';
+
+    // Upload to Meta - get NUMERIC media ID (for message sending)
+    const result = await metaApi.uploadMedia(
+      waAccount.phoneNumberId,
+      accountWithToken.accessToken,
+      buffer,
+      mimeType,
+      filename,
+      waAccount.wabaId
+    );
+
+    // Save fresh ID to DB
+    await prisma.template.update({
+      where: { id: template.id },
+      data: {
+        headerMediaId: result.id,
+        headerMediaUploadedAt: new Date(),
+        headerMediaLastVerified: new Date(),
+      },
+    });
+
+    console.log(`✅ Refreshed media ID: ${result.id}`);
+    return result.id;
+    
+  } catch (error: any) {
+    console.error(`❌ Media refresh failed: ${error.message}`);
+    return null;
+  }
+}
+
+// Helper to extract {{n}} variables
+function extractVariables(text: string): number[] {
+  const regex = /\{\{(\d+)\}\}/g;
+  const vars: number[] = [];
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    vars.push(parseInt(match[1], 10));
+  }
+  return [...new Set(vars)].sort((a, b) => a - b);
+}
+
+// ✅ buildTemplateMessage (adapted with language code mapper)
+async function buildTemplateMessage(template: any, variables: Record<string, string>) {
+  const components: any[] = [];
+
+  const headerType = template.headerType?.toUpperCase();
+
+  // ✅ HEADER: Only attach media if template has DYNAMIC header
+  //    Approved templates with STATIC media use Meta's embedded copy
+  //    We should NOT send media ID for static headers
+  
+  if (headerType === 'TEXT' && template.headerContent) {
+    // Text header with variables
+    const headerVars = extractVariables(template.headerContent);
+    if (headerVars.length > 0) {
+      components.push({
+        type: 'header',
+        parameters: headerVars.map((idx: number) => ({
+          type: 'text',
+          text: variables[String(idx)] || '',
+        })),
+      });
+    }
+  }
+  else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+    // ✅ CRITICAL: For media headers, we MUST provide fresh media
+    //    But we resolve it FROM CLOUDINARY on every send
+    
+    const freshMediaId = await resolveTemplateMedia(template);
+    
+    if (!freshMediaId) {
+      throw new Error(
+        `Template "${template.name}" has media header but no valid media. ` +
+        `Please re-upload media in template settings.`
+      );
+    }
+
+    const mediaType = headerType.toLowerCase(); // image/video/document
+    const mediaParam: any = { id: freshMediaId };
+    
+    if (mediaType === 'document') {
+      mediaParam.filename = template.name + '.pdf';
+    }
+
+    components.push({
+      type: 'header',
+      parameters: [{
+        type: mediaType,
+        [mediaType]: mediaParam,
+      }],
+    });
+  }
+
+  // ✅ BODY variables
+  const bodyVars = extractVariables(template.bodyText);
+  if (bodyVars.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: bodyVars.map((idx: number) => ({
+        type: 'text',
+        text: variables[String(idx)] || '',
+      })),
+    });
+  }
+
+  return {
+    type: 'template',
+    template: {
+      name: template.name,
+      language: { code: toMetaLang(template.language) },
+      components: components.length > 0 ? components : undefined,
+    },
+  };
 }
 
 export const campaignsService = new CampaignsService();

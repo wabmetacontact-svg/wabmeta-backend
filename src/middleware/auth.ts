@@ -1,7 +1,8 @@
-// src/middleware/auth.ts - FIXED VERSION
-// ✅ FIX: now imports shared getCookieOptions from utils/cookies.ts instead of
-// defining its own conflicting cookieOptions() (was causing SameSite/Secure mismatch
-// vs auth.controller.ts, which broke cookies cross-domain wabmeta.com <-> onrender.com)
+// src/middleware/auth.ts - FIXED
+// ✅ FIX 1: tokenVersion cache invalidation - DB se fresh check karo jab mismatch ho
+// ✅ FIX 2: Cache TTL 120s→60s (stale data kam hoga)
+// ✅ FIX 3: P2024 pool timeout pe 503 return karo, 401 nahi
+// ✅ FIX 4: organizationId missing fix cleaned up
 
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types/express';
@@ -10,23 +11,25 @@ import { AppError } from './errorHandler';
 import prisma from '../config/database';
 import { getRedis } from '../config/redis';
 import { authService } from '../modules/auth/auth.service';
-import { getCookieOptions } from '../utils/cookies'; // ✅ FIX: shared cookie options
+import { getCookieOptions } from '../utils/cookies';
 
 const USER_CACHE_PREFIX = 'user:auth:';
-const CACHE_TTL = 120;
+const CACHE_TTL = 60; // ✅ 120→60 seconds (stale data risk kam)
 
-// ✅ Safe Redis cache get - kabhi throw nahi karega
+// ============================================
+// SAFE REDIS HELPERS
+// ============================================
+
 const safeRedisGet = async (key: string): Promise<string | null> => {
   try {
     const redis = getRedis();
     if (!redis) return null;
     return await redis.get(key);
-  } catch (err: any) {
+  } catch {
     return null;
   }
 };
 
-// ✅ Safe Redis cache set - kabhi throw nahi karega
 const safeRedisSet = async (
   key: string,
   value: string,
@@ -36,21 +39,93 @@ const safeRedisSet = async (
     const redis = getRedis();
     if (!redis) return;
     await redis.set(key, value, 'EX', ttl);
-  } catch (err: any) {
-    // Silent fail
+  } catch {
+    // Silent
   }
 };
 
-// ✅ Safe Redis cache delete
 const safeRedisDel = async (key: string): Promise<void> => {
   try {
     const redis = getRedis();
     if (!redis) return;
     await redis.del(key);
-  } catch (err: any) {
-    // Silent fail
+  } catch {
+    // Silent
   }
 };
+
+// ============================================
+// USER FETCH - Cache + DB fallback
+// ============================================
+
+interface CachedUser {
+  id: string;
+  email: string;
+  status: string;
+  emailVerified: boolean;
+  tokenVersion: number;
+}
+
+const fetchUser = async (
+  userId: string,
+  forceRefresh = false
+): Promise<CachedUser | null> => {
+  const cacheKey = `${USER_CACHE_PREFIX}${userId}`;
+
+  // Cache check (skip if forceRefresh)
+  if (!forceRefresh) {
+    const cached = await safeRedisGet(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as CachedUser;
+      } catch {
+        // Cache corrupt - DB se fetch karo
+      }
+    }
+  }
+
+  // DB se fetch
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        status: true,
+        emailVerified: true,
+        tokenVersion: true,
+      },
+    });
+
+    if (user) {
+      // Cache mein store karo
+      await safeRedisSet(cacheKey, JSON.stringify(user), CACHE_TTL);
+    }
+
+    return user;
+  } catch (err: any) {
+    // ✅ Pool timeout - cache se serve karo agar available ho
+    if (err?.code === 'P2024') {
+      console.warn('⚠️  Auth middleware: DB pool busy, trying cache fallback');
+      const cached = await safeRedisGet(cacheKey);
+      if (cached) {
+        try {
+          console.log('✅ Auth: Serving from cache during pool pressure');
+          return JSON.parse(cached) as CachedUser;
+        } catch {
+          return null;
+        }
+      }
+      // Cache bhi nahi hai - 503 throw karo (not 401)
+      throw new AppError('Service temporarily busy. Please retry.', 503);
+    }
+    throw err;
+  }
+};
+
+// ============================================
+// MAIN AUTH MIDDLEWARE
+// ============================================
 
 export const authenticate = async (
   req: AuthRequest,
@@ -58,28 +133,23 @@ export const authenticate = async (
   next: NextFunction
 ): Promise<void> => {
   try {
+    // ── Step 1: Token extract karo ──────────────────
     let token = '';
 
-    // 1. Authorization Header
     const authHeader =
       req.headers.authorization || (req.headers as any).Authorization;
+
     if (authHeader && /^Bearer /i.test(authHeader)) {
       token = authHeader.split(' ')[1];
-    }
-    // 2. Alternative Headers
-    else if (req.headers['x-access-token']) {
+    } else if (req.headers['x-access-token']) {
       token = req.headers['x-access-token'] as string;
-    }
-    // 3. Cookies
-    else if (req.cookies?.accessToken || req.cookies?.token) {
+    } else if (req.cookies?.accessToken || req.cookies?.token) {
       token = req.cookies.accessToken || req.cookies.token;
-    }
-    // 4. Query param (last resort)
-    else if (req.query.token) {
+    } else if (req.query.token) {
       token = req.query.token as string;
     }
 
-    // 🔄 AUTO-HEALING: Refresh token se recover karo
+    // ── Step 2: Auto-heal via refresh token ────────
     if (!token && req.cookies?.refreshToken) {
       try {
         console.log('🛡️ Auto-healing: Attempting token refresh...');
@@ -99,10 +169,7 @@ export const authenticate = async (
         token = newTokens.accessToken;
         console.log('✅ Auto-healing: Session restored.');
       } catch (refreshError) {
-        console.warn(
-          '❌ Auto-healing failed:',
-          (refreshError as Error).message
-        );
+        console.warn('❌ Auto-healing failed:', (refreshError as Error).message);
       }
     }
 
@@ -110,147 +177,86 @@ export const authenticate = async (
       throw new AppError('Access token required', 401);
     }
 
-    // Token verify karo
-    const decoded = verifyAccessToken(token) as TokenPayload;
-
-    // organizationId resolve karo
-    let organizationId = decoded.organizationId;
-
-    if (!organizationId) {
-      console.log('⚠️ organizationId missing in token, fixing...');
-
-      let membership = await prisma.organizationMember.findFirst({
-        where: { userId: decoded.userId },
-        include: { organization: true },
-      });
-
-      if (!membership) {
-        const userToFix = await prisma.user.findUnique({
-          where: { id: decoded.userId },
-        });
-
-        if (userToFix) {
-          const orgName = `${userToFix.firstName || 'User'}'s Workspace`;
-          const organization = await prisma.organization.create({
-            data: {
-              name: orgName,
-              slug:
-                orgName.toLowerCase().replace(/[^a-z0-9]/g, '') +
-                '-' +
-                Math.random().toString(36).substring(2, 7),
-              ownerId: userToFix.id,
-              planType: 'FREE_DEMO',
-              featureSimpleBulkUpload: false,
-              featureCsvUpload: false,
-              featureOverrideByAdmin: false,
-            } as any,
-          });
-
-          membership = await prisma.organizationMember.create({
-            data: {
-              organizationId: organization.id,
-              userId: userToFix.id,
-              role: 'OWNER',
-              joinedAt: new Date(),
-            },
-            include: { organization: true },
-          });
-
-          const freePlan = await prisma.plan.findUnique({
-            where: { type: 'FREE_DEMO' },
-          });
-
-          if (freePlan) {
-            await prisma.subscription.create({
-              data: {
-                organizationId: organization.id,
-                planId: freePlan.id,
-                status: 'ACTIVE',
-                billingCycle: 'monthly',
-                currentPeriodStart: new Date(),
-                currentPeriodEnd: new Date(
-                  Date.now() + 30 * 24 * 60 * 60 * 1000
-                ),
-              },
-            });
-          }
-        }
+    // ── Step 3: Token verify karo ──────────────────
+    let decoded: TokenPayload;
+    try {
+      decoded = verifyAccessToken(token) as TokenPayload;
+    } catch (jwtError: any) {
+      // JWT expired vs invalid distinguish karo
+      if (jwtError?.name === 'TokenExpiredError') {
+        throw new AppError('Access token expired', 401);
       }
-
-      if (membership) {
-        organizationId = membership.organization.id;
-      }
+      throw new AppError('Invalid access token', 401);
     }
 
-    // ✅ User cache - Redis optional, DB fallback guaranteed
-    let user: any = null;
-
-    const cacheKey = `${USER_CACHE_PREFIX}${decoded.userId}`;
-    const cachedUser = await safeRedisGet(cacheKey);
-
-    if (cachedUser) {
-      try {
-        user = JSON.parse(cachedUser);
-      } catch {
-        user = null;
-      }
-    }
-
-    if (!user) {
-      user = await prisma.user.findUnique({
-        where: { id: decoded.userId },
-        select: {
-          id: true,
-          email: true,
-          status: true,
-          emailVerified: true,
-          tokenVersion: true,
-        },
-      });
-
-      if (user) {
-        await safeRedisSet(
-          cacheKey,
-          JSON.stringify({
-            id: user.id,
-            email: user.email,
-            status: user.status,
-            emailVerified: user.emailVerified,
-            tokenVersion: user.tokenVersion,
-          }),
-          CACHE_TTL
-        );
-      }
-    }
+    // ── Step 4: User fetch (cache → DB) ────────────
+    let user = await fetchUser(decoded.userId);
 
     if (!user) {
       throw new AppError('User not found', 401);
     }
 
-    // tokenVersion check - password change / logoutAll ke baad purane tokens invalid
+    // ── Step 5: tokenVersion check ─────────────────
+    // ✅ KEY FIX: Cache mein stale tokenVersion ho sakta hai
+    // Agar mismatch hai toh pehle DB se fresh fetch karo
     if (
       decoded.tokenVersion !== undefined &&
       user.tokenVersion !== undefined &&
       decoded.tokenVersion !== user.tokenVersion
     ) {
       console.warn(
-        `🚨 Token version mismatch for user ${decoded.userId}: ` +
-        `JWT=${decoded.tokenVersion}, DB=${user.tokenVersion}`
+        `⚠️  tokenVersion mismatch for ${decoded.userId}: ` +
+        `token=${decoded.tokenVersion}, cache=${user.tokenVersion} → refreshing from DB`
       );
 
-      await safeRedisDel(cacheKey);
+      // ✅ Force DB refresh - cache ko bypass karo
+      user = await fetchUser(decoded.userId, true);
 
-      throw new AppError('Session expired. Please login again.', 401);
+      if (!user) {
+        throw new AppError('User not found', 401);
+      }
+
+      // DB se fresh data ke baad bhi mismatch = genuinely invalid token
+      if (decoded.tokenVersion !== user.tokenVersion) {
+        console.warn(
+          `🚨 tokenVersion CONFIRMED mismatch for ${decoded.userId}: ` +
+          `token=${decoded.tokenVersion}, DB=${user.tokenVersion}`
+        );
+        await safeRedisDel(`${USER_CACHE_PREFIX}${decoded.userId}`);
+        throw new AppError('Session expired. Please login again.', 401);
+      }
+
+      console.log(`✅ tokenVersion verified from DB for ${decoded.userId}`);
     }
 
+    // ── Step 6: Status check ───────────────────────
     if (user.status === 'SUSPENDED') {
-      throw new AppError('Account suspended', 403);
+      throw new AppError('Account suspended. Please contact support.', 403);
     }
 
+    // ── Step 7: organizationId resolve ─────────────
+    let organizationId = decoded.organizationId;
+
+    if (!organizationId) {
+      // Membership DB se dhundo - lightweight query
+      try {
+        const membership = await prisma.organizationMember.findFirst({
+          where: { userId: decoded.userId },
+          select: { organizationId: true },
+        });
+        organizationId = membership?.organizationId;
+      } catch (err: any) {
+        if (err?.code !== 'P2024') throw err;
+        // Pool busy - organizationId ke bina continue karo
+        console.warn('⚠️  Could not fetch organizationId: pool busy');
+      }
+    }
+
+    // ── Step 8: req.user set karo ──────────────────
     req.user = {
       id: user.id,
       email: user.email,
-      organizationId: organizationId,
+      organizationId,
     };
 
     next();
@@ -259,6 +265,9 @@ export const authenticate = async (
   }
 };
 
+// ============================================
+// REQUIRE EMAIL VERIFIED
+// ============================================
 export const requireEmailVerified = async (
   req: AuthRequest,
   res: Response,
@@ -284,6 +293,9 @@ export const requireEmailVerified = async (
   }
 };
 
+// ============================================
+// REQUIRE ORGANIZATION
+// ============================================
 export const requireOrganization = async (
   req: AuthRequest,
   res: Response,
@@ -296,19 +308,29 @@ export const requireOrganization = async (
 
     const organization = await prisma.organization.findUnique({
       where: { id: req.user.organizationId },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        planType: true,
+        ownerId: true,
+      },
     });
 
     if (!organization) {
       throw new AppError('Organization not found', 404);
     }
 
-    req.organization = organization;
+    req.organization = organization as any;
     next();
   } catch (error) {
     next(error);
   }
 };
 
+// ============================================
+// OPTIONAL AUTH
+// ============================================
 export const optionalAuth = async (
   req: AuthRequest,
   res: Response,
@@ -317,16 +339,11 @@ export const optionalAuth = async (
   try {
     const authHeader = req.headers.authorization;
 
-    if (authHeader && authHeader.startsWith('Bearer ')) {
+    if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-
       try {
         const decoded = verifyAccessToken(token) as TokenPayload;
-
-        const user = await prisma.user.findUnique({
-          where: { id: decoded.userId },
-          select: { id: true, email: true, status: true },
-        });
+        const user = await fetchUser(decoded.userId);
 
         if (user && user.status !== 'SUSPENDED') {
           req.user = {

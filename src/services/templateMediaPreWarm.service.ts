@@ -33,7 +33,7 @@ export class TemplateMediaPreWarmService {
 
     try {
       // Find templates that need refresh
-      const REFRESH_THRESHOLD_DAYS = 20; // Refresh if older than 20 days
+      const REFRESH_THRESHOLD_DAYS = 25; // Meta ID valid for 30 days, refresh at 25
       const thresholdDate = new Date(
         Date.now() - REFRESH_THRESHOLD_DAYS * 24 * 60 * 60 * 1000
       );

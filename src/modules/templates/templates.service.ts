@@ -261,21 +261,34 @@ const buildMetaTemplatePayload = (t: {
       components.push(headerComp);
     }
     else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-      const mediaForCreation = t.headerMediaId || t.headerContent;
+      // ✅ CRITICAL: Only use HANDLE, never Cloudinary URL
+      const handle = t.headerMediaId;
 
-      if (!mediaForCreation) {
+      if (!handle) {
         throw new AppError(
-          `${headerType} template requires uploaded media. Please upload a file first.`,
+          `${headerType} template requires a Meta upload handle. ` +
+          `Please re-upload the media file.`,
           400
         );
       }
 
-      components.push({
+      // ✅ Validate handle format (Meta requires "digit:base64" format)
+      if (handle.startsWith('http')) {
+        throw new AppError(
+          `Invalid media handle: URLs cannot be used. ` +
+          `Please re-upload the file to get a valid Meta handle.`,
+          400
+        );
+      }
+
+      const headerComp: any = {
         type: 'HEADER',
         format: headerType,
-        example: { header_handle: [mediaForCreation] },
-      });
-      console.log(`✅ ${headerType} header with: ${mediaForCreation.substring(0, 40)}...`);
+        example: { header_handle: [handle] },
+      };
+
+      components.push(headerComp);
+      console.log(`✅ ${headerType} header with handle: ${handle.substring(0, 30)}...`);
     }
   }
 
@@ -646,30 +659,41 @@ export class TemplatesService {
     let finalCloudinaryUrl: string | null = null;
 
     if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+      // ✅ SIMPLIFIED: Cloudinary URL for DB, Meta handle for creation
+      
+      // Get permanent URL (Cloudinary)
       finalCloudinaryUrl =
         input.cloudinaryUrl ||
         input.permanentUrl ||
-        (() => {
-          if (input.headerMediaId?.includes(':::')) {
-            const url = input.headerMediaId.split(':::')[1];
-            return url && url.startsWith('http') && !url.includes('scontent') ? url : null;
-          }
-          return null;
-        })() ||
-        (input.headerContent?.startsWith('http') && !input.headerContent.includes('scontent')
-          ? input.headerContent
-          : null) ||
+        (input.headerContent?.startsWith('http') && 
+         !input.headerContent.includes('scontent') 
+          ? input.headerContent 
+          : null);
+
+      // Get Meta handle (for template creation)
+      // Handle format: "4:V2hh..." - NOT numeric ID
+      const rawHandle = 
+        input.headerMediaId || 
+        input.metaNumericId || 
         null;
 
-      finalMetaId =
-        (input.metaNumericId || null) ||
-        (() => {
-          const rawId = input.headerMediaId?.split(':::')[0];
-          if (rawId && /^\d+$/.test(rawId)) return rawId;
-          return null;
-        })() ||
-        input.headerMediaId?.split(':::')[0] ||
-        null;
+      // ✅ Store handle as-is (it's temporary anyway - only for creation)
+      finalMetaId = rawHandle;
+
+      // ✅ Validation
+      if (!finalCloudinaryUrl) {
+        throw new AppError(
+          'Media must be uploaded first. Cloudinary URL missing.',
+          400
+        );
+      }
+
+      if (!finalMetaId) {
+        throw new AppError(
+          'Meta media handle missing. Please re-upload the file.',
+          400
+        );
+      }
     }
 
     const mediaHeaderContent =
@@ -711,17 +735,14 @@ export class TemplatesService {
       language: input.language,
       category: input.category,
       headerType: input.headerType || null,
-      headerContent: mediaHeaderContent,
-      headerMediaId: (() => {
-        if (!finalMetaId) return null;
-        if (/^\d{10,}$/.test(finalMetaId)) return finalMetaId;
-        return null;
-      })(),
-      headerMediaUploadedAt: (() => {
-        if (!finalMetaId) return null;
-        if (/^\d{10,}$/.test(finalMetaId)) return new Date();
-        return null;
-      })(),
+      
+      // ✅ CHANGED: Always store Cloudinary URL (permanent)
+      headerContent: finalCloudinaryUrl || mediaHeaderContent,
+      
+      // ✅ CHANGED: Handle stored temporarily (will be null after approval)
+      headerMediaId: null, // Don't store handle - it expires
+      
+      headerMediaUploadedAt: finalMetaId ? new Date() : null,
       headerMediaLastVerified: null,
       bodyText: input.bodyText,
       footerText: input.footerText || null,

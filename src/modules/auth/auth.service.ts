@@ -692,17 +692,48 @@ export class AuthService {
   // ────────────────────────────────────────────
   async login(input: LoginInput): Promise<AuthResponse> {
     const normalizedEmail = input.email.trim().toLowerCase();
-
     console.log(`🔐 Login attempt: ${normalizedEmail}`);
 
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
+    // ── Step 1: User fetch with explicit error handling ──
+    let user: any;
+    try {
+      user = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        select: {
+          id: true,
+          email: true,
+          password: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          avatar: true,
+          emailVerified: true,
+          status: true,
+          googleId: true,
+          tokenVersion: true,
+          createdAt: true,
+        },
+      });
+    } catch (err: any) {
+      // ✅ Pool timeout pe generic error - user ko pata nahi chalega
+      if (err?.code === 'P2024') {
+        console.error('❌ Login DB timeout for:', normalizedEmail);
+        throw new AppError(
+          'Service temporarily busy. Please try again in a moment.',
+          503
+        );
+      }
+      throw err;
+    }
 
+    // ── Step 2: User existence check ────────────────────
     if (!user) {
+      // ✅ Timing attack prevention - same delay even for missing users
+      await new Promise((r) => setTimeout(r, 200));
       throw new AppError('Invalid email or password', 401);
     }
 
+    // ── Step 3: Account type check ──────────────────────
     if (!user.password) {
       if (user.googleId) {
         throw new AppError(
@@ -716,33 +747,53 @@ export class AuthService {
       );
     }
 
-    const isValid = await comparePassword(input.password, user.password);
-    if (!isValid) {
-      throw new AppError('Invalid email or password', 401);
+    // ── Step 4: Status check BEFORE bcrypt (fast fail) ──
+    if (user.status === 'SUSPENDED') {
+      throw new AppError('Account suspended. Please contact support.', 403);
     }
 
-    if (user.status === 'SUSPENDED') {
+    // ── Step 5: Password compare ─────────────────────────
+    let isValid = false;
+    try {
+      isValid = await comparePassword(input.password, user.password);
+    } catch (bcryptError: any) {
+      console.error('❌ bcrypt error during login:', bcryptError.message);
       throw new AppError(
-        'Account suspended. Please contact support.',
-        403
+        'Login error. Please try again.',
+        500
       );
     }
 
+    if (!isValid) {
+      console.log(`❌ Wrong password for: ${normalizedEmail}`);
+      throw new AppError('Invalid email or password', 401);
+    }
+
+    // ── Step 6: Get/create organization ─────────────────
     let organization = await getDefaultOrg(user.id);
 
     if (!organization) {
-      console.log('⚠️  No org found for user, auto-creating...');
+      console.log('⚠️  No org found, auto-creating...');
       const orgName = `${user.firstName || 'User'}'s Workspace`;
       organization = await prisma.$transaction((tx) =>
         createOrgWithPlan(tx, user.id, orgName)
       );
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    });
+    // ── Step 7: Update lastLoginAt (non-blocking) ───────
+    // ✅ Await nahi karo - login slow nahi karega
+    prisma.user
+      .update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+      })
+      .catch((err) => {
+        if (err?.code !== 'P2024') {
+          console.error('⚠️  lastLoginAt update failed:', err.message);
+        }
+      });
 
+    // ── Step 8: Generate tokens ──────────────────────────
     const tokens = await generateTokenPair(
       user.id,
       user.email,
