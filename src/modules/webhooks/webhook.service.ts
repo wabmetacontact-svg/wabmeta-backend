@@ -785,29 +785,32 @@ export class WebhookService {
     msgType: string
   ) {
     try {
+      const context = {
+        organizationId,
+        contactId: contact.id,
+        phone: waFrom,
+        message: content,
+        conversationId: conversation.id,
+      };
+
+      // ✅ 1. Unknown message trigger (for new/unknown senders)
+      // Fire regardless of contact existence - the trigger itself checks
+      automationEngine.triggerUnknownMessage(context)
+        .catch(err => console.error('❌ Unknown message trigger:', err.message));
+
+      // ✅ 2. Keyword trigger (for all messages)
+      if (content) {
+        automationEngine.triggerKeyword(context)
+          .catch(err => console.error('❌ Keyword trigger:', err.message));
+      }
+
+      // ✅ 3. New contact trigger (only if contact was JUST created)
       if (wasNewlyCreated) {
-        await automationEngine.triggerUnknownMessage({
+        automationEngine.triggerNewContact({
           organizationId,
           contactId: contact.id,
           phone: waFrom,
-          message: content,
-          conversationId: conversation.id,
-        });
-        await automationEngine.triggerNewContact({
-          organizationId,
-          contactId: contact.id,
-          phone: waFrom,
-          message: content,
-          conversationId: conversation.id,
-        });
-      } else {
-        await automationEngine.triggerKeyword({
-          organizationId,
-          contactId: contact.id,
-          phone: waFrom,
-          message: content,
-          conversationId: conversation.id,
-        });
+        }).catch(err => console.error('❌ New contact trigger:', err.message));
       }
 
       if (msgType === 'INTERACTIVE') {

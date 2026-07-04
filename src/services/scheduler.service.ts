@@ -17,21 +17,18 @@ export function initializeScheduler() {
   console.log('⏰ Initializing scheduler...');
 
   // ============================================
-  // 1. AUTOMATION - Every 2 minutes (was 1 min - too frequent)
+  // 1. AUTOMATION SCHEDULED - Every minute
+  // ✅ CHANGED: Was every 2 minutes, back to 1 minute for accuracy
   // ============================================
-  cron.schedule('*/2 * * * *', async () => {
+  cron.schedule('* * * * *', async () => {
     if (runningFlags.automation) {
-      console.log('⏭️  Automation trigger already running, skipping');
-      return;
+      return; // Silent skip - normal
     }
     runningFlags.automation = true;
     try {
       await automationEngine.triggerScheduled();
     } catch (error: any) {
-      // ✅ Pool timeout - silently skip
-      if (error?.code === 'P2024') {
-        console.warn('⚠️  Automation trigger skipped: DB pool busy');
-      } else {
+      if (error?.code !== 'P2024') {
         console.error('🤖 Scheduled automation trigger error:', error);
       }
     } finally {
@@ -40,12 +37,14 @@ export function initializeScheduler() {
   });
 
   // ============================================
-  // 2. INACTIVITY CHECK - Every hour
+  // 2. INACTIVITY CHECK - Every 30 minutes  
+  // ✅ CHANGED: Was every hour, now 30min for better UX
   // ============================================
-  cron.schedule('0 * * * *', async () => {
+  cron.schedule('*/30 * * * *', async () => {
     if (runningFlags.inactivity) return;
     runningFlags.inactivity = true;
     try {
+      console.log('💤 Running inactivity check...');
       await automationEngine.triggerInactivity();
     } catch (error: any) {
       if (error?.code !== 'P2024') {
