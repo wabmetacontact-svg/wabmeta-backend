@@ -619,15 +619,27 @@ export async function deductWalletForCampaign(params: {
   };
 }
 
-// ─── Helper: Category Label (with actual rate) ────────────────────────────────
-function getCategoryLabel(category: string, rateRupees: number): string {
+function getCategoryLabel(
+  category: string,
+  rateRupees: number
+): string {
   const upper = category.toUpperCase();
-  const rStr  = `₹${rateRupees.toFixed(2)}`;
+  const rStr = `₹${rateRupees.toFixed(2)}`;
 
-  if (upper.includes('MARKETING')) return `Marketing (${rStr})`;
-  if (upper.includes('AUTH'))      return `Authentication (${rStr})`;
-  if (upper.includes('UTILITY'))   return `Utility (${rStr})`;
-  return `${category} (${rStr})`;
+  // ✅ Standardized keywords for analytics parsing
+  if (upper.includes('MARKETING')) {
+    return `MARKETING (${rStr})`;
+  }
+  if (upper.includes('AUTHENTICATION') || upper.includes('AUTH')) {
+    return `AUTHENTICATION (${rStr})`;
+  }
+  if (upper.includes('UTILITY')) {
+    return `UTILITY (${rStr})`;
+  }
+  if (upper.includes('SERVICE')) {
+    return `SERVICE (${rStr})`;
+  }
+  return `${category.toUpperCase()} (${rStr})`;
 }
 
 // ─── Helper: Low Balance Alert ─────────────────────────────────────────────────

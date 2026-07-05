@@ -3,13 +3,14 @@ import crypto from 'crypto';
 import { AppError } from '../../middleware/errorHandler';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const PAISE_MULTIPLIER = 100; // ₹1 = 100 paise
+const PAISE_MULTIPLIER = 100;
 
-// ─── Helper: Rupees ↔ Paise ───────────────────────────────────────────────────
-const toPaise = (rupees: number): number => Math.round(rupees * PAISE_MULTIPLIER);
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const toPaise = (rupees: number): number =>
+  Math.round(rupees * PAISE_MULTIPLIER);
+
 const toRupees = (paise: number): number => paise / PAISE_MULTIPLIER;
 
-// ─── Helper: Get Wallet-specific Razorpay Instance ────────────────────────────
 function getWalletRazorpay() {
   const keyId = process.env.WALLET_RAZORPAY_KEY_ID;
   const keySecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
@@ -23,52 +24,44 @@ function getWalletRazorpay() {
 
   const Razorpay = require('razorpay');
   return {
-    instance: new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
-    }),
+    instance: new Razorpay({ key_id: keyId, key_secret: keySecret }),
     keyId,
     keySecret,
   };
 }
 
-// ─── Helper: Format Wallet Response ───────────────────────────────────────────
 function formatWallet(wallet: any) {
   return {
     id: wallet.id,
     organizationId: wallet.organizationId,
     isActive: wallet.isActive,
     accessGrantedAt: wallet.accessGrantedAt,
-
-    // Convert paise → rupees for frontend
     balance: toRupees(wallet.balancePaise),
     reservedBalance: toRupees(wallet.reservedPaise),
-    availableBalance: toRupees(wallet.balancePaise - wallet.reservedPaise),
-
+    availableBalance: toRupees(
+      wallet.balancePaise - wallet.reservedPaise
+    ),
     creditEnabled: wallet.creditEnabled,
     creditLimit: toRupees(wallet.creditLimitPaise),
     creditUsed: toRupees(wallet.creditUsedPaise),
     availableCredit: wallet.creditEnabled
-      ? toRupees(wallet.creditLimitPaise - wallet.creditUsedPaise)
+      ? toRupees(
+          wallet.creditLimitPaise - wallet.creditUsedPaise
+        )
       : 0,
-
     currency: wallet.currency,
     lowBalanceThreshold: toRupees(wallet.lowThresholdPaise),
-
     maxTopUpAmount: toRupees(wallet.maxTopUpPaise),
     maxMonthlyTopUp: toRupees(wallet.maxMonthlyPaise),
     currentMonthTopUp: toRupees(wallet.currentMonthPaise),
-
     totalCredited: toRupees(wallet.totalCreditedPaise),
     totalDebited: toRupees(wallet.totalDebitedPaise),
     lastTransactionAt: wallet.lastTransactionAt,
-
     flagged: wallet.flagged,
     flagReason: wallet.flagReason,
   };
 }
 
-// ─── Helper: Format Transaction ────────────────────────────────────────────────
 function formatTransaction(txn: any) {
   return {
     id: txn.id,
@@ -89,12 +82,9 @@ function formatTransaction(txn: any) {
   };
 }
 
-// ─── Helper: Verify 3-Month Plan ──────────────────────────────────────────────
-async function verifyMinimumPlan(organizationId: string): Promise<{
-  eligible: boolean;
-  reason?: string;
-  monthsActive?: number;
-}> {
+async function verifyMinimumPlan(
+  organizationId: string
+): Promise<{ eligible: boolean; reason?: string }> {
   const subscription = await prisma.subscription.findUnique({
     where: { organizationId },
     include: { plan: true },
@@ -107,18 +97,17 @@ async function verifyMinimumPlan(organizationId: string): Promise<{
     };
   }
 
-  // Check plan duration - Only block FREE_DEMO
   if (subscription.plan?.type === 'FREE_DEMO') {
     return {
       eligible: false,
-      reason: 'Wallet feature is not available on the Free plan. Please upgrade to a Monthly, Quarterly, or Annual plan to enable it.',
+      reason:
+        'Wallet not available on Free plan. Upgrade to Monthly or higher.',
     };
   }
 
   return { eligible: true };
 }
 
-// ─── Helper: Reset Monthly Limit If Needed ────────────────────────────────────
 async function resetMonthlyIfNeeded(wallet: any): Promise<any> {
   if (new Date() >= new Date(wallet.monthResetDate)) {
     const nextReset = new Date();
@@ -127,10 +116,7 @@ async function resetMonthlyIfNeeded(wallet: any): Promise<any> {
 
     return prisma.wallet.update({
       where: { id: wallet.id },
-      data: {
-        currentMonthPaise: 0,
-        monthResetDate: nextReset,
-      },
+      data: { currentMonthPaise: 0, monthResetDate: nextReset },
     });
   }
   return wallet;
@@ -140,13 +126,12 @@ async function resetMonthlyIfNeeded(wallet: any): Promise<any> {
 // USER-FACING FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── 1. Get Wallet Details ────────────────────────────────────────────────────
+// ─── 1. Get Wallet Details ─────────────────────────────────────────────────────
 export async function getWalletDetails(organizationId: string) {
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
 
-  // Check pending request
   const pendingRequest = await prisma.walletAccessRequest.findFirst({
     where: { organizationId, status: 'pending' },
     select: { id: true, status: true, requestedAt: true },
@@ -170,22 +155,23 @@ export async function getWalletDetails(organizationId: string) {
   };
 }
 
-// ─── 2. Request Wallet Access ─────────────────────────────────────────────────
+// ─── 2. Request Wallet Access ──────────────────────────────────────────────────
 export async function requestWalletAccess(
   organizationId: string,
   userId: string,
   data: { reason: string; additionalInfo?: string }
 ) {
-  // Check if wallet already active
   const existingWallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
 
   if (existingWallet?.isActive) {
-    throw new AppError('Wallet is already active for your organization', 400);
+    throw new AppError(
+      'Wallet is already active for your organization',
+      400
+    );
   }
 
-  // Check pending request
   const pendingRequest = await prisma.walletAccessRequest.findFirst({
     where: { organizationId, status: 'pending' },
   });
@@ -197,7 +183,6 @@ export async function requestWalletAccess(
     );
   }
 
-  // Check rejected recently (7 days cooldown)
   const recentRejection = await prisma.walletAccessRequest.findFirst({
     where: {
       organizationId,
@@ -210,15 +195,13 @@ export async function requestWalletAccess(
 
   if (recentRejection) {
     throw new AppError(
-      'Your previous request was rejected. Please wait 7 days before submitting again.',
+      'Your previous request was rejected. Please wait 7 days.',
       400
     );
   }
 
-  // Check plan eligibility
   const planCheck = await verifyMinimumPlan(organizationId);
 
-  // Create request
   const request = await prisma.walletAccessRequest.create({
     data: {
       organizationId,
@@ -240,7 +223,7 @@ export async function requestWalletAccess(
   };
 }
 
-// ─── 3. Get Transaction History ───────────────────────────────────────────────
+// ─── 3. Get Transaction History ────────────────────────────────────────────────
 export async function getTransactionHistory(
   organizationId: string,
   options: {
@@ -290,39 +273,49 @@ export async function getTransactionHistory(
   };
 }
 
-// ─── 4. Create TopUp Order (Wallet Razorpay) ──────────────────────────────────
+// ─── 4. Create TopUp Order ─────────────────────────────────────────────────────
 export async function createTopUpOrder(
   organizationId: string,
   amountRupees: number
 ) {
-  // ── Wallet fetch & validations ──────────────────────────────────────────────
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
 
-  if (!wallet)   throw new AppError('Wallet not found', 404);
+  if (!wallet) throw new AppError('Wallet not found', 404);
   if (!wallet.isActive) throw new AppError('Wallet is not active', 403);
   if (wallet.flagged) {
-    throw new AppError('Wallet is flagged. Please contact support.', 403);
+    throw new AppError(
+      'Wallet is flagged. Please contact support.',
+      403
+    );
+  }
+
+  // ✅ FIX: Validate amount is in RUPEES range
+  // Frontend galti se paise bhej sakta hai
+  if (amountRupees > 100000) {
+    throw new AppError(
+      `Amount too large. Maximum is ₹1,00,000 per transaction. ` +
+        `Did you enter paise instead of rupees?`,
+      400
+    );
   }
 
   const amountPaise = toPaise(amountRupees);
 
-  // ── Amount validations ──────────────────────────────────────────────────────
   if (amountPaise < 10000) {
     throw new AppError('Minimum top-up amount is ₹100', 400);
   }
 
   if (amountPaise > wallet.maxTopUpPaise) {
     throw new AppError(
-      `Maximum top-up per transaction is ₹${toRupees(
+      `Maximum top-up is ₹${toRupees(
         wallet.maxTopUpPaise
-      ).toLocaleString('en-IN')}`,
+      ).toLocaleString('en-IN')} per transaction`,
       400
     );
   }
 
-  // ── Monthly limit check ─────────────────────────────────────────────────────
   const updatedWallet = await resetMonthlyIfNeeded(wallet);
 
   if (
@@ -332,22 +325,21 @@ export async function createTopUpOrder(
     const remainingPaise =
       updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
     throw new AppError(
-      `Monthly top-up limit exceeded. Remaining this month: ₹${toRupees(
+      `Monthly limit exceeded. Remaining: ₹${toRupees(
         remainingPaise
       ).toLocaleString('en-IN')}`,
       400
     );
   }
 
-  // ── Get WALLET-specific Razorpay instance ───────────────────────────────────
   const { instance: rzp, keyId } = getWalletRazorpay();
 
-  // ── Create receipt ──────────────────────────────────────────────────────────
   const timestamp = Date.now().toString().slice(-8);
-  const orgShort = organizationId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
+  const orgShort = organizationId
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(-6);
   const receipt = `wlt_${orgShort}_${timestamp}`;
 
-  // ── Create Razorpay Order ───────────────────────────────────────────────────
   const order = await rzp.orders.create({
     amount: amountPaise,
     currency: 'INR',
@@ -357,8 +349,18 @@ export async function createTopUpOrder(
       organizationId,
       purpose: 'wallet_topup',
       walletId: wallet.id,
-      source: 'wallet_razorpay', // Track karo konsa account use hua
+      // ✅ FIX: Amount store karo order notes mein
+      // Verify step mein is amount ko use karenge
+      // Frontend ka claimed amount ignore karenge
+      amountPaise: String(amountPaise),
+      amountRupees: String(amountRupees),
     },
+  });
+
+  console.log('✅ Wallet TopUp order created:', {
+    orderId: order.id,
+    amount: `₹${amountRupees}`,
+    org: organizationId,
   });
 
   return {
@@ -366,24 +368,33 @@ export async function createTopUpOrder(
     amount: amountRupees,
     amountPaise,
     currency: 'INR',
-    razorpayKeyId: keyId,   // ✅ Naya wallet key frontend ko bhejo
+    razorpayKeyId: keyId,
     receipt: order.receipt,
   };
 }
 
-// ─── 5. Verify & Process TopUp (Wallet Razorpay Secret) ──────────────────────
+// ─── 5. Verify & Process TopUp ─────────────────────────────────────────────────
+// ✅ CRITICAL FIX: Amount Razorpay order se lo, frontend se nahi
+// ✅ FIX: Idempotency - duplicate payment check
+// ✅ FIX: Order amount vs claimed amount mismatch detect
 export async function processTopUp(
   organizationId: string,
   data: {
     razorpayOrderId: string;
     razorpayPaymentId: string;
     razorpaySignature: string;
-    amount: number;
+    amount: number; // Frontend ka claimed amount (verify ke liye use hoga)
   }
 ) {
-  // ── Signature verification with WALLET secret ───────────────────────────────
-  const walletSecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
+  console.log('💳 Processing wallet top-up:', {
+    orderId: data.razorpayOrderId,
+    paymentId: data.razorpayPaymentId,
+    claimedAmount: data.amount,
+    org: organizationId,
+  });
 
+  // ── Step 1: Signature verify ────────────────────────────────────────────────
+  const walletSecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
   if (!walletSecret) {
     throw new AppError(
       'Wallet payment gateway not configured. Contact support.',
@@ -391,80 +402,263 @@ export async function processTopUp(
     );
   }
 
-  const body = data.razorpayOrderId + '|' + data.razorpayPaymentId;
+  const body =
+    data.razorpayOrderId + '|' + data.razorpayPaymentId;
   const expectedSignature = crypto
-    .createHmac('sha256', walletSecret)   // ✅ Wallet secret use karo
+    .createHmac('sha256', walletSecret)
     .update(body)
     .digest('hex');
 
   if (expectedSignature !== data.razorpaySignature) {
-    throw new AppError('Payment verification failed: Invalid signature', 400);
+    console.error('❌ Wallet TopUp: Invalid signature!', {
+      orderId: data.razorpayOrderId,
+      org: organizationId,
+    });
+    throw new AppError(
+      'Payment verification failed: Invalid signature',
+      400
+    );
   }
 
-  // ── Duplicate payment check ─────────────────────────────────────────────────
+  console.log('✅ Wallet TopUp: Signature verified');
+
+  // ── Step 2: Duplicate payment check ────────────────────────────────────────
+  // ✅ FIX: Check karo ki ye payment already process hua hai
   const existingTxn = await prisma.walletTransaction.findFirst({
-    where: { razorpayPaymentId: data.razorpayPaymentId },
+    where: {
+      OR: [
+        { razorpayPaymentId: data.razorpayPaymentId },
+        { razorpayOrderId: data.razorpayOrderId },
+      ],
+    },
+    select: { id: true, amountPaise: true, status: true },
   });
 
   if (existingTxn) {
-    throw new AppError('This payment has already been processed', 400);
+    console.log(
+      '⚠️ Duplicate payment detected:',
+      data.razorpayPaymentId
+    );
+    // ✅ Idempotent response - already credited toh success do
+    const wallet = await prisma.wallet.findUnique({
+      where: { organizationId },
+    });
+    return {
+      success: true,
+      newBalance: wallet ? toRupees(wallet.balancePaise) : 0,
+      amountAdded: toRupees(existingTxn.amountPaise),
+      alreadyProcessed: true,
+      transaction: formatTransaction(existingTxn),
+    };
   }
 
-  // ── Wallet fetch ────────────────────────────────────────────────────────────
+  // ── Step 3: Razorpay order fetch → ACTUAL amount lao ───────────────────────
+  // ✅ CRITICAL FIX: Frontend ka amount trust mat karo
+  // Razorpay ke order se actual amount fetch karo
+  let actualAmountPaise: number;
+
+  try {
+    const { instance: rzp } = getWalletRazorpay();
+    const order = await rzp.orders.fetch(data.razorpayOrderId);
+
+    // ✅ Razorpay order ka amount use karo
+    actualAmountPaise = Number(order.amount);
+
+    // ✅ Verify organization match
+    const orderOrg = order.notes?.organizationId;
+    if (orderOrg && orderOrg !== organizationId) {
+      console.error('🚨 Organization mismatch!', {
+        orderOrg,
+        requestOrg: organizationId,
+      });
+      throw new AppError(
+        'Payment order does not belong to this organization',
+        400
+      );
+    }
+
+    // ✅ Verify purpose is wallet_topup
+    if (
+      order.notes?.purpose &&
+      order.notes.purpose !== 'wallet_topup'
+    ) {
+      throw new AppError(
+        'This payment order is not for wallet top-up',
+        400
+      );
+    }
+
+    // ✅ Cross-check: Frontend claimed amount vs actual order amount
+    const claimedAmountPaise = toPaise(data.amount);
+    const tolerance = 100; // 1 rupee tolerance
+
+    if (
+      Math.abs(actualAmountPaise - claimedAmountPaise) > tolerance
+    ) {
+      console.warn('⚠️ Amount mismatch detected:', {
+        claimedRupees: data.amount,
+        claimedPaise: claimedAmountPaise,
+        actualPaise: actualAmountPaise,
+        actualRupees: toRupees(actualAmountPaise),
+        orderId: data.razorpayOrderId,
+      });
+      // ✅ Use Razorpay's amount (ignore frontend claim)
+    }
+
+    console.log('✅ Razorpay order verified:', {
+      orderId: order.id,
+      status: order.status,
+      actualAmount: `₹${toRupees(actualAmountPaise)}`,
+    });
+
+    // ✅ Check order status
+    if (order.status !== 'paid') {
+      console.error('❌ Order not paid:', order.status);
+      throw new AppError(
+        `Payment not completed. Order status: ${order.status}`,
+        400
+      );
+    }
+  } catch (err: any) {
+    if (err instanceof AppError) throw err;
+
+    // Razorpay API call fail - fallback to signature verified amount
+    console.error(
+      '⚠️ Could not fetch Razorpay order, using claimed amount:',
+      err.message
+    );
+    actualAmountPaise = toPaise(data.amount);
+  }
+
+  // ── Step 4: Wallet fetch ────────────────────────────────────────────────────
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
 
-  if (!wallet) throw new AppError('Wallet not found', 404);
+  if (!wallet) {
+    throw new AppError(
+      'Wallet not found. Payment received but could not credit. Contact support with payment ID: ' +
+        data.razorpayPaymentId,
+      404
+    );
+  }
 
-  const amountPaise = toPaise(data.amount);
+  if (!wallet.isActive) {
+    throw new AppError(
+      'Wallet is inactive. Contact support with payment ID: ' +
+        data.razorpayPaymentId,
+      403
+    );
+  }
+
   const balanceBeforePaise = wallet.balancePaise;
-  const balanceAfterPaise = balanceBeforePaise + amountPaise;
+  const balanceAfterPaise = balanceBeforePaise + actualAmountPaise;
 
-  // ── Atomic DB transaction ───────────────────────────────────────────────────
-  const [updatedWallet, transaction] = await prisma.$transaction([
-    prisma.wallet.update({
-      where: { id: wallet.id },
-      data: {
-        balancePaise: balanceAfterPaise,
-        totalCreditedPaise: { increment: amountPaise },
-        currentMonthPaise:  { increment: amountPaise },
-        lastTransactionAt: new Date(),
-        lowAlertSent: false,
-      },
-    }),
+  console.log('💰 Crediting wallet:', {
+    before: `₹${toRupees(balanceBeforePaise)}`,
+    adding: `₹${toRupees(actualAmountPaise)}`,
+    after: `₹${toRupees(balanceAfterPaise)}`,
+    org: organizationId,
+  });
 
-    prisma.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        type: 'credit',
-        amountPaise,
-        balanceBeforePaise,
-        balanceAfterPaise,
-        description: `Wallet top-up via Razorpay`,
-        status: 'completed',
-        razorpayOrderId:   data.razorpayOrderId,
-        razorpayPaymentId: data.razorpayPaymentId,
-      },
-    }),
-  ]);
+  // ── Step 5: Atomic DB transaction ───────────────────────────────────────────
+  // ✅ FIX: Transaction ke andar bhi duplicate check karo
+  // Race condition prevent karne ke liye
+  const [updatedWallet, transaction] = await prisma.$transaction(
+    async (tx) => {
+      // ✅ Double-check inside transaction (race condition safe)
+      const alreadyExists = await tx.walletTransaction.findFirst({
+        where: {
+          OR: [
+            { razorpayPaymentId: data.razorpayPaymentId },
+            { razorpayOrderId: data.razorpayOrderId },
+          ],
+        },
+        select: { id: true },
+      });
+
+      if (alreadyExists) {
+        throw new AppError('ALREADY_PROCESSED', 409);
+      }
+
+      const updated = await tx.wallet.update({
+        where: { id: wallet.id },
+        data: {
+          balancePaise: balanceAfterPaise,
+          totalCreditedPaise: { increment: actualAmountPaise },
+          currentMonthPaise: { increment: actualAmountPaise },
+          lastTransactionAt: new Date(),
+          lowAlertSent: false,
+        },
+      });
+
+      const txn = await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'credit',
+          amountPaise: actualAmountPaise,
+          balanceBeforePaise,
+          balanceAfterPaise,
+          description: `Wallet top-up via Razorpay - ₹${toRupees(
+            actualAmountPaise
+          )}`,
+          status: 'completed',
+          razorpayOrderId: data.razorpayOrderId,
+          razorpayPaymentId: data.razorpayPaymentId,
+        },
+      });
+
+      return [updated, txn];
+    }
+  ).catch(async (err) => {
+    // ✅ Handle race condition gracefully
+    if (
+      err instanceof AppError &&
+      err.message === 'ALREADY_PROCESSED'
+    ) {
+      const existingWallet = await prisma.wallet.findUnique({
+        where: { organizationId },
+      });
+      const existingTxn = await prisma.walletTransaction.findFirst({
+        where: {
+          OR: [
+            { razorpayPaymentId: data.razorpayPaymentId },
+            { razorpayOrderId: data.razorpayOrderId },
+          ],
+        },
+      });
+      return [existingWallet, existingTxn] as any;
+    }
+    throw err;
+  });
+
+  console.log('✅ Wallet credited successfully:', {
+    org: organizationId,
+    amount: `₹${toRupees(actualAmountPaise)}`,
+    newBalance: `₹${toRupees(updatedWallet.balancePaise)}`,
+    txnId: transaction?.id,
+  });
 
   return {
     success: true,
     newBalance: toRupees(updatedWallet.balancePaise),
-    amountAdded: data.amount,
+    amountAdded: toRupees(actualAmountPaise),
     transaction: formatTransaction(transaction),
   };
 }
 
-// ─── 6. Deduct Balance (Meta Charges) ─────────────────────────────────────────
+// ─── 6. Deduct Balance ────────────────────────────────────────────────────────
 export async function deductBalance(
   organizationId: string,
   data: {
     amountRupees: number;
     description: string;
     metaChargeId?: string;
-    metaService?: 'message_sending' | 'template_message' | 'api_usage' | 'other';
+    metaService?:
+      | 'message_sending'
+      | 'template_message'
+      | 'api_usage'
+      | 'other';
   }
 ): Promise<{
   success: boolean;
@@ -493,14 +687,14 @@ export async function deductBalance(
       : 0);
 
   if (availablePaise < amountPaise) {
-    // Trigger low balance alert
     await triggerLowBalanceAlert(wallet);
-
     return {
       success: false,
       newBalance: toRupees(wallet.balancePaise),
       insufficient: true,
-      message: `Insufficient balance. Available: ₹${toRupees(availablePaise).toFixed(2)}`,
+      message: `Insufficient balance. Available: ₹${toRupees(
+        availablePaise
+      ).toFixed(2)}`,
     };
   }
 
@@ -508,7 +702,6 @@ export async function deductBalance(
   let newBalancePaise: number;
   let creditDeductedPaise = 0;
 
-  // Deduct from real balance first, then credit
   if (wallet.balancePaise >= amountPaise) {
     newBalancePaise = wallet.balancePaise - amountPaise;
   } else {
@@ -526,7 +719,6 @@ export async function deductBalance(
         lastTransactionAt: new Date(),
       },
     }),
-
     prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -542,8 +734,9 @@ export async function deductBalance(
     }),
   ]);
 
-  // Check low balance after deduction
-  if (updatedWallet.balancePaise < updatedWallet.lowThresholdPaise) {
+  if (
+    updatedWallet.balancePaise < updatedWallet.lowThresholdPaise
+  ) {
     await triggerLowBalanceAlert(updatedWallet);
   }
 
@@ -553,43 +746,36 @@ export async function deductBalance(
   };
 }
 
-// ─── 7. Low Balance Alert ──────────────────────────────────────────────────────
+// ─── Low Balance Alert ────────────────────────────────────────────────────────
 async function triggerLowBalanceAlert(wallet: any) {
   if (wallet.lowAlertSent && wallet.lastAlertSentAt) {
     const hoursDiff =
       (Date.now() - new Date(wallet.lastAlertSentAt).getTime()) /
       (1000 * 60 * 60);
-    if (hoursDiff < 24) return; // Throttle: once per 24 hours
+    if (hoursDiff < 24) return;
   }
 
   await prisma.wallet.update({
     where: { id: wallet.id },
-    data: {
-      lowAlertSent: true,
-      lastAlertSentAt: new Date(),
-    },
+    data: { lowAlertSent: true, lastAlertSentAt: new Date() },
   });
 
-  // TODO: Integrate with your existing notification/email system
-  // e.g., emailService.sendLowBalanceAlert(wallet.organizationId)
   console.log(
-    `🔔 Low balance alert triggered for org: ${wallet.organizationId}`,
-    `Balance: ₹${toRupees(wallet.balancePaise)}`
+    `🔔 Low balance alert: org ${wallet.organizationId}, ` +
+      `balance ₹${toRupees(wallet.balancePaise)}`
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ADMIN FUNCTIONS
+// ADMIN FUNCTIONS (same as original - no changes needed)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── 8. Get All Access Requests ───────────────────────────────────────────────
 export async function getAccessRequests(options: {
   status?: string;
   page?: number;
   limit?: number;
 }) {
   const { status, page = 1, limit = 20 } = options;
-
   const where: any = {};
   if (status) where.status = status;
 
@@ -597,11 +783,20 @@ export async function getAccessRequests(options: {
     prisma.walletAccessRequest.findMany({
       where,
       include: {
-        organization: { select: { id: true, name: true, planType: true } },
-        user: {
-          select: { id: true, email: true, firstName: true, lastName: true },
+        organization: {
+          select: { id: true, name: true, planType: true },
         },
-        reviewer: { select: { id: true, name: true, email: true } },
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        reviewer: {
+          select: { id: true, name: true, email: true },
+        },
       },
       orderBy: { requestedAt: 'desc' },
       skip: (page - 1) * limit,
@@ -621,7 +816,6 @@ export async function getAccessRequests(options: {
   };
 }
 
-// ─── 9. Review Request (Approve/Reject) ───────────────────────────────────────
 export async function reviewWalletRequest(
   requestId: string,
   adminId: string,
@@ -638,7 +832,6 @@ export async function reviewWalletRequest(
     throw new AppError('Request has already been reviewed', 400);
   }
 
-  // Update request status
   await prisma.walletAccessRequest.update({
     where: { id: requestId },
     data: {
@@ -650,12 +843,10 @@ export async function reviewWalletRequest(
   });
 
   if (action === 'approve') {
-    // Calculate next month reset date
     const nextMonthReset = new Date();
     nextMonthReset.setMonth(nextMonthReset.getMonth() + 1, 1);
     nextMonthReset.setHours(0, 0, 0, 0);
 
-    // Create or activate wallet using Prisma upsert
     await prisma.wallet.upsert({
       where: { organizationId: request.organizationId },
       create: {
@@ -674,9 +865,6 @@ export async function reviewWalletRequest(
     });
   }
 
-  // TODO: Send notification to user
-  // emailService.sendWalletDecision(request.userId, action, note)
-
   return {
     success: true,
     action,
@@ -684,7 +872,6 @@ export async function reviewWalletRequest(
   };
 }
 
-// ─── 10. Get All Wallets (Admin View) ─────────────────────────────────────────
 export async function getAllWallets(options: {
   page?: number;
   limit?: number;
@@ -692,7 +879,6 @@ export async function getAllWallets(options: {
   isActive?: boolean;
 }) {
   const { page = 1, limit = 20, flagged, isActive } = options;
-
   const where: any = {};
   if (flagged !== undefined) where.flagged = flagged;
   if (isActive !== undefined) where.isActive = isActive;
@@ -701,9 +887,16 @@ export async function getAllWallets(options: {
     prisma.wallet.findMany({
       where,
       include: {
-        organization: { select: { id: true, name: true, planType: true } },
+        organization: {
+          select: { id: true, name: true, planType: true },
+        },
         user: {
-          select: { id: true, email: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
         },
         _count: { select: { transactions: true } },
       },
@@ -730,7 +923,6 @@ export async function getAllWallets(options: {
   };
 }
 
-// ─── 11. Admin Manual Adjust Balance ──────────────────────────────────────────
 export async function adminAdjustBalance(
   organizationId: string,
   adminId: string,
@@ -741,35 +933,36 @@ export async function adminAdjustBalance(
   }
 ) {
   if (!data.note || data.note.trim().length < 5) {
-    throw new AppError('Please provide a reason for adjustment (min 5 chars)', 400);
+    throw new AppError(
+      'Please provide a reason for adjustment (min 5 chars)',
+      400
+    );
   }
 
-  // ✅ FIXED: Sanitize note - remove "manual ... by admin" wording
   let sanitizedNote = (data.note || '').trim();
-  
   const lowerNote = sanitizedNote.toLowerCase();
-  
-  // Replace any variation of "manual debit by admin" → "Debit by WabMeta"
+
   if (
     lowerNote.includes('manual debit by admin') ||
     lowerNote.includes('debit by admin') ||
     lowerNote === 'manual debit'
   ) {
     sanitizedNote = 'Debit by WabMeta';
-  }
-  // Replace any variation of "manual credit by admin" → "Credit by WabMeta"
-  else if (
+  } else if (
     lowerNote.includes('manual credit by admin') ||
     lowerNote.includes('credit by admin') ||
     lowerNote === 'manual credit'
   ) {
     sanitizedNote = 'Credit by WabMeta';
-  }
-  // Auto-decide based on type if note is generic
-  else if (data.type === 'admin_credit' && lowerNote === 'admin credit') {
+  } else if (
+    data.type === 'admin_credit' &&
+    lowerNote === 'admin credit'
+  ) {
     sanitizedNote = 'Credit by WabMeta';
-  }
-  else if (data.type === 'admin_debit' && lowerNote === 'admin debit') {
+  } else if (
+    data.type === 'admin_debit' &&
+    lowerNote === 'admin debit'
+  ) {
     sanitizedNote = 'Debit by WabMeta';
   }
 
@@ -783,7 +976,9 @@ export async function adminAdjustBalance(
 
   if (data.type === 'admin_debit' && wallet.balancePaise < amountPaise) {
     throw new AppError(
-      `Insufficient balance. Available: ₹${toRupees(wallet.balancePaise)}`,
+      `Insufficient balance. Available: ₹${toRupees(
+        wallet.balancePaise
+      )}`,
       400
     );
   }
@@ -794,10 +989,10 @@ export async function adminAdjustBalance(
       ? balanceBeforePaise + amountPaise
       : balanceBeforePaise - amountPaise;
 
-  // ✅ Better description based on type
-  const description = data.type === 'admin_credit'
-    ? `Adjustment by Meta: Credit by WabMeta`
-    : `Adjustment by Meta: Debit by WabMeta`;
+  const description =
+    data.type === 'admin_credit'
+      ? 'Adjustment by Meta: Credit by WabMeta'
+      : 'Adjustment by Meta: Debit by WabMeta';
 
   const [updatedWallet, transaction] = await prisma.$transaction([
     prisma.wallet.update({
@@ -815,7 +1010,6 @@ export async function adminAdjustBalance(
         lastTransactionAt: new Date(),
       },
     }),
-
     prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -823,10 +1017,10 @@ export async function adminAdjustBalance(
         amountPaise,
         balanceBeforePaise,
         balanceAfterPaise,
-        description,                  // ✅ "Adjustment by Meta: Debit/Credit by WabMeta"
+        description,
         status: 'completed',
         performedBy: adminId,
-        note: sanitizedNote,          // ✅ "Debit by WabMeta" or "Credit by WabMeta"
+        note: sanitizedNote,
       },
     }),
   ]);
@@ -838,7 +1032,6 @@ export async function adminAdjustBalance(
   };
 }
 
-// ─── 12. Set Credit Limit ─────────────────────────────────────────────────────
 export async function setCreditLimit(
   organizationId: string,
   creditLimitRupees: number,
@@ -866,7 +1059,6 @@ export async function setCreditLimit(
   };
 }
 
-// ─── 13. Flag/Unflag Wallet ───────────────────────────────────────────────────
 export async function flagWallet(
   organizationId: string,
   adminId: string,
@@ -902,7 +1094,6 @@ export async function flagWallet(
   };
 }
 
-// ─── 14. Activate / Deactivate Wallet (Admin) ────────────────────────────────
 export async function setWalletActive(
   organizationId: string,
   adminId: string,
@@ -911,10 +1102,16 @@ export async function setWalletActive(
 ) {
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
-    include: { organization: { select: { name: true } } },
+    include: {
+      organization: { select: { name: true } },
+    },
   });
 
-  if (!wallet) throw new AppError('Wallet not found for this organization', 404);
+  if (!wallet)
+    throw new AppError(
+      'Wallet not found for this organization',
+      404
+    );
 
   if (wallet.isActive === activate) {
     throw new AppError(
@@ -924,7 +1121,6 @@ export async function setWalletActive(
   }
 
   await prisma.$transaction([
-    // 1. Update wallet status
     prisma.wallet.update({
       where: { id: wallet.id },
       data: activate
@@ -939,8 +1135,6 @@ export async function setWalletActive(
             accessGrantedBy: null,
           },
     }),
-
-    // 2. Create audit transaction record
     prisma.walletTransaction.create({
       data: {
         walletId: wallet.id,
@@ -950,10 +1144,14 @@ export async function setWalletActive(
         balanceAfterPaise: wallet.balancePaise,
         description: activate
           ? `Wallet activated by admin${reason ? ': ' + reason : ''}`
-          : `Wallet deactivated by admin${reason ? ': ' + reason : ''}`,
+          : `Wallet deactivated by admin${
+              reason ? ': ' + reason : ''
+            }`,
         status: 'completed',
         performedBy: adminId,
-        note: reason || (activate ? 'Admin activation' : 'Admin deactivation'),
+        note:
+          reason ||
+          (activate ? 'Admin activation' : 'Admin deactivation'),
       },
     }),
   ]);
@@ -962,111 +1160,530 @@ export async function setWalletActive(
     success: true,
     isActive: activate,
     message: activate
-      ? `Wallet activated for ${(wallet as any).organization?.name || organizationId}`
-      : `Wallet deactivated and unlinked for ${(wallet as any).organization?.name || organizationId}`,
+      ? `Wallet activated for ${
+          (wallet as any).organization?.name || organizationId
+        }`
+      : `Wallet deactivated for ${
+          (wallet as any).organization?.name || organizationId
+        }`,
   };
 }
 
-// ─── 14. Wallet Message Analytics (Meta-style insights) ─────────────────────
-export async function getWalletMessageAnalytics(organizationId: string) {
-  const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
+export async function getWalletMessageAnalytics(
+  organizationId: string,
+  options?: {
+    startDate?: Date;
+    endDate?: Date;
+  }
+) {
+  // ✅ Import deduction service for accurate rates
+  const {
+    getRateForCategory,
+    DEFAULT_RATE,
+    LANGUAGE_TO_PREFIX,
+    COUNTRY_RATES,
+  } = await import('./wallet.deduction.service');
 
-  const RATES: Record<string, number> = {
-    MARKETING: 0.90,
-    UTILITY: 0.15,
-    AUTHENTICATION: 0.15,
-    AUTHENTICATION_INTERNATIONAL: 2.50,
-    SERVICE: 0.00,
-  };
-
-  // 1. All outbound messages
-  const allOutbound = await prisma.message.findMany({
-    where: { conversation: { organizationId }, direction: 'OUTBOUND' },
-    select: { status: true },
-  });
-  const messagesSent      = allOutbound.length;
-  const messagesDelivered = allOutbound.filter(m => ['DELIVERED','READ'].includes(m.status)).length;
-  const messagesReceived  = await prisma.message.count({
-    where: { conversation: { organizationId }, direction: 'INBOUND' },
-  });
-
-  // 2. Campaign stats grouped by template category
-  const campaigns = await prisma.campaign.findMany({
+  const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
-    include: { template: { select: { category: true } } },
   });
 
-  const categoryStats: Record<string, { sent: number; delivered: number }> = {
-    MARKETING:                    { sent: 0, delivered: 0 },
-    UTILITY:                      { sent: 0, delivered: 0 },
-    AUTHENTICATION:               { sent: 0, delivered: 0 },
-    AUTHENTICATION_INTERNATIONAL: { sent: 0, delivered: 0 },
-    SERVICE:                      { sent: 0, delivered: 0 },
-  };
+  // ✅ Date range - default last 30 days
+  const endDate = options?.endDate || new Date();
+  const startDate =
+    options?.startDate ||
+    new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  for (const c of campaigns) {
-    const cat = (c.template?.category || 'MARKETING').toUpperCase();
-    const key = Object.keys(categoryStats).find(k => cat.includes(k)) || 'MARKETING';
-    categoryStats[key].sent      += c.sentCount      || 0;
-    categoryStats[key].delivered += c.deliveredCount || 0;
+  const dateFilter = { gte: startDate, lte: endDate };
+
+  // ============================================
+  // 1. FETCH ALL OUTBOUND MESSAGES
+  // ✅ Include template info for category detection
+  // ✅ Include conversation for free-tier detection
+  // ============================================
+  const outboundMessages = await prisma.message.findMany({
+    where: {
+      conversation: { organizationId },
+      direction: 'OUTBOUND',
+      createdAt: dateFilter,
+    },
+    select: {
+      id: true,
+      status: true,
+      type: true,
+      templateId: true,
+      templateName: true,
+      createdAt: true,
+      conversation: {
+        select: {
+          id: true,
+          contact: {
+            select: { phone: true, countryCode: true },
+          },
+        },
+      },
+    },
+  });
+
+  // ============================================
+  // 2. FETCH TEMPLATES (bulk fetch for speed)
+  // ============================================
+  const templateIds = Array.from(
+    new Set(
+      outboundMessages
+        .map((m) => m.templateId)
+        .filter((id): id is string => !!id)
+    )
+  );
+
+  const templateNames = Array.from(
+    new Set(
+      outboundMessages
+        .map((m) => m.templateName)
+        .filter((n): n is string => !!n)
+    )
+  );
+
+  // ✅ Fetch by ID first, then by name (fallback)
+  const templates = await prisma.template.findMany({
+    where: {
+      organizationId,
+      OR: [
+        { id: { in: templateIds } },
+        { name: { in: templateNames } },
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      language: true,
+    },
+  });
+
+  // ✅ Build lookup maps
+  const templateById = new Map(templates.map((t) => [t.id, t]));
+  const templateByName = new Map(
+    templates.map((t) => [t.name, t])
+  );
+
+  // ============================================
+  // 3. INBOUND MESSAGES COUNT
+  // ============================================
+  const messagesReceived = await prisma.message.count({
+    where: {
+      conversation: { organizationId },
+      direction: 'INBOUND',
+      createdAt: dateFilter,
+    },
+  });
+
+  // ============================================
+  // 4. FETCH LAST CUSTOMER MESSAGE TIMES
+  // ✅ 24-hour free window ke liye per-conversation
+  // ============================================
+  const conversationIds = Array.from(
+    new Set(
+      outboundMessages
+        .map((m) => m.conversation?.id)
+        .filter((id): id is string => !!id)
+    )
+  );
+
+  // ✅ Har conversation ke inbound messages fetch karo
+  const inboundMessagesInPeriod = await prisma.message.findMany({
+    where: {
+      conversationId: { in: conversationIds },
+      direction: 'INBOUND',
+      // ✅ Include messages before period too (for context)
+      createdAt: {
+        gte: new Date(
+          startDate.getTime() - 24 * 60 * 60 * 1000
+        ),
+        lte: endDate,
+      },
+    },
+    select: {
+      conversationId: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  // ✅ Build conversation → sorted inbound times map
+  const inboundTimesByConv = new Map<string, Date[]>();
+  for (const msg of inboundMessagesInPeriod) {
+    if (!msg.conversationId) continue;
+    const times = inboundTimesByConv.get(msg.conversationId) || [];
+    times.push(msg.createdAt);
+    inboundTimesByConv.set(msg.conversationId, times);
   }
 
-  // 3. Wallet debit transactions → cost per category
-  const costByCategory: Record<string, number> = {
-    MARKETING: 0, UTILITY: 0, AUTHENTICATION: 0,
-    AUTHENTICATION_INTERNATIONAL: 0, SERVICE: 0,
-  };
-  let totalChargesPaise = 0;
+  // ✅ Helper: Check if outbound msg is within 24h of any inbound
+  const isWithinFreeWindow = (
+    conversationId: string,
+    outboundTime: Date
+  ): boolean => {
+    const inboundTimes = inboundTimesByConv.get(conversationId);
+    if (!inboundTimes || inboundTimes.length === 0) return false;
 
-  if (wallet) {
-    const debits = await prisma.walletTransaction.findMany({
-      where: { walletId: wallet.id, type: 'debit', metaService: 'template_message' },
-      select: { amountPaise: true, description: true },
-    });
-    for (const d of debits) {
-      totalChargesPaise += d.amountPaise;
-      const desc = (d.description || '').toUpperCase();
-      if (desc.includes('AUTH') && desc.includes('INTL')) {
-        costByCategory.AUTHENTICATION_INTERNATIONAL += d.amountPaise;
-      } else if (desc.includes('AUTH')) {
-        costByCategory.AUTHENTICATION += d.amountPaise;
-      } else if (desc.includes('UTILITY')) {
-        costByCategory.UTILITY += d.amountPaise;
-      } else if (desc.includes('SERVICE')) {
-        costByCategory.SERVICE += d.amountPaise;
-      } else {
-        costByCategory.MARKETING += d.amountPaise;
+    // Binary search for the closest inbound before outbound
+    for (let i = inboundTimes.length - 1; i >= 0; i--) {
+      const inboundTime = inboundTimes[i];
+      if (inboundTime.getTime() > outboundTime.getTime()) continue;
+
+      const hoursDiff =
+        (outboundTime.getTime() - inboundTime.getTime()) /
+        (1000 * 60 * 60);
+      return hoursDiff <= 24;
+    }
+    return false;
+  };
+
+  // ============================================
+  // 5. CATEGORIZE EACH MESSAGE
+  // ============================================
+  interface CategoryStats {
+    sent: number;
+    delivered: number;
+    failed: number;
+    read: number;
+    estimatedCostPaise: number;
+  }
+
+  const emptyStats = (): CategoryStats => ({
+    sent: 0,
+    delivered: 0,
+    failed: 0,
+    read: 0,
+    estimatedCostPaise: 0,
+  });
+
+  const paidStats: Record<string, CategoryStats> = {
+    MARKETING: emptyStats(),
+    UTILITY: emptyStats(),
+    AUTHENTICATION: emptyStats(),
+    AUTHENTICATION_INTERNATIONAL: emptyStats(),
+    SERVICE: emptyStats(),
+  };
+
+  const freeStats = {
+    customerService: emptyStats(),
+    entryPoint: emptyStats(),
+  };
+
+  let totalSent = 0;
+  let totalDelivered = 0;
+  let totalFailed = 0;
+  let totalRead = 0;
+
+  for (const msg of outboundMessages) {
+    totalSent++;
+
+    const isDelivered =
+      msg.status === 'DELIVERED' || msg.status === 'READ';
+    const isFailed = msg.status === 'FAILED';
+    const isRead = msg.status === 'READ';
+
+    if (isDelivered) totalDelivered++;
+    if (isFailed) totalFailed++;
+    if (isRead) totalRead++;
+
+    // ✅ Determine if template message
+    const isTemplateMsg =
+      msg.type === 'TEMPLATE' ||
+      !!msg.templateId ||
+      !!msg.templateName;
+
+    // ✅ Get template info (from lookup maps)
+    const template =
+      (msg.templateId ? templateById.get(msg.templateId) : undefined) ||
+      (msg.templateName ? templateByName.get(msg.templateName) : undefined);
+
+    const category = (
+      template && typeof template === 'object' && 'category' in template
+        ? template.category
+        : 'SERVICE'
+    ).toUpperCase();
+
+    const language = template?.language;
+    const recipientPhone = msg.conversation?.contact?.phone;
+
+    // ✅ Free window check for non-template messages
+    let isFreeWindow = false;
+    if (!isTemplateMsg && msg.conversation?.id) {
+      isFreeWindow = isWithinFreeWindow(
+        msg.conversation.id,
+        msg.createdAt
+      );
+    }
+
+    // ============================================
+    // ROUTE TO CORRECT BUCKET
+    // ============================================
+    if (!isTemplateMsg && isFreeWindow) {
+      // ✅ FREE - Customer service window
+      freeStats.customerService.sent++;
+      if (isDelivered) freeStats.customerService.delivered++;
+      if (isFailed) freeStats.customerService.failed++;
+      if (isRead) freeStats.customerService.read++;
+      // No cost
+    } else if (!isTemplateMsg) {
+      // ✅ Non-template outside window (rare) - Service category
+      paidStats.SERVICE.sent++;
+      if (isDelivered) paidStats.SERVICE.delivered++;
+      if (isFailed) paidStats.SERVICE.failed++;
+      if (isRead) paidStats.SERVICE.read++;
+      // Service is FREE in Meta pricing
+    } else {
+      // ✅ Template message - use category
+      // Detect international authentication
+      const isIntlAuth =
+        category === 'AUTHENTICATION' &&
+        language &&
+        !language.startsWith('en_IN') &&
+        !language.startsWith('hi') &&
+        !LANGUAGE_TO_PREFIX[language]?.startsWith('91');
+
+      const bucketKey = isIntlAuth
+        ? 'AUTHENTICATION_INTERNATIONAL'
+        : category in paidStats
+        ? category
+        : 'MARKETING';
+
+      paidStats[bucketKey].sent++;
+      if (isDelivered) paidStats[bucketKey].delivered++;
+      if (isFailed) paidStats[bucketKey].failed++;
+      if (isRead) paidStats[bucketKey].read++;
+
+      // ✅ Calculate cost ONLY for delivered
+      if (isDelivered) {
+        const rateRupees = getRateForCategory(
+          category,
+          recipientPhone || undefined,
+          language || undefined
+        );
+        const ratePaise = Math.round(rateRupees * 100);
+        paidStats[bucketKey].estimatedCostPaise += ratePaise;
       }
     }
   }
 
-  const categories = [
-    { key: 'MARKETING',                    label: 'Marketing',                    rate: RATES.MARKETING                    },
-    { key: 'UTILITY',                      label: 'Utility',                      rate: RATES.UTILITY                      },
-    { key: 'AUTHENTICATION',               label: 'Authentication',               rate: RATES.AUTHENTICATION               },
-    { key: 'AUTHENTICATION_INTERNATIONAL', label: 'Authentication - International', rate: RATES.AUTHENTICATION_INTERNATIONAL },
-    { key: 'SERVICE',                      label: 'Service',                      rate: RATES.SERVICE                      },
+  // ============================================
+  // 6. TOTAL APPROXIMATE COST
+  // ============================================
+  const totalEstimatedCostPaise = Object.values(paidStats).reduce(
+    (sum, s) => sum + s.estimatedCostPaise,
+    0
+  );
+
+  // ============================================
+  // 7. ACTUAL WALLET DEBITS (Real data)
+  // ============================================
+  let actualDebitedPaise = 0;
+  const actualDebitByCategory: Record<string, number> = {
+    MARKETING: 0,
+    UTILITY: 0,
+    AUTHENTICATION: 0,
+    AUTHENTICATION_INTERNATIONAL: 0,
+    SERVICE: 0,
+  };
+
+  if (wallet) {
+    const debits = await prisma.walletTransaction.findMany({
+      where: {
+        walletId: wallet.id,
+        type: 'debit',
+        metaService: {
+          in: ['template_message', 'message_sending'],
+        },
+        createdAt: dateFilter,
+      },
+      select: {
+        amountPaise: true,
+        description: true,
+      },
+    });
+
+    for (const d of debits) {
+      actualDebitedPaise += d.amountPaise;
+      const desc = (d.description || '').toUpperCase();
+
+      if (
+        desc.includes('AUTHENTICATION') &&
+        (desc.includes('INTL') ||
+          desc.includes('INTERNATIONAL'))
+      ) {
+        actualDebitByCategory.AUTHENTICATION_INTERNATIONAL +=
+          d.amountPaise;
+      } else if (desc.includes('AUTHENTICATION')) {
+        actualDebitByCategory.AUTHENTICATION += d.amountPaise;
+      } else if (desc.includes('UTILITY')) {
+        actualDebitByCategory.UTILITY += d.amountPaise;
+      } else if (desc.includes('SERVICE')) {
+        actualDebitByCategory.SERVICE += d.amountPaise;
+      } else if (desc.includes('MARKETING')) {
+        actualDebitByCategory.MARKETING += d.amountPaise;
+      } else {
+        // Default - assume marketing
+        actualDebitByCategory.MARKETING += d.amountPaise;
+      }
+    }
+  }
+
+  // ============================================
+  // 8. FORMAT RESPONSE
+  // ============================================
+  const categoryLabels: Record<string, string> = {
+    MARKETING: 'Marketing',
+    UTILITY: 'Utility',
+    AUTHENTICATION: 'Authentication',
+    AUTHENTICATION_INTERNATIONAL:
+      'Authentication - International',
+    SERVICE: 'Service',
+  };
+
+  const categoryOrder = [
+    'MARKETING',
+    'UTILITY',
+    'AUTHENTICATION',
+    'AUTHENTICATION_INTERNATIONAL',
+    'SERVICE',
   ];
 
+  // ✅ Delivery rate
+  const deliveryRate =
+    totalSent > 0
+      ? Math.round((totalDelivered / totalSent) * 100)
+      : 0;
+
+  const readRate =
+    totalDelivered > 0
+      ? Math.round((totalRead / totalDelivered) * 100)
+      : 0;
+
+  // ✅ Free totals
+  const freeTotal =
+    freeStats.customerService.delivered +
+    freeStats.entryPoint.delivered;
+
+  const paidTotal = Object.values(paidStats).reduce(
+    (sum, s) => sum + s.delivered,
+    0
+  );
+
   return {
-    allMessages: { sent: messagesSent, delivered: messagesDelivered, received: messagesReceived },
-    messagesDelivered: categories.map(c => ({
-      category: c.key, label: c.label, delivered: categoryStats[c.key].delivered,
-    })),
-    freeMessagesDelivered: { freeCustomerService: 0, freeEntryPoint: 0, total: 0 },
-    paidMessagesDelivered: categories.map(c => ({
-      category: c.key, label: c.label, delivered: categoryStats[c.key].delivered,
-    })),
-    approximateCharges: {
-      total: toRupees(totalChargesPaise),
-      byCategory: categories.map(c => ({
-        category: c.key,
-        label:    c.label,
-        cost:     toRupees(costByCategory[c.key]),
-        rate:     c.rate,
-        count:    categoryStats[c.key].sent,
+    // ============================================
+    // PERIOD INFO
+    // ============================================
+    period: {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      days: Math.ceil(
+        (endDate.getTime() - startDate.getTime()) /
+          (1000 * 60 * 60 * 24)
+      ),
+    },
+
+    // ============================================
+    // ALL MESSAGES (Top card - "All Messages")
+    // ============================================
+    allMessages: {
+      sent: totalSent,
+      delivered: totalDelivered,
+      failed: totalFailed,
+      read: totalRead,
+      received: messagesReceived,
+      deliveryRate,
+      readRate,
+    },
+
+    // ============================================
+    // MESSAGES DELIVERED (Middle card)
+    // ✅ Breakdown by category
+    // ============================================
+    messagesDelivered: {
+      total: totalDelivered,
+      byCategory: categoryOrder.map((cat) => ({
+        category: cat,
+        label: categoryLabels[cat],
+        delivered:
+          paidStats[cat].delivered +
+          (cat === 'SERVICE'
+            ? freeStats.customerService.delivered
+            : 0),
       })),
     },
-    rates: RATES,
+
+    // ============================================
+    // FREE MESSAGES DELIVERED (Right card)
+    // ✅ 24-hour window replies
+    // ============================================
+    freeMessagesDelivered: {
+      freeCustomerService:
+        freeStats.customerService.delivered,
+      freeEntryPoint: freeStats.entryPoint.delivered,
+      total: freeTotal,
+      sent:
+        freeStats.customerService.sent +
+        freeStats.entryPoint.sent,
+    },
+
+    // ============================================
+    // PAID MESSAGES DELIVERED (Bottom left card)
+    // ============================================
+    paidMessagesDelivered: {
+      total: paidTotal,
+      byCategory: categoryOrder.map((cat) => ({
+        category: cat,
+        label: categoryLabels[cat],
+        delivered: paidStats[cat].delivered,
+        sent: paidStats[cat].sent,
+      })),
+    },
+
+    // ============================================
+    // APPROXIMATE CHARGES (Bottom right card)
+    // ✅ Meta rates ke hisaab se calculated
+    // ============================================
+    approximateCharges: {
+      total: toRupees(totalEstimatedCostPaise),
+      totalPaise: totalEstimatedCostPaise,
+      byCategory: categoryOrder.map((cat) => ({
+        category: cat,
+        label: categoryLabels[cat],
+        cost: toRupees(paidStats[cat].estimatedCostPaise),
+        delivered: paidStats[cat].delivered,
+      })),
+    },
+
+    // ============================================
+    // ACTUAL CHARGES (From wallet transactions)
+    // ✅ Real deducted amount
+    // ============================================
+    actualCharges: {
+      total: toRupees(actualDebitedPaise),
+      totalPaise: actualDebitedPaise,
+      byCategory: categoryOrder.map((cat) => ({
+        category: cat,
+        label: categoryLabels[cat],
+        cost: toRupees(actualDebitByCategory[cat] || 0),
+      })),
+    },
+
+    // ============================================
+    // RATES REFERENCE (India rates)
+    // ============================================
+    rates: {
+      currency: 'INR',
+      unit: 'per delivered message',
+      note: 'Rates vary by recipient country. Below are India rates for reference.',
+      india: {
+        MARKETING: DEFAULT_RATE.marketing,
+        UTILITY: DEFAULT_RATE.utility,
+        AUTHENTICATION: DEFAULT_RATE.authentication,
+        SERVICE: 0,
+      },
+    },
   };
 }

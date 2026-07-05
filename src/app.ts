@@ -24,6 +24,7 @@ import contactsRoutes from './modules/contacts/contacts.routes';
 import campaignsRoutes from './modules/campaigns/campaigns.routes';
 import templatesRoutes from './modules/templates/templates.routes';
 import webhookRoutes from './modules/webhooks/webhook.routes';
+import walletWebhookRouter from './modules/wallet/wallet.webhook';
 import dashboardRoutes from './modules/dashboard/dashboard.routes';
 import organizationsRoutes from './modules/organizations/organizations.routes';
 import usersRoutes from './modules/users/users.routes';
@@ -222,6 +223,7 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // Double processing completely removed
 // ============================================
 app.use('/api/auth', authRoutes);
+app.use('/api/webhooks', walletWebhookRouter);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
