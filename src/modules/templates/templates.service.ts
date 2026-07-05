@@ -261,34 +261,53 @@ const buildMetaTemplatePayload = (t: {
       components.push(headerComp);
     }
     else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-      // ✅ CRITICAL: Only use HANDLE, never Cloudinary URL
-      const handle = t.headerMediaId;
+      // ✅ Get handle - try headerMediaId first, then headerContent
+      let handle = t.headerMediaId || '';
+
+      // ✅ SANITIZE: Remove any concatenation
+      if (handle.includes('\n')) {
+        handle = handle.split('\n')[0].trim();
+      }
+      if (handle.includes(',')) {
+        handle = handle.split(',')[0].trim();
+      }
+      if (handle.includes(' ')) {
+        handle = handle.split(' ')[0].trim();
+      }
+      if (handle.includes(':::')) {
+        handle = handle.split(':::')[0].trim();
+      }
 
       if (!handle) {
         throw new AppError(
-          `${headerType} template requires a Meta upload handle. ` +
-          `Please re-upload the media file.`,
+          `${headerType} template requires a Meta upload handle. Please re-upload the media file.`,
           400
         );
       }
 
-      // ✅ Validate handle format (Meta requires "digit:base64" format)
+      // ✅ Validate: NO URLs allowed as handle
       if (handle.startsWith('http')) {
         throw new AppError(
-          `Invalid media handle: URLs cannot be used. ` +
-          `Please re-upload the file to get a valid Meta handle.`,
+          `Invalid media handle: URLs cannot be used as handle. Please re-upload.`,
           400
         );
+      }
+
+      // ✅ Validate handle format (should be "digit:base64string")
+      if (!/^\d+:[A-Za-z0-9+/=:_\-]+/.test(handle)) {
+        console.warn(`⚠️ Unusual handle format: ${handle.substring(0, 30)}`);
       }
 
       const headerComp: any = {
         type: 'HEADER',
         format: headerType,
-        example: { header_handle: [handle] },
+        example: { 
+          header_handle: [handle] // ✅ Array with SINGLE handle
+        },
       };
 
       components.push(headerComp);
-      console.log(`✅ ${headerType} header with handle: ${handle.substring(0, 30)}...`);
+      console.log(`✅ ${headerType} header with handle: ${handle.substring(0, 30)}... (length: ${handle.length})`);
     }
   }
 
@@ -659,9 +678,7 @@ export class TemplatesService {
     let finalCloudinaryUrl: string | null = null;
 
     if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-      // ✅ SIMPLIFIED: Cloudinary URL for DB, Meta handle for creation
-      
-      // Get permanent URL (Cloudinary)
+      // Cloudinary URL extraction (keep your existing logic)
       finalCloudinaryUrl =
         input.cloudinaryUrl ||
         input.permanentUrl ||
@@ -670,15 +687,31 @@ export class TemplatesService {
           ? input.headerContent 
           : null);
 
-      // Get Meta handle (for template creation)
-      // Handle format: "4:V2hh..." - NOT numeric ID
-      const rawHandle = 
+      // ✅ CRITICAL FIX: Sanitize handle - remove any concatenation
+      let rawHandle = String(
         input.headerMediaId || 
         input.metaNumericId || 
-        null;
+        ''
+      ).trim();
 
-      // ✅ Store handle as-is (it's temporary anyway - only for creation)
-      finalMetaId = rawHandle;
+      // ✅ Handle multiple handles (from double upload bug)
+      if (rawHandle.includes('\n')) {
+        console.warn('⚠️ Multiple handles detected in input, taking first');
+        rawHandle = rawHandle.split('\n')[0].trim();
+      }
+      if (rawHandle.includes(',')) {
+        rawHandle = rawHandle.split(',')[0].trim();
+      }
+      if (rawHandle.includes(' ')) {
+        rawHandle = rawHandle.split(' ')[0].trim();
+      }
+
+      // Remove any URL smuggling
+      if (rawHandle.includes(':::')) {
+        rawHandle = rawHandle.split(':::')[0].trim();
+      }
+
+      finalMetaId = rawHandle || null;
 
       // ✅ Validation
       if (!finalCloudinaryUrl) {
@@ -694,6 +727,20 @@ export class TemplatesService {
           400
         );
       }
+
+      // ✅ Validate handle format
+      if (finalMetaId.startsWith('http')) {
+        throw new AppError(
+          'Invalid media handle (URL detected). Please re-upload.',
+          400
+        );
+      }
+
+      console.log('✅ Sanitized media data:', {
+        handleLength: finalMetaId.length,
+        handlePreview: finalMetaId.substring(0, 40),
+        cloudinaryUrl: finalCloudinaryUrl.substring(0, 60),
+      });
     }
 
     const mediaHeaderContent =
@@ -806,35 +853,70 @@ export class TemplatesService {
           console.log('✅ Meta template created:', metaTemplateId);
         }
       } catch (e: any) {
-        const metaErr = e.metaError || e.response?.data?.error;
-        const msg = String(metaErr?.message || e?.message || 'Meta submission failed');
+        // ✅ FIX: Better error extraction - try multiple paths
+        const metaErr = 
+          e.metaError || 
+          e.response?.data?.error || 
+          e.response?.data ||
+          e;
+        
+        const errorCode = metaErr?.code || metaErr?.error_code || e?.code;
+        const errorMessage = 
+          metaErr?.message || 
+          metaErr?.error_user_msg ||
+          metaErr?.error_user_title ||
+          e?.message || 
+          'Meta submission failed';
+        
+        const errorSubcode = metaErr?.error_subcode;
+        const errorData = metaErr?.error_data;
+        const fbtraceId = metaErr?.fbtrace_id;
 
-        console.error('❌ Meta template create failed:', {
-          code: metaErr?.code,
-          message: metaErr?.message,
-          error_subcode: metaErr?.error_subcode,
-          error_data: metaErr?.error_data,
+        // ✅ LOG EVERYTHING for debugging
+        console.error('❌ Meta template create failed - FULL ERROR:', {
+          code: errorCode,
+          message: errorMessage,
+          error_subcode: errorSubcode,
+          error_data: errorData,
+          fbtrace_id: fbtraceId,
           templateName: input.name,
           language: toMetaLanguage(input.language),
+          fullError: JSON.stringify(e.response?.data || e.message || e, null, 2),
         });
 
-        // ✅ Better error message mapping
-        let friendlyMsg = msg;
-        if (metaErr?.code === 100) {
-          if (msg.toLowerCase().includes('example') || msg.toLowerCase().includes('body_text')) {
-            friendlyMsg = 'Meta rejected: Variable examples are required for each {{variable}} in your template body. Please add sample values.';
-          } else if (msg.toLowerCase().includes('header')) {
-            friendlyMsg = 'Meta rejected: Header example values are missing or invalid. If you have {{variables}} in the header, provide sample values.';
+        // ✅ Better user-facing messages
+        let friendlyMsg = errorMessage;
+        
+        if (errorMessage.toLowerCase().includes('handle') || 
+            errorMessage.toLowerCase().includes('media')) {
+          friendlyMsg = 'Meta rejected the media file. This usually happens when:\n' +
+            '1. Media handle is invalid or expired\n' +
+            '2. Media file is corrupted\n' +
+            '3. Media exceeds size/format limits\n' +
+            'Please re-upload the media and try again.';
+        } else if (errorCode === 100) {
+          if (errorMessage.toLowerCase().includes('example') || 
+              errorMessage.toLowerCase().includes('body_text')) {
+            friendlyMsg = 'Meta rejected: Variable examples are required for each {{variable}}. Please add sample values.';
+          } else if (errorMessage.toLowerCase().includes('header')) {
+            friendlyMsg = 'Meta rejected: Header configuration invalid. Check header text/media.';
+          } else {
+            friendlyMsg = `Meta validation failed: ${errorMessage}`;
           }
-        } else if (metaErr?.code === 132000) {
-          friendlyMsg = 'Meta rejected: Template content violates WhatsApp policy. Check for prohibited content.';
-        } else if (metaErr?.code === 132001) {
-          friendlyMsg = 'Meta rejected: A template with this name already exists in Meta. Use a different name or sync templates first.';
+        } else if (errorCode === 132000) {
+          friendlyMsg = 'Meta rejected: Template content violates WhatsApp policy.';
+        } else if (errorCode === 132001) {
+          friendlyMsg = 'Meta rejected: Template name already exists. Use a different name.';
+        } else if (errorCode === 190) {
+          friendlyMsg = 'WhatsApp access token expired. Please reconnect in Settings.';
         }
 
         await prisma.template.update({
           where: { id: template.id },
-          data: { status: 'REJECTED', rejectionReason: friendlyMsg },
+          data: { 
+            status: 'REJECTED', 
+            rejectionReason: friendlyMsg,
+          },
         });
       }
     }

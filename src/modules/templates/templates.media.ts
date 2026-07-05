@@ -204,19 +204,28 @@ export const uploadTemplateMedia = async (
     // ❌ NO metaNumericId (not needed for templates)
     // ❌ NO ":::" smuggling
     // ============================================
+    // ✅ FIX: Ensure single clean handle
+    let cleanHandle = String(metaHandle || '').trim();
+    if (cleanHandle.includes('\n')) {
+      cleanHandle = cleanHandle.split('\n')[0].trim();
+    }
+
+    // Validate handle
+    if (!cleanHandle || cleanHandle.length < 10) {
+      throw new AppError('Meta upload succeeded but handle is invalid', 500);
+    }
+
     const responseData = {
-      // For Meta template creation - the handle
-      mediaHandle: metaHandle,
-      
-      // For permanent storage in DB
+      // ✅ SINGLE clean handle
+      mediaHandle: cleanHandle,
       cloudinaryUrl: cloudinaryUrl,
       permanentUrl: cloudinaryUrl,
       
-      // Backward compatibility (old code)
-      mediaId: metaHandle,
+      // Backward compat
+      mediaId: cleanHandle,
       url: cloudinaryUrl,
       
-      // File metadata
+      // Metadata
       filename: file.originalname,
       mimeType: file.mimetype,
       size: file.size,
@@ -225,7 +234,7 @@ export const uploadTemplateMedia = async (
     };
 
     console.log('✅ Upload complete:', {
-      handle: `${metaHandle.substring(0, 30)}...`,
+      handle: `${cleanHandle.substring(0, 30)}... (${cleanHandle.length} chars)`,
       cloudinary: `${cloudinaryUrl.substring(0, 50)}...`,
     });
 
