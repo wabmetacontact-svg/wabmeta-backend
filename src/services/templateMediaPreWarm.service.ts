@@ -3,6 +3,8 @@ import prisma from '../config/database';
 import { metaApi } from '../modules/meta/meta.api';
 import { metaService } from '../modules/meta/meta.service';
 import axios from 'axios';
+import { WhatsAppAccountStatus } from '@prisma/client';
+import { resolveTemplateHeaderMedia } from '../utils/templateMediaResolver';
 
 /**
  * Pre-warm template media before they expire.
@@ -64,10 +66,25 @@ export class TemplateMediaPreWarmService {
           }
 
           // Skip if URL is not valid
-          const url = template.headerContent;
-          if (!url || !url.startsWith('http') || url.includes('scontent.whatsapp')) {
+          let url = template.headerContent;
+          if (!url || !url.startsWith('http')) {
             console.warn(`⚠️ Template ${template.id} has invalid URL`);
             continue;
+          }
+
+          // ✅ Resolve short-lived Meta URL to Cloudinary first if needed
+          if (url.includes('scontent.whatsapp')) {
+            console.log(`🔄 Template ${template.id} has scontent URL, resolving to Cloudinary first...`);
+            const resolved = await resolveTemplateHeaderMedia(template).catch((err) => {
+              console.error(`Failed to resolve template media in pre-warm:`, err.message);
+              return null;
+            });
+            if (resolved && !resolved.includes('scontent.whatsapp')) {
+              url = resolved;
+            } else {
+              console.warn(`⚠️ Failed to resolve scontent URL for template ${template.id}`);
+              continue;
+            }
           }
 
           // Get decrypted token
@@ -91,9 +108,9 @@ export class TemplateMediaPreWarmService {
           const buffer = Buffer.from(response.data);
           const mimeType =
             response.headers['content-type']?.split(';')[0]?.trim() ||
-            (template.headerType === 'IMAGE'
+            (template.headerType?.toUpperCase() === 'IMAGE'
               ? 'image/jpeg'
-              : template.headerType === 'VIDEO'
+              : template.headerType?.toUpperCase() === 'VIDEO'
               ? 'video/mp4'
               : 'application/pdf');
 
@@ -130,6 +147,27 @@ export class TemplateMediaPreWarmService {
             err.message
           );
           failed++;
+
+          // ✅ AUTO-HEAL: If token is expired or account not registered, mark as DISCONNECTED
+          const isTokenError = 
+            err.message?.includes('token') || 
+            err.message?.includes('OAuth') || 
+            err.status === 401 || 
+            err.status === 403 || 
+            err.message?.includes('190') || 
+            err.message?.includes('133010') ||
+            err.message?.includes('not registered');
+
+          if (isTokenError && template.whatsappAccount?.id) {
+            console.warn(`⚠️ Deactivating broken account ${template.whatsappAccount.id} due to pre-warm API error`);
+            await prisma.whatsAppAccount.update({
+              where: { id: template.whatsappAccount.id },
+              data: {
+                status: WhatsAppAccountStatus.DISCONNECTED,
+                accessToken: null,
+              },
+            }).catch((e) => console.error('Failed to disconnect account in pre-warm error path:', e));
+          }
         }
       }
 

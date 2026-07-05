@@ -259,21 +259,31 @@ export class WebhookService {
     }
   }
 
-  // -----------------------------
-  // Main Handler
-  // -----------------------------
-  async handleWebhook(payload: any): Promise<{ status: string; reason?: string; profileName?: string; error?: string }> {
+  // ============================================
+  // MAIN WEBHOOK HANDLER
+  // ✅ FIX: "📨 Webhook received" log REMOVED
+  //    webhook.routes.ts already handle karta hai logging
+  //    Yahan rakhne se double log aata tha
+  // ============================================
+  async handleWebhook(
+    payload: any
+  ): Promise<{
+    status: string;
+    reason?: string;
+    profileName?: string;
+    error?: string;
+  }> {
     try {
-      console.log('📨 Webhook received');
-
       if (payload.object === 'instagram') {
         return await this.handleInstagramEvent(payload);
       }
 
       const value = this.extractValue(payload);
-      const field = payload?.entry?.[0]?.changes?.[0]?.field || 'unknown';
+      const field =
+        payload?.entry?.[0]?.changes?.[0]?.field || 'unknown';
       const phoneNumberId = value?.metadata?.phone_number_id;
 
+      // ✅ Single clean log
       console.log('📨 Webhook field:', field);
 
       switch (field) {

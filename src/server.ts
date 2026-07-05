@@ -1,4 +1,8 @@
-// src/server.ts - FIXED: No connection pool leaks
+// src/server.ts - FINAL FIXED VERSION
+// ✅ FIX 1: Pre-warm REMOVED from startBackgroundJobs()
+//    Ab sirf scheduler.service.ts (daily 3 AM cron) handle karta hai
+//    Pehle: server.ts + scheduler = DOUBLE run on every deploy
+// ✅ FIX 2: Cleaner startup logs
 
 import http from 'http';
 import app from './app';
@@ -33,7 +37,6 @@ async function bootstrap() {
     // Step 1: Encryption
     console.log('🔐 Validating encryption...');
     const encryptionValid = validateEncryptionKey();
-
     if (!encryptionValid) {
       if (config.app.isProduction) {
         console.error('❌ ENCRYPTION_KEY required in production. Exiting.');
@@ -45,7 +48,7 @@ async function bootstrap() {
       console.log('✅ Encryption key validated');
     }
 
-    // Step 2: Database - single connection test
+    // Step 2: Database
     console.log('📦 Testing database connection...');
     try {
       await prisma.$queryRaw`SELECT 1`;
@@ -66,17 +69,19 @@ async function bootstrap() {
     initializeSocket(server);
     console.log('✅ Socket.io initialized');
 
-    // Step 6: Scheduler (automation + subscription)
+    // Step 6: Scheduler
+    // ✅ NOTE: Pre-warm is handled by scheduler (daily 3 AM cron)
+    // DO NOT add pre-warm here - it will cause double execution
     console.log('⏰ Starting scheduler...');
     initializeScheduler();
     console.log('✅ Scheduler started');
 
-    // Step 7: Campaign processor (separate, controlled)
+    // Step 7: Campaign processor
     console.log('📅 Starting campaign processor...');
     startCampaignProcessor();
     console.log('✅ Campaign processor started');
 
-    // Step 8: Background cron jobs (health check, window expiry)
+    // Step 8: Background jobs (infra only - NO pre-warm here)
     startBackgroundJobs();
 
     // Step 9: Campaign recovery
@@ -98,7 +103,7 @@ async function bootstrap() {
       console.warn('⚠️  Redis init failed:', error);
     }
 
-    // Step 11: Start listening
+    // Step 11: Listen
     const PORT = config.port || 5000;
     server.listen(PORT, () => {
       console.log('');
@@ -106,15 +111,15 @@ async function bootstrap() {
       console.log('🚀 SERVER IS RUNNING!');
       console.log(`   📡 Port        : ${PORT}`);
       console.log(`   🌍 Environment : ${config.app.env}`);
-      console.log(`   🔐 Encryption  : ${encryptionValid ? 'ENABLED ✓' : 'DISABLED ✗'}`);
+      console.log(
+        `   🔐 Encryption  : ${encryptionValid ? 'ENABLED ✓' : 'DISABLED ✗'}`
+      );
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
     });
 
-    // Graceful shutdown
     setupGracefulShutdown(server);
     setupErrorHandlers();
-
   } catch (error) {
     console.error('❌ FAILED TO START SERVER:', error);
     process.exit(1);
@@ -122,35 +127,25 @@ async function bootstrap() {
 }
 
 // ============================================
-// ✅ CAMPAIGN PROCESSOR - OVERLAP SAFE
+// CAMPAIGN PROCESSOR - OVERLAP SAFE
 // ============================================
-
-let campaignProcessorRunning = false; // ← Overlap prevention flag
+let campaignProcessorRunning = false;
 
 function startCampaignProcessor() {
-  // ✅ Pehli baar 30s baad start karo (server settle hone do)
-  // Phir har 60s mein - 30s tha isliye overlap ho raha tha
   setTimeout(() => {
-    runCampaignProcessor(); // First run
-    setInterval(runCampaignProcessor, 60 * 1000); // Har 60s
+    runCampaignProcessor();
+    setInterval(runCampaignProcessor, 60 * 1000);
   }, 30 * 1000);
 }
 
 async function runCampaignProcessor() {
-  // ✅ Agar pichla run abhi bhi chal raha hai toh skip karo
-  if (campaignProcessorRunning) {
-    console.log('⏭️  Campaign processor still running, skipping this cycle');
-    return;
-  }
-
+  if (campaignProcessorRunning) return;
   campaignProcessorRunning = true;
-
   try {
     await processScheduledCampaigns();
   } catch (error) {
     console.error('❌ Campaign processor error:', error);
   } finally {
-    // ✅ Always release the lock
     campaignProcessorRunning = false;
   }
 }
@@ -158,8 +153,11 @@ async function runCampaignProcessor() {
 async function processScheduledCampaigns() {
   const now = new Date();
 
-  // ✅ Lightweight query - sirf IDs fetch karo pehle
-  let scheduledCampaigns: { id: string; organizationId: string; name: string }[] = [];
+  let scheduledCampaigns: {
+    id: string;
+    organizationId: string;
+    name: string;
+  }[] = [];
 
   try {
     scheduledCampaigns = await prisma.campaign.findMany({
@@ -167,16 +165,10 @@ async function processScheduledCampaigns() {
         status: 'SCHEDULED',
         scheduledAt: { lte: now },
       },
-      select: {
-        id: true,
-        organizationId: true,
-        name: true,
-      },
-      // ✅ Safety: Max 10 campaigns per cycle
+      select: { id: true, organizationId: true, name: true },
       take: 10,
     });
   } catch (error: any) {
-    // ✅ Pool timeout pe quietly fail karo, crash mat karo
     if (error?.code === 'P2024') {
       console.warn('⚠️  Campaign check skipped: DB pool busy');
       return;
@@ -192,7 +184,6 @@ async function processScheduledCampaigns() {
     './modules/campaigns/campaigns.service'
   );
 
-  // ✅ Sequential processing - parallel mat karo (connection exhaust hoga)
   for (const campaign of scheduledCampaigns) {
     try {
       console.log(`🚀 Starting: ${campaign.name} (${campaign.id})`);
@@ -200,19 +191,14 @@ async function processScheduledCampaigns() {
       console.log(`✅ Started: ${campaign.name}`);
     } catch (error: any) {
       console.error(`❌ Failed to start ${campaign.id}:`, error.message);
-
-      // ✅ Failed campaign mark karo - try/catch separately
       try {
         await prisma.campaign.update({
           where: { id: campaign.id },
-          data: {
-            status: 'FAILED',
-            completedAt: new Date(),
-          },
+          data: { status: 'FAILED', completedAt: new Date() },
         });
       } catch (updateError: any) {
-        if (updateError?.code === 'P2024') {
-          console.warn(`⚠️  Could not mark campaign ${campaign.id} as failed - pool busy`);
+        if (updateError?.code !== 'P2024') {
+          console.error(`❌ Could not mark campaign as failed:`, updateError);
         }
       }
     }
@@ -220,11 +206,13 @@ async function processScheduledCampaigns() {
 }
 
 // ============================================
-// ✅ BACKGROUND JOBS - POOL FRIENDLY
+// BACKGROUND JOBS - INFRASTRUCTURE ONLY
+// ✅ FIX: Pre-warm REMOVED
+//    scheduler.service.ts daily 3 AM cron handle karta hai
+//    Yahan rakhne se DOUBLE execution hoti thi
 // ============================================
-
 function startBackgroundJobs() {
-  // ✅ 1. Health check - 10 min mein ek baar (3 min bahut zyada tha)
+  // 1. DB Health check - 10 min
   setInterval(async () => {
     try {
       await prisma.$queryRaw`SELECT 1`;
@@ -232,12 +220,12 @@ function startBackgroundJobs() {
       if (error?.code === 'P2024') {
         console.warn('⚠️  Health check skipped: pool busy');
       } else {
-        console.error('❌ DB Health check failed:', error);
+        console.error('❌ DB health check failed:', error);
       }
     }
-  }, 10 * 60 * 1000); // ← 3min se 10min
+  }, 10 * 60 * 1000);
 
-  // ✅ 2. Conversation window expiry - 10 min
+  // 2. Conversation window expiry - 10 min
   if (webhookService?.expireConversationWindows) {
     setInterval(async () => {
       try {
@@ -247,10 +235,10 @@ function startBackgroundJobs() {
           console.error('❌ Window expiry error:', error);
         }
       }
-    }, 10 * 60 * 1000); // ← 5min se 10min
+    }, 10 * 60 * 1000);
   }
 
-  // ✅ 3. Daily message limit reset - 1 hour
+  // 3. Daily message limit reset - 1 hour
   if (webhookService?.resetDailyMessageLimits) {
     setInterval(async () => {
       try {
@@ -263,31 +251,9 @@ function startBackgroundJobs() {
     }, 60 * 60 * 1000);
   }
 
-  // ✅ 4. Template media pre-warm - 24 hours (startup se 5 min baad)
-  setTimeout(async () => {
-    try {
-      const { templateMediaPreWarmService } = await import(
-        './services/templateMediaPreWarm.service'
-      );
-      await templateMediaPreWarmService.preWarmExpiringMedia();
-    } catch (error) {
-      console.error('❌ Initial media pre-warm error:', error);
-    }
-
-    // Phir daily
-    setInterval(async () => {
-      try {
-        const { templateMediaPreWarmService } = await import(
-          './services/templateMediaPreWarm.service'
-        );
-        await templateMediaPreWarmService.preWarmExpiringMedia();
-      } catch (error) {
-        console.error('❌ Media pre-warm error:', error);
-      }
-    }, 24 * 60 * 60 * 1000);
-  }, 5 * 60 * 1000);
-
-  console.log('✅ Background jobs started');
+  console.log(
+    '✅ Background jobs started (pre-warm managed by scheduler cron)'
+  );
 }
 
 // ============================================
@@ -296,7 +262,6 @@ function startBackgroundJobs() {
 function setupGracefulShutdown(server: http.Server) {
   const shutdown = async (signal: string) => {
     console.log(`\n🔄 ${signal} received. Shutting down...`);
-
     server.close(async () => {
       console.log('✅ HTTP server closed');
       try {
@@ -307,10 +272,8 @@ function setupGracefulShutdown(server: http.Server) {
       }
       process.exit(0);
     });
-
-    // Force exit after 10s
     setTimeout(() => {
-      console.error('⚠️  Force exiting after timeout');
+      console.error('⚠️  Force exiting');
       process.exit(1);
     }, 10000);
   };
@@ -325,13 +288,10 @@ function setupGracefulShutdown(server: http.Server) {
 function setupErrorHandlers() {
   process.on('uncaughtException', (error) => {
     console.error('❌ UNCAUGHT EXCEPTION:', error);
-    // Production mein crash mat karo - log karo
   });
 
   process.on('unhandledRejection', (reason: any) => {
     const msg = reason?.message || String(reason);
-
-    // ✅ Known safe-to-ignore errors
     const ignorable = [
       'Connection is closed',
       'Redis',
@@ -339,17 +299,12 @@ function setupErrorHandlers() {
       'ECONNREFUSED',
       'enableOfflineQueue',
     ];
-
     if (ignorable.some((i) => msg.includes(i))) {
       console.warn(`⚠️  Handled rejection: ${msg}`);
       return;
     }
-
     console.error('❌ UNHANDLED REJECTION:', msg);
   });
 }
 
-// ============================================
-// START
-// ============================================
 bootstrap();

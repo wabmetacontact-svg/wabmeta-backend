@@ -16,6 +16,7 @@ import { metaApi, generatePhonePin } from './meta.api'; // ✅ FIX: import gener
 import { config } from '../../config';
 import { encrypt, safeDecryptStrict, maskToken, isMetaToken } from '../../utils/encryption';
 import { getAccountWithDecryptedToken } from '../../utils/tokenDecryption'; // ✅ FIX: shared helper
+import { resolveTemplateHeaderMedia } from '../../utils/templateMediaResolver';
 import { v4 as uuidv4 } from 'uuid';
 import { ConnectionProgress } from './meta.types';
 import { AppError } from '../../middleware/errorHandler';
@@ -856,8 +857,34 @@ export class MetaService {
 
     console.log(`🔄 Syncing templates for account ${accountId} (WABA: ${account.wabaId})`);
 
-    const metaTemplates = await metaApi.getTemplates(account.wabaId, accessToken);
-    console.log(`📥 Fetched ${metaTemplates.length} templates from Meta`);
+    let metaTemplates: any[] = [];
+    try {
+      metaTemplates = await metaApi.getTemplates(account.wabaId, accessToken);
+      console.log(`📥 Fetched ${metaTemplates.length} templates from Meta`);
+    } catch (error: any) {
+      console.error(`❌ Template sync API call failed for account ${accountId}:`, error.message);
+      
+      const isTokenError = 
+        error.message?.includes('token') || 
+        error.message?.includes('OAuth') || 
+        error.status === 401 || 
+        error.status === 403 || 
+        error.message?.includes('190') || 
+        error.message?.includes('133010') ||
+        error.message?.includes('not registered');
+
+      if (isTokenError) {
+        console.warn(`⚠️ Deactivating broken account ${accountId} due to template sync API error`);
+        await prisma.whatsAppAccount.update({
+          where: { id: accountId },
+          data: {
+            status: WhatsAppAccountStatus.DISCONNECTED,
+            accessToken: null,
+          },
+        }).catch((e) => console.error('Failed to disconnect account in template sync error path:', e));
+      }
+      throw error;
+    }
 
     const existingTemplates = await prisma.template.findMany({
       where: {
@@ -914,6 +941,7 @@ export class MetaService {
           qualityScore: metaTemplate.quality_score?.score || null,
         };
 
+        let dbTemplate;
         if (existing) {
           const updateData: any = { ...baseTemplateData };
           if (existing.headerMediaId) {
@@ -921,7 +949,7 @@ export class MetaService {
           } else if (extractedHeaderHandle) {
             updateData.headerMediaId = extractedHeaderHandle;
           }
-          await prisma.template.update({
+          dbTemplate = await prisma.template.update({
             where: { id: existing.id },
             data: updateData,
           });
@@ -930,8 +958,15 @@ export class MetaService {
           if (extractedHeaderHandle) {
             baseTemplateData.headerMediaId = extractedHeaderHandle;
           }
-          await prisma.template.create({ data: baseTemplateData });
+          dbTemplate = await prisma.template.create({ data: baseTemplateData });
           created++;
+        }
+
+        // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
+        if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
+          await resolveTemplateHeaderMedia(dbTemplate).catch((err) => {
+            console.error(`Failed to resolve template media in syncTemplates:`, err.message);
+          });
         }
       } catch (err: any) {
         console.error(`Failed to sync ${metaTemplate.name}:`, err.message);
@@ -1016,6 +1051,7 @@ export class MetaService {
             qualityScore: template.quality_score?.score || null,
           };
 
+          let dbTemplate;
           if (existing) {
             const updateData: any = { ...baseData };
             if (existing.headerMediaId) {
@@ -1023,13 +1059,20 @@ export class MetaService {
             } else if (extractedHandle) {
               updateData.headerMediaId = extractedHandle;
             }
-            await prisma.template.update({
+            dbTemplate = await prisma.template.update({
               where: { id: existing.id },
               data: updateData,
             });
           } else {
             if (extractedHandle) baseData.headerMediaId = extractedHandle;
-            await prisma.template.create({ data: baseData });
+            dbTemplate = await prisma.template.create({ data: baseData });
+          }
+
+          // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
+          if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
+            await resolveTemplateHeaderMedia(dbTemplate).catch((err) => {
+              console.error(`Failed to resolve template media in syncTemplatesBackground:`, err.message);
+            });
           }
 
           synced++;
@@ -1039,8 +1082,28 @@ export class MetaService {
       }
 
       console.log(`✅ Background sync: ${synced}/${templates.length} templates`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Background template sync failed:', error);
+      
+      const isTokenError = 
+        error.message?.includes('token') || 
+        error.message?.includes('OAuth') || 
+        error.status === 401 || 
+        error.status === 403 || 
+        error.message?.includes('190') || 
+        error.message?.includes('133010') ||
+        error.message?.includes('not registered');
+
+      if (isTokenError) {
+        console.warn(`⚠️ Deactivating broken account ${accountId} due to background sync API error`);
+        await prisma.whatsAppAccount.update({
+          where: { id: accountId },
+          data: {
+            status: WhatsAppAccountStatus.DISCONNECTED,
+            accessToken: null,
+          },
+        }).catch((e) => console.error('Failed to disconnect account in background sync error path:', e));
+      }
     }
   }
 

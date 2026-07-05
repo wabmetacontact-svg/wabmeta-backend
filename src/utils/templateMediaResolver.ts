@@ -44,9 +44,9 @@ export async function resolveTemplateHeaderMedia(template: {
     const buffer = Buffer.from(response.data);
     const mimeType =
       response.headers['content-type']?.split(';')[0]?.trim() ||
-      (template.headerType === 'IMAGE'
+      (template.headerType?.toUpperCase() === 'IMAGE'
         ? 'image/jpeg'
-        : template.headerType === 'VIDEO'
+        : template.headerType?.toUpperCase() === 'VIDEO'
         ? 'video/mp4'
         : 'application/pdf');
 

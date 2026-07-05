@@ -89,6 +89,22 @@ export function initializeScheduler() {
     }
   });
 
+  // ============================================
+  // 5. TEMPLATE MEDIA PRE-WARM - Daily at 3 AM
+  // ============================================
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      console.log('🔥 Running daily template media pre-warm...');
+      const { TemplateMediaPreWarmService } = await import(
+        './templateMediaPreWarm.service'
+      );
+      const preWarmService = new TemplateMediaPreWarmService();
+      await preWarmService.preWarmExpiringMedia();
+    } catch (error) {
+      console.error('❌ Daily media pre-warm error:', error);
+    }
+  });
+
   console.log('✅ Scheduler initialized');
 }
 
