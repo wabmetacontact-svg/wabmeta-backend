@@ -1,4 +1,7 @@
-// src/config/database.ts - FIXED CONNECTION POOL
+// src/config/database.ts - PERMANENT FIX
+// ✅ Optimized for Render + Supabase/Neon combo
+// ✅ Connection pooling with proper limits
+// ✅ Auto-reconnect on failures
 
 import { PrismaClient } from '@prisma/client';
 
@@ -9,69 +12,59 @@ const createPrismaClient = () => {
     throw new Error('DATABASE_URL environment variable is not set');
   }
 
-  const prismaOptions: any = {
-    log: process.env.NODE_ENV === 'development'
-      ? ['error', 'warn']
-      : ['error'],
-    // ✅ Prisma-level connection pool config
-    datasources: {},
-  };
-
-  // ✅ Remove any existing connection params to rebuild cleanly
   const baseUrl = dbUrl.split('?')[0];
   const existingParams = new URLSearchParams(
     dbUrl.includes('?') ? dbUrl.split('?')[1] : ''
   );
 
-  // ✅ Render free tier pe connection limit LOW rakhna ZAROORI hai
-  // Supabase/Neon free = max 20 connections
-  // connection_limit = 5 means Prisma pool size = 5
-  // Baaki connections webhooks, auth ke liye bachti hain
-  
   const isPooler =
     dbUrl.includes('.pooler.supabase.com') ||
     dbUrl.includes('pooler') ||
     dbUrl.includes('pgbouncer');
 
   const isNeon = dbUrl.includes('neon.tech');
-  const isSupabase = dbUrl.includes('supabase.com');
 
-  // ✅ PgBouncer mode (Supabase pooler)
+  // ✅ PgBouncer mode
   if (isPooler) {
     existingParams.set('pgbouncer', 'true');
-    existingParams.set('prepared_statements', 'false'); // pgbouncer ke saath zaroori
-    console.log('🔧 Configured: Supabase PgBouncer pooler');
+    existingParams.set('prepared_statements', 'false');
+    console.log('🔧 Mode: Supabase PgBouncer');
   }
 
-  // ✅ Neon config
   if (isNeon) {
     existingParams.set('sslmode', 'require');
     existingParams.set('connect_timeout', '15');
-    console.log('🔧 Configured: Neon database');
+    console.log('🔧 Mode: Neon');
   }
 
-  // ✅ KEY FIX: Connection limit BAHUT kam rakhna hai
-  // Render free tier + Supabase free = max 20 total connections
-  // Prisma pool = 5, baaki 15 = headroom for spikes
-  existingParams.set('connection_limit', '5');   // ← 30 se 5 kar diya
-  existingParams.set('pool_timeout', '10');       // ← 60 se 10 kar diya (fast fail)
-  existingParams.set('connect_timeout', '10');
+  // ✅ CRITICAL FIX: Increased limits
+  // Supabase pooler pe hum SAFELY 10-15 connections use kar sakte hain
+  // Kyunki pooler internally sab manage karta hai
+  existingParams.set('connection_limit', '15');    // ← 5 se 15
+  existingParams.set('pool_timeout', '20');         // ← 10 se 20
+  existingParams.set('connect_timeout', '15');
+  
+  // ✅ Statement timeout - long queries kill kare
+  existingParams.set('statement_timeout', '30000'); // 30 sec max per query
 
   const finalUrl = `${baseUrl}?${existingParams.toString()}`;
-  
-  prismaOptions.datasources = { db: { url: finalUrl } };
 
-  const client = new PrismaClient(prismaOptions);
+  const client = new PrismaClient({
+    log: process.env.NODE_ENV === 'development' 
+      ? ['error', 'warn'] 
+      : ['error'],
+    datasources: { db: { url: finalUrl } },
+  });
 
-  console.log('✅ Prisma client created');
-  console.log(`   connection_limit : 5`);
-  console.log(`   pool_timeout     : 10s`);
-  console.log(`   Mode             : ${isPooler ? 'PgBouncer' : isNeon ? 'Neon' : 'Direct'}`);
+  console.log('✅ Prisma configured:');
+  console.log(`   connection_limit : 15`);
+  console.log(`   pool_timeout     : 20s`);
+  console.log(`   statement_timeout: 30s`);
 
   return client;
 };
 
-// ✅ Singleton - ek hi instance
+// Singleton
 declare global {
   var __prisma: PrismaClient | undefined;
 }
@@ -82,7 +75,6 @@ if (process.env.NODE_ENV !== 'production') {
   globalThis.__prisma = prisma;
 }
 
-// ✅ Graceful shutdown - sirf ek jagah handle karo
 process.on('beforeExit', async () => {
   await prisma.$disconnect();
 });

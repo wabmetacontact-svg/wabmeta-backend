@@ -127,24 +127,55 @@ async function bootstrap() {
 }
 
 // ============================================
-// CAMPAIGN PROCESSOR - OVERLAP SAFE
+// ============================================
+// ✅ NEW: Cron Priority System
+// High priority queries always get connection
+// Low priority skipped during pool pressure
+// ============================================
+
+let poolPressureCount = 0;
+const POOL_PRESSURE_THRESHOLD = 3;
+let inPoolPressureMode = false;
+
+// Track pool pressure
+function reportPoolError() {
+  poolPressureCount++;
+  if (poolPressureCount >= POOL_PRESSURE_THRESHOLD && !inPoolPressureMode) {
+    inPoolPressureMode = true;
+    console.warn('🚨 Pool pressure detected - throttling low-priority crons');
+    
+    // Auto-recover after 5 min
+    setTimeout(() => {
+      inPoolPressureMode = false;
+      poolPressureCount = 0;
+      console.log('✅ Pool pressure cleared - crons resumed');
+    }, 5 * 60 * 1000);
+  }
+}
+
+// ============================================
+// ✅ CAMPAIGN PROCESSOR - PRIORITY: HIGH
 // ============================================
 let campaignProcessorRunning = false;
 
 function startCampaignProcessor() {
+  // First run after 60 sec
   setTimeout(() => {
     runCampaignProcessor();
-    setInterval(runCampaignProcessor, 60 * 1000);
-  }, 30 * 1000);
+    // Then every 90 seconds (was 60)
+    setInterval(runCampaignProcessor, 90 * 1000);
+  }, 60 * 1000);
 }
 
 async function runCampaignProcessor() {
   if (campaignProcessorRunning) return;
   campaignProcessorRunning = true;
+
   try {
     await processScheduledCampaigns();
-  } catch (error) {
-    console.error('❌ Campaign processor error:', error);
+  } catch (error: any) {
+    if (error?.code === 'P2024') reportPoolError();
+    console.error('❌ Campaign processor error:', error?.message);
   } finally {
     campaignProcessorRunning = false;
   }
@@ -152,12 +183,7 @@ async function runCampaignProcessor() {
 
 async function processScheduledCampaigns() {
   const now = new Date();
-
-  let scheduledCampaigns: {
-    id: string;
-    organizationId: string;
-    name: string;
-  }[] = [];
+  let scheduledCampaigns: any[] = [];
 
   try {
     scheduledCampaigns = await prisma.campaign.findMany({
@@ -165,12 +191,16 @@ async function processScheduledCampaigns() {
         status: 'SCHEDULED',
         scheduledAt: { lte: now },
       },
-      select: { id: true, organizationId: true, name: true },
-      take: 10,
+      select: {
+        id: true,
+        organizationId: true,
+        name: true,
+      },
+      take: 5, // ✅ Reduced from 10
     });
   } catch (error: any) {
     if (error?.code === 'P2024') {
-      console.warn('⚠️  Campaign check skipped: DB pool busy');
+      reportPoolError();
       return;
     }
     throw error;
@@ -180,80 +210,88 @@ async function processScheduledCampaigns() {
 
   console.log(`📅 Processing ${scheduledCampaigns.length} scheduled campaigns`);
 
-  const { campaignsService } = await import(
-    './modules/campaigns/campaigns.service'
-  );
+  const { campaignsService } = await import('./modules/campaigns/campaigns.service');
 
   for (const campaign of scheduledCampaigns) {
     try {
-      console.log(`🚀 Starting: ${campaign.name} (${campaign.id})`);
       await campaignsService.start(campaign.organizationId, campaign.id);
-      console.log(`✅ Started: ${campaign.name}`);
+      // ✅ 2 second gap between campaigns
+      await new Promise(r => setTimeout(r, 2000));
     } catch (error: any) {
-      console.error(`❌ Failed to start ${campaign.id}:`, error.message);
-      try {
-        await prisma.campaign.update({
-          where: { id: campaign.id },
-          data: { status: 'FAILED', completedAt: new Date() },
-        });
-      } catch (updateError: any) {
-        if (updateError?.code !== 'P2024') {
-          console.error(`❌ Could not mark campaign as failed:`, updateError);
-        }
-      }
+      console.error(`❌ Campaign ${campaign.id}:`, error.message);
     }
   }
 }
 
 // ============================================
-// BACKGROUND JOBS - INFRASTRUCTURE ONLY
-// ✅ FIX: Pre-warm REMOVED
-//    scheduler.service.ts daily 3 AM cron handle karta hai
-//    Yahan rakhne se DOUBLE execution hoti thi
+// ✅ BACKGROUND JOBS - PRIORITY: LOW
+// Skip during pool pressure
 // ============================================
+
 function startBackgroundJobs() {
-  // 1. DB Health check - 10 min
+  // ✅ 1. Health check - Every 15 min (was 10)
   setInterval(async () => {
+    if (inPoolPressureMode) return;
     try {
       await prisma.$queryRaw`SELECT 1`;
     } catch (error: any) {
-      if (error?.code === 'P2024') {
-        console.warn('⚠️  Health check skipped: pool busy');
-      } else {
-        console.error('❌ DB health check failed:', error);
-      }
+      if (error?.code === 'P2024') reportPoolError();
     }
-  }, 10 * 60 * 1000);
+  }, 15 * 60 * 1000);
 
-  // 2. Conversation window expiry - 10 min
+  // ✅ 2. Window expiry - Every 15 min (was 10)
   if (webhookService?.expireConversationWindows) {
     setInterval(async () => {
+      if (inPoolPressureMode) {
+        console.log('⏭️ Window expiry skipped: pool pressure');
+        return;
+      }
       try {
         await webhookService.expireConversationWindows();
       } catch (error: any) {
-        if (error?.code !== 'P2024') {
-          console.error('❌ Window expiry error:', error);
-        }
+        if (error?.code === 'P2024') reportPoolError();
       }
-    }, 10 * 60 * 1000);
+    }, 15 * 60 * 1000);
   }
 
-  // 3. Daily message limit reset - 1 hour
+  // ✅ 3. Message limit reset - Every 2 hours (was 1)
   if (webhookService?.resetDailyMessageLimits) {
     setInterval(async () => {
+      if (inPoolPressureMode) return;
       try {
         await webhookService.resetDailyMessageLimits();
       } catch (error: any) {
-        if (error?.code !== 'P2024') {
-          console.error('❌ Limit reset error:', error);
-        }
+        if (error?.code === 'P2024') reportPoolError();
       }
-    }, 60 * 60 * 1000);
+    }, 2 * 60 * 60 * 1000);
   }
 
-  console.log(
-    '✅ Background jobs started (pre-warm managed by scheduler cron)'
-  );
+  // ✅ 4. Template pre-warm - Once daily at 3 AM
+  const scheduleNextPreWarm = () => {
+    const now = new Date();
+    const next3AM = new Date();
+    next3AM.setHours(3, 0, 0, 0);
+    if (next3AM <= now) next3AM.setDate(next3AM.getDate() + 1);
+    const msUntil3AM = next3AM.getTime() - now.getTime();
+
+    setTimeout(async () => {
+      if (!inPoolPressureMode) {
+        try {
+          const { templateMediaPreWarmService } = await import('./services/templateMediaPreWarm.service');
+          await templateMediaPreWarmService.preWarmExpiringMedia();
+        } catch (error) {
+          console.error('❌ Pre-warm error:', error);
+        }
+      }
+      scheduleNextPreWarm(); // Schedule next
+    }, msUntil3AM);
+    
+    console.log(`⏰ Next pre-warm scheduled: ${next3AM.toLocaleString()}`);
+  };
+  
+  scheduleNextPreWarm();
+
+  console.log('✅ Background jobs started (with pool pressure protection)');
 }
 
 // ============================================
