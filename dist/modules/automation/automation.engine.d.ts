@@ -13,8 +13,8 @@ interface TriggerContext {
 }
 declare class AutomationEngine {
     private isContactInTargetGroups;
-    private contactExistsInCRM;
     triggerUnknownMessage(context: TriggerContext): Promise<void>;
+    private contactExistedBefore;
     triggerKeyword(context: TriggerContext): Promise<boolean>;
     triggerNewContact(context: TriggerContext): Promise<void>;
     triggerWebhook(organizationId: string, automationId: string, context: TriggerContext): Promise<void>;

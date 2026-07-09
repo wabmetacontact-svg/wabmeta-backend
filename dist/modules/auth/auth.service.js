@@ -1,5 +1,9 @@
 "use strict";
-// src/modules/auth/auth.service.ts - FINAL VERSION
+// src/modules/auth/auth.service.ts - FIXED VERSION
+// ✅ FIX 1: generateTokenPair now returns correct accessExpiresIn (was returning 7d refresh expiry)
+// ✅ FIX 2: changePassword now increments tokenVersion (invalidates old access tokens immediately)
+// ✅ FIX 3: resetPassword now increments tokenVersion (invalidates old access tokens immediately)
+// ✅ FIX 4: logoutAll now increments tokenVersion in a transaction (invalidates in-flight access tokens too)
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -28,8 +32,6 @@ const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // 1 minute
 // CLIENTS
 // ============================================
 const googleClient = new google_auth_library_1.OAuth2Client(config_1.config.google.clientId);
-// ✅ NOTE: redis variable HATAYA gaya hai top se
-// Har function me getRedis() call hoga jab zaroorat ho
 // ============================================
 // HELPER: Phone Normalizers
 // ============================================
@@ -64,7 +66,6 @@ const sendWhatsAppTemplate = (phone, templateName, bodyParams = []) => {
         return;
     }
     const waPhone = toWhatsAppPhone(phone);
-    // Fetch the template from DB to check for header configuration dynamically
     database_1.default.template
         .findFirst({
         where: {
@@ -126,28 +127,7 @@ const sendWhatsAppTemplate = (phone, templateName, bodyParams = []) => {
         }
     });
 };
-// ============================================
-// HELPER: Safe Redis operation wrapper
-// ============================================
-// ✅ NEW: Redis operations ko safely execute karo
-const safeRedisOp = async (operation, fallback, operationName = 'Redis op') => {
-    const redis = (0, redis_1.getRedis)();
-    if (!redis) {
-        console.warn(`⚠️  ${operationName}: Redis not available, using fallback`);
-        return fallback;
-    }
-    try {
-        return await operation(redis);
-    }
-    catch (err) {
-        console.warn(`⚠️  ${operationName} failed: ${err.message}`);
-        return fallback;
-    }
-};
-// ✅ In-memory store - Redis down hone pe kaam aayega
-// Note: Multi-instance pe kaam nahi karega, but single Render instance pe theek hai
 const memoryOtpStore = new Map();
-// Expired OTPs cleanup (memory leak prevent karo)
 setInterval(() => {
     const now = Date.now();
     for (const [key, data] of memoryOtpStore.entries()) {
@@ -155,7 +135,7 @@ setInterval(() => {
             memoryOtpStore.delete(key);
         }
     }
-}, 5 * 60 * 1000); // Har 5 min pe cleanup
+}, 5 * 60 * 1000);
 // ─── OTP Store (Redis + Memory Fallback) ─────────────────────────
 const storeOTP = async (key, data) => {
     const redis = (0, redis_1.getRedis)();
@@ -169,7 +149,6 @@ const storeOTP = async (key, data) => {
             console.warn('⚠️  Redis store failed, using memory:', err.message);
         }
     }
-    // ✅ Memory fallback
     memoryOtpStore.set(key, data);
 };
 const getOTP = async (key) => {
@@ -184,11 +163,9 @@ const getOTP = async (key) => {
             console.warn('⚠️  Redis get failed, checking memory:', err.message);
         }
     }
-    // ✅ Memory fallback
     const memData = memoryOtpStore.get(key);
     if (!memData)
         return null;
-    // Expiry check
     if (Date.now() > memData.expiresAt) {
         memoryOtpStore.delete(key);
         return null;
@@ -205,7 +182,6 @@ const deleteOTP = async (key) => {
             console.warn('⚠️  Redis del failed:', err.message);
         }
     }
-    // Memory se bhi delete karo
     memoryOtpStore.delete(key);
 };
 const updateOTPAttempts = async (key, data, newAttempts) => {
@@ -239,7 +215,6 @@ const formatUser = (user) => ({
 // HELPER: Generate JWT tokens
 // ============================================
 const generateTokenPair = async (userId, email, organizationId) => {
-    // ✅ User ka current tokenVersion fetch karo
     const user = await database_1.default.user.findUnique({
         where: { id: userId },
         select: { tokenVersion: true },
@@ -248,7 +223,7 @@ const generateTokenPair = async (userId, email, organizationId) => {
         userId,
         email,
         organizationId,
-        tokenVersion: user?.tokenVersion ?? 0, // ✅ JWT me include karo
+        tokenVersion: user?.tokenVersion ?? 0,
     };
     const accessToken = (0, jwt_1.generateAccessToken)(payload);
     const refreshToken = (0, jwt_1.generateRefreshToken)(payload);
@@ -259,7 +234,10 @@ const generateTokenPair = async (userId, email, organizationId) => {
     return {
         accessToken,
         refreshToken,
-        expiresIn: (0, jwt_1.parseExpiryTime)(config_1.config.jwt.expiresIn),
+        // ✅ FIX: this was config.jwt.expiresIn (7d) which described the REFRESH token,
+        // not the access token. Frontend uses this value to know when the access token
+        // actually expires, so it must reflect accessExpiresIn (15m).
+        expiresIn: (0, jwt_1.parseExpiryTime)(config_1.config.jwt.accessExpiresIn),
     };
 };
 // ============================================
@@ -336,7 +314,6 @@ class AuthService {
     async sendPhoneOTP(phone) {
         const waPhone = toWhatsAppPhone(phone);
         const key = `${PHONE_OTP_PREFIX}${waPhone}`;
-        // Cooldown check (Redis ya memory se)
         const existing = await getOTP(key);
         if (existing) {
             const elapsed = Date.now() - (existing.createdAt || 0);
@@ -352,7 +329,6 @@ class AuthService {
             createdAt: Date.now(),
             expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
         };
-        // ✅ Redis ya memory me store karo - koi bhi down ho chalega
         await storeOTP(key, otpData);
         if (config_1.config.nodeEnv === 'development') {
             console.log('\n' + '='.repeat(45));
@@ -376,7 +352,6 @@ class AuthService {
         const waPhone = toWhatsAppPhone(phone);
         const phoneE164 = toE164(phone);
         const key = `${PHONE_OTP_PREFIX}${waPhone}`;
-        // ✅ Redis ya memory se OTP lo
         const storedData = await getOTP(key);
         if (!storedData) {
             throw new errorHandler_1.AppError('OTP expired or not found. Please request a new OTP.', 400);
@@ -391,9 +366,7 @@ class AuthService {
             await updateOTPAttempts(key, storedData, newAttempts);
             throw new errorHandler_1.AppError(`Invalid OTP. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`, 400);
         }
-        // OTP verified - delete from Redis
         await deleteOTP(key);
-        // Email duplicate check
         const normalizedEmail = userData.email.trim().toLowerCase();
         const existingUser = await database_1.default.user.findUnique({
             where: { email: normalizedEmail },
@@ -401,9 +374,7 @@ class AuthService {
         if (existingUser) {
             throw new errorHandler_1.AppError('This email is already registered. Please login instead.', 409);
         }
-        // Hash password
         const hashedPassword = await (0, password_1.hashPassword)(userData.password);
-        // Create user + org + subscription
         const result = await database_1.default.$transaction(async (tx) => {
             const user = await tx.user.create({
                 data: {
@@ -421,9 +392,7 @@ class AuthService {
             const organization = await createOrgWithPlan(tx, user.id, orgName);
             return { user, organization };
         });
-        // Generate tokens
         const tokens = await generateTokenPair(result.user.id, result.user.email, result.organization.id);
-        // Send welcome messages (non-blocking)
         sendWhatsAppTemplate(waPhone, config_1.config.platform.whatsapp.welcomeTemplate, [result.user.firstName]);
         sendEmailNonBlocking({
             to: normalizedEmail,
@@ -448,13 +417,11 @@ class AuthService {
     async register(input) {
         const { email, password, firstName, lastName, phone, organizationName } = input;
         const normalizedEmail = email.trim().toLowerCase();
-        // Email duplicate check
         const existingUser = await database_1.default.user.findUnique({
             where: { email: normalizedEmail },
         });
         if (existingUser) {
             if (!existingUser.emailVerified) {
-                // User exists but not verified - resend OTP
                 const otp = (0, otp_1.generateOTP)(6);
                 const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
                 const otpData = {
@@ -478,9 +445,7 @@ class AuthService {
             }
             throw new errorHandler_1.AppError('Email already registered. Please login instead.', 409);
         }
-        // Hash password
         const hashedPassword = await (0, password_1.hashPassword)(password);
-        // Create user + organization in transaction
         const result = await database_1.default.$transaction(async (tx) => {
             const user = await tx.user.create({
                 data: {
@@ -497,7 +462,6 @@ class AuthService {
             const organization = await createOrgWithPlan(tx, user.id, orgName);
             return { user, organization };
         });
-        // ✅ Generate OTP & send to EMAIL
         const otp = (0, otp_1.generateOTP)(6);
         const key = `${EMAIL_OTP_PREFIX}${normalizedEmail}`;
         const otpData = {
@@ -507,7 +471,6 @@ class AuthService {
             expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
         };
         await storeOTP(key, otpData);
-        // ✅ Send OTP Email
         const tpl = email_resend_1.emailTemplates.otp(result.user.firstName, otp);
         sendEmailNonBlocking({
             to: normalizedEmail,
@@ -515,8 +478,6 @@ class AuthService {
             html: tpl.html,
         });
         console.log(`📧 Signup OTP sent to: ${normalizedEmail}`);
-        // ❌ NO WhatsApp message yet
-        // ❌ NO tokens yet (user not verified)
         return {
             message: 'Account created! Please check your email for verification OTP.',
             email: normalizedEmail,
@@ -529,35 +490,85 @@ class AuthService {
     async login(input) {
         const normalizedEmail = input.email.trim().toLowerCase();
         console.log(`🔐 Login attempt: ${normalizedEmail}`);
-        const user = await database_1.default.user.findUnique({
-            where: { email: normalizedEmail },
-        });
+        // ── Step 1: User fetch with explicit error handling ──
+        let user;
+        try {
+            user = await database_1.default.user.findUnique({
+                where: { email: normalizedEmail },
+                select: {
+                    id: true,
+                    email: true,
+                    password: true,
+                    firstName: true,
+                    lastName: true,
+                    phone: true,
+                    avatar: true,
+                    emailVerified: true,
+                    status: true,
+                    googleId: true,
+                    tokenVersion: true,
+                    createdAt: true,
+                },
+            });
+        }
+        catch (err) {
+            // ✅ Pool timeout pe generic error - user ko pata nahi chalega
+            if (err?.code === 'P2024') {
+                console.error('❌ Login DB timeout for:', normalizedEmail);
+                throw new errorHandler_1.AppError('Service temporarily busy. Please try again in a moment.', 503);
+            }
+            throw err;
+        }
+        // ── Step 2: User existence check ────────────────────
         if (!user) {
+            // ✅ Timing attack prevention - same delay even for missing users
+            await new Promise((r) => setTimeout(r, 200));
             throw new errorHandler_1.AppError('Invalid email or password', 401);
         }
+        // ── Step 3: Account type check ──────────────────────
         if (!user.password) {
             if (user.googleId) {
                 throw new errorHandler_1.AppError('This account uses Google Sign-In. Please login with Google.', 400);
             }
             throw new errorHandler_1.AppError('Account configuration error. Please contact support.', 500);
         }
-        const isValid = await (0, password_1.comparePassword)(input.password, user.password);
-        if (!isValid) {
-            throw new errorHandler_1.AppError('Invalid email or password', 401);
-        }
+        // ── Step 4: Status check BEFORE bcrypt (fast fail) ──
         if (user.status === 'SUSPENDED') {
             throw new errorHandler_1.AppError('Account suspended. Please contact support.', 403);
         }
+        // ── Step 5: Password compare ─────────────────────────
+        let isValid = false;
+        try {
+            isValid = await (0, password_1.comparePassword)(input.password, user.password);
+        }
+        catch (bcryptError) {
+            console.error('❌ bcrypt error during login:', bcryptError.message);
+            throw new errorHandler_1.AppError('Login error. Please try again.', 500);
+        }
+        if (!isValid) {
+            console.log(`❌ Wrong password for: ${normalizedEmail}`);
+            throw new errorHandler_1.AppError('Invalid email or password', 401);
+        }
+        // ── Step 6: Get/create organization ─────────────────
         let organization = await getDefaultOrg(user.id);
         if (!organization) {
-            console.log('⚠️  No org found for user, auto-creating...');
+            console.log('⚠️  No org found, auto-creating...');
             const orgName = `${user.firstName || 'User'}'s Workspace`;
             organization = await database_1.default.$transaction((tx) => createOrgWithPlan(tx, user.id, orgName));
         }
-        await database_1.default.user.update({
+        // ── Step 7: Update lastLoginAt (non-blocking) ───────
+        // ✅ Await nahi karo - login slow nahi karega
+        database_1.default.user
+            .update({
             where: { id: user.id },
             data: { lastLoginAt: new Date() },
+        })
+            .catch((err) => {
+            if (err?.code !== 'P2024') {
+                console.error('⚠️  lastLoginAt update failed:', err.message);
+            }
         });
+        // ── Step 8: Generate tokens ──────────────────────────
         const tokens = await generateTokenPair(user.id, user.email, organization?.id);
         console.log(`✅ Login successful: ${normalizedEmail}`);
         return {
@@ -569,7 +580,6 @@ class AuthService {
     // ────────────────────────────────────────────
     // VERIFY EMAIL
     // ────────────────────────────────────────────
-    // ✅ FIXED verifyEmail - welcome messages add kiye
     async verifyEmail(token) {
         const user = await database_1.default.user.findFirst({
             where: {
@@ -589,13 +599,11 @@ class AuthService {
                 status: 'ACTIVE',
             },
         });
-        // ✅ Welcome Email
         sendEmailNonBlocking({
             to: user.email,
             subject: '🎉 Welcome to WabMeta!',
             html: email_resend_1.emailTemplates.welcome(user.firstName).html,
         });
-        // ✅ Welcome WhatsApp (agar phone ho)
         if (user.phone) {
             sendWhatsAppTemplate(user.phone, config_1.config.platform.whatsapp.welcomeTemplate, [user.firstName]);
             console.log(`📱 Welcome WhatsApp sent → ${user.phone}`);
@@ -674,15 +682,18 @@ class AuthService {
             throw new errorHandler_1.AppError('Invalid or expired reset token', 400);
         }
         const hashed = await (0, password_1.hashPassword)(newPassword);
-        await database_1.default.user.update({
-            where: { id: user.id },
-            data: {
-                password: hashed,
-                passwordResetToken: null,
-                passwordResetExpires: null,
-            },
-        });
-        await database_1.default.refreshToken.deleteMany({ where: { userId: user.id } });
+        await database_1.default.$transaction([
+            database_1.default.user.update({
+                where: { id: user.id },
+                data: {
+                    password: hashed,
+                    passwordResetToken: null,
+                    passwordResetExpires: null,
+                    tokenVersion: { increment: 1 }, // ✅ FIX: invalidate any still-live access tokens immediately
+                },
+            }),
+            database_1.default.refreshToken.deleteMany({ where: { userId: user.id } }),
+        ]);
         return { message: 'Password reset successfully' };
     }
     // ────────────────────────────────────────────
@@ -710,8 +721,6 @@ class AuthService {
             subject: tpl.subject,
             html: tpl.html,
         });
-        // ❌ Resend pe WhatsApp mat bhejo - sirf email
-        // (Phone OTP wala alag flow था पहले)
         console.log(`📧 OTP resent to: ${normalizedEmail}`);
         return { message: 'OTP sent to your email' };
     }
@@ -735,16 +744,13 @@ class AuthService {
             await updateOTPAttempts(key, storedData, newAttempts);
             throw new errorHandler_1.AppError(`Invalid OTP. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`, 400);
         }
-        // OTP verified
         await deleteOTP(key);
         const user = await database_1.default.user.findUnique({
             where: { email: normalizedEmail },
         });
         if (!user)
             throw new errorHandler_1.AppError('User not found', 404);
-        // ✅ Check if first verification
         const isFirstVerification = !user.emailVerified;
-        // Update user as verified + active
         await database_1.default.user.update({
             where: { id: user.id },
             data: {
@@ -753,20 +759,15 @@ class AuthService {
                 lastLoginAt: new Date(),
             },
         });
-        // Get organization
         const organization = await getDefaultOrg(user.id);
-        // Generate tokens
         const tokens = await generateTokenPair(user.id, user.email, organization?.id);
-        // ✅ FIRST TIME VERIFICATION - send welcome messages
         if (isFirstVerification) {
-            // ✅ Welcome Email
             sendEmailNonBlocking({
                 to: normalizedEmail,
                 subject: '🎉 Welcome to WabMeta!',
                 html: email_resend_1.emailTemplates.welcome(user.firstName).html,
             });
             console.log(`📧 Welcome email sent → ${normalizedEmail}`);
-            // ✅ Welcome WhatsApp (jo phone signup me diya tha)
             if (user.phone) {
                 sendWhatsAppTemplate(user.phone, config_1.config.platform.whatsapp.welcomeTemplate, [user.firstName]);
                 console.log(`📱 Welcome WhatsApp sent → ${user.phone}`);
@@ -776,7 +777,6 @@ class AuthService {
             }
             console.log(`✅ Account activated: ${normalizedEmail}`);
         }
-        // Get fresh user data after update
         const updatedUser = await database_1.default.user.findUnique({
             where: { id: user.id },
         });
@@ -871,9 +871,6 @@ class AuthService {
             include: { user: true },
         });
         if (!stored) {
-            // 🚨 TOKEN REUSE DETECTION
-            // Token is valid JWT but not in DB -> it was already used and deleted.
-            // This means a compromised token is being reused. Revoke all sessions!
             if (payload && payload.userId) {
                 console.warn(`🚨 TOKEN REUSE DETECTED! Revoking all sessions for user: ${payload.userId}`);
                 await database_1.default.refreshToken.deleteMany({ where: { userId: payload.userId } });
@@ -901,7 +898,15 @@ class AuthService {
     // LOGOUT ALL DEVICES
     // ────────────────────────────────────────────
     async logoutAll(userId) {
-        await database_1.default.refreshToken.deleteMany({ where: { userId } });
+        // ✅ FIX: bump tokenVersion too, otherwise any access token issued before this
+        // call stays valid (up to 15m) even after "logout all devices"
+        await database_1.default.$transaction([
+            database_1.default.refreshToken.deleteMany({ where: { userId } }),
+            database_1.default.user.update({
+                where: { id: userId },
+                data: { tokenVersion: { increment: 1 } },
+            }),
+        ]);
         return { message: 'Logged out from all devices' };
     }
     // ────────────────────────────────────────────
@@ -928,11 +933,16 @@ class AuthService {
             throw new errorHandler_1.AppError('Current password is incorrect', 400);
         }
         const hashed = await (0, password_1.hashPassword)(newPassword);
-        await database_1.default.user.update({
-            where: { id: userId },
-            data: { password: hashed },
-        });
-        await database_1.default.refreshToken.deleteMany({ where: { userId } });
+        await database_1.default.$transaction([
+            database_1.default.user.update({
+                where: { id: userId },
+                data: {
+                    password: hashed,
+                    tokenVersion: { increment: 1 }, // ✅ FIX: invalidate all live access tokens immediately
+                },
+            }),
+            database_1.default.refreshToken.deleteMany({ where: { userId } }),
+        ]);
         return { message: 'Password changed successfully' };
     }
 }

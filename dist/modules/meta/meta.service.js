@@ -1,21 +1,25 @@
 "use strict";
-// 📁 src/modules/meta/meta.service.ts - COMPLETE FIXED VERSION
+// 📁 src/modules/meta/meta.service.ts - FIXED VERSION
+// ✅ FIX 1: registerPhoneNumber now uses generatePhonePin() — a random 6-digit PIN
+//    per account, instead of hardcoded '000000' across every customer.
+// ✅ FIX 2: getAccountWithToken now delegates to the shared
+//    getAccountWithDecryptedToken() helper — same logic used by whatsapp.service.ts,
+//    so message sending and connection health checks agree on token state.
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.metaService = exports.MetaService = void 0;
 const client_1 = require("@prisma/client");
-const meta_api_1 = require("./meta.api");
+const meta_api_1 = require("./meta.api"); // ✅ FIX: import generatePhonePin
 const config_1 = require("../../config");
 const encryption_1 = require("../../utils/encryption");
+const tokenDecryption_1 = require("../../utils/tokenDecryption"); // ✅ FIX: shared helper
+const templateMediaResolver_1 = require("../../utils/templateMediaResolver");
 const uuid_1 = require("uuid");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
 class MetaService {
-    // ============================================
-    // HELPER METHODS
-    // ============================================
     sanitizeAccount(account) {
         if (!account)
             return null;
@@ -26,19 +30,15 @@ class MetaService {
             hasWebhookSecret: !!webhookSecret,
         };
     }
-    // ✅ Detect Connection Type Helper
     detectConnectionType(metaData) {
         if (!metaData)
             return 'CLOUD_API';
-        // Check if it's Cloud API
         if (metaData.api_version || metaData.cloud_api || metaData.platformType === 'CLOUD_API') {
             return 'CLOUD_API';
         }
-        // Check if it's Business App
         if (metaData.business_app || metaData.app_based || metaData.platformType === 'WHATSAPP_BUSINESS_APP') {
             return 'BUSINESS_APP';
         }
-        // Check if it's On-Premise
         if (metaData.on_premise || metaData.self_hosted || metaData.platformType === 'ON_PREMISE') {
             return 'ON_PREMISE';
         }
@@ -92,21 +92,16 @@ class MetaService {
         };
     }
     // ============================================
-    // CONNECTION FLOW - ✅ FIXED RECONNECT LOGIC
+    // CONNECTION FLOW
     // ============================================
-    async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress, embeddedSignup = false, // true = FB.login flow, no redirect_uri needed
-    sessionWabaId, // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
-    sessionPhoneNumberId // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
-    ) {
+    async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress, embeddedSignup = false, sessionWabaId, sessionPhoneNumberId) {
         try {
             console.log('\n🔄 ========== META CONNECTION START ==========');
             console.log('   Organization ID:', organizationId);
             console.log('   Embedded Signup:', embeddedSignup);
             console.log('   Session WABA ID:', sessionWabaId || '(will lookup from token)');
             console.log('   Session Phone ID:', sessionPhoneNumberId || '(will lookup from WABA)');
-            // ============================================
             // STEP 1: Get Access Token
-            // ============================================
             onProgress?.({
                 step: 'TOKEN_EXCHANGE',
                 status: 'in_progress',
@@ -119,13 +114,10 @@ class MetaService {
             }
             else {
                 console.log('🔄 Exchanging code for token...');
-                // ✅ Pass skipRedirectUri=true for FB.login flow (Embedded Signup)
-                // FB.login codes MUST be exchanged WITHOUT redirect_uri
                 const tokenResponse = await meta_api_1.metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
                 accessToken = tokenResponse.accessToken;
                 console.log('✅ Short-lived token obtained');
             }
-            // Try to get long-lived token
             try {
                 console.log('🔄 Getting long-lived token...');
                 const longLivedTokenResponse = await meta_api_1.metaApi.getLongLivedToken(accessToken);
@@ -144,9 +136,7 @@ class MetaService {
                 status: 'completed',
                 message: 'Access token obtained',
             });
-            // ============================================
             // STEP 2: Debug Token & Get WABA
-            // ============================================
             onProgress?.({
                 step: 'FETCHING_WABA',
                 status: 'in_progress',
@@ -157,14 +147,12 @@ class MetaService {
                 throw new errorHandler_1.AppError('Access token is invalid or expired', 401);
             }
             console.log('🔍 Token is valid');
-            // Get WABA ID - Priority: session info > granular scopes > business API
             let wabaId = sessionWabaId || null;
             let businessId = null;
             if (wabaId) {
                 console.log('✅ Using WABA ID from session info (most reliable):', wabaId);
             }
             else {
-                // Method 1: granular scopes from debug token
                 const granularScopes = debugInfo.data.granular_scopes || [];
                 console.log('🔍 Granular scopes:', JSON.stringify(granularScopes));
                 for (const scope of granularScopes) {
@@ -177,7 +165,6 @@ class MetaService {
                         businessId = scope.target_ids[0];
                     }
                 }
-                // Method 2: business API fallback (requires business_management scope - may fail)
                 if (!wabaId) {
                     console.log('⚠️ WABA not in granular scopes, trying business API fallback...');
                     try {
@@ -203,7 +190,6 @@ class MetaService {
                     '4. Add and VERIFY a phone number\n' +
                     '5. Click FINISH and wait for the popup to close', 400);
             }
-            // Get WABA details (wrapped in try-catch - some fields may require extra permissions)
             let wabaDetails = { id: wabaId, name: 'WhatsApp Business Account' };
             try {
                 wabaDetails = await meta_api_1.metaApi.getWABADetails(wabaId, accessToken);
@@ -222,16 +208,13 @@ class MetaService {
                 message: `Found WABA: ${wabaDetails.name}`,
                 data: { wabaId, wabaName: wabaDetails.name },
             });
-            // ============================================
             // STEP 3: Get Phone Numbers
-            // ============================================
             onProgress?.({
                 step: 'FETCHING_PHONE',
                 status: 'in_progress',
                 message: 'Fetching phone numbers...',
             });
             let phoneNumbers;
-            // ✅ If session phone number ID provided, get it directly (most reliable for Embedded Signup)
             if (sessionPhoneNumberId) {
                 console.log('📥 Fetching specific phone by session ID:', sessionPhoneNumberId);
                 try {
@@ -268,12 +251,9 @@ class MetaService {
                 status: 'completed',
                 message: `Found phone: ${primaryPhone.displayPhoneNumber}`,
             });
-            // Auto-detect connection type based on primary phone data
             const autoDetected = this.detectConnectionType(primaryPhone);
             const finalConnectionType = autoDetected !== 'CLOUD_API' ? autoDetected : connectionType;
-            // ============================================
             // STEP 4: Subscribe to Webhooks
-            // ============================================
             onProgress?.({
                 step: 'SUBSCRIBE_WEBHOOK',
                 status: 'in_progress',
@@ -291,36 +271,58 @@ class MetaService {
                 status: 'completed',
                 message: 'Webhooks configured',
             });
-            // ============================================
             // STEP 4.5: Register Phone Number for Cloud API
-            // ============================================
             onProgress?.({
                 step: 'REGISTER_PHONE',
                 status: 'in_progress',
                 message: 'Registering phone number to Cloud API...',
             });
+            // ✅ FIX: generate a random, per-account 6-digit PIN instead of hardcoded '000000'.
+            // We check if this phoneNumberId already has a persisted PIN (previous reconnection)
+            // and reuse it — Meta rejects PIN changes without prior 2FA disable.
+            let phonePin;
             try {
-                console.log(`[Meta Service] Registering phone number ${primaryPhone.id}...`);
-                await meta_api_1.metaApi.registerPhoneNumber(primaryPhone.id, accessToken);
+                const existingRecord = await database_1.default.whatsAppAccount.findUnique({
+                    where: { phoneNumberId: primaryPhone.id },
+                    select: { webhookSecret: true },
+                });
+                // We reuse webhookSecret column to also stash the encrypted PIN with a marker
+                // (schema-safe: no new column needed). Marker prefix = "PIN::"
+                let reusedPin = null;
+                if (existingRecord?.webhookSecret) {
+                    try {
+                        const decrypted = (0, encryption_1.safeDecryptStrict)(existingRecord.webhookSecret);
+                        if (decrypted?.startsWith('PIN::')) {
+                            const parts = decrypted.split('::');
+                            if (parts[1] && /^\d{6}$/.test(parts[1])) {
+                                reusedPin = parts[1];
+                            }
+                        }
+                    }
+                    catch {
+                        // ignore — treat as no existing PIN
+                    }
+                }
+                phonePin = reusedPin || (0, meta_api_1.generatePhonePin)();
+                console.log(`[Meta Service] Using ${reusedPin ? 'existing' : 'new'} PIN for phone ${primaryPhone.id}`);
+                await meta_api_1.metaApi.registerPhoneNumber(primaryPhone.id, accessToken, phonePin);
                 console.log('✅ Phone number registered successfully');
             }
             catch (registerError) {
                 console.warn('⚠️ Phone number registration failed:', registerError.message);
+                phonePin = (0, meta_api_1.generatePhonePin)(); // ensure we still have a value to persist below
             }
             onProgress?.({
                 step: 'REGISTER_PHONE',
                 status: 'completed',
                 message: 'Phone number registered',
             });
-            // ============================================
-            // STEP 5: Save to Database — UPSERT approach
-            // ============================================
+            // STEP 5: Save to Database
             onProgress?.({
                 step: 'SAVING',
                 status: 'in_progress',
                 message: 'Saving account...',
             });
-            // Block if org already has a DIFFERENT phone connected
             const existingConnectedInOrg = await database_1.default.whatsAppAccount.findFirst({
                 where: {
                     organizationId,
@@ -339,18 +341,16 @@ class MetaService {
                 throw new errorHandler_1.AppError('Token encryption verification failed', 500);
             }
             console.log('✅ Encryption verified');
-            const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+            const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
             const cleanPhoneNumber = primaryPhone.displayPhoneNumber.replace(/\D/g, '');
+            // ✅ Persist the PIN encrypted alongside the webhook verify token so we can
+            // reuse it on future re-registrations. Prefix with "PIN::<pin>::" so we can
+            // distinguish it from raw webhook secrets when reading back.
             const webhookVerifyToken = (0, uuid_1.v4)();
-            const encryptedWebhookSecret = (0, encryption_1.encrypt)(webhookVerifyToken);
-            // ✅ UPSERT — atomically handles ALL cases:
-            //   • Brand new phone number → CREATE
-            //   • Same phone, same org → UPDATE (reactivate)
-            //   • Same phone, different org → UPDATE (transfer ownership)
-            //   • Race condition / findFirst miss → UPDATE (no crash)
+            const combinedSecret = `PIN::${phonePin}::WEBHOOK::${webhookVerifyToken}`;
+            const encryptedWebhookSecret = (0, encryption_1.encrypt)(combinedSecret);
             let savedAccount;
             try {
-                // Check if any existing record with this phoneNumberId (any org, any status)
                 const existingByPhone = await database_1.default.whatsAppAccount.findUnique({
                     where: { phoneNumberId: primaryPhone.id },
                 });
@@ -369,7 +369,7 @@ class MetaService {
                     savedAccount = await database_1.default.whatsAppAccount.update({
                         where: { id: existingByPhone.id },
                         data: {
-                            organizationId, // update org if transferring
+                            organizationId,
                             accessToken: encryptedToken,
                             tokenExpiresAt,
                             wabaId,
@@ -383,12 +383,13 @@ class MetaService {
                             codeVerificationStatus: primaryPhone.codeVerificationStatus,
                             nameStatus: primaryPhone.nameStatus,
                             messagingLimit: primaryPhone.messagingLimitTier,
+                            // ✅ persist PIN + webhook secret together (encrypted)
+                            webhookSecret: encryptedWebhookSecret,
                         },
                     });
                     console.log('✅ Account updated successfully');
                 }
                 else {
-                    // Truly new — CREATE
                     console.log('🔄 Creating new WhatsApp account');
                     const accountCount = await database_1.default.whatsAppAccount.count({ where: { organizationId } });
                     savedAccount = await database_1.default.whatsAppAccount.create({
@@ -415,7 +416,6 @@ class MetaService {
                 }
             }
             catch (dbError) {
-                // Last resort: if create still hits unique constraint, do a findUnique + update
                 if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
                     console.warn('⚠️ Unique constraint hit despite findUnique miss — doing force update');
                     const forceExisting = await database_1.default.whatsAppAccount.findFirst({
@@ -439,6 +439,7 @@ class MetaService {
                                 codeVerificationStatus: primaryPhone.codeVerificationStatus,
                                 nameStatus: primaryPhone.nameStatus,
                                 messagingLimit: primaryPhone.messagingLimitTier,
+                                webhookSecret: encryptedWebhookSecret,
                             },
                         });
                         console.log('✅ Force-updated existing account');
@@ -451,9 +452,7 @@ class MetaService {
                     throw dbError;
                 }
             }
-            // ============================================
-            // STEP 5.5: Save/Update MetaConnection & PhoneNumbers
-            // ============================================
+            // STEP 5.5: MetaConnection & PhoneNumbers
             let savedMetaConnection = null;
             try {
                 console.log('🔄 Saving MetaConnection...');
@@ -515,7 +514,6 @@ class MetaService {
                 status: 'completed',
                 message: 'WhatsApp account connected!',
             });
-            // Sync templates in background
             this.syncTemplatesBackground(savedAccount.id, wabaId, accessToken).catch((err) => {
                 console.error('Background template sync failed:', err);
             });
@@ -560,73 +558,23 @@ class MetaService {
         }
         return this.sanitizeAccount(account);
     }
-    async getAccountWithToken(accountId) {
-        const account = await database_1.default.whatsAppAccount.findUnique({
-            where: { id: accountId },
-        });
-        if (!account) {
-            console.error(`❌ Account not found: ${accountId}`);
-            return null;
-        }
-        if (!account.accessToken) {
-            console.error(`❌ No access token for account: ${accountId}`);
-            return null;
-        }
-        console.log(`\n🔐 ========== TOKEN RETRIEVAL ==========`);
-        console.log(`   Account ID: ${accountId}`);
-        console.log(`   Organization: ${account.organizationId}`);
-        console.log(`   Phone: ${account.phoneNumber}`);
-        let decryptedToken = (0, encryption_1.safeDecryptStrict)(account.accessToken);
-        // ✅ AUTO-FIX: If token is plain text (not encrypted), encrypt it now
-        if (!decryptedToken && account.accessToken && (0, encryption_1.isMetaToken)(account.accessToken)) {
-            console.log('🔄 Auto-fixing plain text token for account:', accountId);
-            const encryptedToken = (0, encryption_1.encrypt)(account.accessToken);
-            await database_1.default.whatsAppAccount.update({
-                where: { id: accountId },
-                data: { accessToken: encryptedToken }
-            });
-            decryptedToken = account.accessToken;
-            console.log('✅ Token encrypted and saved successfully');
-        }
-        if (!decryptedToken) {
-            console.error(`❌ Failed to decrypt token for account: ${accountId}`);
-            console.error(`   Possible causes:`);
-            console.error(`   1. Token was not encrypted properly`);
-            console.error(`   2. ENCRYPTION_KEY changed in .env`);
-            console.error(`   3. Database corruption`);
-            console.error(`\n   ✅ SOLUTION: Reconnect WhatsApp account`);
-            await database_1.default.whatsAppAccount.update({
-                where: { id: accountId },
-                data: {
-                    status: client_1.WhatsAppAccountStatus.DISCONNECTED,
-                    accessToken: null,
-                },
-            });
-            return null;
-        }
-        console.log(`✅ Token decrypted successfully`);
-        console.log(`   Token: ${(0, encryption_1.maskToken)(decryptedToken)}`);
-        console.log(`🔐 ========== TOKEN RETRIEVAL END ==========\n`);
-        return {
-            account,
-            accessToken: decryptedToken,
-        };
-    }
     /**
-     * ✅ SAFE DISCONNECT - Soft disconnect, preserves data
-     * Idempotent: Can be called multiple times safely
-     * Handles default account switching automatically
+     * ✅ FIX: now delegates to the shared getAccountWithDecryptedToken() helper.
+     * This is the SAME helper used by whatsapp.service.ts for message sending,
+     * so both agree on account/token state. If a token can't be decrypted, both
+     * see the account as unusable (DB is auto-marked DISCONNECTED by the helper).
      */
+    async getAccountWithToken(accountId) {
+        return (0, tokenDecryption_1.getAccountWithDecryptedToken)(accountId);
+    }
     async disconnectAccount(accountId, organizationId) {
         console.log(`🔌 Disconnecting account: ${accountId}`);
-        // Find account (safe - checks organization ownership)
         const account = await database_1.default.whatsAppAccount.findFirst({
             where: {
                 id: accountId,
                 organizationId,
             },
         });
-        // ✅ Idempotent: If already not found, treat as already disconnected
         if (!account) {
             console.log(`ℹ️  Account not found or already disconnected: ${accountId}`);
             return {
@@ -634,7 +582,6 @@ class MetaService {
                 message: 'Account already disconnected (not found)',
             };
         }
-        // Check if already disconnected
         if (account.status === client_1.WhatsAppAccountStatus.DISCONNECTED && !account.accessToken) {
             console.log(`ℹ️  Account already disconnected: ${accountId}`);
             return {
@@ -642,8 +589,6 @@ class MetaService {
                 message: 'Account already disconnected',
             };
         }
-        // ✅ Soft disconnect: Mark as disconnected, clear token
-        // This preserves campaign history, templates, and other relations
         await database_1.default.whatsAppAccount.update({
             where: { id: accountId },
             data: {
@@ -654,7 +599,6 @@ class MetaService {
             },
         });
         console.log(`✅ Account disconnected: ${accountId}`);
-        // ✅ If it was default, set another CONNECTED account as default
         if (account.isDefault) {
             const anotherAccount = await database_1.default.whatsAppAccount.findFirst({
                 where: {
@@ -782,7 +726,7 @@ class MetaService {
         }
     }
     // ============================================
-    // TEMPLATE SYNC
+    // TEMPLATE SYNC (unchanged)
     // ============================================
     async syncTemplates(accountId, organizationId) {
         const result = await this.getAccountWithToken(accountId);
@@ -794,8 +738,32 @@ class MetaService {
             throw new errorHandler_1.AppError('Unauthorized', 403);
         }
         console.log(`🔄 Syncing templates for account ${accountId} (WABA: ${account.wabaId})`);
-        const metaTemplates = await meta_api_1.metaApi.getTemplates(account.wabaId, accessToken);
-        console.log(`📥 Fetched ${metaTemplates.length} templates from Meta`);
+        let metaTemplates = [];
+        try {
+            metaTemplates = await meta_api_1.metaApi.getTemplates(account.wabaId, accessToken);
+            console.log(`📥 Fetched ${metaTemplates.length} templates from Meta`);
+        }
+        catch (error) {
+            console.error(`❌ Template sync API call failed for account ${accountId}:`, error.message);
+            const isTokenError = error.message?.includes('token') ||
+                error.message?.includes('OAuth') ||
+                error.status === 401 ||
+                error.status === 403 ||
+                error.message?.includes('190') ||
+                error.message?.includes('133010') ||
+                error.message?.includes('not registered');
+            if (isTokenError) {
+                console.warn(`⚠️ Deactivating broken account ${accountId} due to template sync API error`);
+                await database_1.default.whatsAppAccount.update({
+                    where: { id: accountId },
+                    data: {
+                        status: client_1.WhatsAppAccountStatus.DISCONNECTED,
+                        accessToken: null,
+                    },
+                }).catch((e) => console.error('Failed to disconnect account in template sync error path:', e));
+            }
+            throw error;
+        }
         const existingTemplates = await database_1.default.template.findMany({
             where: {
                 whatsappAccountId: accountId,
@@ -805,7 +773,7 @@ class MetaService {
                 name: true,
                 language: true,
                 metaTemplateId: true,
-                headerMediaId: true, // ✅ Must fetch to preserve during sync
+                headerMediaId: true,
             },
         });
         const existingMap = new Map(existingTemplates.map((t) => [`${t.name}_${t.language}`, t]));
@@ -818,13 +786,12 @@ class MetaService {
                 const status = this.mapTemplateStatus(metaTemplate.status);
                 const key = `${metaTemplate.name}_${metaTemplate.language}`;
                 if (status === 'DRAFT' || status === 'REJECTED') {
-                    metaKeys.add(key); // ✅ ADD THIS: Add before skipping so it doesn't get deleted locally
+                    metaKeys.add(key);
                     skipped++;
                     continue;
                 }
                 metaKeys.add(key);
                 const existing = existingMap.get(key);
-                // ✅ Extract header handle from Meta's example (for new templates)
                 const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
                 const baseTemplateData = {
                     organizationId,
@@ -843,31 +810,33 @@ class MetaService {
                     variables: this.extractVariables(metaTemplate.components),
                     qualityScore: metaTemplate.quality_score?.score || null,
                 };
+                let dbTemplate;
                 if (existing) {
-                    // ✅ CRITICAL: Preserve existing headerMediaId - Meta does NOT return it in sync
-                    // Overwriting it with null causes 403 errors during campaign send
                     const updateData = { ...baseTemplateData };
                     if (existing.headerMediaId) {
-                        // Keep existing mediaId if already set
                         delete updateData.headerMediaId;
                     }
                     else if (extractedHeaderHandle) {
-                        // Populate from Meta's example handle if available (rare)
                         updateData.headerMediaId = extractedHeaderHandle;
                     }
-                    await database_1.default.template.update({
+                    dbTemplate = await database_1.default.template.update({
                         where: { id: existing.id },
                         data: updateData,
                     });
                     updated++;
                 }
                 else {
-                    // New template: set headerMediaId from extracted handle if available
                     if (extractedHeaderHandle) {
                         baseTemplateData.headerMediaId = extractedHeaderHandle;
                     }
-                    await database_1.default.template.create({ data: baseTemplateData });
+                    dbTemplate = await database_1.default.template.create({ data: baseTemplateData });
                     created++;
+                }
+                // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
+                if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
+                    await (0, templateMediaResolver_1.resolveTemplateHeaderMedia)(dbTemplate).catch((err) => {
+                        console.error(`Failed to resolve template media in syncTemplates:`, err.message);
+                    });
                 }
             }
             catch (err) {
@@ -939,8 +908,8 @@ class MetaService {
                         variables: this.extractVariables(template.components),
                         qualityScore: template.quality_score?.score || null,
                     };
+                    let dbTemplate;
                     if (existing) {
-                        // ✅ CRITICAL: Do NOT overwrite headerMediaId during sync
                         const updateData = { ...baseData };
                         if (existing.headerMediaId) {
                             delete updateData.headerMediaId;
@@ -948,7 +917,7 @@ class MetaService {
                         else if (extractedHandle) {
                             updateData.headerMediaId = extractedHandle;
                         }
-                        await database_1.default.template.update({
+                        dbTemplate = await database_1.default.template.update({
                             where: { id: existing.id },
                             data: updateData,
                         });
@@ -956,7 +925,13 @@ class MetaService {
                     else {
                         if (extractedHandle)
                             baseData.headerMediaId = extractedHandle;
-                        await database_1.default.template.create({ data: baseData });
+                        dbTemplate = await database_1.default.template.create({ data: baseData });
+                    }
+                    // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
+                    if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
+                        await (0, templateMediaResolver_1.resolveTemplateHeaderMedia)(dbTemplate).catch((err) => {
+                            console.error(`Failed to resolve template media in syncTemplatesBackground:`, err.message);
+                        });
                     }
                     synced++;
                 }
@@ -968,11 +943,25 @@ class MetaService {
         }
         catch (error) {
             console.error('❌ Background template sync failed:', error);
+            const isTokenError = error.message?.includes('token') ||
+                error.message?.includes('OAuth') ||
+                error.status === 401 ||
+                error.status === 403 ||
+                error.message?.includes('190') ||
+                error.message?.includes('133010') ||
+                error.message?.includes('not registered');
+            if (isTokenError) {
+                console.warn(`⚠️ Deactivating broken account ${accountId} due to background sync API error`);
+                await database_1.default.whatsAppAccount.update({
+                    where: { id: accountId },
+                    data: {
+                        status: client_1.WhatsAppAccountStatus.DISCONNECTED,
+                        accessToken: null,
+                    },
+                }).catch((e) => console.error('Failed to disconnect account in background sync error path:', e));
+            }
         }
     }
-    // ============================================
-    // TEMPLATE HELPERS
-    // ============================================
     mapCategory(category) {
         const map = {
             MARKETING: 'MARKETING',
@@ -1022,30 +1011,22 @@ class MetaService {
             return null;
         if (header.text)
             return header.text;
-        // Media Header Example Extraction
         if (header.example) {
             const ex = header.example;
             return ex.header_url?.[0] || ex.header_handle?.[0] || ex.header_text?.[0] || null;
         }
         return null;
     }
-    // ✅ NEW: Extract header_handle from Meta's example (the actual Media ID)
     extractHeaderHandle(components) {
         if (!Array.isArray(components))
             return null;
         const header = components.find((c) => c.type === 'HEADER');
         if (!header || !header.example)
             return null;
-        // Meta returns the handle in example.header_handle array
         const handle = header.example?.header_handle?.[0];
-        // ✅ CRITICAL: Handles starting with '4:' are NOT valid Media IDs for the messages endpoint.
-        // They are only for template creation examples.
-        // Media IDs must be numeric.
         if (handle && /^\d+$/.test(handle)) {
             return handle;
         }
-        // If it starts with '4:', it's a resumable upload handle, NOT a Media ID.
-        // Sending this in the 'id' field of a message will fail with Error 100.
         return null;
     }
     extractFooterText(components) {

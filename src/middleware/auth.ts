@@ -1,8 +1,7 @@
-// src/middleware/auth.ts - FIXED
-// ✅ FIX 1: tokenVersion cache invalidation - DB se fresh check karo jab mismatch ho
-// ✅ FIX 2: Cache TTL 120s→60s (stale data kam hoga)
-// ✅ FIX 3: P2024 pool timeout pe 503 return karo, 401 nahi
-// ✅ FIX 4: organizationId missing fix cleaned up
+// src/middleware/auth.ts - PRODUCTION READY
+// ✅ Cache TTL increased to 5 minutes (paid plan)
+// ✅ Better error handling
+// ✅ Pool timeout graceful degradation
 
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../types/express';
@@ -14,7 +13,7 @@ import { authService } from '../modules/auth/auth.service';
 import { getCookieOptions } from '../utils/cookies';
 
 const USER_CACHE_PREFIX = 'user:auth:';
-const CACHE_TTL = 60; // ✅ 120→60 seconds (stale data risk kam)
+const CACHE_TTL = 300; // ✅ 5 minutes (paid plan can afford longer cache)
 
 // ============================================
 // SAFE REDIS HELPERS
@@ -72,19 +71,17 @@ const fetchUser = async (
 ): Promise<CachedUser | null> => {
   const cacheKey = `${USER_CACHE_PREFIX}${userId}`;
 
-  // Cache check (skip if forceRefresh)
   if (!forceRefresh) {
     const cached = await safeRedisGet(cacheKey);
     if (cached) {
       try {
         return JSON.parse(cached) as CachedUser;
       } catch {
-        // Cache corrupt - DB se fetch karo
+        // Cache corrupt
       }
     }
   }
 
-  // DB se fetch
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -98,13 +95,11 @@ const fetchUser = async (
     });
 
     if (user) {
-      // Cache mein store karo
       await safeRedisSet(cacheKey, JSON.stringify(user), CACHE_TTL);
     }
 
     return user;
   } catch (err: any) {
-    // ✅ Pool timeout - cache se serve karo agar available ho
     if (err?.code === 'P2024') {
       console.warn('⚠️  Auth middleware: DB pool busy, trying cache fallback');
       const cached = await safeRedisGet(cacheKey);
@@ -116,7 +111,6 @@ const fetchUser = async (
           return null;
         }
       }
-      // Cache bhi nahi hai - 503 throw karo (not 401)
       throw new AppError('Service temporarily busy. Please retry.', 503);
     }
     throw err;
@@ -133,7 +127,6 @@ export const authenticate = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    // ── Step 1: Token extract karo ──────────────────
     let token = '';
 
     const authHeader =
@@ -149,7 +142,7 @@ export const authenticate = async (
       token = req.query.token as string;
     }
 
-    // ── Step 2: Auto-heal via refresh token ────────
+    // Auto-heal via refresh token
     if (!token && req.cookies?.refreshToken) {
       try {
         console.log('🛡️ Auto-healing: Attempting token refresh...');
@@ -177,28 +170,23 @@ export const authenticate = async (
       throw new AppError('Access token required', 401);
     }
 
-    // ── Step 3: Token verify karo ──────────────────
     let decoded: TokenPayload;
     try {
       decoded = verifyAccessToken(token) as TokenPayload;
     } catch (jwtError: any) {
-      // JWT expired vs invalid distinguish karo
       if (jwtError?.name === 'TokenExpiredError') {
         throw new AppError('Access token expired', 401);
       }
       throw new AppError('Invalid access token', 401);
     }
 
-    // ── Step 4: User fetch (cache → DB) ────────────
     let user = await fetchUser(decoded.userId);
 
     if (!user) {
       throw new AppError('User not found', 401);
     }
 
-    // ── Step 5: tokenVersion check ─────────────────
-    // ✅ KEY FIX: Cache mein stale tokenVersion ho sakta hai
-    // Agar mismatch hai toh pehle DB se fresh fetch karo
+    // tokenVersion check with DB fallback
     if (
       decoded.tokenVersion !== undefined &&
       user.tokenVersion !== undefined &&
@@ -209,14 +197,12 @@ export const authenticate = async (
         `token=${decoded.tokenVersion}, cache=${user.tokenVersion} → refreshing from DB`
       );
 
-      // ✅ Force DB refresh - cache ko bypass karo
       user = await fetchUser(decoded.userId, true);
 
       if (!user) {
         throw new AppError('User not found', 401);
       }
 
-      // DB se fresh data ke baad bhi mismatch = genuinely invalid token
       if (decoded.tokenVersion !== user.tokenVersion) {
         console.warn(
           `🚨 tokenVersion CONFIRMED mismatch for ${decoded.userId}: ` +
@@ -229,16 +215,13 @@ export const authenticate = async (
       console.log(`✅ tokenVersion verified from DB for ${decoded.userId}`);
     }
 
-    // ── Step 6: Status check ───────────────────────
     if (user.status === 'SUSPENDED') {
       throw new AppError('Account suspended. Please contact support.', 403);
     }
 
-    // ── Step 7: organizationId resolve ─────────────
     let organizationId = decoded.organizationId;
 
     if (!organizationId) {
-      // Membership DB se dhundo - lightweight query
       try {
         const membership = await prisma.organizationMember.findFirst({
           where: { userId: decoded.userId },
@@ -247,12 +230,10 @@ export const authenticate = async (
         organizationId = membership?.organizationId;
       } catch (err: any) {
         if (err?.code !== 'P2024') throw err;
-        // Pool busy - organizationId ke bina continue karo
         console.warn('⚠️  Could not fetch organizationId: pool busy');
       }
     }
 
-    // ── Step 8: req.user set karo ──────────────────
     req.user = {
       id: user.id,
       email: user.email,

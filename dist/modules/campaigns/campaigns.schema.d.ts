@@ -340,13 +340,13 @@ export declare const getCampaignsSchema: z.ZodObject<{
         page: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
         sortOrder: "asc" | "desc";
-        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         search?: string | undefined;
+        status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
     }, {
-        limit?: string | undefined;
-        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
-        page?: string | undefined;
         search?: string | undefined;
+        limit?: string | undefined;
+        status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
+        page?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
@@ -356,15 +356,15 @@ export declare const getCampaignsSchema: z.ZodObject<{
         page: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
         sortOrder: "asc" | "desc";
-        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
         search?: string | undefined;
+        status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
     };
 }, {
     query: {
-        limit?: string | undefined;
-        status?: "CANCELLED" | "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | undefined;
-        page?: string | undefined;
         search?: string | undefined;
+        limit?: string | undefined;
+        status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
+        page?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };

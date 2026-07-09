@@ -133,10 +133,32 @@ const getMessageAnalytics = async (req, res) => {
         const organizationId = req.user?.organizationId;
         if (!organizationId)
             return (0, response_1.errorResponse)(res, 'Organization not found', 400);
-        const data = await walletService.getWalletMessageAnalytics(organizationId);
+        // ✅ Date range support
+        const { startDate, endDate, days } = req.query;
+        let start;
+        let end;
+        if (days && !isNaN(Number(days))) {
+            const n = Math.min(Number(days), 365); // Max 1 year
+            end = new Date();
+            start = new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+        }
+        else {
+            if (typeof startDate === 'string') {
+                const s = new Date(startDate);
+                if (!isNaN(s.getTime()))
+                    start = s;
+            }
+            if (typeof endDate === 'string') {
+                const e = new Date(endDate);
+                if (!isNaN(e.getTime()))
+                    end = e;
+            }
+        }
+        const data = await walletService.getWalletMessageAnalytics(organizationId, { startDate: start, endDate: end });
         return (0, response_1.sendSuccess)(res, data, 'Analytics retrieved');
     }
     catch (err) {
+        console.error('Analytics error:', err);
         return (0, response_1.errorResponse)(res, err.message, err.statusCode || 500);
     }
 };

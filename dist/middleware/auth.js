@@ -1,5 +1,8 @@
 "use strict";
-// src/middleware/auth.ts - FIXED VERSION
+// src/middleware/auth.ts - PRODUCTION READY
+// ✅ Cache TTL increased to 5 minutes (paid plan)
+// ✅ Better error handling
+// ✅ Pool timeout graceful degradation
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -10,43 +13,34 @@ const errorHandler_1 = require("./errorHandler");
 const database_1 = __importDefault(require("../config/database"));
 const redis_1 = require("../config/redis");
 const auth_service_1 = require("../modules/auth/auth.service");
-// ✅ REMOVED: const redis = getRedis(); ← YE WALI LINE HATAO
-// Module level pe Redis capture NAHI karna - stale ho jaati hai
+const cookies_1 = require("../utils/cookies");
 const USER_CACHE_PREFIX = 'user:auth:';
-const CACHE_TTL = 120;
-const cookieOptions = (isRefresh = false) => ({
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    maxAge: isRefresh ? 7 * 24 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000,
-    path: '/',
-});
-// ✅ Safe Redis cache get - kabhi throw nahi karega
+const CACHE_TTL = 300; // ✅ 5 minutes (paid plan can afford longer cache)
+// ============================================
+// SAFE REDIS HELPERS
+// ============================================
 const safeRedisGet = async (key) => {
     try {
-        const redis = (0, redis_1.getRedis)(); // ✅ Har baar fresh call
+        const redis = (0, redis_1.getRedis)();
         if (!redis)
             return null;
         return await redis.get(key);
     }
-    catch (err) {
-        // Silent fail - Redis down hone pe auth kaam karta rahe
+    catch {
         return null;
     }
 };
-// ✅ Safe Redis cache set - kabhi throw nahi karega
 const safeRedisSet = async (key, value, ttl) => {
     try {
-        const redis = (0, redis_1.getRedis)(); // ✅ Har baar fresh call
+        const redis = (0, redis_1.getRedis)();
         if (!redis)
             return;
         await redis.set(key, value, 'EX', ttl);
     }
-    catch (err) {
-        // Silent fail
+    catch {
+        // Silent
     }
 };
-// ✅ Safe Redis cache delete
 const safeRedisDel = async (key) => {
     try {
         const redis = (0, redis_1.getRedis)();
@@ -54,37 +48,83 @@ const safeRedisDel = async (key) => {
             return;
         await redis.del(key);
     }
-    catch (err) {
-        // Silent fail
+    catch {
+        // Silent
     }
 };
+const fetchUser = async (userId, forceRefresh = false) => {
+    const cacheKey = `${USER_CACHE_PREFIX}${userId}`;
+    if (!forceRefresh) {
+        const cached = await safeRedisGet(cacheKey);
+        if (cached) {
+            try {
+                return JSON.parse(cached);
+            }
+            catch {
+                // Cache corrupt
+            }
+        }
+    }
+    try {
+        const user = await database_1.default.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                status: true,
+                emailVerified: true,
+                tokenVersion: true,
+            },
+        });
+        if (user) {
+            await safeRedisSet(cacheKey, JSON.stringify(user), CACHE_TTL);
+        }
+        return user;
+    }
+    catch (err) {
+        if (err?.code === 'P2024') {
+            console.warn('⚠️  Auth middleware: DB pool busy, trying cache fallback');
+            const cached = await safeRedisGet(cacheKey);
+            if (cached) {
+                try {
+                    console.log('✅ Auth: Serving from cache during pool pressure');
+                    return JSON.parse(cached);
+                }
+                catch {
+                    return null;
+                }
+            }
+            throw new errorHandler_1.AppError('Service temporarily busy. Please retry.', 503);
+        }
+        throw err;
+    }
+};
+// ============================================
+// MAIN AUTH MIDDLEWARE
+// ============================================
 const authenticate = async (req, res, next) => {
     try {
         let token = '';
-        // 1. Authorization Header
         const authHeader = req.headers.authorization || req.headers.Authorization;
         if (authHeader && /^Bearer /i.test(authHeader)) {
             token = authHeader.split(' ')[1];
         }
-        // 2. Alternative Headers
         else if (req.headers['x-access-token']) {
             token = req.headers['x-access-token'];
         }
-        // 3. Cookies
         else if (req.cookies?.accessToken || req.cookies?.token) {
             token = req.cookies.accessToken || req.cookies.token;
         }
-        // 4. Query param (last resort)
         else if (req.query.token) {
             token = req.query.token;
         }
-        // 🔄 AUTO-HEALING: Refresh token se recover karo
+        // Auto-heal via refresh token
         if (!token && req.cookies?.refreshToken) {
             try {
                 console.log('🛡️ Auto-healing: Attempting token refresh...');
                 const newTokens = await auth_service_1.authService.refreshToken(req.cookies.refreshToken);
-                res.cookie('refreshToken', newTokens.refreshToken, cookieOptions(true));
-                res.cookie('accessToken', newTokens.accessToken, cookieOptions(false));
+                res.cookie('refreshToken', newTokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
+                res.cookie('accessToken', newTokens.accessToken, (0, cookies_1.getCookieOptions)(false));
                 res.setHeader('x-new-access-token', newTokens.accessToken);
                 res.setHeader('x-token-refreshed', 'true');
                 res.setHeader('Access-Control-Expose-Headers', 'x-new-access-token, x-token-refreshed');
@@ -98,123 +138,60 @@ const authenticate = async (req, res, next) => {
         if (!token) {
             throw new errorHandler_1.AppError('Access token required', 401);
         }
-        // Token verify karo
-        const decoded = (0, jwt_1.verifyAccessToken)(token);
-        // organizationId resolve karo
-        let organizationId = decoded.organizationId;
-        if (!organizationId) {
-            console.log('⚠️ organizationId missing in token, fixing...');
-            let membership = await database_1.default.organizationMember.findFirst({
-                where: { userId: decoded.userId },
-                include: { organization: true },
-            });
-            if (!membership) {
-                const userToFix = await database_1.default.user.findUnique({
-                    where: { id: decoded.userId },
-                });
-                if (userToFix) {
-                    const orgName = `${userToFix.firstName || 'User'}'s Workspace`;
-                    const organization = await database_1.default.organization.create({
-                        data: {
-                            name: orgName,
-                            slug: orgName.toLowerCase().replace(/[^a-z0-9]/g, '') +
-                                '-' +
-                                Math.random().toString(36).substring(2, 7),
-                            ownerId: userToFix.id,
-                            planType: 'FREE_DEMO',
-                            featureSimpleBulkUpload: false,
-                            featureCsvUpload: false,
-                            featureOverrideByAdmin: false,
-                        },
-                    });
-                    membership = await database_1.default.organizationMember.create({
-                        data: {
-                            organizationId: organization.id,
-                            userId: userToFix.id,
-                            role: 'OWNER',
-                            joinedAt: new Date(),
-                        },
-                        include: { organization: true },
-                    });
-                    const freePlan = await database_1.default.plan.findUnique({
-                        where: { type: 'FREE_DEMO' },
-                    });
-                    if (freePlan) {
-                        await database_1.default.subscription.create({
-                            data: {
-                                organizationId: organization.id,
-                                planId: freePlan.id,
-                                status: 'ACTIVE',
-                                billingCycle: 'monthly',
-                                currentPeriodStart: new Date(),
-                                currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-                            },
-                        });
-                    }
-                }
-            }
-            if (membership) {
-                organizationId = membership.organization.id;
-            }
+        let decoded;
+        try {
+            decoded = (0, jwt_1.verifyAccessToken)(token);
         }
-        // ✅ User cache - Redis optional, DB fallback guaranteed
-        let user = null;
-        // Try Redis cache first (safe - never throws)
-        const cacheKey = `${USER_CACHE_PREFIX}${decoded.userId}`;
-        const cachedUser = await safeRedisGet(cacheKey);
-        if (cachedUser) {
-            try {
-                user = JSON.parse(cachedUser);
+        catch (jwtError) {
+            if (jwtError?.name === 'TokenExpiredError') {
+                throw new errorHandler_1.AppError('Access token expired', 401);
             }
-            catch {
-                user = null; // JSON parse fail → DB se lo
-            }
+            throw new errorHandler_1.AppError('Invalid access token', 401);
         }
-        // Cache miss ya Redis down → DB se lo
-        if (!user) {
-            user = await database_1.default.user.findUnique({
-                where: { id: decoded.userId },
-                select: {
-                    id: true,
-                    email: true,
-                    status: true,
-                    emailVerified: true,
-                    tokenVersion: true, // ✅ NEW: tokenVersion bhi fetch karo
-                },
-            });
-            // Cache mein store karo (without tokenVersion for security)
-            if (user) {
-                await safeRedisSet(cacheKey, JSON.stringify({
-                    id: user.id,
-                    email: user.email,
-                    status: user.status,
-                    emailVerified: user.emailVerified,
-                    tokenVersion: user.tokenVersion, // ✅ Cache me bhi store karo
-                }), CACHE_TTL);
-            }
-        }
+        let user = await fetchUser(decoded.userId);
         if (!user) {
             throw new errorHandler_1.AppError('User not found', 401);
         }
-        // ✅ NEW: tokenVersion check - admin ne password change kiya?
-        // JWT me tokenVersion hoga (naya login pe), DB me current version hai
-        // Agar mismatch → token invalid → logout force karo
+        // tokenVersion check with DB fallback
         if (decoded.tokenVersion !== undefined &&
             user.tokenVersion !== undefined &&
             decoded.tokenVersion !== user.tokenVersion) {
-            console.warn(`🚨 Token version mismatch for user ${decoded.userId}: ` +
-                `JWT=${decoded.tokenVersion}, DB=${user.tokenVersion}`);
-            // Redis cache invalidate karo
-            await safeRedisDel(cacheKey);
-            throw new errorHandler_1.AppError('Session expired. Please login again.', 401);
+            console.warn(`⚠️  tokenVersion mismatch for ${decoded.userId}: ` +
+                `token=${decoded.tokenVersion}, cache=${user.tokenVersion} → refreshing from DB`);
+            user = await fetchUser(decoded.userId, true);
+            if (!user) {
+                throw new errorHandler_1.AppError('User not found', 401);
+            }
+            if (decoded.tokenVersion !== user.tokenVersion) {
+                console.warn(`🚨 tokenVersion CONFIRMED mismatch for ${decoded.userId}: ` +
+                    `token=${decoded.tokenVersion}, DB=${user.tokenVersion}`);
+                await safeRedisDel(`${USER_CACHE_PREFIX}${decoded.userId}`);
+                throw new errorHandler_1.AppError('Session expired. Please login again.', 401);
+            }
+            console.log(`✅ tokenVersion verified from DB for ${decoded.userId}`);
         }
         if (user.status === 'SUSPENDED') {
-            throw new errorHandler_1.AppError('Account suspended', 403);
+            throw new errorHandler_1.AppError('Account suspended. Please contact support.', 403);
+        }
+        let organizationId = decoded.organizationId;
+        if (!organizationId) {
+            try {
+                const membership = await database_1.default.organizationMember.findFirst({
+                    where: { userId: decoded.userId },
+                    select: { organizationId: true },
+                });
+                organizationId = membership?.organizationId;
+            }
+            catch (err) {
+                if (err?.code !== 'P2024')
+                    throw err;
+                console.warn('⚠️  Could not fetch organizationId: pool busy');
+            }
         }
         req.user = {
             id: user.id,
             email: user.email,
-            organizationId: organizationId,
+            organizationId,
         };
         next();
     }
@@ -223,6 +200,9 @@ const authenticate = async (req, res, next) => {
     }
 };
 exports.authenticate = authenticate;
+// ============================================
+// REQUIRE EMAIL VERIFIED
+// ============================================
 const requireEmailVerified = async (req, res, next) => {
     try {
         if (!req.user) {
@@ -242,6 +222,9 @@ const requireEmailVerified = async (req, res, next) => {
     }
 };
 exports.requireEmailVerified = requireEmailVerified;
+// ============================================
+// REQUIRE ORGANIZATION
+// ============================================
 const requireOrganization = async (req, res, next) => {
     try {
         if (!req.user?.organizationId) {
@@ -249,6 +232,13 @@ const requireOrganization = async (req, res, next) => {
         }
         const organization = await database_1.default.organization.findUnique({
             where: { id: req.user.organizationId },
+            select: {
+                id: true,
+                name: true,
+                slug: true,
+                planType: true,
+                ownerId: true,
+            },
         });
         if (!organization) {
             throw new errorHandler_1.AppError('Organization not found', 404);
@@ -261,17 +251,17 @@ const requireOrganization = async (req, res, next) => {
     }
 };
 exports.requireOrganization = requireOrganization;
+// ============================================
+// OPTIONAL AUTH
+// ============================================
 const optionalAuth = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
+        if (authHeader?.startsWith('Bearer ')) {
             const token = authHeader.split(' ')[1];
             try {
                 const decoded = (0, jwt_1.verifyAccessToken)(token);
-                const user = await database_1.default.user.findUnique({
-                    where: { id: decoded.userId },
-                    select: { id: true, email: true, status: true },
-                });
+                const user = await fetchUser(decoded.userId);
                 if (user && user.status !== 'SUSPENDED') {
                     req.user = {
                         id: user.id,

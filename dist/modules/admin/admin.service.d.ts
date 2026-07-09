@@ -226,28 +226,28 @@ export declare class AdminService {
                 status: import(".prisma/client").$Enums.SubscriptionStatus;
                 createdAt: Date;
                 updatedAt: Date;
+                messagesUsed: number;
+                planId: string;
                 billingCycle: string;
                 currentPeriodStart: Date;
                 currentPeriodEnd: Date;
-                messagesUsed: number;
                 contactsUsed: number;
                 paymentMethod: string | null;
                 lastPaymentAt: Date | null;
                 nextPaymentAt: Date | null;
                 cancelledAt: Date | null;
-                planId: string;
             }) | null;
-            owner: {
-                email: string;
-                id: string;
-                firstName: string;
-                lastName: string | null;
-            };
             _count: {
                 campaigns: number;
                 contacts: number;
                 members: number;
                 whatsappAccounts: number;
+            };
+            owner: {
+                email: string;
+                id: string;
+                firstName: string;
+                lastName: string | null;
             };
         } & {
             name: string;
@@ -307,17 +307,23 @@ export declare class AdminService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
+            messagesUsed: number;
+            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
-            messagesUsed: number;
             contactsUsed: number;
             paymentMethod: string | null;
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         }) | null;
+        _count: {
+            campaigns: number;
+            chatbots: number;
+            contacts: number;
+            templates: number;
+        };
         owner: {
             email: string;
             id: string;
@@ -342,17 +348,11 @@ export declare class AdminService {
             joinedAt: Date | null;
         })[];
         whatsappAccounts: {
+            phoneNumber: string;
             id: string;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
-            phoneNumber: string;
             displayName: string;
         }[];
-        _count: {
-            campaigns: number;
-            chatbots: number;
-            contacts: number;
-            templates: number;
-        };
     } & {
         name: string;
         id: string;
@@ -434,17 +434,23 @@ export declare class AdminService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
+            messagesUsed: number;
+            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
-            messagesUsed: number;
             contactsUsed: number;
             paymentMethod: string | null;
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         }) | null;
+        _count: {
+            campaigns: number;
+            chatbots: number;
+            contacts: number;
+            templates: number;
+        };
         owner: {
             email: string;
             id: string;
@@ -469,17 +475,11 @@ export declare class AdminService {
             joinedAt: Date | null;
         })[];
         whatsappAccounts: {
+            phoneNumber: string;
             id: string;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
-            phoneNumber: string;
             displayName: string;
         }[];
-        _count: {
-            campaigns: number;
-            chatbots: number;
-            contacts: number;
-            templates: number;
-        };
     } & {
         name: string;
         id: string;
@@ -616,15 +616,15 @@ export declare class AdminService {
     }>;
     getActivityLogs(input: GetActivityLogsInput): Promise<{
         logs: ({
-            organization: {
-                name: string;
-                id: string;
-            } | null;
             user: {
                 email: string;
                 id: string;
                 firstName: string;
                 lastName: string | null;
+            } | null;
+            organization: {
+                name: string;
+                id: string;
             } | null;
         } & {
             userId: string | null;
@@ -675,13 +675,13 @@ export declare class AdminService {
         success: boolean;
         message: string;
         account: {
+            phoneNumber: string;
             organizationId: string;
             id: string;
             wabaId: string;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
             createdAt: Date;
             updatedAt: Date;
-            phoneNumber: string;
             phoneNumberId: string;
             accessToken: string | null;
             displayName: string;

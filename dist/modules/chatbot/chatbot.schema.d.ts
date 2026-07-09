@@ -10254,13 +10254,13 @@ export declare const getChatbotsSchema: z.ZodObject<{
         page: number;
         sortBy: "name" | "status" | "createdAt";
         sortOrder: "asc" | "desc";
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         search?: string | undefined;
+        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
     }, {
+        search?: string | undefined;
         limit?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
@@ -10270,15 +10270,15 @@ export declare const getChatbotsSchema: z.ZodObject<{
         page: number;
         sortBy: "name" | "status" | "createdAt";
         sortOrder: "asc" | "desc";
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         search?: string | undefined;
+        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
     };
 }, {
     query: {
+        search?: string | undefined;
         limit?: string | undefined;
         status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };

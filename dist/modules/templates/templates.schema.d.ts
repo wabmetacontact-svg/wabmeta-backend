@@ -450,21 +450,21 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         limit: number;
         page: number;
+        search?: string | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
+        search?: string | undefined;
         limit?: string | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>>;
@@ -472,23 +472,23 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     query?: {
         limit: number;
         page: number;
+        search?: string | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     } | undefined;
 }, {
     query?: {
+        search?: string | undefined;
         limit?: string | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     } | undefined;

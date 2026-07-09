@@ -1,16 +1,18 @@
 "use strict";
+// src/modules/templates/templates.media.ts - FIXED
+// ✅ FIX 1: Simplified flow - Cloudinary + Meta Resumable only
+// ✅ FIX 2: No more numeric ID (not needed for templates)
+// ✅ FIX 3: Pre-upload validation (size, format, dimensions)
+// ✅ FIX 4: Clear separation: handle (temp) vs cloudinaryUrl (permanent)
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uploadTemplateMedia = exports.uploadMiddleware = void 0;
 const multer_1 = __importDefault(require("multer"));
-const path_1 = __importDefault(require("path"));
-const fs_1 = __importDefault(require("fs"));
 const errorHandler_1 = require("../../middleware/errorHandler");
 const meta_upload_service_1 = require("../../services/meta.upload.service");
 const meta_service_1 = require("../meta/meta.service");
-const meta_api_1 = require("../meta/meta.api");
 const database_1 = __importDefault(require("../../config/database"));
 let cloudinaryService = null;
 try {
@@ -20,6 +22,9 @@ try {
 catch (e) {
     console.warn('⚠️ Cloudinary not available');
 }
+// ============================================
+// MULTER CONFIG
+// ============================================
 const storage = multer_1.default.memoryStorage();
 const fileFilter = (req, file, cb) => {
     const allowedMimes = [
@@ -37,8 +42,37 @@ const fileFilter = (req, file, cb) => {
 exports.uploadMiddleware = (0, multer_1.default)({
     storage,
     fileFilter,
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB (PDF ke liye)
 });
+// ============================================
+// VALIDATION HELPER
+// ============================================
+const validateFileForMeta = (file) => {
+    // Meta's strict size limits
+    const LIMITS = {
+        'image/jpeg': 5 * 1024 * 1024, // 5MB
+        'image/png': 5 * 1024 * 1024, // 5MB
+        'image/jpg': 5 * 1024 * 1024,
+        'video/mp4': 16 * 1024 * 1024, // 16MB
+        'video/3gpp': 16 * 1024 * 1024,
+        'application/pdf': 100 * 1024 * 1024, // 100MB
+    };
+    const maxSize = LIMITS[file.mimetype];
+    if (!maxSize) {
+        throw new errorHandler_1.AppError(`Unsupported file type: ${file.mimetype}`, 400);
+    }
+    if (file.size > maxSize) {
+        const maxMB = (maxSize / 1024 / 1024).toFixed(0);
+        const fileMB = (file.size / 1024 / 1024).toFixed(2);
+        throw new errorHandler_1.AppError(`File too large. ${file.mimetype} max: ${maxMB}MB, got: ${fileMB}MB`, 400);
+    }
+    if (file.size === 0) {
+        throw new errorHandler_1.AppError('File is empty', 400);
+    }
+};
+// ============================================
+// MAIN UPLOAD HANDLER
+// ============================================
 const uploadTemplateMedia = async (req, res, next) => {
     try {
         const file = req.file;
@@ -48,7 +82,9 @@ const uploadTemplateMedia = async (req, res, next) => {
             throw new errorHandler_1.AppError('No file uploaded', 400);
         if (!organizationId)
             throw new errorHandler_1.AppError('Organization required', 400);
-        console.log('📤 Template media upload started:', {
+        // ✅ Pre-validate file
+        validateFileForMeta(file);
+        console.log('📤 Template media upload:', {
             filename: file.originalname,
             size: `${(file.size / 1024).toFixed(2)} KB`,
             mime: file.mimetype,
@@ -68,122 +104,87 @@ const uploadTemplateMedia = async (req, res, next) => {
                 orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
             });
         }
-        if (!account)
-            throw new errorHandler_1.AppError('No connected WhatsApp account', 400);
+        if (!account) {
+            throw new errorHandler_1.AppError('No connected WhatsApp account. Please connect in Settings.', 400);
+        }
         const accountWithToken = await meta_service_1.metaService.getAccountWithToken(account.id);
         if (!accountWithToken?.accessToken) {
             throw new errorHandler_1.AppError('Failed to get WhatsApp credentials', 500);
         }
         // ============================================
-        // STEP 2: Upload to Cloudinary (PERMANENT URL)
-        // Ye kabhi expire nahi hota - campaign send ke
-        // liye hamesh available rahega
+        // STEP 2: Upload to Cloudinary (PERMANENT)
+        // ✅ Ye DB mein hamesha rahega
+        // ✅ Campaign send ke time se fresh Meta ID banane ke liye
         // ============================================
         let cloudinaryUrl = '';
         if (cloudinaryService?.isConfigured()) {
             try {
-                console.log('☁️ Uploading to Cloudinary (permanent storage)...');
+                console.log('☁️ Uploading to Cloudinary...');
                 const result = await cloudinaryService.uploadTemplateMedia(file.buffer, file.originalname, file.mimetype, organizationId);
                 cloudinaryUrl = result.secureUrl;
-                console.log('✅ Cloudinary upload success:', cloudinaryUrl.substring(0, 70));
+                console.log('✅ Cloudinary:', cloudinaryUrl.substring(0, 60));
             }
             catch (cloudErr) {
-                console.warn('⚠️ Cloudinary upload failed:', cloudErr.message);
+                console.error('❌ Cloudinary FAILED:', cloudErr.message);
+                // Cloudinary fail = critical for permanent storage
+                throw new errorHandler_1.AppError('Failed to store media permanently. Please try again.', 500);
             }
         }
-        // Fallback: Local disk storage
-        if (!cloudinaryUrl) {
-            try {
-                const uploadDir = path_1.default.join(process.cwd(), 'uploads', 'templates');
-                if (!fs_1.default.existsSync(uploadDir)) {
-                    fs_1.default.mkdirSync(uploadDir, { recursive: true });
-                }
-                const safeFilename = `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-                const localFilePath = path_1.default.join(uploadDir, safeFilename);
-                fs_1.default.writeFileSync(localFilePath, file.buffer);
-                const backendUrl = process.env.BACKEND_URL || process.env.APP_URL || '';
-                if (backendUrl) {
-                    cloudinaryUrl = `${backendUrl}/uploads/templates/${safeFilename}`;
-                    console.log('💾 Local fallback URL saved:', cloudinaryUrl);
-                }
-            }
-            catch (diskErr) {
-                console.warn('⚠️ Disk save failed:', diskErr.message);
-            }
+        else {
+            throw new errorHandler_1.AppError('Media storage not configured. Contact support.', 500);
         }
         // ============================================
-        // STEP 3: Upload to Meta - Get NUMERIC ID
-        // Numeric ID = permanent for message sending
-        // Ye campaigns me directly use hoga
-        // ============================================
-        let metaNumericId = '';
-        try {
-            console.log('📱 Uploading to Meta (simple upload - numeric ID)...');
-            const result = await meta_api_1.metaApi.uploadMedia(account.phoneNumberId, accountWithToken.accessToken, file.buffer, file.mimetype, file.originalname, account.wabaId);
-            metaNumericId = result.id;
-            console.log('✅ Meta numeric ID obtained:', metaNumericId);
-        }
-        catch (simpleErr) {
-            console.warn('⚠️ Meta simple upload failed:', simpleErr.message);
-        }
-        // ============================================
-        // STEP 4: Upload to Meta - Get RESUMABLE HANDLE
-        // Handle = template creation/approval ke liye
-        // Ye temporary hai - campaign send me use NAHI hoga
+        // STEP 3: Upload to Meta - Get HANDLE ONLY
+        // ✅ Ye handle SIRF template creation ke liye hai
+        // ✅ Once approved, Meta stores media permanently
         // ============================================
         let metaHandle = '';
         try {
-            console.log('📱 Uploading to Meta (resumable - approval handle)...');
-            const result = await meta_upload_service_1.metaUploadService.uploadMediaForTemplate('app', accountWithToken.accessToken, file.buffer, file.mimetype, file.originalname);
+            console.log('📱 Uploading to Meta (resumable for handle)...');
+            const result = await meta_upload_service_1.metaUploadService.uploadMediaForTemplate('', // ignored - uses config.meta.appId
+            accountWithToken.accessToken, file.buffer, file.mimetype, file.originalname);
             metaHandle = result.handle;
-            console.log('✅ Meta handle obtained:', metaHandle.substring(0, 30) + '...');
+            console.log('✅ Meta handle:', metaHandle.substring(0, 40) + '...');
         }
-        catch (resumableErr) {
-            console.warn('⚠️ Meta resumable upload failed:', resumableErr.message);
-            // Fallback: numeric ID as handle too
-            if (metaNumericId)
-                metaHandle = metaNumericId;
-        }
-        // Agar kuch bhi nahi mila toh error
-        if (!metaHandle && !metaNumericId && !cloudinaryUrl) {
-            throw new errorHandler_1.AppError('All upload methods failed. Please check your WhatsApp connection and try again.', 500);
+        catch (metaErr) {
+            console.error('❌ Meta handle upload FAILED:', metaErr.message);
+            throw new errorHandler_1.AppError(`Meta upload failed: ${metaErr.message}. ` +
+                `Please check file format and try again.`, 500);
         }
         // ============================================
-        // STEP 5: ✅ KEY FIX - Clean response
-        // NO MORE ":::" SMUGGLING
-        // Sab fields alag alag bhejo frontend ko
+        // STEP 4: Clean response
+        // ✅ mediaHandle: Template creation ke liye (Meta)
+        // ✅ cloudinaryUrl: PERMANENT storage (DB backup + auto-refresh)
+        // ❌ NO metaNumericId (not needed for templates)
+        // ❌ NO ":::" smuggling
         // ============================================
+        // ✅ FIX: Ensure single clean handle
+        let cleanHandle = String(metaHandle || '').trim();
+        if (cleanHandle.includes('\n')) {
+            cleanHandle = cleanHandle.split('\n')[0].trim();
+        }
+        // Validate handle
+        if (!cleanHandle || cleanHandle.length < 10) {
+            throw new errorHandler_1.AppError('Meta upload succeeded but handle is invalid', 500);
+        }
         const responseData = {
-            // Template creation ke liye (Meta approval)
-            // Handle preferred, numeric ID as fallback
-            mediaHandle: metaHandle || metaNumericId || '',
-            // ✅ Campaign sending ke liye - PERMANENT
-            // Numeric ID directly use hoga - kabhi expire nahi
-            metaNumericId: metaNumericId || null,
-            // ✅ DB storage ke liye - PERMANENT URL
-            // Campaign me fresh upload ke liye use hoga
-            cloudinaryUrl: cloudinaryUrl || null,
-            permanentUrl: cloudinaryUrl || null,
-            // ✅ Legacy compatibility (kuch jagah use ho raha hai)
-            // NO MORE ":::" - clean mediaId
-            mediaId: metaHandle || metaNumericId || '',
-            url: cloudinaryUrl || '',
-            // File info
+            // ✅ SINGLE clean handle
+            mediaHandle: cleanHandle,
+            cloudinaryUrl: cloudinaryUrl,
+            permanentUrl: cloudinaryUrl,
+            // Backward compat
+            mediaId: cleanHandle,
+            url: cloudinaryUrl,
+            // Metadata
             filename: file.originalname,
             mimeType: file.mimetype,
             size: file.size,
             wabaId: account.wabaId,
             whatsappAccountId: account.id,
         };
-        console.log('✅ Upload complete - Clean response:', {
-            metaHandle: responseData.mediaHandle
-                ? responseData.mediaHandle.substring(0, 30) + '...'
-                : 'none',
-            metaNumericId: responseData.metaNumericId || 'none',
-            cloudinaryUrl: responseData.cloudinaryUrl
-                ? responseData.cloudinaryUrl.substring(0, 60)
-                : 'none',
-            hasSmuggling: false, // ✅ Confirmed: no ":::" in response
+        console.log('✅ Upload complete:', {
+            handle: `${cleanHandle.substring(0, 30)}... (${cleanHandle.length} chars)`,
+            cloudinary: `${cloudinaryUrl.substring(0, 50)}...`,
         });
         return res.json({
             success: true,

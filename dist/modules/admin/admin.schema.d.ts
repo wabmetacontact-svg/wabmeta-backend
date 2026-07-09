@@ -107,35 +107,35 @@ export declare const getUsersSchema: z.ZodObject<{
         sortBy: z.ZodOptional<z.ZodString>;
         sortOrder: z.ZodOptional<z.ZodEnum<["asc", "desc"]>>;
     }, "strip", z.ZodTypeAny, {
+        search?: string | undefined;
         limit?: string | undefined;
         status?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
+        search?: string | undefined;
         limit?: string | undefined;
         status?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
+        search?: string | undefined;
         limit?: string | undefined;
         status?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };
 }, {
     query: {
+        search?: string | undefined;
         limit?: string | undefined;
         status?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };
@@ -298,35 +298,35 @@ export declare const getOrganizationsSchema: z.ZodObject<{
         sortBy: z.ZodOptional<z.ZodString>;
         sortOrder: z.ZodOptional<z.ZodEnum<["asc", "desc"]>>;
     }, "strip", z.ZodTypeAny, {
+        search?: string | undefined;
         limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
+        search?: string | undefined;
         limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
+        search?: string | undefined;
         limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };
 }, {
     query: {
+        search?: string | undefined;
         limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };
@@ -429,18 +429,18 @@ export declare const updateSubscriptionSchema: z.ZodObject<{
         billingCycle: z.ZodOptional<z.ZodEnum<["monthly", "yearly"]>>;
     }, "strip", z.ZodTypeAny, {
         status?: "ACTIVE" | "CANCELLED" | "EXPIRED" | "PAST_DUE" | undefined;
-        billingCycle?: "monthly" | "yearly" | undefined;
         planId?: string | undefined;
+        billingCycle?: "monthly" | "yearly" | undefined;
     }, {
         status?: "ACTIVE" | "CANCELLED" | "EXPIRED" | "PAST_DUE" | undefined;
-        billingCycle?: "monthly" | "yearly" | undefined;
         planId?: string | undefined;
+        billingCycle?: "monthly" | "yearly" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         status?: "ACTIVE" | "CANCELLED" | "EXPIRED" | "PAST_DUE" | undefined;
-        billingCycle?: "monthly" | "yearly" | undefined;
         planId?: string | undefined;
+        billingCycle?: "monthly" | "yearly" | undefined;
     };
     params: {
         id: string;
@@ -448,8 +448,8 @@ export declare const updateSubscriptionSchema: z.ZodObject<{
 }, {
     body: {
         status?: "ACTIVE" | "CANCELLED" | "EXPIRED" | "PAST_DUE" | undefined;
-        billingCycle?: "monthly" | "yearly" | undefined;
         planId?: string | undefined;
+        billingCycle?: "monthly" | "yearly" | undefined;
     };
     params: {
         id: string;

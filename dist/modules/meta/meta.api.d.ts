@@ -1,15 +1,13 @@
 import { TokenExchangeResponse, DebugTokenResponse, SharedWABAInfo, PhoneNumberInfo } from './meta.types';
+/**
+ * ✅ NEW: Generate a cryptographically random 6-digit PIN for
+ * WhatsApp two-step verification. Each account gets its own PIN.
+ */
+export declare function generatePhonePin(): string;
 declare class MetaApiClient {
     private client;
     private graphVersion;
     constructor();
-    /**
-     * Exchange authorization code for access token.
-     * @param code - The authorization code from FB.login or OAuth redirect
-     * @param skipRedirectUri - Set TRUE for FB.login/Embedded Signup flow.
-     *   FB.login codes must be exchanged WITHOUT a redirect_uri.
-     *   Only OAuth redirect flow (state-token based) needs redirect_uri.
-     */
     exchangeCodeForToken(code: string, skipRedirectUri?: boolean): Promise<TokenExchangeResponse>;
     getLongLivedToken(shortLivedToken: string): Promise<TokenExchangeResponse>;
     debugToken(accessToken: string): Promise<DebugTokenResponse>;
@@ -25,47 +23,37 @@ declare class MetaApiClient {
         codeVerificationStatus?: string;
         nameStatus?: string;
     }>;
-    registerPhoneNumber(phoneNumberId: string, accessToken: string): Promise<boolean>;
     /**
-     * ✅ Extract WhatsApp profile from incoming webhook
-     * This is the MOST RELIABLE method to get real names
-     * Called when processing incoming messages
+     * ✅ FIX: Register phone number with a caller-supplied PIN.
+     * Previously the PIN was hardcoded to '000000' across every customer, which
+     * is a serious security hole — a universal known two-step verification PIN
+     * means any adversary who can transfer the number (SIM swap, carrier access)
+     * can immediately deregister/re-register on WhatsApp on any customer's account.
+     *
+     * Caller MUST pass a random, per-account PIN (see generatePhonePin()) and
+     * persist it encrypted so it can be reused on future re-registrations.
      */
+    registerPhoneNumber(phoneNumberId: string, accessToken: string, pin: string): Promise<boolean>;
     extractProfileFromWebhook(webhookData: any): {
         waId: string;
         profileName: string;
         phone: string;
     } | null;
-    /**
-     * ✅ Get WhatsApp contact profile
-     * Uses the Contacts API to check if number exists and get profile
-     */
     getContactProfile(phoneNumberId: string, accessToken: string, phone: string): Promise<{
         exists: boolean;
         waId?: string;
         profileName?: string;
         status?: string;
     }>;
-    /**
-     * ✅ Batch check multiple contacts
-     * Check up to 50 contacts at once
-     */
     batchCheckContacts(phoneNumberId: string, accessToken: string, phones: string[]): Promise<Array<{
         input: string;
         waId?: string;
         status: 'valid' | 'invalid';
     }>>;
-    /**
-     * ✅ Get contact profile from message send response
-     */
     extractContactFromMessageResponse(messageResponse: any): {
         waId: string;
         input: string;
     } | null;
-    /**
-     * ⚠️ Get profile picture URL
-     * NOTE: This typically requires special permissions and may not work
-     */
     getProfilePictureUrl(phoneNumberId: string, accessToken: string, waId: string): Promise<string | null>;
     checkContact(phoneNumberId: string, accessToken: string, phone: string): Promise<{
         contacts: Array<{
@@ -90,9 +78,6 @@ declare class MetaApiClient {
         contacts?: any[];
     }>;
     getPhoneNumberInfo(phoneNumberId: string, accessToken: string): Promise<any>;
-    /**
-     * ✅ Enhanced send message with contact extraction
-     */
     sendMessageWithContactInfo(phoneNumberId: string, accessToken: string, to: string, message: any): Promise<{
         messageId: string;
         contact?: {
@@ -127,6 +112,22 @@ declare class MetaApiClient {
     }): Promise<any>;
     private handleError;
     private withRetry;
+    /**
+     * ✅ FIX: Timeout errors on POST /messages are NO LONGER retried.
+     *
+     * A timeout from Meta means: we don't know if the message went through.
+     * If it DID go through, retrying will:
+     *   - Send the same WhatsApp message to the end-user twice
+     *   - Charge the wallet twice (since fire-and-forget deduction runs per API "success")
+     *
+     * We prefer a failed-send that the caller sees over a silent duplicate.
+     * ECONNRESET is also risky on POST for the same reason.
+     *
+     * Only retry on true "we never sent it" conditions:
+     *   - DNS failures (ENOTFOUND)
+     *   - HTTP 5xx from Meta (server errored BEFORE processing)
+     *   - Meta transient error codes 131000, 131016
+     */
     private isRetryable;
     enableCalling(phoneNumberId: string, accessToken: string, options?: {
         callingEnabled: boolean;

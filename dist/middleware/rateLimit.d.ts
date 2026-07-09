@@ -5,12 +5,6 @@ export declare const createRateLimiter: (options: {
     message?: string;
     keyPrefix?: string;
 }) => RateLimitRequestHandler;
-export declare const createRedisRateLimiter: (options: {
-    windowMs: number;
-    max: number;
-    message?: string;
-    keyPrefix?: string;
-}) => RateLimitRequestHandler;
 export declare const authRateLimit: RateLimitRequestHandler;
 export declare const authLimiter: RateLimitRequestHandler;
 export declare const otpRateLimit: RateLimitRequestHandler;
@@ -28,12 +22,6 @@ export declare const rateLimit_fn: (options: {
 export { rateLimit_fn as rateLimit };
 declare const _default: {
     createRateLimiter: (options: {
-        windowMs: number;
-        max: number;
-        message?: string;
-        keyPrefix?: string;
-    }) => RateLimitRequestHandler;
-    createRedisRateLimiter: (options: {
         windowMs: number;
         max: number;
         message?: string;

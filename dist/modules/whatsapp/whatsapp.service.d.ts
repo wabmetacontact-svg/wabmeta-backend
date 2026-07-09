@@ -33,41 +33,28 @@ interface ContactCheckResult {
     status: string;
 }
 declare class WhatsAppService {
-    /**
-     * Check if a string looks like a Meta access token
-     */
-    private looksLikeAccessToken;
-    /**
-     * Extract plain text content from message payload
-     */
     private extractMessageContent;
     /**
-     * Get account with safe token decryption
+     * ✅ FIX: delegates to the shared getAccountWithDecryptedToken() helper.
+     * Previously this method had its own logic that would throw an error but
+     * leave the account status as CONNECTED — so message sending would fail
+     * while the dashboard showed the account as healthy. Now, if a token
+     * can't be decrypted, the shared helper marks the account DISCONNECTED
+     * and both the UI and the sending code agree.
      */
     private getAccountWithToken;
-    /**
-     * Format phone number for WhatsApp API
-     */
     private formatPhoneNumber;
-    /**
-     * Get or create contact — always stores in canonical E.164 format: +919XXXXXXXXX
-     */
     private getOrCreateContact;
-    /**
-     * Get or create conversation
-     */
     private getOrCreateConversation;
-    /**
-     * Map string type to MessageType enum
-     */
     private mapMessageType;
     /**
-     * Check if a phone number has WhatsApp
+     * Pre-check: does the wallet have enough balance to cover ONE template send?
+     * Returns true if we should proceed, false to block.
+     * Wallets that don't exist / are flagged / are inactive fall through to Meta's
+     * own billing — same behavior as deductWalletForTemplate's skip conditions.
      */
+    private canAffordSingleTemplateSend;
     checkContact(accountId: string, phone: string): Promise<ContactCheckResult>;
-    /**
-     * Send a text message
-     */
     sendTextMessage(accountId: string, to: string, message: string, conversationId?: string, organizationId?: string, tempId?: string, clientMsgId?: string, skipWindowCheck?: boolean): Promise<{
         success: boolean;
         messageId: string;
@@ -107,18 +94,12 @@ declare class WhatsAppService {
         };
     }>;
     private hydrateTemplate;
-    /**
-     * Send a template message
-     */
     sendTemplateMessage(options: SendTemplateOptions): Promise<{
         success: boolean;
         waMessageId: any;
         wamId: any;
         message: any;
     }>;
-    /**
-     * Send a media message
-     */
     sendMediaMessage(accountId: string, to: string, mediaType: 'image' | 'document' | 'video' | 'audio', mediaUrl: string, caption?: string, conversationId?: string, organizationId?: string, tempId?: string, clientMsgId?: string): Promise<{
         success: boolean;
         messageId: string;
@@ -157,9 +138,6 @@ declare class WhatsAppService {
             whatsappMessageId: string | null;
         };
     }>;
-    /**
-     * Core send message function
-     */
     sendMessage(options: SendMessageOptions): Promise<{
         success: boolean;
         messageId: string;
@@ -198,31 +176,13 @@ declare class WhatsAppService {
             whatsappMessageId: string | null;
         };
     }>;
-    /**
-     * 24h window check — throws if window is expired
-     */
     private checkWindowOrThrow;
-    /**
-     * Send bulk campaign messages - WITH CONTACT CHECK
-     */
     sendCampaignMessages(campaignId: string, batchSize?: number, delayMs?: number): Promise<CampaignSendResult>;
-    /**
-     * Update campaign contact status
-     */
     updateContactStatus(campaignId: string, contactId: string, status: MessageStatus, waMessageId?: string, failureReason?: string): Promise<void>;
-    /**
-     * Check if campaign is complete
-     */
     checkCampaignCompletion(campaignId: string): Promise<boolean>;
-    /**
-     * Build template components with variables
-     */
     private buildTemplateComponents;
     private extractVariablesFromText;
     private extractVariables;
-    /**
-     * Mark message as read
-     */
     markAsRead(accountId: string, messageId: string): Promise<{
         success: boolean;
         error?: undefined;
@@ -230,9 +190,6 @@ declare class WhatsAppService {
         success: boolean;
         error: any;
     }>;
-    /**
-     * Send typing indicator
-     */
     sendTypingIndicator(conversationId: string): Promise<{
         success: boolean;
         reason: string;
@@ -247,13 +204,13 @@ declare class WhatsAppService {
         reason?: undefined;
     }>;
     getDefaultAccount(organizationId: string): Promise<{
+        phoneNumber: string;
         organizationId: string;
         id: string;
         wabaId: string;
         status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumber: string;
         phoneNumberId: string;
         accessToken: string | null;
         displayName: string;
@@ -276,17 +233,11 @@ declare class WhatsAppService {
         valid: boolean;
         reason?: string;
     }>;
-    /**
-     * Single account ka quality rating Meta se fetch karke DB update karo
-     */
     syncAccountQuality(accountId: string): Promise<{
         success: boolean;
         account?: any;
         error?: string;
     }>;
-    /**
-     * Organization ke saare accounts sync karo (bulk)
-     */
     syncAllAccountsQuality(organizationId: string): Promise<{
         total: number;
         synced: number;

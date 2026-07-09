@@ -1,12 +1,29 @@
 "use strict";
-// 📁 src/modules/meta/meta.api.ts - COMPLETE META API CLIENT WITH PROFILE METHODS
+// 📁 src/modules/meta/meta.api.ts - FIXED VERSION
+// ✅ FIX 1: isRetryable no longer retries on timeouts. A timeout doesn't mean
+//    Meta didn't process the message — it may have sent it AND billed us. Retrying
+//    would cause duplicate messages to end-users and duplicate wallet charges.
+// ✅ FIX 2: registerPhoneNumber now takes a per-account PIN instead of hardcoded
+//    '000000'. A universal PIN across all customers was a two-step-verification
+//    security hole.
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.metaApi = void 0;
+exports.generatePhonePin = generatePhonePin;
 const axios_1 = __importDefault(require("axios"));
+const crypto_1 = __importDefault(require("crypto"));
 const config_1 = require("../../config");
+/**
+ * ✅ NEW: Generate a cryptographically random 6-digit PIN for
+ * WhatsApp two-step verification. Each account gets its own PIN.
+ */
+function generatePhonePin() {
+    // 6 random digits, uniformly distributed
+    const n = crypto_1.default.randomInt(0, 1_000_000);
+    return n.toString().padStart(6, '0');
+}
 class MetaApiClient {
     client;
     graphVersion;
@@ -19,7 +36,6 @@ class MetaApiClient {
                 'Content-Type': 'application/json',
             },
         });
-        // Request interceptor
         this.client.interceptors.request.use((reqConfig) => {
             const url = reqConfig.url || '';
             const method = reqConfig.method?.toUpperCase() || 'GET';
@@ -29,13 +45,11 @@ class MetaApiClient {
             console.error('[Meta API] Request setup error:', error.message);
             return Promise.reject(error);
         });
-        // Response interceptor
         this.client.interceptors.response.use((response) => {
             console.log(`[Meta API] ✅ Response: ${response.status}`);
             return response;
         }, (error) => {
             const metaError = error.response?.data?.error;
-            // Don't log as ERROR if it's a known/handled restriction
             const isRestricted = metaError?.code === 100 && metaError?.error_subcode === 33;
             const isSmbRestriction = metaError?.code === 100 && metaError?.message?.includes('SMB');
             const isHandledError = isRestricted || isSmbRestriction;
@@ -63,18 +77,9 @@ class MetaApiClient {
     // ============================================
     // TOKEN MANAGEMENT
     // ============================================
-    /**
-     * Exchange authorization code for access token.
-     * @param code - The authorization code from FB.login or OAuth redirect
-     * @param skipRedirectUri - Set TRUE for FB.login/Embedded Signup flow.
-     *   FB.login codes must be exchanged WITHOUT a redirect_uri.
-     *   Only OAuth redirect flow (state-token based) needs redirect_uri.
-     */
     async exchangeCodeForToken(code, skipRedirectUri = false) {
         try {
             console.log('[Meta API] Exchanging code for token...');
-            // ✅ FB.login Embedded Signup: NO redirect_uri (Meta requirement)
-            // ❌ Sending redirect_uri causes: "Error validating verification code"
             const params = {
                 client_id: config_1.config.meta.appId,
                 client_secret: config_1.config.meta.appSecret,
@@ -163,17 +168,11 @@ class MetaApiClient {
         try {
             console.log('[Meta API] Fetching shared WABAs...');
             const meResponse = await this.client.get('/me', {
-                params: {
-                    access_token: accessToken,
-                    fields: 'id,name',
-                },
+                params: { access_token: accessToken, fields: 'id,name' },
             });
             console.log('[Meta API] User:', meResponse.data.name || meResponse.data.id);
             const businessResponse = await this.client.get(`/${meResponse.data.id}/businesses`, {
-                params: {
-                    access_token: accessToken,
-                    fields: 'id,name',
-                },
+                params: { access_token: accessToken, fields: 'id,name' },
             });
             const businesses = businessResponse.data.data || [];
             console.log('[Meta API] Found businesses:', businesses.length);
@@ -244,8 +243,6 @@ class MetaApiClient {
             const response = await this.client.get(`${wabaId}`, {
                 params: {
                     access_token: accessToken,
-                    // ✅ Only request basic fields — owner_business_info, account_review_status
-                    // require extra permissions not always granted by Embedded Signup tokens
                     fields: 'id,name,currency,timezone_id,message_template_namespace',
                 },
             });
@@ -310,32 +307,39 @@ class MetaApiClient {
             throw this.handleError(error, 'Failed to get phone number details');
         }
     }
-    async registerPhoneNumber(phoneNumberId, accessToken) {
+    /**
+     * ✅ FIX: Register phone number with a caller-supplied PIN.
+     * Previously the PIN was hardcoded to '000000' across every customer, which
+     * is a serious security hole — a universal known two-step verification PIN
+     * means any adversary who can transfer the number (SIM swap, carrier access)
+     * can immediately deregister/re-register on WhatsApp on any customer's account.
+     *
+     * Caller MUST pass a random, per-account PIN (see generatePhonePin()) and
+     * persist it encrypted so it can be reused on future re-registrations.
+     */
+    async registerPhoneNumber(phoneNumberId, accessToken, pin) {
         try {
             console.log(`[Meta API] Registering phone number ${phoneNumberId}...`);
-            const response = await this.client.post(`${phoneNumberId}/register`, { messaging_product: 'whatsapp', pin: '000000' }, { headers: { Authorization: `Bearer ${accessToken}` } });
+            if (!pin || !/^\d{6}$/.test(pin)) {
+                throw new Error('registerPhoneNumber requires a 6-digit numeric PIN');
+            }
+            const response = await this.client.post(`${phoneNumberId}/register`, { messaging_product: 'whatsapp', pin }, { headers: { Authorization: `Bearer ${accessToken}` } });
             console.log('[Meta API] ✅ Phone number registered');
             return response.data.success === true;
         }
         catch (error) {
             const code = error.response?.data?.error?.code;
-            // 10 = already registered, 133005/133006 = PIN-related (already set up)
             if (code === 10 || code === 133005 || code === 133006) {
                 console.log('[Meta API] ℹ️ Phone already registered / PIN set — skipping (non-fatal)');
                 return true;
             }
             console.warn('[Meta API] ⚠️ Register failed (non-fatal):', error.response?.data?.error?.message);
-            return false; // ✅ don't throw — registration failure shouldn't block connection
+            return false;
         }
     }
     // ============================================
     // WHATSAPP PROFILE METHODS
     // ============================================
-    /**
-     * ✅ Extract WhatsApp profile from incoming webhook
-     * This is the MOST RELIABLE method to get real names
-     * Called when processing incoming messages
-     */
     extractProfileFromWebhook(webhookData) {
         try {
             const entry = webhookData.entry?.[0];
@@ -343,7 +347,6 @@ class MetaApiClient {
             const value = changes?.value;
             if (!value)
                 return null;
-            // From incoming message
             if (value.messages?.[0]) {
                 const message = value.messages[0];
                 const contact = value.contacts?.[0];
@@ -353,7 +356,6 @@ class MetaApiClient {
                     phone: message.from.startsWith('+') ? message.from : '+' + message.from,
                 };
             }
-            // From status update (also contains contact info sometimes)
             if (value.statuses?.[0]) {
                 const status = value.statuses[0];
                 const contact = value.contacts?.[0];
@@ -374,10 +376,6 @@ class MetaApiClient {
             return null;
         }
     }
-    /**
-     * ✅ Get WhatsApp contact profile
-     * Uses the Contacts API to check if number exists and get profile
-     */
     async getContactProfile(phoneNumberId, accessToken, phone) {
         try {
             const cleanPhone = phone.replace(/[^0-9]/g, '');
@@ -412,10 +410,6 @@ class MetaApiClient {
             return { exists: false };
         }
     }
-    /**
-     * ✅ Batch check multiple contacts
-     * Check up to 50 contacts at once
-     */
     async batchCheckContacts(phoneNumberId, accessToken, phones) {
         try {
             const cleanPhones = phones
@@ -455,9 +449,6 @@ class MetaApiClient {
             throw this.handleError(error, 'Failed to batch check contacts');
         }
     }
-    /**
-     * ✅ Get contact profile from message send response
-     */
     extractContactFromMessageResponse(messageResponse) {
         try {
             const contact = messageResponse.contacts?.[0];
@@ -474,10 +465,6 @@ class MetaApiClient {
             return null;
         }
     }
-    /**
-     * ⚠️ Get profile picture URL
-     * NOTE: This typically requires special permissions and may not work
-     */
     async getProfilePictureUrl(phoneNumberId, accessToken, waId) {
         try {
             console.log(`[Meta API] Attempting to get profile picture for ${waId}...`);
@@ -515,7 +502,6 @@ class MetaApiClient {
         }
         catch (error) {
             const metaError = error.response?.data?.error;
-            // Handle "Unsupported post request" (code 100, subcode 33)
             if (metaError?.code === 100 && metaError?.error_subcode === 33) {
                 console.warn(`[Meta API] Contact check not supported for ID ${phoneNumberId}. Bypassing.`);
                 return {
@@ -613,7 +599,7 @@ class MetaApiClient {
         try {
             const response = await this.withRetry(() => this.client.post(`${phoneNumberId}/messages`, payload, {
                 headers: { Authorization: `Bearer ${accessToken}` },
-                timeout: 15000, // hang hone se rokta hai
+                timeout: 15000,
             }), { label: 'sendMessage' });
             const messageId = response.data.messages?.[0]?.id;
             console.log(`[Meta API] ✅ Message sent: ${messageId}`);
@@ -640,9 +626,6 @@ class MetaApiClient {
             throw error;
         }
     }
-    /**
-     * ✅ Enhanced send message with contact extraction
-     */
     async sendMessageWithContactInfo(phoneNumberId, accessToken, to, message) {
         const cleanTo = to.replace(/[^0-9]/g, '');
         console.log(`[Meta API] Sending message to ${cleanTo.substring(0, 5)}...`);
@@ -655,7 +638,7 @@ class MetaApiClient {
         try {
             const response = await this.withRetry(() => this.client.post(`/${phoneNumberId}/messages`, payload, {
                 headers: { Authorization: `Bearer ${accessToken}` },
-                timeout: 15000, // hang hone se rokta hai
+                timeout: 15000,
             }), { label: 'sendMessageWithContactInfo' });
             const messageId = response.data.messages?.[0]?.id;
             const contact = this.extractContactFromMessageResponse(response.data);
@@ -687,7 +670,7 @@ class MetaApiClient {
         }
         catch (error) {
             console.warn('[Meta API] markMessageAsRead failed (non-fatal):', error.message);
-            return false; // crash mat karo — read-receipt important nahi hai
+            return false;
         }
     }
     // ============================================
@@ -797,20 +780,18 @@ class MetaApiClient {
                     ...formData.getHeaders(),
                     Authorization: `Bearer ${accessToken}`,
                 },
-                timeout: 60000, // 1 minute
+                timeout: 60000,
             });
             console.log('[Meta API] Upload response:', {
                 status: response.status,
                 data: JSON.stringify(response.data),
             });
-            // ✅ Extract media ID (handle different response formats)
             let mediaId = null;
-            // Try different possible fields
             if (response.data?.id) {
                 mediaId = response.data.id;
             }
             else if (response.data?.h) {
-                mediaId = response.data.h; // Some API versions use 'h'
+                mediaId = response.data.h;
             }
             else if (response.data?.media_id) {
                 mediaId = response.data.media_id;
@@ -819,9 +800,7 @@ class MetaApiClient {
                 console.error('❌ No media ID found in response:', response.data);
                 throw new Error('No media ID in Meta upload response');
             }
-            // ✅ Validate media ID format
             const mediaIdStr = String(mediaId);
-            // Check if it's a valid media ID (not phone number)
             if (mediaIdStr.startsWith('92') && mediaIdStr.length === 12) {
                 console.error('❌ Received phone number instead of media ID:', mediaIdStr);
                 throw new Error('Invalid media ID - received phone number');
@@ -935,42 +914,50 @@ class MetaApiClient {
         }
         throw lastError;
     }
+    /**
+     * ✅ FIX: Timeout errors on POST /messages are NO LONGER retried.
+     *
+     * A timeout from Meta means: we don't know if the message went through.
+     * If it DID go through, retrying will:
+     *   - Send the same WhatsApp message to the end-user twice
+     *   - Charge the wallet twice (since fire-and-forget deduction runs per API "success")
+     *
+     * We prefer a failed-send that the caller sees over a silent duplicate.
+     * ECONNRESET is also risky on POST for the same reason.
+     *
+     * Only retry on true "we never sent it" conditions:
+     *   - DNS failures (ENOTFOUND)
+     *   - HTTP 5xx from Meta (server errored BEFORE processing)
+     *   - Meta transient error codes 131000, 131016
+     */
     isRetryable(error) {
-        // Network / timeout errors
-        if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'].includes(error?.code))
+        // ✅ CHANGED: no longer includes ECONNABORTED (timeout) or ECONNRESET
+        if (['ETIMEDOUT', 'ENOTFOUND'].includes(error?.code))
             return true;
         const status = error?.response?.status;
         const code = error?.response?.data?.error?.code;
-        // 131000 = "Something went wrong", 131016 = "Service unavailable" → dono transient
         if (code === 131000 || code === 131016)
             return true;
-        // Meta ke 5xx server errors
         if (status && status >= 500)
             return true;
-        return false; // baaki sab (auth, param, template, recipient errors) retry mat karo
+        return false;
     }
     // ============================================
     // CALLING API METHODS
     // ============================================
-    // ✅ 1. Enable calling feature on phone number (Full Schema)
     async enableCalling(phoneNumberId, accessToken, options = { callingEnabled: true }) {
         try {
             console.log(`[Meta API] Enabling calling for ${phoneNumberId}...`);
-            // Build calling_settings payload
             const callingSettings = {
                 status: options.callingEnabled ? 'ENABLED' : 'DISABLED',
                 callback_permission_status: options.callbackEnabled !== false ? 'ENABLED' : 'DISABLED',
-                sip: { status: 'DISABLED' }, // Use WhatsApp native calling
+                sip: { status: 'DISABLED' },
             };
-            // NOTE: inbound_calls_enabled is NOT a valid key for the calling param (Meta removed it)
-            // Country restriction (e.g. ["IN"] for India only)
             if (options.restrictToCountries && options.restrictToCountries.length > 0) {
                 callingSettings.call_icons = {
                     restrict_to_user_countries: options.restrictToCountries,
                 };
             }
-            // Call hours (business hours)
-            // ⚠️ When DISABLED, omit call_hours entirely — Meta rejects weekly_operating_hours: [] via schema
             if (options.callHoursEnabled && options.weeklyHours && options.weeklyHours.length > 0) {
                 callingSettings.call_hours = {
                     status: 'ENABLED',
@@ -987,7 +974,6 @@ class MetaApiClient {
                     })) || [],
                 };
             }
-            // else: omit call_hours entirely when disabled — avoids schema validation error
             const response = await this.client.post(`/${phoneNumberId}/settings`, { calling: callingSettings }, { headers: { Authorization: `Bearer ${accessToken}` } });
             console.log('[Meta API] ✅ Calling settings updated');
             return { success: true, data: response.data };
@@ -997,17 +983,15 @@ class MetaApiClient {
             throw this.handleError(error, 'Failed to enable calling');
         }
     }
-    // ✅ 2. Fetch calling settings
     async getCallingSettings(phoneNumberId, accessToken) {
         try {
             console.log(`[Meta API] Fetching call settings for ${phoneNumberId}...`);
             const response = await this.client.get(`/${phoneNumberId}/settings`, {
                 params: {
                     access_token: accessToken,
-                    fields: 'calling,calling_settings', // try both old and new field names
+                    fields: 'calling,calling_settings',
                 }
             });
-            // Try new 'calling' field + fallback to old 'calling_settings'
             const calling = response.data?.calling || response.data?.calling_settings || {};
             return {
                 callingEnabled: calling.status === 'ENABLED' || calling.calling_enabled === true || false,
@@ -1030,44 +1014,26 @@ class MetaApiClient {
             };
         }
     }
-    // ✅ 3. Business-initiated call (via interactive message with Call button)
-    //
-    // ⚠️ IMPORTANT: WhatsApp Business Calling does NOT support cold-calling.
-    //    The /calls endpoint does not exist — it throws "Missing session parameter".
-    //    Business-initiated calls work by sending an interactive message with a
-    //    "call" CTA button. The user must be within an active 24-hour messaging
-    //    session (they must have messaged you first).
-    //
-    //    Flow:
-    //      1. User sends a message → opens 24h session
-    //      2. Business sends interactive message with call CTA button
-    //      3. User taps the button → call is initiated on their device
     async initiateCall(phoneNumberId, accessToken, to, options) {
         try {
             const cleanTo = to.replace(/[^0-9]/g, '');
             console.log(`[Meta API] Sending call CTA to ${cleanTo.substring(0, 5)}...`);
-            // ── Build wa.me call URL ──────────────────────────────────────────
-            // phoneNumberId is Meta's internal 16-digit ID — NEVER use it as a phone number.
-            // Only use businessPhoneNumber if it's a real E.164 number (≤15 digits after cleaning).
             const rawBusinessPhone = (options?.businessPhoneNumber || '').replace(/[^0-9]/g, '');
             const isRealPhone = rawBusinessPhone.length >= 7 && rawBusinessPhone.length <= 15;
             let callUrl;
             let bodyText;
             let buttonText;
             if (isRealPhone) {
-                // ✅ Valid phone number → wa.me call link
                 callUrl = `https://wa.me/${rawBusinessPhone}?call=true`;
                 bodyText = options?.bodyText || '📞 Aap hamse WhatsApp Call ke zariye baat kar sakte hain. Niche button dabayein.';
                 buttonText = options?.buttonText || '📞 Call Now';
             }
             else {
-                // ⚠️ No valid phone number — send a plain text message instead of broken link
                 console.warn('[Meta API] ⚠️ No valid business phone number for wa.me URL — sending text-only call invite');
-                callUrl = 'https://wa.me/'; // fallback (will be replaced below with text-only message)
+                callUrl = 'https://wa.me/';
                 bodyText = options?.bodyText || '📞 Please call us back on WhatsApp to connect with our team.';
                 buttonText = options?.buttonText || '📞 Call Us';
             }
-            // Business-initiated calls use an interactive message with a call CTA button
             const payload = {
                 messaging_product: 'whatsapp',
                 recipient_type: 'individual',
@@ -1088,7 +1054,6 @@ class MetaApiClient {
                 },
             };
             if (options?.callbackData) {
-                // callback_data goes on the top-level message for session tracking
                 payload.biz_opaque_callback_data = options.callbackData;
             }
             const response = await this.client.post(`/${phoneNumberId}/messages`, payload, {
@@ -1106,7 +1071,6 @@ class MetaApiClient {
             throw this.handleError(error, 'Failed to initiate call');
         }
     }
-    // ✅ 4. Check/request call permissions
     async requestCallPermission(phoneNumberId, accessToken, to) {
         try {
             const cleanTo = to.replace(/[^0-9]/g, '');
@@ -1129,7 +1093,6 @@ class MetaApiClient {
             throw this.handleError(error, 'Failed to request call permission');
         }
     }
-    // ✅ 5. Subscribe to calls webhook
     async subscribeToCallsWebhook(wabaId, accessToken) {
         try {
             console.log('[Meta API] Subscribing to calls webhook...');
@@ -1146,7 +1109,6 @@ class MetaApiClient {
             throw this.handleError(error, 'Failed to subscribe to calls webhook');
         }
     }
-    // ✅ 6. Get call logs
     async getCallLogs(phoneNumberId, accessToken, limit = 20) {
         try {
             const response = await this.client.get(`/${phoneNumberId}/call_logs`, {

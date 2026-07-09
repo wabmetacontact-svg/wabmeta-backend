@@ -109,6 +109,7 @@ export declare function processTopUp(organizationId: string, data: {
     success: boolean;
     newBalance: number;
     amountAdded: number;
+    alreadyProcessed: boolean;
     transaction: {
         id: any;
         transactionId: any;
@@ -126,6 +127,28 @@ export declare function processTopUp(organizationId: string, data: {
         note: any;
         createdAt: any;
     };
+} | {
+    success: boolean;
+    newBalance: number;
+    amountAdded: number;
+    transaction: {
+        id: any;
+        transactionId: any;
+        type: any;
+        amount: number;
+        balanceBefore: number;
+        balanceAfter: number;
+        currency: any;
+        description: any;
+        status: any;
+        metaChargeId: any;
+        metaService: any;
+        razorpayOrderId: any;
+        razorpayPaymentId: any;
+        note: any;
+        createdAt: any;
+    };
+    alreadyProcessed?: undefined;
 }>;
 export declare function deductBalance(organizationId: string, data: {
     amountRupees: number;
@@ -144,16 +167,16 @@ export declare function getAccessRequests(options: {
     limit?: number;
 }): Promise<{
     requests: ({
-        organization: {
-            name: string;
-            id: string;
-            planType: import(".prisma/client").$Enums.PlanType;
-        };
         user: {
             email: string;
             id: string;
             firstName: string;
             lastName: string | null;
+        };
+        organization: {
+            name: string;
+            id: string;
+            planType: import(".prisma/client").$Enums.PlanType;
         };
         reviewer: {
             name: string;
@@ -265,37 +288,76 @@ export declare function setWalletActive(organizationId: string, adminId: string,
     isActive: boolean;
     message: string;
 }>;
-export declare function getWalletMessageAnalytics(organizationId: string): Promise<{
+export declare function getWalletMessageAnalytics(organizationId: string, options?: {
+    startDate?: Date;
+    endDate?: Date;
+}): Promise<{
+    period: {
+        startDate: string;
+        endDate: string;
+        days: number;
+    };
     allMessages: {
         sent: number;
         delivered: number;
+        failed: number;
+        read: number;
         received: number;
+        deliveryRate: number;
+        readRate: number;
     };
     messagesDelivered: {
-        category: string;
-        label: string;
-        delivered: number;
-    }[];
-    freeMessagesDelivered: {
-        freeCustomerService: number;
-        freeEntryPoint: number;
-        total: number;
-    };
-    paidMessagesDelivered: {
-        category: string;
-        label: string;
-        delivered: number;
-    }[];
-    approximateCharges: {
         total: number;
         byCategory: {
             category: string;
             label: string;
-            cost: number;
-            rate: number;
-            count: number;
+            delivered: number;
         }[];
     };
-    rates: Record<string, number>;
+    freeMessagesDelivered: {
+        freeCustomerService: number;
+        freeEntryPoint: number;
+        total: number;
+        sent: number;
+    };
+    paidMessagesDelivered: {
+        total: number;
+        byCategory: {
+            category: string;
+            label: string;
+            delivered: number;
+            sent: number;
+        }[];
+    };
+    approximateCharges: {
+        total: number;
+        totalPaise: number;
+        byCategory: {
+            category: string;
+            label: string;
+            cost: number;
+            delivered: number;
+        }[];
+    };
+    actualCharges: {
+        total: number;
+        totalPaise: number;
+        byCategory: {
+            category: string;
+            label: string;
+            cost: number;
+        }[];
+    };
+    rates: {
+        currency: string;
+        unit: string;
+        note: string;
+        india: {
+            MARKETING: number;
+            UTILITY: number;
+            AUTHENTICATION: number;
+            SERVICE: number;
+        };
+    };
 }>;
 //# sourceMappingURL=wallet.service.d.ts.map

@@ -1,7 +1,6 @@
-// src/config/database.ts - PERMANENT FIX
-// ✅ Optimized for Render + Supabase/Neon combo
-// ✅ Connection pooling with proper limits
-// ✅ Auto-reconnect on failures
+// src/config/database.ts - RENDER PAID PLAN OPTIMIZED
+// ✅ 2GB RAM = Higher connection pool
+// ✅ Always-on = No cold start issues
 
 import { PrismaClient } from '@prisma/client';
 
@@ -24,28 +23,23 @@ const createPrismaClient = () => {
 
   const isNeon = dbUrl.includes('neon.tech');
 
-  // ✅ PgBouncer mode
   if (isPooler) {
     existingParams.set('pgbouncer', 'true');
     existingParams.set('prepared_statements', 'false');
-    console.log('🔧 Mode: Supabase PgBouncer');
+    console.log('🔧 DB Mode: Supabase PgBouncer');
   }
 
   if (isNeon) {
     existingParams.set('sslmode', 'require');
-    existingParams.set('connect_timeout', '15');
-    console.log('🔧 Mode: Neon');
+    console.log('🔧 DB Mode: Neon');
   }
 
-  // ✅ CRITICAL FIX: Increased limits
-  // Supabase pooler pe hum SAFELY 10-15 connections use kar sakte hain
-  // Kyunki pooler internally sab manage karta hai
-  existingParams.set('connection_limit', '15');    // ← 5 se 15
-  existingParams.set('pool_timeout', '20');         // ← 10 se 20
-  existingParams.set('connect_timeout', '15');
-  
-  // ✅ Statement timeout - long queries kill kare
-  existingParams.set('statement_timeout', '30000'); // 30 sec max per query
+  // ✅ PAID PLAN SETTINGS (2GB RAM, 1 CPU)
+  existingParams.set('connection_limit', '20');
+  existingParams.set('pool_timeout', '30');
+  existingParams.set('connect_timeout', '20');
+  existingParams.set('statement_timeout', '30000');
+  existingParams.set('idle_in_transaction_session_timeout', '60000');
 
   const finalUrl = `${baseUrl}?${existingParams.toString()}`;
 
@@ -54,18 +48,20 @@ const createPrismaClient = () => {
       ? ['error', 'warn'] 
       : ['error'],
     datasources: { db: { url: finalUrl } },
+    errorFormat: 'minimal',
   });
 
-  console.log('✅ Prisma configured:');
-  console.log(`   connection_limit : 15`);
-  console.log(`   pool_timeout     : 20s`);
+  console.log('✅ Prisma configured (RENDER PAID PLAN):');
+  console.log(`   connection_limit : 20`);
+  console.log(`   pool_timeout     : 30s`);
   console.log(`   statement_timeout: 30s`);
 
   return client;
 };
 
-// Singleton
+// ✅ Singleton pattern
 declare global {
+  // eslint-disable-next-line no-var
   var __prisma: PrismaClient | undefined;
 }
 
@@ -75,8 +71,21 @@ if (process.env.NODE_ENV !== 'production') {
   globalThis.__prisma = prisma;
 }
 
-process.on('beforeExit', async () => {
+// ✅ Graceful shutdown
+const gracefulShutdown = async () => {
+  console.log('🔌 Closing Prisma connections...');
   await prisma.$disconnect();
+  console.log('✅ Prisma disconnected');
+};
+
+process.on('beforeExit', gracefulShutdown);
+process.on('SIGINT', async () => {
+  await gracefulShutdown();
+  process.exit(0);
+});
+process.on('SIGTERM', async () => {
+  await gracefulShutdown();
+  process.exit(0);
 });
 
 export default prisma;

@@ -1,5 +1,7 @@
 "use strict";
 // src/utils/jwt.ts
+// ✅ FIXED: generateAccessToken was using config.jwt.expiresIn (7d) instead of
+// config.jwt.accessExpiresIn (15m) — access tokens were living 7 days instead of 15 minutes.
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -29,7 +31,8 @@ const getExpirySeconds = (expiryString) => {
 const generateAccessToken = (payload) => {
     const secret = config_1.config.jwt.secret;
     const options = {
-        expiresIn: getExpirySeconds(config_1.config.jwt.expiresIn),
+        // ✅ FIX: use accessExpiresIn (15m), NOT expiresIn (7d)
+        expiresIn: getExpirySeconds(config_1.config.jwt.accessExpiresIn),
     };
     return jsonwebtoken_1.default.sign({ tokenVersion: 0, ...payload, type: 'access' }, secret, options);
 };

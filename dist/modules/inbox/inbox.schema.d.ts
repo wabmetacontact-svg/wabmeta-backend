@@ -21,9 +21,9 @@ export declare const getConversationsSchema: z.ZodObject<{
         assignedTo?: string | undefined;
         labels?: string | undefined;
     }, {
+        search?: string | undefined;
         limit?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         isArchived?: string | undefined;
         isRead?: string | undefined;
         assignedTo?: string | undefined;
@@ -45,9 +45,9 @@ export declare const getConversationsSchema: z.ZodObject<{
     };
 }, {
     query: {
+        search?: string | undefined;
         limit?: string | undefined;
         page?: string | undefined;
-        search?: string | undefined;
         isArchived?: string | undefined;
         isRead?: string | undefined;
         assignedTo?: string | undefined;

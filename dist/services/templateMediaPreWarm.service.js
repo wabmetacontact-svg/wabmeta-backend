@@ -9,6 +9,8 @@ const database_1 = __importDefault(require("../config/database"));
 const meta_api_1 = require("../modules/meta/meta.api");
 const meta_service_1 = require("../modules/meta/meta.service");
 const axios_1 = __importDefault(require("axios"));
+const client_1 = require("@prisma/client");
+const templateMediaResolver_1 = require("../utils/templateMediaResolver");
 /**
  * Pre-warm template media before they expire.
  * Runs daily. Re-uploads media for templates with:
@@ -30,7 +32,7 @@ class TemplateMediaPreWarmService {
         let failed = 0;
         try {
             // Find templates that need refresh
-            const REFRESH_THRESHOLD_DAYS = 20; // Refresh if older than 20 days
+            const REFRESH_THRESHOLD_DAYS = 25; // Meta ID valid for 30 days, refresh at 25
             const thresholdDate = new Date(Date.now() - REFRESH_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
             const templates = await database_1.default.template.findMany({
                 where: {
@@ -55,10 +57,25 @@ class TemplateMediaPreWarmService {
                         continue;
                     }
                     // Skip if URL is not valid
-                    const url = template.headerContent;
-                    if (!url || !url.startsWith('http') || url.includes('scontent.whatsapp')) {
+                    let url = template.headerContent;
+                    if (!url || !url.startsWith('http')) {
                         console.warn(`⚠️ Template ${template.id} has invalid URL`);
                         continue;
+                    }
+                    // ✅ Resolve short-lived Meta URL to Cloudinary first if needed
+                    if (url.includes('scontent.whatsapp')) {
+                        console.log(`🔄 Template ${template.id} has scontent URL, resolving to Cloudinary first...`);
+                        const resolved = await (0, templateMediaResolver_1.resolveTemplateHeaderMedia)(template).catch((err) => {
+                            console.error(`Failed to resolve template media in pre-warm:`, err.message);
+                            return null;
+                        });
+                        if (resolved && !resolved.includes('scontent.whatsapp')) {
+                            url = resolved;
+                        }
+                        else {
+                            console.warn(`⚠️ Failed to resolve scontent URL for template ${template.id}`);
+                            continue;
+                        }
                     }
                     // Get decrypted token
                     const accountWithToken = await meta_service_1.metaService.getAccountWithToken(template.whatsappAccount.id);
@@ -75,9 +92,9 @@ class TemplateMediaPreWarmService {
                     });
                     const buffer = Buffer.from(response.data);
                     const mimeType = response.headers['content-type']?.split(';')[0]?.trim() ||
-                        (template.headerType === 'IMAGE'
+                        (template.headerType?.toUpperCase() === 'IMAGE'
                             ? 'image/jpeg'
-                            : template.headerType === 'VIDEO'
+                            : template.headerType?.toUpperCase() === 'VIDEO'
                                 ? 'video/mp4'
                                 : 'application/pdf');
                     const filename = url.split('/').pop()?.split('?')[0] || 'media';
@@ -100,6 +117,24 @@ class TemplateMediaPreWarmService {
                 catch (err) {
                     console.error(`❌ Pre-warm failed for ${template.name}:`, err.message);
                     failed++;
+                    // ✅ AUTO-HEAL: If token is expired or account not registered, mark as DISCONNECTED
+                    const isTokenError = err.message?.includes('token') ||
+                        err.message?.includes('OAuth') ||
+                        err.status === 401 ||
+                        err.status === 403 ||
+                        err.message?.includes('190') ||
+                        err.message?.includes('133010') ||
+                        err.message?.includes('not registered');
+                    if (isTokenError && template.whatsappAccount?.id) {
+                        console.warn(`⚠️ Deactivating broken account ${template.whatsappAccount.id} due to pre-warm API error`);
+                        await database_1.default.whatsAppAccount.update({
+                            where: { id: template.whatsappAccount.id },
+                            data: {
+                                status: client_1.WhatsAppAccountStatus.DISCONNECTED,
+                                accessToken: null,
+                            },
+                        }).catch((e) => console.error('Failed to disconnect account in pre-warm error path:', e));
+                    }
                 }
             }
             console.log(`🏁 Pre-warm complete: ${refreshed} refreshed, ${failed} failed`);

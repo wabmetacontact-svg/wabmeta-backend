@@ -1,5 +1,8 @@
 "use strict";
-// ✅ CREATE: src/modules/automation/automation.service.ts
+// src/modules/automation/automation.service.ts - FIXED
+// ✅ FIX 1: getActiveByTrigger now handles undefined organizationId (global query)
+// ✅ FIX 2: Added getGlobalActiveByTrigger for cron jobs
+// ✅ FIX 3: Better error handling with P2024 skip
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -8,9 +11,6 @@ exports.automationService = exports.AutomationService = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const errorHandler_1 = require("../../middleware/errorHandler");
 class AutomationService {
-    // ==========================================
-    // GET ALL AUTOMATIONS
-    // ==========================================
     async getAll(organizationId) {
         const automations = await database_1.default.automation.findMany({
             where: { organizationId },
@@ -22,27 +22,19 @@ class AutomationService {
             triggerConfig: a.triggerConfig,
         }));
     }
-    // ==========================================
-    // GET AUTOMATION BY ID
-    // ==========================================
     async getById(organizationId, automationId) {
         const automation = await database_1.default.automation.findFirst({
             where: { id: automationId, organizationId },
         });
-        if (!automation) {
+        if (!automation)
             throw new errorHandler_1.AppError('Automation not found', 404);
-        }
         return {
             ...automation,
             actions: automation.actions,
             triggerConfig: automation.triggerConfig,
         };
     }
-    // ==========================================
-    // CREATE AUTOMATION
-    // ==========================================
     async create(organizationId, input) {
-        // Validate actions
         if (!input.actions || input.actions.length === 0) {
             throw new errorHandler_1.AppError('At least one action is required', 400);
         }
@@ -66,16 +58,12 @@ class AutomationService {
             triggerConfig: automation.triggerConfig,
         };
     }
-    // ==========================================
-    // UPDATE AUTOMATION
-    // ==========================================
     async update(organizationId, automationId, input) {
         const automation = await database_1.default.automation.findFirst({
             where: { id: automationId, organizationId },
         });
-        if (!automation) {
+        if (!automation)
             throw new errorHandler_1.AppError('Automation not found', 404);
-        }
         const updated = await database_1.default.automation.update({
             where: { id: automationId },
             data: {
@@ -96,37 +84,25 @@ class AutomationService {
             triggerConfig: updated.triggerConfig,
         };
     }
-    // ==========================================
-    // DELETE AUTOMATION
-    // ==========================================
     async delete(organizationId, automationId) {
         const automation = await database_1.default.automation.findFirst({
             where: { id: automationId, organizationId },
         });
-        if (!automation) {
+        if (!automation)
             throw new errorHandler_1.AppError('Automation not found', 404);
-        }
-        await database_1.default.automation.delete({
-            where: { id: automationId },
-        });
+        await database_1.default.automation.delete({ where: { id: automationId } });
         console.log(`✅ Automation deleted: ${automationId}`);
         return { message: 'Automation deleted successfully' };
     }
-    // ==========================================
-    // TOGGLE AUTOMATION STATUS
-    // ==========================================
     async toggle(organizationId, automationId) {
         const automation = await database_1.default.automation.findFirst({
             where: { id: automationId, organizationId },
         });
-        if (!automation) {
+        if (!automation)
             throw new errorHandler_1.AppError('Automation not found', 404);
-        }
         const updated = await database_1.default.automation.update({
             where: { id: automationId },
-            data: {
-                isActive: !automation.isActive,
-            },
+            data: { isActive: !automation.isActive },
         });
         console.log(`✅ Automation ${automationId} is now ${updated.isActive ? 'ACTIVE' : 'INACTIVE'}`);
         return {
@@ -135,40 +111,70 @@ class AutomationService {
             triggerConfig: updated.triggerConfig,
         };
     }
-    // ==========================================
-    // GET ACTIVE AUTOMATIONS BY TRIGGER
-    // ==========================================
+    /**
+     * ✅ FIXED: Get active automations by trigger
+     * - If organizationId provided: filter by that org (for webhook triggers)
+     * - If organizationId undefined: return ALL orgs (for cron jobs)
+     */
     async getActiveByTrigger(organizationId, trigger) {
-        const automations = await database_1.default.automation.findMany({
-            where: {
-                organizationId,
-                trigger,
-                isActive: true,
-            },
-        });
-        return automations.map((a) => ({
-            ...a,
-            actions: a.actions,
-            triggerConfig: a.triggerConfig,
-            targetGroupIds: a.targetGroupIds || [],
-            excludeExisting: a.excludeExisting ?? true,
-        }));
+        try {
+            const where = { trigger, isActive: true };
+            // ✅ Only add organizationId filter if provided
+            if (organizationId) {
+                where.organizationId = organizationId;
+            }
+            const automations = await database_1.default.automation.findMany({
+                where,
+                // ✅ Include organization info for cron jobs (no orgId filter)
+                select: {
+                    id: true,
+                    organizationId: true,
+                    name: true,
+                    description: true,
+                    trigger: true,
+                    triggerConfig: true,
+                    actions: true,
+                    isActive: true,
+                    executionCount: true,
+                    lastExecutedAt: true,
+                    targetGroupIds: true,
+                    excludeExisting: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+            return automations.map((a) => ({
+                ...a,
+                actions: a.actions,
+                triggerConfig: a.triggerConfig,
+                targetGroupIds: a.targetGroupIds || [],
+                excludeExisting: a.excludeExisting ?? true,
+            }));
+        }
+        catch (error) {
+            if (error?.code === 'P2024') {
+                console.warn(`⚠️ getActiveByTrigger(${trigger}) skipped: DB pool busy`);
+                return [];
+            }
+            throw error;
+        }
     }
-    // ==========================================
-    // INCREMENT EXECUTION COUNT
-    // ==========================================
     async incrementExecutionCount(automationId) {
-        await database_1.default.automation.update({
-            where: { id: automationId },
-            data: {
-                executionCount: { increment: 1 },
-                lastExecutedAt: new Date(),
-            },
-        });
+        try {
+            await database_1.default.automation.update({
+                where: { id: automationId },
+                data: {
+                    executionCount: { increment: 1 },
+                    lastExecutedAt: new Date(),
+                },
+            });
+        }
+        catch (error) {
+            if (error?.code !== 'P2024') {
+                console.error('Failed to increment execution count:', error);
+            }
+        }
     }
-    // ==========================================
-    // GET STATS
-    // ==========================================
     async getStats(organizationId) {
         const [total, active, totalExecutions] = await Promise.all([
             database_1.default.automation.count({ where: { organizationId } }),

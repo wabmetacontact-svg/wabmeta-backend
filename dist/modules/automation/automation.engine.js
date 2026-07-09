@@ -26,55 +26,90 @@ class AutomationEngine {
         return !!membership;
     }
     // ==========================================
-    // ✅ CHECK IF CONTACT EXISTS (For UNKNOWN_MESSAGE)
-    // ==========================================
-    async contactExistsInCRM(organizationId, phone) {
-        const contact = await database_1.default.contact.findFirst({
-            where: {
-                organizationId,
-                phone: phone,
-                createdAt: {
-                    lt: new Date(Date.now() - 60000), // Older than 1 minute
-                },
-            },
-        });
-        return !!contact;
-    }
-    // ==========================================
-    // ✅ TRIGGER: UNKNOWN MESSAGE (Enhanced)
+    // ✅ TRIGGER: UNKNOWN MESSAGE
     // ==========================================
     async triggerUnknownMessage(context) {
-        console.log(`🤖 [AUTOMATION] Triggering UNKNOWN_MESSAGE for org: ${context.organizationId}`);
+        console.log(`🤖 [UNKNOWN_MESSAGE] Triggered for org: ${context.organizationId}, phone: ${context.phone}`);
+        if (!context.phone) {
+            console.warn(`⚠️ [UNKNOWN_MESSAGE] No phone in context`);
+            return;
+        }
         try {
-            // Get automations
             const automations = await automation_service_1.automationService.getActiveByTrigger(context.organizationId, 'UNKNOWN_MESSAGE');
             if (automations.length === 0) {
-                console.log(`ℹ️ No active UNKNOWN_MESSAGE automations found`);
+                console.log(`ℹ️ [UNKNOWN_MESSAGE] No active automations for this org`);
                 return;
             }
+            console.log(`🤖 [UNKNOWN_MESSAGE] Found ${automations.length} automation(s)`);
+            // ✅ Check if contact ALREADY existed BEFORE this message
+            // (Different from just "exists" - we check if they existed before now)
+            const contactExistedBefore = await this.contactExistedBefore(context.organizationId, context.phone);
+            console.log(`🔍 [UNKNOWN_MESSAGE] Contact existed before: ${contactExistedBefore}`);
             for (const automation of automations) {
-                // ✅ Check excludeExisting flag
-                if (automation.excludeExisting) {
-                    const exists = await this.contactExistsInCRM(context.organizationId, context.phone);
-                    if (exists) {
-                        console.log(`⏭️ Contact already exists. Skipping automation: ${automation.name}`);
+                try {
+                    // ✅ Skip if contact existed BEFORE and excludeExisting is ON
+                    if (automation.excludeExisting && contactExistedBefore) {
+                        console.log(`⏭️ [UNKNOWN_MESSAGE] Skipping ${automation.name}: contact exists`);
                         continue;
                     }
-                }
-                // ✅ Check target groups (if contact already exists)
-                if (context.contactId && automation.targetGroupIds?.length > 0) {
-                    const inTargetGroup = await this.isContactInTargetGroups(context.contactId, automation.targetGroupIds);
-                    if (!inTargetGroup) {
-                        console.log(`⏭️ Contact not in target groups. Skipping: ${automation.name}`);
-                        continue;
+                    // ✅ Cooldown check - prevent spam if same unknown number messages multiple times
+                    // Only trigger once per contact per automation per 24 hours
+                    if (context.contactId) {
+                        const recentRun = await database_1.default.automationSequence.findFirst({
+                            where: {
+                                automationId: automation.id,
+                                contactId: context.contactId,
+                                createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+                            },
+                        });
+                        if (recentRun) {
+                            console.log(`⏭️ [UNKNOWN_MESSAGE] Skipping ${automation.name}: already ran in last 24h`);
+                            continue;
+                        }
                     }
+                    // Group check (if applicable)
+                    if (context.contactId && automation.targetGroupIds?.length > 0) {
+                        const inGroup = await this.isContactInTargetGroups(context.contactId, automation.targetGroupIds);
+                        if (!inGroup) {
+                            console.log(`⏭️ [UNKNOWN_MESSAGE] Not in target groups: ${automation.name}`);
+                            continue;
+                        }
+                    }
+                    console.log(`🚀 [UNKNOWN_MESSAGE] Executing: ${automation.name}`);
+                    await this.executeSequence(automation.id, automation.actions, context);
                 }
-                console.log(`🤖 Executing automation: ${automation.name}`);
-                await this.executeSequence(automation.id, automation.actions, context);
+                catch (err) {
+                    console.error(`❌ [UNKNOWN_MESSAGE] Failed ${automation.id}:`, err.message);
+                }
             }
         }
         catch (error) {
-            console.error('🤖 UNKNOWN_MESSAGE automation error:', error);
+            if (error?.code !== 'P2024') {
+                console.error('🤖 [UNKNOWN_MESSAGE] Error:', error);
+            }
+        }
+    }
+    // ==========================================
+    // ✅ NEW HELPER: Check if contact existed BEFORE now
+    // ==========================================
+    async contactExistedBefore(organizationId, phone, toleranceMs = 10000 // 10 seconds tolerance
+    ) {
+        try {
+            const cutoffTime = new Date(Date.now() - toleranceMs);
+            const contact = await database_1.default.contact.findFirst({
+                where: {
+                    organizationId,
+                    phone,
+                    createdAt: { lt: cutoffTime },
+                },
+                select: { id: true },
+            });
+            return !!contact;
+        }
+        catch (error) {
+            if (error?.code === 'P2024')
+                return false;
+            throw error;
         }
     }
     // ==========================================
@@ -161,100 +196,234 @@ class AutomationEngine {
         }
     }
     // ==========================================
-    // ✅ TRIGGER: Scheduled
+    // ✅ FIXED: TRIGGER: Scheduled (Time-based)
     // ==========================================
     async triggerScheduled() {
         try {
-            // Find active SCHEDULE automations
+            const now = new Date();
+            const currentHHMM = now.toTimeString().substring(0, 5); // "09:30"
+            const currentDay = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+            const isWeekday = currentDay >= 1 && currentDay <= 5;
+            const isWeekend = currentDay === 0 || currentDay === 6;
+            console.log(`⏰ [SCHEDULE] Checking triggers at ${currentHHMM} (day ${currentDay})`);
+            // ✅ FIX: undefined orgId = get all orgs
             const automations = await automation_service_1.automationService.getActiveByTrigger(undefined, 'SCHEDULE');
+            if (automations.length === 0) {
+                return; // No scheduled automations
+            }
+            console.log(`⏰ [SCHEDULE] Found ${automations.length} scheduled automation(s)`);
             for (const automation of automations) {
-                console.log(`⏰ Processing scheduled automation: ${automation.name} (${automation.id})`);
-                // SCHEDULED automations usually target a specific group or all contacts
-                const targetGroupIds = automation.targetGroupIds || [];
-                let contacts = [];
-                if (targetGroupIds.length > 0) {
-                    contacts = await database_1.default.contact.findMany({
-                        where: {
-                            organizationId: automation.organizationId,
-                            status: 'ACTIVE',
-                            groupMemberships: {
-                                some: { groupId: { in: targetGroupIds } }
-                            }
+                try {
+                    const config = automation.triggerConfig;
+                    const scheduledTime = config?.time || '09:00'; // Default 9 AM
+                    const days = config?.days || 'daily'; // daily | weekdays | weekends
+                    // ✅ Check if today matches recursion
+                    let shouldRunToday = false;
+                    if (days === 'daily')
+                        shouldRunToday = true;
+                    else if (days === 'weekdays' && isWeekday)
+                        shouldRunToday = true;
+                    else if (days === 'weekends' && isWeekend)
+                        shouldRunToday = true;
+                    if (!shouldRunToday) {
+                        console.log(`⏭️ [SCHEDULE] ${automation.name}: Not scheduled for today (${days})`);
+                        continue;
+                    }
+                    // ✅ Check if current time matches (with 1-minute tolerance)
+                    const [schedHour, schedMin] = scheduledTime.split(':').map(Number);
+                    const [currHour, currMin] = currentHHMM.split(':').map(Number);
+                    const schedMinutes = schedHour * 60 + schedMin;
+                    const currMinutes = currHour * 60 + currMin;
+                    const diffMinutes = Math.abs(schedMinutes - currMinutes);
+                    if (diffMinutes > 1) {
+                        // Not the scheduled time yet
+                        continue;
+                    }
+                    // ✅ CRITICAL: Prevent duplicate runs on same day
+                    if (automation.lastExecutedAt) {
+                        const lastRun = new Date(automation.lastExecutedAt);
+                        const lastRunDate = lastRun.toDateString();
+                        const todayDate = now.toDateString();
+                        if (lastRunDate === todayDate) {
+                            console.log(`⏭️ [SCHEDULE] ${automation.name}: Already ran today`);
+                            continue;
                         }
-                    });
+                    }
+                    console.log(`🚀 [SCHEDULE] Executing: ${automation.name} for org: ${automation.organizationId}`);
+                    // ✅ Get target contacts
+                    const targetGroupIds = automation.targetGroupIds || [];
+                    let contacts = [];
+                    try {
+                        if (targetGroupIds.length > 0) {
+                            contacts = await database_1.default.contact.findMany({
+                                where: {
+                                    organizationId: automation.organizationId,
+                                    status: 'ACTIVE',
+                                    groupMemberships: {
+                                        some: { groupId: { in: targetGroupIds } },
+                                    },
+                                },
+                                select: { id: true, phone: true, firstName: true },
+                                take: 500, // Safety limit
+                            });
+                        }
+                        else {
+                            // No groups = ALL active contacts
+                            contacts = await database_1.default.contact.findMany({
+                                where: {
+                                    organizationId: automation.organizationId,
+                                    status: 'ACTIVE',
+                                },
+                                select: { id: true, phone: true, firstName: true },
+                                take: 500,
+                            });
+                        }
+                    }
+                    catch (dbErr) {
+                        if (dbErr?.code === 'P2024') {
+                            console.warn(`⚠️ [SCHEDULE] DB busy, skipping ${automation.name}`);
+                            continue;
+                        }
+                        throw dbErr;
+                    }
+                    console.log(`📇 [SCHEDULE] ${automation.name}: ${contacts.length} contacts targeted`);
+                    if (contacts.length === 0) {
+                        console.log(`⏭️ [SCHEDULE] No contacts found for ${automation.name}`);
+                        // Still mark as executed for the day
+                        await automation_service_1.automationService.incrementExecutionCount(automation.id);
+                        continue;
+                    }
+                    // ✅ Mark as executed BEFORE processing (prevents duplicates)
+                    await automation_service_1.automationService.incrementExecutionCount(automation.id);
+                    // ✅ Execute sequentially with small delay (avoid rate limits)
+                    for (const contact of contacts) {
+                        try {
+                            await this.executeSequence(automation.id, automation.actions, {
+                                organizationId: automation.organizationId,
+                                contactId: contact.id,
+                                phone: contact.phone,
+                            });
+                            // Small delay between contacts (200ms)
+                            await new Promise((r) => setTimeout(r, 200));
+                        }
+                        catch (err) {
+                            console.error(`❌ [SCHEDULE] Failed for contact ${contact.id}:`, err.message);
+                        }
+                    }
+                    console.log(`✅ [SCHEDULE] Completed: ${automation.name}`);
                 }
-                else if (!automation.excludeExisting) {
-                    contacts = await database_1.default.contact.findMany({
-                        where: { organizationId: automation.organizationId, status: 'ACTIVE' }
-                    });
-                }
-                console.log(`🤖 Found ${contacts.length} candidate contacts for schedule`);
-                // Trigger sequence for each contact (optimized with bulk check)
-                const contactIds = contacts.map(c => c.id);
-                const existingSequences = contactIds.length > 0 ? await database_1.default.automationSequence.findMany({
-                    where: {
-                        automationId: automation.id,
-                        contactId: { in: contactIds }
-                    },
-                    select: { contactId: true, status: true }
-                }) : [];
-                const existingMap = new Map();
-                for (const seq of existingSequences) {
-                    existingMap.set(seq.contactId, seq.status);
-                }
-                for (const contact of contacts) {
-                    const status = existingMap.get(contact.id);
-                    if (!status || status === 'COMPLETED') {
-                        this.executeSequence(automation.id, automation.actions, {
-                            organizationId: automation.organizationId,
-                            contactId: contact.id,
-                            phone: contact.phone
-                        }).catch(err => console.error(`❌ Schedule execution failed for ${contact.id}:`, err));
+                catch (err) {
+                    if (err?.code !== 'P2024') {
+                        console.error(`❌ [SCHEDULE] Automation ${automation.id} failed:`, err.message);
                     }
                 }
             }
         }
         catch (error) {
-            console.error('🤖 Scheduled automation trigger error:', error);
+            if (error?.code !== 'P2024') {
+                console.error('🤖 Scheduled automation trigger error:', error);
+            }
         }
     }
     // ==========================================
-    // ✅ TRIGGER: Inactivity
+    // ✅ FIXED: TRIGGER: Contact Inactivity
     // ==========================================
     async triggerInactivity() {
         try {
+            console.log(`💤 [INACTIVITY] Starting inactivity check...`);
+            // ✅ FIX: undefined orgId = get all orgs
             const automations = await automation_service_1.automationService.getActiveByTrigger(undefined, 'INACTIVITY');
+            if (automations.length === 0) {
+                return;
+            }
+            console.log(`💤 [INACTIVITY] Found ${automations.length} automation(s)`);
             for (const automation of automations) {
-                const config = automation.triggerConfig;
-                const hours = config?.hours || 24;
-                const inactiveSince = new Date(Date.now() - (hours * 60 * 60 * 1000));
-                console.log(`💤 Checking inactivity (${hours}h) for automation: ${automation.name}`);
-                const contacts = await database_1.default.contact.findMany({
-                    where: {
+                try {
+                    const config = automation.triggerConfig;
+                    const hours = Number(config?.hours) || 24;
+                    const inactiveSince = new Date(Date.now() - hours * 60 * 60 * 1000);
+                    console.log(`💤 [INACTIVITY] ${automation.name}: checking ${hours}h inactive`);
+                    // ✅ Target contacts (with group filtering)
+                    const targetGroupIds = automation.targetGroupIds || [];
+                    const whereClause = {
                         organizationId: automation.organizationId,
                         status: 'ACTIVE',
-                        lastMessageAt: { lt: inactiveSince },
-                        // Ensure they haven't already received this inactivity message recently
-                        automationSequences: {
-                            none: {
-                                automationId: automation.id,
-                                lastStepAt: { gt: inactiveSince }
-                            }
+                        lastMessageAt: { lt: inactiveSince, not: null },
+                    };
+                    if (targetGroupIds.length > 0) {
+                        whereClause.groupMemberships = {
+                            some: { groupId: { in: targetGroupIds } },
+                        };
+                    }
+                    let contacts = [];
+                    try {
+                        contacts = await database_1.default.contact.findMany({
+                            where: whereClause,
+                            select: {
+                                id: true,
+                                phone: true,
+                                firstName: true,
+                                lastMessageAt: true,
+                            },
+                            take: 100, // Safety limit
+                            orderBy: { lastMessageAt: 'asc' }, // Oldest first
+                        });
+                    }
+                    catch (dbErr) {
+                        if (dbErr?.code === 'P2024') {
+                            console.warn(`⚠️ [INACTIVITY] DB busy, skipping ${automation.name}`);
+                            continue;
+                        }
+                        throw dbErr;
+                    }
+                    if (contacts.length === 0) {
+                        continue;
+                    }
+                    // ✅ Filter out contacts who already got this inactivity message recently
+                    const contactIds = contacts.map((c) => c.id);
+                    const recentSequences = await database_1.default.automationSequence.findMany({
+                        where: {
+                            automationId: automation.id,
+                            contactId: { in: contactIds },
+                            // Already ran within cooldown period (e.g. within last inactivity window)
+                            lastStepAt: { gt: inactiveSince },
+                        },
+                        select: { contactId: true },
+                    });
+                    const alreadyRunSet = new Set(recentSequences.map((s) => s.contactId));
+                    const eligibleContacts = contacts.filter((c) => !alreadyRunSet.has(c.id));
+                    console.log(`💤 [INACTIVITY] ${automation.name}: ${contacts.length} inactive, ` +
+                        `${eligibleContacts.length} eligible (${alreadyRunSet.size} skipped)`);
+                    if (eligibleContacts.length === 0)
+                        continue;
+                    await automation_service_1.automationService.incrementExecutionCount(automation.id);
+                    // ✅ Execute sequentially with delay
+                    for (const contact of eligibleContacts) {
+                        try {
+                            await this.executeSequence(automation.id, automation.actions, {
+                                organizationId: automation.organizationId,
+                                contactId: contact.id,
+                                phone: contact.phone,
+                            });
+                            await new Promise((r) => setTimeout(r, 300));
+                        }
+                        catch (err) {
+                            console.error(`❌ [INACTIVITY] Failed for ${contact.id}:`, err.message);
                         }
                     }
-                });
-                console.log(`🤖 Found ${contacts.length} inactive contacts`);
-                for (const contact of contacts) {
-                    this.executeSequence(automation.id, automation.actions, {
-                        organizationId: automation.organizationId,
-                        contactId: contact.id,
-                        phone: contact.phone
-                    }).catch(err => console.error(`❌ Inactivity execution failed for ${contact.id}:`, err));
+                    console.log(`✅ [INACTIVITY] Completed: ${automation.name}`);
+                }
+                catch (err) {
+                    if (err?.code !== 'P2024') {
+                        console.error(`❌ [INACTIVITY] Automation ${automation.id} failed:`, err.message);
+                    }
                 }
             }
         }
         catch (error) {
-            console.error('🤖 Inactivity automation trigger error:', error);
+            if (error?.code !== 'P2024') {
+                console.error('🤖 Inactivity automation trigger error:', error);
+            }
         }
     }
     // ==========================================

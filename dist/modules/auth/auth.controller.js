@@ -1,26 +1,13 @@
 "use strict";
-// src/modules/auth/auth.controller.ts - FINAL VERSION
+// src/modules/auth/auth.controller.ts - FIXED VERSION
+// ✅ FIX: now imports shared getCookieOptions/getClearCookieOptions from utils/cookies.ts
+// instead of its own conflicting local versions (was causing cross-domain cookie issues
+// and clearCookie not matching original cookie attributes)
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.authController = exports.AuthController = void 0;
 const auth_service_1 = require("./auth.service");
 const response_1 = require("../../utils/response");
-// ✅ Cookie options for setting cookies (with maxAge)
-const cookieOptions = (isRefresh = false) => ({
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production, false for local dev over http
-    sameSite: 'lax', // Changed from 'none' to 'lax' to prevent CSRF
-    maxAge: isRefresh
-        ? 7 * 24 * 60 * 60 * 1000 // 7 days
-        : 1 * 60 * 60 * 1000, // 1 hour
-    path: '/',
-});
-// ✅ FIX: Cookie options for clearing cookies (NO maxAge)
-const clearCookieOptions = () => ({
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    path: '/',
-});
+const cookies_1 = require("../../utils/cookies"); // ✅ FIX
 class AuthController {
     // ────────────────────────────────────────────
     // SEND PHONE OTP
@@ -79,8 +66,8 @@ class AuthController {
                 password,
                 organizationName: organizationName?.trim(),
             });
-            res.cookie('refreshToken', result.tokens.refreshToken, cookieOptions(true));
-            res.cookie('accessToken', result.tokens.accessToken, cookieOptions(false));
+            res.cookie('refreshToken', result.tokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
+            res.cookie('accessToken', result.tokens.accessToken, (0, cookies_1.getCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, result, 'Account created successfully! Welcome to WabMeta 🎉', 201);
         }
         catch (error) {
@@ -95,7 +82,6 @@ class AuthController {
             const input = req.body;
             const result = await auth_service_1.authService.register(input);
             // ❌ Cookies mat set karo - user verified nahi hai abhi
-            // ✅ Sirf success message return karo
             return (0, response_1.sendSuccess)(res, result, result.message, 201);
         }
         catch (error) {
@@ -109,8 +95,8 @@ class AuthController {
         try {
             const input = req.body;
             const result = await auth_service_1.authService.login(input);
-            res.cookie('refreshToken', result.tokens.refreshToken, cookieOptions(true));
-            res.cookie('accessToken', result.tokens.accessToken, cookieOptions(false));
+            res.cookie('refreshToken', result.tokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
+            res.cookie('accessToken', result.tokens.accessToken, (0, cookies_1.getCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, result, 'Login successful');
         }
         catch (error) {
@@ -189,8 +175,8 @@ class AuthController {
         try {
             const { email, otp } = req.body;
             const result = await auth_service_1.authService.verifyOTP(email, otp);
-            res.cookie('refreshToken', result.tokens.refreshToken, cookieOptions(true));
-            res.cookie('accessToken', result.tokens.accessToken, cookieOptions(false));
+            res.cookie('refreshToken', result.tokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
+            res.cookie('accessToken', result.tokens.accessToken, (0, cookies_1.getCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, result, 'OTP verified successfully');
         }
         catch (error) {
@@ -204,8 +190,8 @@ class AuthController {
         try {
             const { credential } = req.body;
             const result = await auth_service_1.authService.googleAuth(credential);
-            res.cookie('refreshToken', result.tokens.refreshToken, cookieOptions(true));
-            res.cookie('accessToken', result.tokens.accessToken, cookieOptions(false));
+            res.cookie('refreshToken', result.tokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
+            res.cookie('accessToken', result.tokens.accessToken, (0, cookies_1.getCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, result, 'Google authentication successful');
         }
         catch (error) {
@@ -226,8 +212,8 @@ class AuthController {
                 });
             }
             const tokens = await auth_service_1.authService.refreshToken(refreshToken);
-            res.cookie('refreshToken', tokens.refreshToken, cookieOptions(true));
-            res.cookie('accessToken', tokens.accessToken, cookieOptions(false));
+            res.cookie('refreshToken', tokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
+            res.cookie('accessToken', tokens.accessToken, (0, cookies_1.getCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, tokens, 'Token refreshed');
         }
         catch (error) {
@@ -235,7 +221,7 @@ class AuthController {
         }
     }
     // ────────────────────────────────────────────
-    // LOGOUT - ✅ FIXED clearCookie warning
+    // LOGOUT
     // ────────────────────────────────────────────
     async logout(req, res, next) {
         try {
@@ -243,9 +229,8 @@ class AuthController {
             if (refreshToken) {
                 await auth_service_1.authService.logout(refreshToken);
             }
-            // ✅ FIX: Use clearCookieOptions (no maxAge)
-            res.clearCookie('refreshToken', clearCookieOptions());
-            res.clearCookie('accessToken', clearCookieOptions());
+            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)());
+            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)());
             return (0, response_1.sendSuccess)(res, null, 'Logged out successfully');
         }
         catch (error) {
@@ -253,15 +238,14 @@ class AuthController {
         }
     }
     // ────────────────────────────────────────────
-    // LOGOUT ALL - ✅ FIXED clearCookie warning
+    // LOGOUT ALL
     // ────────────────────────────────────────────
     async logoutAll(req, res, next) {
         try {
             const userId = req.user.id;
             const result = await auth_service_1.authService.logoutAll(userId);
-            // ✅ FIX: Use clearCookieOptions (no maxAge)
-            res.clearCookie('refreshToken', clearCookieOptions());
-            res.clearCookie('accessToken', clearCookieOptions());
+            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)());
+            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)());
             return (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -282,15 +266,17 @@ class AuthController {
         }
     }
     // ────────────────────────────────────────────
-    // CHANGE PASSWORD - ✅ FIXED clearCookie warning
+    // CHANGE PASSWORD
     // ────────────────────────────────────────────
     async changePassword(req, res, next) {
         try {
             const userId = req.user.id;
             const { currentPassword, newPassword } = req.body;
             const result = await auth_service_1.authService.changePassword(userId, currentPassword, newPassword);
-            // ✅ FIX: Use clearCookieOptions (no maxAge)
-            res.clearCookie('refreshToken', clearCookieOptions());
+            // ✅ FIX: clear BOTH cookies (access token was still valid for up to 15m/7d
+            // before the tokenVersion fix — now also clear accessToken cookie for safety)
+            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)());
+            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)());
             return (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {

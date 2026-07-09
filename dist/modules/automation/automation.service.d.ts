@@ -108,7 +108,12 @@ export declare class AutomationService {
         targetGroupIds: string[];
         excludeExisting: boolean;
     }>;
-    getActiveByTrigger(organizationId: string, trigger: AutomationTrigger): Promise<any[]>;
+    /**
+     * ✅ FIXED: Get active automations by trigger
+     * - If organizationId provided: filter by that org (for webhook triggers)
+     * - If organizationId undefined: return ALL orgs (for cron jobs)
+     */
+    getActiveByTrigger(organizationId: string | undefined, trigger: AutomationTrigger): Promise<any[]>;
     incrementExecutionCount(automationId: string): Promise<void>;
     getStats(organizationId: string): Promise<{
         total: number;

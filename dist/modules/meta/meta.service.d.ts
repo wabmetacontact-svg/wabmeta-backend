@@ -18,24 +18,23 @@ export declare class MetaService {
         hasRedirectUri: boolean;
         apiVersion: string;
     };
-    completeConnection(codeOrToken: string, organizationId: string, userId: string, connectionType?: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP', onProgress?: (progress: ConnectionProgress) => void, embeddedSignup?: boolean, // true = FB.login flow, no redirect_uri needed
-    sessionWabaId?: string, // ✅ From WA_EMBEDDED_SIGNUP message event (most reliable)
-    sessionPhoneNumberId?: string): Promise<{
+    completeConnection(codeOrToken: string, organizationId: string, userId: string, connectionType?: 'CLOUD_API' | 'WHATSAPP_BUSINESS_APP', onProgress?: (progress: ConnectionProgress) => void, embeddedSignup?: boolean, sessionWabaId?: string, sessionPhoneNumberId?: string): Promise<{
         success: boolean;
         account?: any;
         error?: string;
     }>;
     getAccounts(organizationId: string): Promise<any[]>;
     getAccount(accountId: string, organizationId: string): Promise<any>;
+    /**
+     * ✅ FIX: now delegates to the shared getAccountWithDecryptedToken() helper.
+     * This is the SAME helper used by whatsapp.service.ts for message sending,
+     * so both agree on account/token state. If a token can't be decrypted, both
+     * see the account as unusable (DB is auto-marked DISCONNECTED by the helper).
+     */
     getAccountWithToken(accountId: string): Promise<{
         account: WhatsAppAccount;
         accessToken: string;
     } | null>;
-    /**
-     * ✅ SAFE DISCONNECT - Soft disconnect, preserves data
-     * Idempotent: Can be called multiple times safely
-     * Handles default account switching automatically
-     */
     disconnectAccount(accountId: string, organizationId: string): Promise<{
         success: boolean;
         message: string;

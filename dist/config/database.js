@@ -1,49 +1,67 @@
 "use strict";
-// src/config/database.ts - OPTIMIZED
+// src/config/database.ts - RENDER PAID PLAN OPTIMIZED
+// ✅ 2GB RAM = Higher connection pool
+// ✅ Always-on = No cold start issues
 Object.defineProperty(exports, "__esModule", { value: true });
 const client_1 = require("@prisma/client");
 const createPrismaClient = () => {
     let dbUrl = process.env.DATABASE_URL;
-    const prismaOptions = {
+    if (!dbUrl) {
+        throw new Error('DATABASE_URL environment variable is not set');
+    }
+    const baseUrl = dbUrl.split('?')[0];
+    const existingParams = new URLSearchParams(dbUrl.includes('?') ? dbUrl.split('?')[1] : '');
+    const isPooler = dbUrl.includes('.pooler.supabase.com') ||
+        dbUrl.includes('pooler') ||
+        dbUrl.includes('pgbouncer');
+    const isNeon = dbUrl.includes('neon.tech');
+    if (isPooler) {
+        existingParams.set('pgbouncer', 'true');
+        existingParams.set('prepared_statements', 'false');
+        console.log('🔧 DB Mode: Supabase PgBouncer');
+    }
+    if (isNeon) {
+        existingParams.set('sslmode', 'require');
+        console.log('🔧 DB Mode: Neon');
+    }
+    // ✅ PAID PLAN SETTINGS (2GB RAM, 1 CPU)
+    existingParams.set('connection_limit', '20');
+    existingParams.set('pool_timeout', '30');
+    existingParams.set('connect_timeout', '20');
+    existingParams.set('statement_timeout', '30000');
+    existingParams.set('idle_in_transaction_session_timeout', '60000');
+    const finalUrl = `${baseUrl}?${existingParams.toString()}`;
+    const client = new client_1.PrismaClient({
         log: process.env.NODE_ENV === 'development'
             ? ['error', 'warn']
             : ['error'],
-    };
-    // Auto-configure for Supabase pooler
-    if (dbUrl && (dbUrl.includes('.pooler.supabase.com') || dbUrl.includes('pooler'))) {
-        if (!dbUrl.includes('pgbouncer=true')) {
-            dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'pgbouncer=true';
-        }
-        console.log('🔧 Auto-configured database pooler');
-    }
-    // Auto-configure for Neon pooler
-    if (dbUrl && dbUrl.includes('neon.tech')) {
-        if (!dbUrl.includes('sslmode=require')) {
-            dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'sslmode=require';
-        }
-        console.log('🔧 Auto-configured Neon database');
-    }
-    // ✅ GLOBAL DEFAULTS (Works for AWS RDS, Supabase, Neon, etc.)
-    if (dbUrl && !dbUrl.includes('connection_limit=')) {
-        dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'connection_limit=30';
-    }
-    if (dbUrl && !dbUrl.includes('pool_timeout=')) {
-        dbUrl += (dbUrl.includes('?') ? '&' : '?') + 'pool_timeout=60';
-    }
-    prismaOptions.datasources = { db: { url: dbUrl } };
-    return new client_1.PrismaClient(prismaOptions);
+        datasources: { db: { url: finalUrl } },
+        errorFormat: 'minimal',
+    });
+    console.log('✅ Prisma configured (RENDER PAID PLAN):');
+    console.log(`   connection_limit : 20`);
+    console.log(`   pool_timeout     : 30s`);
+    console.log(`   statement_timeout: 30s`);
+    return client;
 };
-const prisma = globalThis.prisma ?? createPrismaClient();
+const prisma = globalThis.__prisma ?? createPrismaClient();
 if (process.env.NODE_ENV !== 'production') {
-    globalThis.prisma = prisma;
+    globalThis.__prisma = prisma;
 }
-// Graceful shutdown
-const shutdown = async () => {
-    console.log('🔌 Disconnecting database...');
+// ✅ Graceful shutdown
+const gracefulShutdown = async () => {
+    console.log('🔌 Closing Prisma connections...');
     await prisma.$disconnect();
+    console.log('✅ Prisma disconnected');
 };
-process.on('beforeExit', shutdown);
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('beforeExit', gracefulShutdown);
+process.on('SIGINT', async () => {
+    await gracefulShutdown();
+    process.exit(0);
+});
+process.on('SIGTERM', async () => {
+    await gracefulShutdown();
+    process.exit(0);
+});
 exports.default = prisma;
 //# sourceMappingURL=database.js.map
