@@ -10,7 +10,7 @@ import { config } from './config';
 import prisma from './config/database';
 import { initializeSocket } from './socket';
 import { validateEncryptionKey } from './utils/encryption';
-import { initializeScheduler } from './services/scheduler.service';
+import { initializeScheduler, startTemplateMediaPreWarmJob } from './services/scheduler.service';
 
 let webhookService: any = null;
 
@@ -116,6 +116,9 @@ async function bootstrap() {
       );
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
+
+      // ✅ Start template media pre-warm job
+      startTemplateMediaPreWarmJob();
     });
 
     setupGracefulShutdown(server);
@@ -265,31 +268,6 @@ function startBackgroundJobs() {
       }
     }, 2 * 60 * 60 * 1000);
   }
-
-  // ✅ 4. Template pre-warm - Once daily at 3 AM
-  const scheduleNextPreWarm = () => {
-    const now = new Date();
-    const next3AM = new Date();
-    next3AM.setHours(3, 0, 0, 0);
-    if (next3AM <= now) next3AM.setDate(next3AM.getDate() + 1);
-    const msUntil3AM = next3AM.getTime() - now.getTime();
-
-    setTimeout(async () => {
-      if (!inPoolPressureMode) {
-        try {
-          const { templateMediaPreWarmService } = await import('./services/templateMediaPreWarm.service');
-          await templateMediaPreWarmService.preWarmExpiringMedia();
-        } catch (error) {
-          console.error('❌ Pre-warm error:', error);
-        }
-      }
-      scheduleNextPreWarm(); // Schedule next
-    }, msUntil3AM);
-    
-    console.log(`⏰ Next pre-warm scheduled: ${next3AM.toLocaleString()}`);
-  };
-  
-  scheduleNextPreWarm();
 
   console.log('✅ Background jobs started (with pool pressure protection)');
 }

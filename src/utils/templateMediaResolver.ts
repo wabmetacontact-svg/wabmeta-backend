@@ -1,13 +1,75 @@
+// src/utils/templateMediaResolver.ts - PRODUCTION FIX
+// ✅ Single source of truth for media resolution
+// ✅ Smart caching with automatic refresh
+// ✅ Handles all edge cases
+
 import axios from 'axios';
 import prisma from '../config/database';
 import { cloudinaryService } from '../services/cloudinary.service';
+import { metaApi } from '../modules/meta/meta.api';
+import { metaService } from '../modules/meta/meta.service';
+
+// ✅ Meta media ID expires in 30 days
+const MEDIA_TTL_DAYS = 25; // Refresh at 25 days for safety
+const MEDIA_TTL_MS = MEDIA_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 /**
- * Resolves a template's header media. If the headerContent is a short-lived Meta CDN URL
- * (scontent.whatsapp.net), it downloads the media, uploads it to Cloudinary, updates the
- * template database record with the new Cloudinary URL, and returns the new URL.
- * 
- * If it's already a permanent URL (like Cloudinary), it returns it as-is.
+ * Detects MIME type from URL
+ */
+function detectMimeFromUrl(url: string, headerType?: string): string {
+  const urlPath = url.split('?')[0].toLowerCase();
+  
+  const extMatch = urlPath.match(/\.([a-z0-9]+)$/i);
+  if (extMatch) {
+    const extMap: Record<string, string> = {
+      jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      png: 'image/png', webp: 'image/webp',
+      mp4: 'video/mp4', '3gp': 'video/3gpp',
+      pdf: 'application/pdf',
+    };
+    const mime = extMap[extMatch[1].toLowerCase()];
+    if (mime) return mime;
+  }
+
+  // Cloudinary format hints
+  if (urlPath.includes('/image/upload/')) return 'image/jpeg';
+  if (urlPath.includes('/video/upload/')) return 'video/mp4';
+  if (urlPath.includes('/raw/upload/')) return 'application/pdf';
+
+  // Fallback by header type
+  const typeDefaults: Record<string, string> = {
+    IMAGE: 'image/jpeg',
+    VIDEO: 'video/mp4',
+    DOCUMENT: 'application/pdf',
+  };
+  return typeDefaults[(headerType || '').toUpperCase()] || 'application/pdf';
+}
+
+/**
+ * Builds proper filename from URL and MIME
+ */
+function buildFilename(url: string, mimeType: string): string {
+  const urlPath = url.split('?')[0];
+  const lastSegment = urlPath.split('/').pop() || 'media';
+  
+  if (/\.[a-zA-Z0-9]{2,5}$/.test(lastSegment)) return lastSegment;
+  
+  const mimeToExt: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'video/mp4': 'mp4',
+    'video/3gpp': '3gp',
+    'application/pdf': 'pdf',
+  };
+  
+  const ext = mimeToExt[mimeType] || 'bin';
+  return `${lastSegment}.${ext}`;
+}
+
+/**
+ * ✅ MAIN FUNCTION: Resolves scontent.whatsapp.net URLs to Cloudinary
+ * Called when template is synced/created from Meta
  */
 export async function resolveTemplateHeaderMedia(template: {
   id: string;
@@ -16,43 +78,30 @@ export async function resolveTemplateHeaderMedia(template: {
   headerContent: string | null;
 }): Promise<string | null> {
   const url = template.headerContent;
-  
-  if (!url) {
-    return null;
-  }
+  if (!url) return null;
 
-  // If it's already a permanent URL (e.g. Cloudinary, custom domain), return it as-is
+  // Already permanent URL
   if (!url.includes('scontent.whatsapp')) {
     return url;
   }
 
-  // Verify Cloudinary is configured
   if (!cloudinaryService.isConfigured()) {
-    console.warn('⚠️ Cloudinary is not configured. Cannot resolve WhatsApp CDN media.');
+    console.warn('⚠️ Cloudinary not configured');
     return url;
   }
 
   try {
-    console.log(`🔄 Resolving WhatsApp CDN media to Cloudinary for template: ${template.id}`);
+    console.log(`🔄 Resolving scontent URL for template: ${template.id}`);
     
-    // Download media from Meta CDN
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 30000,
     });
 
     const buffer = Buffer.from(response.data);
-    const mimeType =
-      response.headers['content-type']?.split(';')[0]?.trim() ||
-      (template.headerType?.toUpperCase() === 'IMAGE'
-        ? 'image/jpeg'
-        : template.headerType?.toUpperCase() === 'VIDEO'
-        ? 'video/mp4'
-        : 'application/pdf');
+    const mimeType = detectMimeFromUrl(url, template.headerType || undefined);
+    const filename = buildFilename(url, mimeType);
 
-    const filename = url.split('/').pop()?.split('?')[0] || 'media';
-
-    // Upload to Cloudinary
     const uploadResult = await cloudinaryService.uploadTemplateMedia(
       buffer,
       filename,
@@ -62,19 +111,247 @@ export async function resolveTemplateHeaderMedia(template: {
 
     const secureUrl = uploadResult.secureUrl;
 
-    // Update database record
     await prisma.template.update({
       where: { id: template.id },
-      data: {
-        headerContent: secureUrl,
+      data: { headerContent: secureUrl },
+    });
+
+    console.log(`✅ Resolved to Cloudinary: ${secureUrl.substring(0, 60)}...`);
+    return secureUrl;
+  } catch (err: any) {
+    console.error(`❌ Failed to resolve template media:`, err.message);
+    return url;
+  }
+}
+
+/**
+ * ✅ CRITICAL FUNCTION: Get fresh Meta media ID for sending messages
+ * This is what campaigns/messages use
+ * 
+ * Logic:
+ * 1. Check if we have fresh media ID (< 25 days old)
+ * 2. If yes → return it
+ * 3. If no → download from Cloudinary → upload to Meta → save new ID
+ * 
+ * ✅ SINGLE-FLIGHT: Multiple concurrent calls will share one upload
+ */
+const inFlightUploads = new Map<string, Promise<string | null>>();
+
+export async function getFreshMediaIdForSending(
+  templateId: string
+): Promise<string | null> {
+  // ✅ Single-flight: prevent duplicate uploads
+  const existing = inFlightUploads.get(templateId);
+  if (existing) {
+    console.log(`⏳ Waiting for in-flight media upload: ${templateId}`);
+    return existing;
+  }
+
+  const uploadPromise = _getFreshMediaId(templateId);
+  inFlightUploads.set(templateId, uploadPromise);
+
+  try {
+    return await uploadPromise;
+  } finally {
+    // Clean up after 5 seconds to allow other requests to reuse
+    setTimeout(() => inFlightUploads.delete(templateId), 5000);
+  }
+}
+
+/**
+ * Internal function - actual media ID resolution
+ */
+async function _getFreshMediaId(templateId: string): Promise<string | null> {
+  const template = await prisma.template.findUnique({
+    where: { id: templateId },
+    include: { whatsappAccount: true },
+  });
+
+  if (!template) {
+    console.error(`❌ Template not found: ${templateId}`);
+    return null;
+  }
+
+  if (!template.whatsappAccount) {
+    console.error(`❌ Template has no WhatsApp account: ${templateId}`);
+    return null;
+  }
+
+  const headerType = (template.headerType || '').toUpperCase();
+  
+  // No media header - return null (not an error)
+  if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+    return null;
+  }
+
+  // ✅ STEP 1: Check if cached media ID is still fresh
+  const mediaId = template.headerMediaId;
+  const uploadedAt = template.headerMediaUploadedAt;
+
+  if (mediaId && /^\d+$/.test(mediaId) && uploadedAt) {
+    const ageMs = Date.now() - new Date(uploadedAt).getTime();
+    const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+    
+    if (ageMs < MEDIA_TTL_MS) {
+      console.log(`✅ Using cached media ID: ${mediaId} (${ageDays} days old)`);
+      return mediaId;
+    }
+    
+    console.log(`⏰ Cached media ID expired (${ageDays} days old) - refreshing...`);
+  }
+
+  // ✅ STEP 2: Need fresh upload - get Cloudinary URL
+  let sourceUrl = template.headerContent;
+  
+  // If it's a scontent URL, resolve it first
+  if (sourceUrl && sourceUrl.includes('scontent.whatsapp')) {
+    console.log('🔄 Header has scontent URL - resolving to Cloudinary first...');
+    sourceUrl = await resolveTemplateHeaderMedia({
+      id: template.id,
+      organizationId: template.organizationId,
+      headerType: template.headerType,
+      headerContent: template.headerContent,
+    });
+  }
+
+  // Check if we have a valid permanent URL
+  if (!sourceUrl || !sourceUrl.startsWith('http')) {
+    console.error(`❌ Template ${template.name} has no valid source URL`);
+    return null;
+  }
+
+  // ✅ STEP 3: Download from source and upload to Meta
+  try {
+    // Get decrypted token
+    const accountWithToken = await metaService.getAccountWithToken(
+      template.whatsappAccount.id
+    );
+    
+    if (!accountWithToken?.accessToken) {
+      console.error(`❌ Cannot decrypt token for ${template.whatsappAccount.id}`);
+      return null;
+    }
+
+    console.log(`📥 Downloading from: ${sourceUrl.substring(0, 60)}...`);
+    
+    const response = await axios.get(sourceUrl, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
+        'Accept': '*/*',
       },
     });
 
-    console.log(`✅ Successfully resolved template media. New URL: ${secureUrl}`);
-    return secureUrl;
+    const buffer = Buffer.from(response.data);
+    const rawMime = (response.headers['content-type'] || '')
+      .split(';')[0]
+      .trim();
+    
+    const mimeType = rawMime && rawMime.startsWith('image/') || 
+                     rawMime.startsWith('video/') || 
+                     rawMime.startsWith('application/')
+      ? rawMime
+      : detectMimeFromUrl(sourceUrl, template.headerType || undefined);
+    
+    const filename = buildFilename(sourceUrl, mimeType);
+
+    console.log(`📤 Uploading to Meta: ${filename} (${mimeType}, ${buffer.length} bytes)`);
+
+    const result = await metaApi.uploadMedia(
+      template.whatsappAccount.phoneNumberId,
+      accountWithToken.accessToken,
+      buffer,
+      mimeType,
+      filename,
+      template.whatsappAccount.wabaId
+    );
+
+    if (!result?.id) {
+      console.error('❌ Meta upload returned no ID');
+      return null;
+    }
+
+    // ✅ STEP 4: Save fresh ID to DB
+    await prisma.template.update({
+      where: { id: template.id },
+      data: {
+        headerMediaId: result.id,
+        headerMediaUploadedAt: new Date(),
+        headerMediaLastVerified: new Date(),
+      },
+    });
+
+    console.log(`✅ Fresh media ID uploaded: ${result.id}`);
+    return result.id;
   } catch (err: any) {
-    console.error(`❌ Failed to resolve template media for template ${template.id}:`, err.message);
-    // Return original URL as fallback so we don't block the message, even if it might fail later
-    return url;
+    console.error(`❌ Media upload failed for ${template.name}:`, err.message);
+    
+    // Log detailed error for debugging
+    if (err.response?.data) {
+      console.error('   Meta error:', JSON.stringify(err.response.data.error || err.response.data));
+    }
+    
+    return null;
   }
+}
+
+/**
+ * ✅ HELPER: Validate template is ready to send
+ * Called before campaign starts to fail fast
+ */
+export async function validateTemplateReady(templateId: string): Promise<{
+  ready: boolean;
+  reason?: string;
+}> {
+  const template = await prisma.template.findUnique({
+    where: { id: templateId },
+    include: { whatsappAccount: true },
+  });
+
+  if (!template) return { ready: false, reason: 'Template not found' };
+  if (template.status !== 'APPROVED') {
+    return { ready: false, reason: `Template not approved (${template.status})` };
+  }
+  if (!template.whatsappAccount) {
+    return { ready: false, reason: 'No WhatsApp account linked' };
+  }
+  if (template.whatsappAccount.status !== 'CONNECTED') {
+    return { ready: false, reason: 'WhatsApp account disconnected' };
+  }
+
+  const headerType = (template.headerType || '').toUpperCase();
+  
+  if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+    // Must have either fresh media ID OR permanent URL to re-upload
+    const hasFreshId = template.headerMediaId && 
+                       /^\d+$/.test(template.headerMediaId) &&
+                       template.headerMediaUploadedAt &&
+                       (Date.now() - new Date(template.headerMediaUploadedAt).getTime()) < MEDIA_TTL_MS;
+    
+    const hasPermanentUrl = template.headerContent && 
+                           template.headerContent.startsWith('http') &&
+                           !template.headerContent.includes('scontent.whatsapp');
+    
+    if (!hasFreshId && !hasPermanentUrl) {
+      return {
+        ready: false,
+        reason: `Template "${template.name}" has expired media and no source URL. Please re-upload media.`,
+      };
+    }
+
+    // ✅ Pre-warm the media ID
+    if (!hasFreshId && hasPermanentUrl) {
+      console.log(`🔥 Pre-warming media for ${template.name}...`);
+      const freshId = await getFreshMediaIdForSending(templateId);
+      if (!freshId) {
+        return {
+          ready: false,
+          reason: `Failed to upload media for template "${template.name}". Please re-upload manually.`,
+        };
+      }
+    }
+  }
+
+  return { ready: true };
 }

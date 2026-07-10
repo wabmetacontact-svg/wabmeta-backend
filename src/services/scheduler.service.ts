@@ -7,6 +7,7 @@ import cron from 'node-cron';
 import { automationEngine } from '../modules/automation/automation.engine';
 import prisma from '../config/database';
 import { SubscriptionStatus, PlanType } from '@prisma/client';
+import { templateMediaPreWarmService } from './templateMediaPreWarm.service';
 
 // ✅ Global state tracking
 const state = {
@@ -293,3 +294,18 @@ async function sendExpiryWarnings() {
     }
   }
 }
+
+// ✅ Run every day at 3 AM to refresh expiring media
+export const startTemplateMediaPreWarmJob = () => {
+  cron.schedule('0 3 * * *', async () => {
+    console.log('⏰ [CRON] Starting template media pre-warm job...');
+    try {
+      const result = await templateMediaPreWarmService.preWarmExpiringMedia();
+      console.log(`✅ [CRON] Pre-warm done:`, result);
+    } catch (err: any) {
+      console.error('❌ [CRON] Pre-warm failed:', err.message);
+    }
+  });
+  
+  console.log('⏰ Scheduled: Template media pre-warm (daily at 3 AM)');
+};

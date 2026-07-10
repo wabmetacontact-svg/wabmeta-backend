@@ -16,6 +16,12 @@ import {
   COUNTRY_NAMES_MAP  // ← ye add karo
 } from '../wallet/wallet.deduction.service';
 
+// ✅ NEW: Import shared media resolver
+import { 
+  getFreshMediaIdForSending, 
+  validateTemplateReady 
+} from '../../utils/templateMediaResolver';
+
 
 // ============================================
 // HELPER FUNCTIONS
@@ -536,29 +542,13 @@ export class CampaignsService {
     if (!campaign) throw new AppError('Campaign not found', 404);
     if (campaign.status === 'RUNNING') throw new AppError('Already running', 400);
 
-    // ✅ Template checks
+    // ✅ NEW: Comprehensive template validation with pre-warm
     if (campaign.template) {
-      const tpl = campaign.template as any;
-      if (tpl.status === 'REJECTED') {
-        throw new AppError(`Template "${tpl.name}" is REJECTED by Meta.`, 400);
+      const validation = await validateTemplateReady(campaign.template.id);
+      if (!validation.ready) {
+        throw new AppError(validation.reason || 'Template not ready', 400);
       }
-      if (tpl.status !== 'APPROVED') {
-        throw new AppError(`Template "${tpl.name}" is not approved (status: ${tpl.status}).`, 400);
-      }
-      const headerType = (tpl.headerType || '').toUpperCase();
-      if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-        const mediaId = tpl.headerMediaId;
-        const permanentUrl = tpl.headerContent;
-        const hasNumericId = mediaId && /^\d+$/.test(mediaId);
-        const hasPermanentUrl = permanentUrl && permanentUrl.startsWith('http') && !permanentUrl.includes('scontent.whatsapp');
-        const hasUrlInMediaId = mediaId && mediaId.startsWith('http') && !mediaId.includes('scontent.whatsapp');
-        if (!hasNumericId && !hasPermanentUrl && !hasUrlInMediaId) {
-          throw new AppError(
-            `Template "${tpl.name}" has missing media. Please edit and re-upload.`,
-            400
-          );
-        }
-      }
+      console.log(`✅ Template validated and media pre-warmed: ${campaign.template.name}`);
     }
 
     // ✅ Dynamic Wallet Balance Check
@@ -1033,24 +1023,43 @@ export class CampaignsService {
       const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
       const template = campaign.template;
 
-      // ✅ FIX FOR SERVER CRASH: Pre-resolve media ONCE before the massive loop
+      // ✅ NEW: Pre-warm media using shared resolver (single upload, cached for all recipients)
       if (template.headerType && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType.toUpperCase())) {
         try {
-          console.log(`🖼️ Pre-resolving media for template ${template.name}...`);
-          const resolvedMediaId = await resolveTemplateMedia(template);
+          console.log(`🖼️ Pre-warming media for template: ${template.name}...`);
+          const freshMediaId = await getFreshMediaIdForSending(template.id);
           
-          if (!resolvedMediaId) {
-            throw new Error('Could not resolve template media ID.');
+          if (!freshMediaId) {
+            throw new Error(
+              `Template "${template.name}" media could not be prepared. ` +
+              `Please edit the template and re-upload the media file.`
+            );
           }
 
-          // Update the in-memory template object so the loop uses the fresh cached ID
-          // instead of trying to download and re-upload the media 1000 times concurrently!
-          template.headerMediaId = resolvedMediaId;
+          // ✅ Update in-memory template with fresh ID (all 1000+ recipients use this cached ID)
+          template.headerMediaId = freshMediaId;
           template.headerMediaUploadedAt = new Date();
           template.headerMediaLastVerified = new Date();
+          
+          console.log(`✅ Media ready for campaign: ${freshMediaId}`);
         } catch (err: any) {
-          console.error(`❌ Failed to pre-resolve media:`, err.message);
-          throw new Error(`Failed to prepare template media: ${err.message}`);
+          console.error(`❌ Media pre-warm failed:`, err.message);
+          
+          // Mark campaign as failed with clear reason
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { 
+              status: 'FAILED', 
+              completedAt: new Date() 
+            },
+          });
+          
+          campaignSocketService.emitCampaignError(organizationId, campaignId, {
+            message: err.message,
+            code: 'MEDIA_UPLOAD_FAILED',
+          });
+          
+          throw err;
         }
       }
 
@@ -2006,81 +2015,6 @@ export class CampaignsService {
   }
 }
 
-// ✅ CRITICAL HELPER: Resolve media ID from Cloudinary URL
-async function resolveTemplateMedia(template: any): Promise<string | null> {
-  // Check cache first (last verified within 25 days)
-  if (template.headerMediaId && template.headerMediaLastVerified) {
-    const daysSinceVerified = 
-      (Date.now() - new Date(template.headerMediaLastVerified).getTime()) / 
-      (1000 * 60 * 60 * 24);
-    
-    if (daysSinceVerified < 25) {
-      // Media ID still valid
-      return template.headerMediaId;
-    }
-  }
-
-  // ✅ Need fresh media ID - upload from Cloudinary
-  if (!template.headerContent || !template.headerContent.startsWith('http')) {
-    console.error('❌ Template has no valid Cloudinary URL to refresh from');
-    return null;
-  }
-
-  try {
-    console.log(`🔄 Refreshing media for template: ${template.name}`);
-    
-    const waAccount = await prisma.whatsAppAccount.findUnique({
-      where: { id: template.whatsappAccountId },
-    });
-    
-    if (!waAccount) return null;
-
-    const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
-    if (!accountWithToken) return null;
-
-    // Download from Cloudinary
-    const response = await axios.get(template.headerContent, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
-    });
-    
-    const buffer = Buffer.from(response.data);
-    const mimeType = response.headers['content-type']?.split(';')[0] ||
-      (template.headerType === 'IMAGE' ? 'image/jpeg' :
-       template.headerType === 'VIDEO' ? 'video/mp4' :
-       'application/pdf');
-    
-    const filename = template.headerContent.split('/').pop()?.split('?')[0] || 'media';
-
-    // Upload to Meta - get NUMERIC media ID (for message sending)
-    const result = await metaApi.uploadMedia(
-      waAccount.phoneNumberId,
-      accountWithToken.accessToken,
-      buffer,
-      mimeType,
-      filename,
-      waAccount.wabaId
-    );
-
-    // Save fresh ID to DB
-    await prisma.template.update({
-      where: { id: template.id },
-      data: {
-        headerMediaId: result.id,
-        headerMediaUploadedAt: new Date(),
-        headerMediaLastVerified: new Date(),
-      },
-    });
-
-    console.log(`✅ Refreshed media ID: ${result.id}`);
-    return result.id;
-    
-  } catch (error: any) {
-    console.error(`❌ Media refresh failed: ${error.message}`);
-    return null;
-  }
-}
-
 // Helper to extract {{n}} variables
 function extractVariables(text: string): number[] {
   const regex = /\{\{(\d+)\}\}/g;
@@ -2092,18 +2026,12 @@ function extractVariables(text: string): number[] {
   return [...new Set(vars)].sort((a, b) => a - b);
 }
 
-// ✅ buildTemplateMessage (adapted with language code mapper)
 async function buildTemplateMessage(template: any, variables: Record<string, string>) {
   const components: any[] = [];
-
   const headerType = template.headerType?.toUpperCase();
 
-  // ✅ HEADER: Only attach media if template has DYNAMIC header
-  //    Approved templates with STATIC media use Meta's embedded copy
-  //    We should NOT send media ID for static headers
-  
+  // ✅ TEXT header with variables
   if (headerType === 'TEXT' && template.headerContent) {
-    // Text header with variables
     const headerVars = extractVariables(template.headerContent);
     if (headerVars.length > 0) {
       components.push({
@@ -2115,21 +2043,19 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
       });
     }
   }
+  // ✅ MEDIA header - use PRE-CACHED media ID (already pre-warmed in processCampaignContacts)
   else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    // ✅ CRITICAL: For media headers, we MUST provide fresh media
-    //    But we resolve it FROM CLOUDINARY on every send
+    const mediaId = template.headerMediaId;
     
-    const freshMediaId = await resolveTemplateMedia(template);
-    
-    if (!freshMediaId) {
+    if (!mediaId || !/^\d+$/.test(mediaId)) {
       throw new Error(
-        `Template "${template.name}" has media header but no valid media. ` +
-        `Please re-upload media in template settings.`
+        `Template "${template.name}" media ID is invalid or missing. ` +
+        `Pre-warm should have handled this.`
       );
     }
 
-    const mediaType = headerType.toLowerCase(); // image/video/document
-    const mediaParam: any = { id: freshMediaId };
+    const mediaType = headerType.toLowerCase();
+    const mediaParam: any = { id: mediaId };
     
     if (mediaType === 'document') {
       mediaParam.filename = template.name + '.pdf';
