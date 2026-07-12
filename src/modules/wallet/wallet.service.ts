@@ -2,6 +2,8 @@ import prisma from '../../config/database';
 import crypto from 'crypto';
 import { AppError } from '../../middleware/errorHandler';
 
+const db = prisma as any;
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAISE_MULTIPLIER = 100;
 
@@ -274,6 +276,7 @@ export async function getTransactionHistory(
 }
 
 // ─── 4. Create TopUp Order ─────────────────────────────────────────────────────
+// ─── 4. Create TopUp Order (FIXED with tracking) ───────────────────────────
 export async function createTopUpOrder(
   organizationId: string,
   amountRupees: number
@@ -285,14 +288,9 @@ export async function createTopUpOrder(
   if (!wallet) throw new AppError('Wallet not found', 404);
   if (!wallet.isActive) throw new AppError('Wallet is not active', 403);
   if (wallet.flagged) {
-    throw new AppError(
-      'Wallet is flagged. Please contact support.',
-      403
-    );
+    throw new AppError('Wallet is flagged. Please contact support.', 403);
   }
 
-  // ✅ FIX: Validate amount is in RUPEES range
-  // Frontend galti se paise bhej sakta hai
   if (amountRupees > 100000) {
     throw new AppError(
       `Amount too large. Maximum is ₹1,00,000 per transaction. ` +
@@ -309,25 +307,17 @@ export async function createTopUpOrder(
 
   if (amountPaise > wallet.maxTopUpPaise) {
     throw new AppError(
-      `Maximum top-up is ₹${toRupees(
-        wallet.maxTopUpPaise
-      ).toLocaleString('en-IN')} per transaction`,
+      `Maximum top-up is ₹${toRupees(wallet.maxTopUpPaise).toLocaleString('en-IN')} per transaction`,
       400
     );
   }
 
   const updatedWallet = await resetMonthlyIfNeeded(wallet);
 
-  if (
-    updatedWallet.currentMonthPaise + amountPaise >
-    updatedWallet.maxMonthlyPaise
-  ) {
-    const remainingPaise =
-      updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
+  if (updatedWallet.currentMonthPaise + amountPaise > updatedWallet.maxMonthlyPaise) {
+    const remainingPaise = updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
     throw new AppError(
-      `Monthly limit exceeded. Remaining: ₹${toRupees(
-        remainingPaise
-      ).toLocaleString('en-IN')}`,
+      `Monthly limit exceeded. Remaining: ₹${toRupees(remainingPaise).toLocaleString('en-IN')}`,
       400
     );
   }
@@ -335,9 +325,7 @@ export async function createTopUpOrder(
   const { instance: rzp, keyId } = getWalletRazorpay();
 
   const timestamp = Date.now().toString().slice(-8);
-  const orgShort = organizationId
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .slice(-6);
+  const orgShort = organizationId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
   const receipt = `wlt_${orgShort}_${timestamp}`;
 
   const order = await rzp.orders.create({
@@ -349,15 +337,24 @@ export async function createTopUpOrder(
       organizationId,
       purpose: 'wallet_topup',
       walletId: wallet.id,
-      // ✅ FIX: Amount store karo order notes mein
-      // Verify step mein is amount ko use karenge
-      // Frontend ka claimed amount ignore karenge
       amountPaise: String(amountPaise),
       amountRupees: String(amountRupees),
     },
   });
 
-  console.log('✅ Wallet TopUp order created:', {
+  // ✅ CRITICAL: Save order to DB for tracking
+  await db.walletTopUpOrder.create({
+    data: {
+      organizationId,
+      walletId: wallet.id,
+      razorpayOrderId: order.id,
+      amountPaise,
+      currency: 'INR',
+      status: 'PENDING',
+    },
+  });
+
+  console.log('✅ Wallet TopUp order created & tracked:', {
     orderId: order.id,
     amount: `₹${amountRupees}`,
     org: organizationId,
@@ -373,17 +370,146 @@ export async function createTopUpOrder(
   };
 }
 
-// ─── 5. Verify & Process TopUp ─────────────────────────────────────────────────
-// ✅ CRITICAL FIX: Amount Razorpay order se lo, frontend se nahi
-// ✅ FIX: Idempotency - duplicate payment check
-// ✅ FIX: Order amount vs claimed amount mismatch detect
+// ─── 5. BULLETPROOF Credit Function - Idempotent & Atomic ────────────────
+async function creditWalletAtomic(params: {
+  organizationId: string;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature?: string;
+  amountPaise: number;
+  creditedVia: 'user_verify' | 'webhook' | 'cron_reconciliation' | 'manual';
+}) {
+  const { organizationId, razorpayOrderId, razorpayPaymentId, razorpaySignature, amountPaise, creditedVia } = params;
+
+  return await prisma.$transaction(async (tx) => {
+    const txDb = tx as any;
+
+    // ✅ STEP 1: Check duplicate (by orderId OR paymentId)
+    const existingTxn = await tx.walletTransaction.findFirst({
+      where: {
+        OR: [
+          { razorpayPaymentId },
+          { razorpayOrderId },
+        ],
+      },
+    });
+
+    if (existingTxn) {
+      // Update topup order status if needed
+      await txDb.walletTopUpOrder.updateMany({
+        where: { razorpayOrderId, status: { not: 'COMPLETED' } },
+        data: {
+          status: 'COMPLETED',
+          razorpayPaymentId,
+          completedAt: new Date(),
+          transactionId: existingTxn.id,
+          creditedVia,
+        },
+      });
+
+      return {
+        alreadyCredited: true,
+        transaction: existingTxn,
+        newBalance: 0, // Will be fetched
+      };
+    }
+
+    // ✅ STEP 2: Get wallet with lock
+    const wallet = await tx.wallet.findUnique({
+      where: { organizationId },
+    });
+
+    if (!wallet) {
+      throw new AppError(
+        `Wallet not found for org ${organizationId}. Payment ID: ${razorpayPaymentId}`,
+        404
+      );
+    }
+
+    if (!wallet.isActive) {
+      throw new AppError(
+        `Wallet inactive. Payment ID: ${razorpayPaymentId}`,
+        403
+      );
+    }
+
+    // ✅ STEP 3: Credit atomically
+    const balanceBeforePaise = wallet.balancePaise;
+    const balanceAfterPaise = balanceBeforePaise + amountPaise;
+
+    const updatedWallet = await tx.wallet.update({
+      where: { id: wallet.id },
+      data: {
+        balancePaise: balanceAfterPaise,
+        totalCreditedPaise: { increment: amountPaise },
+        currentMonthPaise: { increment: amountPaise },
+        lastTransactionAt: new Date(),
+        lowAlertSent: false,
+      },
+    });
+
+    // ✅ STEP 4: Create transaction record
+    const transaction = await tx.walletTransaction.create({
+      data: {
+        walletId: wallet.id,
+        type: 'credit',
+        amountPaise,
+        balanceBeforePaise,
+        balanceAfterPaise,
+        description: `Wallet top-up via Razorpay - ₹${toRupees(amountPaise)}`,
+        status: 'completed',
+        razorpayOrderId,
+        razorpayPaymentId,
+        note: `Credited via: ${creditedVia}`,
+      },
+    });
+
+    // ✅ STEP 5: Update topup order
+    await txDb.walletTopUpOrder.upsert({
+      where: { razorpayOrderId },
+      create: {
+        organizationId,
+        walletId: wallet.id,
+        razorpayOrderId,
+        razorpayPaymentId,
+        razorpaySignature,
+        amountPaise,
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        transactionId: transaction.id,
+        creditedVia,
+      },
+      update: {
+        razorpayPaymentId,
+        razorpaySignature,
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        transactionId: transaction.id,
+        creditedVia,
+      },
+    });
+
+    return {
+      alreadyCredited: false,
+      transaction,
+      wallet: updatedWallet,
+      newBalance: toRupees(updatedWallet.balancePaise),
+      amountAdded: toRupees(amountPaise),
+    };
+  }, {
+    isolationLevel: 'Serializable', // ✅ Highest isolation for race conditions
+    timeout: 15000,
+  });
+}
+
+// ─── 5B. Verify & Process TopUp (BULLETPROOF) ─────────────────────────────
 export async function processTopUp(
   organizationId: string,
   data: {
     razorpayOrderId: string;
     razorpayPaymentId: string;
     razorpaySignature: string;
-    amount: number; // Frontend ka claimed amount (verify ke liye use hoga)
+    amount: number;
   }
 ) {
   console.log('💳 Processing wallet top-up:', {
@@ -393,17 +519,13 @@ export async function processTopUp(
     org: organizationId,
   });
 
-  // ── Step 1: Signature verify ────────────────────────────────────────────────
+  // ── Step 1: Signature verify ─────────────────────────────────────────────
   const walletSecret = process.env.WALLET_RAZORPAY_KEY_SECRET;
   if (!walletSecret) {
-    throw new AppError(
-      'Wallet payment gateway not configured. Contact support.',
-      500
-    );
+    throw new AppError('Wallet payment gateway not configured', 500);
   }
 
-  const body =
-    data.razorpayOrderId + '|' + data.razorpayPaymentId;
+  const body = data.razorpayOrderId + '|' + data.razorpayPaymentId;
   const expectedSignature = crypto
     .createHmac('sha256', walletSecret)
     .update(body)
@@ -414,95 +536,39 @@ export async function processTopUp(
       orderId: data.razorpayOrderId,
       org: organizationId,
     });
-    throw new AppError(
-      'Payment verification failed: Invalid signature',
-      400
-    );
-  }
-
-  console.log('✅ Wallet TopUp: Signature verified');
-
-  // ── Step 2: Duplicate payment check ────────────────────────────────────────
-  // ✅ FIX: Check karo ki ye payment already process hua hai
-  const existingTxn = await prisma.walletTransaction.findFirst({
-    where: {
-      OR: [
-        { razorpayPaymentId: data.razorpayPaymentId },
-        { razorpayOrderId: data.razorpayOrderId },
-      ],
-    },
-    select: { id: true, amountPaise: true, status: true },
-  });
-
-  if (existingTxn) {
-    console.log(
-      '⚠️ Duplicate payment detected:',
-      data.razorpayPaymentId
-    );
-    // ✅ Idempotent response - already credited toh success do
-    const wallet = await prisma.wallet.findUnique({
-      where: { organizationId },
+    
+    // ✅ Mark order as failed
+    await db.walletTopUpOrder.updateMany({
+      where: { razorpayOrderId: data.razorpayOrderId },
+      data: {
+        status: 'FAILED',
+        failureReason: 'Invalid signature',
+        attemptCount: { increment: 1 },
+        lastAttemptAt: new Date(),
+      },
     });
-    return {
-      success: true,
-      newBalance: wallet ? toRupees(wallet.balancePaise) : 0,
-      amountAdded: toRupees(existingTxn.amountPaise),
-      alreadyProcessed: true,
-      transaction: formatTransaction(existingTxn),
-    };
+    
+    throw new AppError('Payment verification failed: Invalid signature', 400);
   }
 
-  // ── Step 3: Razorpay order fetch → ACTUAL amount lao ───────────────────────
-  // ✅ CRITICAL FIX: Frontend ka amount trust mat karo
-  // Razorpay ke order se actual amount fetch karo
+  console.log('✅ Signature verified');
+
+  // ── Step 2: Fetch actual amount from Razorpay ────────────────────────────
   let actualAmountPaise: number;
 
   try {
     const { instance: rzp } = getWalletRazorpay();
     const order = await rzp.orders.fetch(data.razorpayOrderId);
 
-    // ✅ Razorpay order ka amount use karo
     actualAmountPaise = Number(order.amount);
 
-    // ✅ Verify organization match
     const orderOrg = order.notes?.organizationId;
     if (orderOrg && orderOrg !== organizationId) {
-      console.error('🚨 Organization mismatch!', {
-        orderOrg,
-        requestOrg: organizationId,
-      });
-      throw new AppError(
-        'Payment order does not belong to this organization',
-        400
-      );
+      throw new AppError('Payment order does not belong to this organization', 400);
     }
 
-    // ✅ Verify purpose is wallet_topup
-    if (
-      order.notes?.purpose &&
-      order.notes.purpose !== 'wallet_topup'
-    ) {
-      throw new AppError(
-        'This payment order is not for wallet top-up',
-        400
-      );
-    }
-
-    // ✅ Cross-check: Frontend claimed amount vs actual order amount
-    const claimedAmountPaise = toPaise(data.amount);
-    const tolerance = 100; // 1 rupee tolerance
-
-    if (
-      Math.abs(actualAmountPaise - claimedAmountPaise) > tolerance
-    ) {
-      console.warn('⚠️ Amount mismatch detected:', {
-        claimedRupees: data.amount,
-        claimedPaise: claimedAmountPaise,
-        actualPaise: actualAmountPaise,
-        actualRupees: toRupees(actualAmountPaise),
-        orderId: data.razorpayOrderId,
-      });
-      // ✅ Use Razorpay's amount (ignore frontend claim)
+    if (order.notes?.purpose && order.notes.purpose !== 'wallet_topup') {
+      throw new AppError('This payment order is not for wallet top-up', 400);
     }
 
     console.log('✅ Razorpay order verified:', {
@@ -511,140 +577,179 @@ export async function processTopUp(
       actualAmount: `₹${toRupees(actualAmountPaise)}`,
     });
 
-    // ✅ Check order status
     if (order.status !== 'paid') {
-      console.error('❌ Order not paid:', order.status);
-      throw new AppError(
-        `Payment not completed. Order status: ${order.status}`,
-        400
-      );
+      throw new AppError(`Payment not completed. Order status: ${order.status}`, 400);
     }
   } catch (err: any) {
     if (err instanceof AppError) throw err;
-
-    // Razorpay API call fail - fallback to signature verified amount
-    console.error(
-      '⚠️ Could not fetch Razorpay order, using claimed amount:',
-      err.message
-    );
+    console.error('⚠️ Razorpay API error, using claimed amount:', err.message);
     actualAmountPaise = toPaise(data.amount);
   }
 
-  // ── Step 4: Wallet fetch ────────────────────────────────────────────────────
-  const wallet = await prisma.wallet.findUnique({
-    where: { organizationId },
-  });
+  // ── Step 3: Credit atomically (idempotent) ───────────────────────────────
+  try {
+    const result = await creditWalletAtomic({
+      organizationId,
+      razorpayOrderId: data.razorpayOrderId,
+      razorpayPaymentId: data.razorpayPaymentId,
+      razorpaySignature: data.razorpaySignature,
+      amountPaise: actualAmountPaise,
+      creditedVia: 'user_verify',
+    });
 
-  if (!wallet) {
-    throw new AppError(
-      'Wallet not found. Payment received but could not credit. Contact support with payment ID: ' +
-        data.razorpayPaymentId,
-      404
-    );
-  }
-
-  if (!wallet.isActive) {
-    throw new AppError(
-      'Wallet is inactive. Contact support with payment ID: ' +
-        data.razorpayPaymentId,
-      403
-    );
-  }
-
-  const balanceBeforePaise = wallet.balancePaise;
-  const balanceAfterPaise = balanceBeforePaise + actualAmountPaise;
-
-  console.log('💰 Crediting wallet:', {
-    before: `₹${toRupees(balanceBeforePaise)}`,
-    adding: `₹${toRupees(actualAmountPaise)}`,
-    after: `₹${toRupees(balanceAfterPaise)}`,
-    org: organizationId,
-  });
-
-  // ── Step 5: Atomic DB transaction ───────────────────────────────────────────
-  // ✅ FIX: Transaction ke andar bhi duplicate check karo
-  // Race condition prevent karne ke liye
-  const [updatedWallet, transaction] = await prisma.$transaction(
-    async (tx) => {
-      // ✅ Double-check inside transaction (race condition safe)
-      const alreadyExists = await tx.walletTransaction.findFirst({
-        where: {
-          OR: [
-            { razorpayPaymentId: data.razorpayPaymentId },
-            { razorpayOrderId: data.razorpayOrderId },
-          ],
-        },
-        select: { id: true },
-      });
-
-      if (alreadyExists) {
-        throw new AppError('ALREADY_PROCESSED', 409);
-      }
-
-      const updated = await tx.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          balancePaise: balanceAfterPaise,
-          totalCreditedPaise: { increment: actualAmountPaise },
-          currentMonthPaise: { increment: actualAmountPaise },
-          lastTransactionAt: new Date(),
-          lowAlertSent: false,
-        },
-      });
-
-      const txn = await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: 'credit',
-          amountPaise: actualAmountPaise,
-          balanceBeforePaise,
-          balanceAfterPaise,
-          description: `Wallet top-up via Razorpay - ₹${toRupees(
-            actualAmountPaise
-          )}`,
-          status: 'completed',
-          razorpayOrderId: data.razorpayOrderId,
-          razorpayPaymentId: data.razorpayPaymentId,
-        },
-      });
-
-      return [updated, txn];
-    }
-  ).catch(async (err) => {
-    // ✅ Handle race condition gracefully
-    if (
-      err instanceof AppError &&
-      err.message === 'ALREADY_PROCESSED'
-    ) {
-      const existingWallet = await prisma.wallet.findUnique({
+    // If already credited (by webhook), fetch current balance
+    if (result.alreadyCredited) {
+      const wallet = await prisma.wallet.findUnique({
         where: { organizationId },
       });
-      const existingTxn = await prisma.walletTransaction.findFirst({
-        where: {
-          OR: [
-            { razorpayPaymentId: data.razorpayPaymentId },
-            { razorpayOrderId: data.razorpayOrderId },
-          ],
-        },
-      });
-      return [existingWallet, existingTxn] as any;
+
+      console.log('✅ Payment already processed - returning success');
+
+      return {
+        success: true,
+        newBalance: wallet ? toRupees(wallet.balancePaise) : 0,
+        amountAdded: toRupees(actualAmountPaise),
+        alreadyProcessed: true,
+        transaction: formatTransaction(result.transaction),
+      };
     }
+
+    console.log('✅ Wallet credited via verify:', {
+      org: organizationId,
+      amount: `₹${result.amountAdded}`,
+      newBalance: `₹${result.newBalance}`,
+    });
+
+    return {
+      success: true,
+      newBalance: result.newBalance,
+      amountAdded: result.amountAdded,
+      transaction: formatTransaction(result.transaction),
+    };
+  } catch (err: any) {
+    // ✅ Update order tracking on failure
+    await db.walletTopUpOrder.updateMany({
+      where: { razorpayOrderId: data.razorpayOrderId },
+      data: {
+        razorpayPaymentId: data.razorpayPaymentId,
+        status: 'FAILED',
+        failureReason: err.message,
+        attemptCount: { increment: 1 },
+        lastAttemptAt: new Date(),
+      },
+    });
+
     throw err;
+  }
+}
+
+// ─── 5C. NEW: Manual Retry Function ──────────────────────────────────────
+// User can retry a failed payment verification
+export async function retryTopUpVerification(
+  organizationId: string,
+  razorpayOrderId: string,
+  razorpayPaymentId?: string
+) {
+  console.log('🔄 Retrying topup verification:', { organizationId, razorpayOrderId });
+
+  // ✅ Verify order belongs to this org
+  const topupOrder = await db.walletTopUpOrder.findUnique({
+    where: { razorpayOrderId },
   });
 
-  console.log('✅ Wallet credited successfully:', {
-    org: organizationId,
-    amount: `₹${toRupees(actualAmountPaise)}`,
-    newBalance: `₹${toRupees(updatedWallet.balancePaise)}`,
-    txnId: transaction?.id,
+  if (!topupOrder) {
+    throw new AppError('Order not found', 404);
+  }
+
+  if (topupOrder.organizationId !== organizationId) {
+    throw new AppError('Order does not belong to your organization', 403);
+  }
+
+  if (topupOrder.status === 'COMPLETED') {
+    const wallet = await prisma.wallet.findUnique({
+      where: { organizationId },
+    });
+    return {
+      success: true,
+      alreadyProcessed: true,
+      newBalance: wallet ? toRupees(wallet.balancePaise) : 0,
+      amountAdded: toRupees(topupOrder.amountPaise),
+      message: 'Payment already credited',
+    };
+  }
+
+  // ✅ Fetch from Razorpay
+  const { instance: rzp } = getWalletRazorpay();
+  const order = await rzp.orders.fetch(razorpayOrderId);
+
+  if (order.status !== 'paid') {
+    throw new AppError(
+      `Payment not completed on Razorpay. Status: ${order.status}. Please contact support.`,
+      400
+    );
+  }
+
+  // ✅ Fetch payments for this order
+  const payments = await rzp.orders.fetchPayments(razorpayOrderId);
+  const capturedPayment = payments.items.find((p: any) => p.status === 'captured');
+
+  if (!capturedPayment) {
+    throw new AppError('No successful payment found for this order', 400);
+  }
+
+  // ✅ Credit wallet
+  const result = await creditWalletAtomic({
+    organizationId,
+    razorpayOrderId,
+    razorpayPaymentId: capturedPayment.id,
+    amountPaise: Number(order.amount),
+    creditedVia: 'user_verify',
   });
+
+  if (result.alreadyCredited) {
+    const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
+    return {
+      success: true,
+      alreadyProcessed: true,
+      newBalance: wallet ? toRupees(wallet.balancePaise) : 0,
+      amountAdded: toRupees(Number(order.amount)),
+      message: 'Payment already credited',
+    };
+  }
 
   return {
     success: true,
-    newBalance: toRupees(updatedWallet.balancePaise),
-    amountAdded: toRupees(actualAmountPaise),
-    transaction: formatTransaction(transaction),
+    newBalance: result.newBalance,
+    amountAdded: result.amountAdded,
+    message: `₹${result.amountAdded} added to wallet successfully!`,
   };
+}
+
+// ─── 5D. NEW: Get Pending Orders (for user to see stuck payments) ────────
+export async function getPendingTopUpOrders(organizationId: string) {
+  const pendingOrders = await db.walletTopUpOrder.findMany({
+    where: {
+      organizationId,
+      status: { in: ['PENDING', 'FAILED'] },
+      createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, // Last 30 days
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
+
+  return (pendingOrders as any[]).map((o: any) => ({
+    id: o.id,
+    orderId: o.razorpayOrderId,
+    paymentId: o.razorpayPaymentId,
+    amount: toRupees(o.amountPaise),
+    status: o.status,
+    attemptCount: o.attemptCount,
+    createdAt: o.createdAt,
+    failureReason: o.failureReason,
+    canRetry: o.status === 'FAILED' || 
+              (o.status === 'PENDING' && 
+               Date.now() - new Date(o.createdAt).getTime() > 5 * 60 * 1000),
+  }));
 }
 
 // ─── 6. Deduct Balance ────────────────────────────────────────────────────────
@@ -1728,4 +1833,50 @@ function getCountryFlag(prefix: string): string {
     '255': '🇹🇿', '233': '🇬🇭', '212': '🇲🇦', '213': '🇩🇿',
   };
   return flagMap[prefix] || '🌐';
+}
+
+// ─── WEBHOOK: Credit wallet from Razorpay webhook ────────────────────────────
+// Called by webhook handler - fully idempotent
+export async function creditWalletFromWebhook(params: {
+  organizationId: string;
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  amountPaise: number;
+}) {
+  console.log('📥 Webhook credit request:', params);
+
+  const result = await creditWalletAtomic({
+    organizationId: params.organizationId,
+    razorpayOrderId: params.razorpayOrderId,
+    razorpayPaymentId: params.razorpayPaymentId,
+    amountPaise: params.amountPaise,
+    creditedVia: 'webhook',
+  });
+
+  if (result.alreadyCredited) {
+    console.log('✅ Webhook: Payment already credited (idempotent)');
+    return { alreadyCredited: true };
+  }
+
+  console.log('✅ Webhook: Wallet credited successfully', {
+    org: params.organizationId,
+    amount: `₹${result.amountAdded}`,
+    newBalance: `₹${result.newBalance}`,
+  });
+
+  // Emit socket event
+  try {
+    const { webhookEvents } = await import('../webhooks/webhook.service');
+    webhookEvents.emit('walletCredited', {
+      organizationId: params.organizationId,
+      amount: result.amountAdded,
+      newBalance: result.newBalance,
+    });
+  } catch {}
+
+  return {
+    alreadyCredited: false,
+    newBalance: result.newBalance,
+    amountAdded: result.amountAdded,
+  };
 }

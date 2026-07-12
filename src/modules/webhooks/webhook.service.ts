@@ -1003,14 +1003,10 @@ export class WebhookService {
               organizationId: true,
               status: true,
               totalContacts: true,
-              sentCount: true,
-              deliveredCount: true,
-              readCount: true,
-              failedCount: true,
               template: {
-                select: { name: true, category: true, language: true }
-              }
-            }
+                select: { name: true, category: true, language: true },
+              },
+            },
           },
           contact: { select: { phone: true } },
         },
@@ -1018,56 +1014,47 @@ export class WebhookService {
 
       if (!campaignContact) return;
 
-      console.log(`📊 Found campaign contact: ${campaignContact.id}`);
-
       const currentStatus = campaignContact.status;
 
+      // ✅ Status priority — only allow forward transitions (unless FAILED)
       const statusPriority: Record<string, number> = {
-        'PENDING': 0,
-        'QUEUED': 0.5,
-        'SENT': 1,
-        'DELIVERED': 2,
-        'READ': 3,
-        'FAILED': -1,
+        PENDING: 0,
+        QUEUED: 0.5,
+        SENT: 1,
+        DELIVERED: 2,
+        READ: 3,
+        FAILED: -1,
       };
 
       const currentPriority = statusPriority[currentStatus] ?? 0;
       const newPriority = statusPriority[newStatus] ?? 0;
 
-      if (newPriority <= currentPriority && newStatus !== 'FAILED') {
-        return;
-      }
+      // Skip lower/equal status (except FAILED which can happen anytime)
+      if (newPriority <= currentPriority && newStatus !== 'FAILED') return;
 
+      // Skip if already FAILED
+      if (currentStatus === 'FAILED' && newStatus !== 'FAILED') return;
+
+      // ✅ Update campaign contact
       await prisma.campaignContact.updateMany({
-        where: { id: campaignContact.id },
+        where: { id: campaignContact.id, status: currentStatus }, // ✅ Optimistic lock
         data: {
           status: newStatus,
           ...(newStatus === 'DELIVERED' ? { deliveredAt: statusTime } : {}),
-          ...(newStatus === 'READ' ? { readAt: statusTime } : {}),
-          ...(newStatus === 'FAILED' ? { failedAt: statusTime, failureReason: failureReason || 'Delivery failed' } : {}),
+          ...(newStatus === 'READ' ? { readAt: statusTime, deliveredAt: statusTime } : {}),
+          ...(newStatus === 'FAILED'
+            ? { failedAt: statusTime, failureReason: failureReason || 'Delivery failed' }
+            : {}),
         },
       });
 
-      console.log(`✅ Campaign contact updated: ${campaignContact.id} -> ${newStatus}`);
+      console.log(`✅ Campaign contact ${campaignContact.id}: ${currentStatus} → ${newStatus}`);
 
-      const campaignUpdateData: any = {};
-      if (newStatus === 'DELIVERED' && currentStatus !== 'DELIVERED' && currentStatus !== 'READ') {
-        campaignUpdateData.deliveredCount = { increment: 1 };
-      } else if (newStatus === 'READ' && currentStatus !== 'READ') {
-        campaignUpdateData.readCount = { increment: 1 };
-        if (currentStatus !== 'DELIVERED') {
-          campaignUpdateData.deliveredCount = { increment: 1 };
-        }
-      } else if (newStatus === 'FAILED' && currentStatus !== 'FAILED') {
-        campaignUpdateData.failedCount = { increment: 1 };
-
-        // ✅ FIX: idempotent refund — under a single transaction, first check if a
-        // refund transaction for THIS waMessageId already exists. If yes, skip.
-        // This prevents Meta webhook retries or racing status updates from
-        // crediting the wallet multiple times for the same failed message.
-        if (campaignContact.campaign && (campaignContact.campaign as any).template) {
+      // ✅ REFUND ON FAILURE (idempotent)
+      if (newStatus === 'FAILED' && currentStatus !== 'FAILED') {
+        if (campaignContact.campaign?.template) {
           try {
-            const template = (campaignContact.campaign as any).template;
+            const template = campaignContact.campaign.template;
             const { getRateForCategory } = await import('../wallet/wallet.deduction.service');
             const rateRupees = getRateForCategory(
               template.category || 'MARKETING',
@@ -1078,7 +1065,6 @@ export class WebhookService {
 
             if (refundPaise > 0) {
               await prisma.$transaction(async (tx) => {
-                // ✅ IDEMPOTENCY GUARD: has this exact waMessageId already been refunded?
                 const existingRefund = await tx.walletTransaction.findFirst({
                   where: {
                     metaChargeId: waMessageId,
@@ -1087,19 +1073,12 @@ export class WebhookService {
                   select: { id: true },
                 });
 
-                if (existingRefund) {
-                  console.log(`↩️ Refund already recorded for ${waMessageId} — skipping duplicate`);
-                  return;
-                }
+                if (existingRefund) return;
 
                 const wallet = await tx.wallet.findUnique({
                   where: { organizationId: campaignContact.campaign.organizationId },
                 });
-
-                if (!wallet) {
-                  console.log(`↩️ No wallet — skipping refund for ${waMessageId}`);
-                  return;
-                }
+                if (!wallet) return;
 
                 const balanceBefore = wallet.balancePaise;
                 const balanceAfter = balanceBefore + refundPaise;
@@ -1116,71 +1095,99 @@ export class WebhookService {
                     amountPaise: refundPaise,
                     balanceBeforePaise: balanceBefore,
                     balanceAfterPaise: balanceAfter,
-                    description: `Refund: Failed campaign message (${campaignContact.contact?.phone}) - ${template.name}`,
+                    description: `Refund: Failed msg (${campaignContact.contact?.phone}) - ${template.name}`,
                     status: 'completed',
-                    metaChargeId: waMessageId,          // ✅ unique key used by the guard above
+                    metaChargeId: waMessageId,
                     metaService: 'template_message_refund',
-                    note: `Campaign Refund (ID: ${campaignContact.campaign.id})`,
+                    note: `Refund (Campaign: ${campaignContact.campaign.id})`,
                   },
                 });
-                console.log(`💰 Refunded ₹${rateRupees.toFixed(2)} to wallet for failed message to ${campaignContact.contact?.phone}`);
+                console.log(`💰 Refunded ₹${rateRupees.toFixed(2)} for failed msg to ${campaignContact.contact?.phone}`);
               });
             }
           } catch (refundErr: any) {
-            console.error('❌ Failed to process wallet refund:', refundErr.message);
+            console.error('❌ Refund error:', refundErr.message);
           }
         }
       }
 
-      let campaign = campaignContact.campaign;
+      // ✅ Recompute campaign counters from source of truth (single query)
+      const counts = await prisma.campaignContact.groupBy({
+        by: ['status'],
+        where: { campaignId: campaignContact.campaignId },
+        _count: true,
+      });
 
-      if (campaign && Object.keys(campaignUpdateData).length > 0) {
-        campaign = await prisma.campaign.update({
-          where: { id: campaignContact.campaignId },
-          data: campaignUpdateData,
-          select: {
-            id: true,
-            organizationId: true,
-            status: true,
-            totalContacts: true,
-            sentCount: true,
-            deliveredCount: true,
-            readCount: true,
-            failedCount: true
-          }
-        }) as any;
-        console.log(`📈 Updated campaign counters for: ${campaign.id}`);
-      }
+      const get = (s: string) => counts.find(c => c.status === s)?._count || 0;
+      const pending = get('PENDING') + get('QUEUED');
+      const sentOnly = get('SENT');
+      const delivered = get('DELIVERED');
+      const read = get('READ');
+      const failed = get('FAILED');
+      const total = pending + sentOnly + delivered + read + failed;
 
-      const orgId = campaign?.organizationId || campaignContact.campaign?.organizationId;
+      // Cumulative counts (for storage)
+      const cumulativeSent = sentOnly + delivered + read;
+      const cumulativeDelivered = delivered + read;
+
+      await prisma.campaign.update({
+        where: { id: campaignContact.campaignId },
+        data: {
+          totalContacts: total,
+          sentCount: cumulativeSent,
+          deliveredCount: cumulativeDelivered,
+          readCount: read,
+          failedCount: failed,
+        },
+      });
+
+      // ✅ EMIT REAL-TIME UPDATES
+      const orgId = campaignContact.campaign?.organizationId;
       const contactPhone = campaignContact.contact?.phone || '';
 
       if (orgId) {
-        import('../campaigns/campaigns.socket').then(({ campaignSocketService }) => {
+        try {
+          const { campaignSocketService } = await import('../campaigns/campaigns.socket');
+
+          // Emit individual contact status
           campaignSocketService.emitContactStatus(orgId, campaignContact.campaignId, {
             contactId: campaignContact.contactId,
             phone: contactPhone,
             status: newStatus,
             messageId: waMessageId,
-            error: failureReason
+            error: failureReason,
+            deliveredAt: newStatus === 'DELIVERED' ? statusTime.toISOString() : undefined,
+            readAt: newStatus === 'READ' ? statusTime.toISOString() : undefined,
+            failedAt: newStatus === 'FAILED' ? statusTime.toISOString() : undefined,
           });
 
-          if (campaign) {
-            const processed = (campaign.sentCount || 0) + (campaign.failedCount || 0);
-            const total = campaign.totalContacts || 1;
-            const percentage = Math.min(100, Math.round((processed / total) * 100));
+          // Emit progress update
+          const processed = cumulativeSent + failed;
+          const percentage = Math.min(100, Math.round((processed / Math.max(total, 1)) * 100));
 
-            campaignSocketService.emitCampaignProgress(orgId, campaignContact.campaignId, {
-              sent: campaign.sentCount || 0,
-              failed: campaign.failedCount || 0,
-              delivered: campaign.deliveredCount || 0,
-              read: campaign.readCount || 0,
-              total: campaign.totalContacts,
-              percentage,
-              status: campaign.status,
-            });
-          }
-        }).catch(e => console.error('❌ Socket emission failed in webhook:', e));
+          campaignSocketService.emitCampaignProgress(orgId, campaignContact.campaignId, {
+            sent: cumulativeSent,
+            failed,
+            delivered: cumulativeDelivered,
+            read,
+            total,
+            percentage,
+            status: campaignContact.campaign?.status || 'RUNNING',
+          });
+
+          // Emit list page update
+          campaignSocketService.emitCampaignUpdate(orgId, campaignContact.campaignId, {
+            status: campaignContact.campaign?.status || 'RUNNING',
+            message: 'Status updated',
+            totalContacts: total,
+            sentCount: cumulativeSent,
+            deliveredCount: cumulativeDelivered,
+            readCount: read,
+            failedCount: failed,
+          });
+        } catch (e) {
+          console.error('❌ Socket emit failed:', e);
+        }
       }
     } catch (e) {
       console.error('updateCampaignContactStatus error:', e);

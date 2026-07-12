@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adminToggleWallet = exports.adminFlagWallet = exports.adminSetCredit = exports.adminAdjustBalance = exports.adminGetAllWallets = exports.adminReviewRequest = exports.adminGetRequests = exports.getMessageAnalytics = exports.verifyTopUp = exports.createTopUp = exports.getTransactions = exports.requestAccess = exports.getWallet = void 0;
+exports.adminToggleWallet = exports.adminFlagWallet = exports.adminSetCredit = exports.adminAdjustBalance = exports.adminGetAllWallets = exports.adminReviewRequest = exports.adminGetRequests = exports.getMessageAnalytics = exports.retryTopUp = exports.getPendingTopUps = exports.verifyTopUp = exports.createTopUp = exports.getTransactions = exports.requestAccess = exports.getWallet = void 0;
 const walletService = __importStar(require("./wallet.service"));
 const response_1 = require("../../utils/response");
 // ─── User Controllers ──────────────────────────────────────────────────────────
@@ -128,6 +128,38 @@ const verifyTopUp = async (req, res) => {
     }
 };
 exports.verifyTopUp = verifyTopUp;
+// ✅ NEW: Get pending topups
+const getPendingTopUps = async (req, res) => {
+    try {
+        const organizationId = req.user?.organizationId;
+        if (!organizationId)
+            return (0, response_1.errorResponse)(res, 'Organization not found', 400);
+        const orders = await walletService.getPendingTopUpOrders(organizationId);
+        return (0, response_1.sendSuccess)(res, { orders }, 'Pending orders retrieved');
+    }
+    catch (err) {
+        return (0, response_1.errorResponse)(res, err.message, err.statusCode || 500);
+    }
+};
+exports.getPendingTopUps = getPendingTopUps;
+// ✅ NEW: Retry topup verification
+const retryTopUp = async (req, res) => {
+    try {
+        const organizationId = req.user?.organizationId;
+        if (!organizationId)
+            return (0, response_1.errorResponse)(res, 'Organization not found', 400);
+        const { razorpayOrderId, razorpayPaymentId } = req.body;
+        if (!razorpayOrderId) {
+            return (0, response_1.errorResponse)(res, 'Order ID required', 400);
+        }
+        const result = await walletService.retryTopUpVerification(organizationId, razorpayOrderId, razorpayPaymentId);
+        return (0, response_1.sendSuccess)(res, result, result.message || 'Payment verified');
+    }
+    catch (err) {
+        return (0, response_1.errorResponse)(res, err.message, err.statusCode || 500);
+    }
+};
+exports.retryTopUp = retryTopUp;
 const getMessageAnalytics = async (req, res) => {
     try {
         const organizationId = req.user?.organizationId;

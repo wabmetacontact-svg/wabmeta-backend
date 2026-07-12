@@ -205,7 +205,10 @@ class AutomationEngine {
             const currentDay = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
             const isWeekday = currentDay >= 1 && currentDay <= 5;
             const isWeekend = currentDay === 0 || currentDay === 6;
-            console.log(`⏰ [SCHEDULE] Checking triggers at ${currentHHMM} (day ${currentDay})`);
+            let triggeredCount = 0;
+            if (process.env.LOG_SCHEDULER === 'verbose') {
+                console.log(`⏰ [SCHEDULE] Checking triggers at ${currentHHMM} (day ${currentDay})`);
+            }
             // ✅ FIX: undefined orgId = get all orgs
             const automations = await automation_service_1.automationService.getActiveByTrigger(undefined, 'SCHEDULE');
             if (automations.length === 0) {
@@ -249,6 +252,7 @@ class AutomationEngine {
                             continue;
                         }
                     }
+                    triggeredCount++;
                     console.log(`🚀 [SCHEDULE] Executing: ${automation.name} for org: ${automation.organizationId}`);
                     // ✅ Get target contacts
                     const targetGroupIds = automation.targetGroupIds || [];
@@ -317,6 +321,9 @@ class AutomationEngine {
                         console.error(`❌ [SCHEDULE] Automation ${automation.id} failed:`, err.message);
                     }
                 }
+            }
+            if (triggeredCount > 0) {
+                console.log(`✅ [SCHEDULE] Fired ${triggeredCount} triggers at ${currentHHMM}`);
             }
         }
         catch (error) {

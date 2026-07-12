@@ -130,7 +130,7 @@ export declare function processTopUp(organizationId: string, data: {
 } | {
     success: boolean;
     newBalance: number;
-    amountAdded: number;
+    amountAdded: number | undefined;
     transaction: {
         id: any;
         transactionId: any;
@@ -150,6 +150,30 @@ export declare function processTopUp(organizationId: string, data: {
     };
     alreadyProcessed?: undefined;
 }>;
+export declare function retryTopUpVerification(organizationId: string, razorpayOrderId: string, razorpayPaymentId?: string): Promise<{
+    success: boolean;
+    alreadyProcessed: boolean;
+    newBalance: number;
+    amountAdded: number;
+    message: string;
+} | {
+    success: boolean;
+    newBalance: number;
+    amountAdded: number | undefined;
+    message: string;
+    alreadyProcessed?: undefined;
+}>;
+export declare function getPendingTopUpOrders(organizationId: string): Promise<{
+    id: any;
+    orderId: any;
+    paymentId: any;
+    amount: number;
+    status: any;
+    attemptCount: any;
+    createdAt: any;
+    failureReason: any;
+    canRetry: boolean;
+}[]>;
 export declare function deductBalance(organizationId: string, data: {
     amountRupees: number;
     description: string;
@@ -387,5 +411,19 @@ export declare function getWalletMessageAnalytics(organizationId: string, option
             SERVICE: number;
         };
     };
+}>;
+export declare function creditWalletFromWebhook(params: {
+    organizationId: string;
+    razorpayOrderId: string;
+    razorpayPaymentId: string;
+    amountPaise: number;
+}): Promise<{
+    alreadyCredited: boolean;
+    newBalance?: undefined;
+    amountAdded?: undefined;
+} | {
+    alreadyCredited: boolean;
+    newBalance: number;
+    amountAdded: number | undefined;
 }>;
 //# sourceMappingURL=wallet.service.d.ts.map

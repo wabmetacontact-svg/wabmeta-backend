@@ -114,6 +114,43 @@ export const verifyTopUp = async (req: Request, res: Response) => {
   }
 };
 
+// ✅ NEW: Get pending topups
+export const getPendingTopUps = async (req: Request, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) return errorResponse(res, 'Organization not found', 400);
+
+    const orders = await walletService.getPendingTopUpOrders(organizationId);
+    return sendSuccess(res, { orders }, 'Pending orders retrieved');
+  } catch (err: any) {
+    return errorResponse(res, err.message, err.statusCode || 500);
+  }
+};
+
+// ✅ NEW: Retry topup verification
+export const retryTopUp = async (req: Request, res: Response) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) return errorResponse(res, 'Organization not found', 400);
+
+    const { razorpayOrderId, razorpayPaymentId } = req.body;
+    
+    if (!razorpayOrderId) {
+      return errorResponse(res, 'Order ID required', 400);
+    }
+
+    const result = await walletService.retryTopUpVerification(
+      organizationId,
+      razorpayOrderId,
+      razorpayPaymentId
+    );
+
+    return sendSuccess(res, result, result.message || 'Payment verified');
+  } catch (err: any) {
+    return errorResponse(res, err.message, err.statusCode || 500);
+  }
+};
+
 export const getMessageAnalytics = async (
   req: Request,
   res: Response

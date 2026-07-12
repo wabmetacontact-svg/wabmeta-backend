@@ -1,6 +1,5 @@
 /**
- * ✅ MAIN FUNCTION: Resolves scontent.whatsapp.net URLs to Cloudinary
- * Called when template is synced/created from Meta
+ * Resolves scontent.whatsapp URLs to Cloudinary
  */
 export declare function resolveTemplateHeaderMedia(template: {
     id: string;
@@ -9,10 +8,6 @@ export declare function resolveTemplateHeaderMedia(template: {
     headerContent: string | null;
 }): Promise<string | null>;
 export declare function getFreshMediaIdForSending(templateId: string): Promise<string | null>;
-/**
- * ✅ HELPER: Validate template is ready to send
- * Called before campaign starts to fail fast
- */
 export declare function validateTemplateReady(templateId: string): Promise<{
     ready: boolean;
     reason?: string;

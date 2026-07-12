@@ -1,74 +1,60 @@
 "use strict";
-// src/modules/campaigns/campaigns.socket.ts - COMPLETE
+// src/modules/campaigns/campaigns.socket.ts - PRODUCTION FIXED
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.campaignSocketService = exports.initializeCampaignSocket = void 0;
 let io = null;
-/**
- * Initialize campaign socket service with Socket.IO instance
- */
 const initializeCampaignSocket = (socketServer) => {
     io = socketServer;
     io.on('connection', (socket) => {
         socket.on('campaign:join', (campaignId) => {
-            console.log(`🔌 [SOCKET] Client joining campaign room: ${campaignId}`);
-            socket.join(`campaign:${campaignId}`);
+            if (campaignId) {
+                socket.join(`campaign:${campaignId}`);
+                console.log(`🔌 Joined campaign room: ${campaignId}`);
+            }
         });
         socket.on('campaign:leave', (campaignId) => {
-            console.log(`🔌 [SOCKET] Client leaving campaign room: ${campaignId}`);
-            socket.leave(`campaign:${campaignId}`);
+            if (campaignId) {
+                socket.leave(`campaign:${campaignId}`);
+            }
         });
         socket.on('org:join', (organizationId) => {
-            console.log(`🔌 [SOCKET] Client joining organization room: ${organizationId}`);
-            socket.join(`org:${organizationId}`);
-            socket.join(`org:${organizationId}:campaigns`);
+            if (organizationId) {
+                socket.join(`org:${organizationId}`);
+                socket.join(`org:${organizationId}:campaigns`);
+            }
         });
     });
     console.log('✅ Campaign Socket Service initialized');
 };
 exports.initializeCampaignSocket = initializeCampaignSocket;
-/**
- * Campaign Socket Service Class
- */
 class CampaignSocketService {
-    /**
-     * Emit campaign status update
-     */
     emitCampaignUpdate(organizationId, campaignId, data) {
-        if (!io) {
-            console.warn('⚠️ Socket.IO not initialized - cannot emit campaign:update');
+        if (!io)
             return;
-        }
         const payload = {
             campaignId,
             organizationId,
             ...data,
             timestamp: new Date().toISOString(),
         };
-        // Emit to multiple rooms for redundancy
         io.to(`org:${organizationId}`).emit('campaign:update', payload);
         io.to(`campaign:${campaignId}`).emit('campaign:update', payload);
         io.to(`org:${organizationId}:campaigns`).emit('campaign:update', payload);
-        console.log(`📡 [SOCKET] campaign:update → org:${organizationId}`, {
-            campaignId,
-            status: data.status,
-            message: data.message,
-        });
     }
     /**
-     * Emit campaign progress updates
+     * ✅ CRITICAL FIX: Progress emit with proper capped values
+     * Backend sends CUMULATIVE numbers (sent = actually sent + delivered + read)
      */
     emitCampaignProgress(organizationId, campaignId, data) {
-        if (!io) {
-            console.warn('⚠️ Socket.IO not initialized - cannot emit campaign:progress');
+        if (!io)
             return;
-        }
         const total = Math.max(data.total, 1);
-        // ✅ CRITICAL: Cap all values to never exceed total
-        const sent = Math.min(data.sent, total);
-        const failed = Math.min(data.failed, total - sent);
-        const delivered = Math.min(data.delivered || 0, sent);
-        const read = Math.min(data.read || 0, delivered);
-        const percentage = Math.min(100, Math.round(((sent + failed) / total) * 100));
+        const sent = Math.min(Math.max(0, data.sent), total);
+        const failed = Math.min(Math.max(0, data.failed), Math.max(0, total - sent));
+        const delivered = Math.min(Math.max(0, data.delivered || 0), sent);
+        const read = Math.min(Math.max(0, data.read || 0), delivered);
+        const processed = Math.min(sent + failed, total);
+        const percentage = Math.min(100, Math.round((processed / total) * 100));
         const payload = {
             campaignId,
             organizationId,
@@ -84,19 +70,10 @@ class CampaignSocketService {
         io.to(`org:${organizationId}`).emit('campaign:progress', payload);
         io.to(`campaign:${campaignId}`).emit('campaign:progress', payload);
         io.to(`org:${organizationId}:campaigns`).emit('campaign:progress', payload);
-        // Only log every 10% to reduce noise
-        if (percentage % 10 === 0) {
-            console.log(`📊 [SOCKET] campaign:progress → ${percentage}% (${sent}+${failed}/${total})`);
-        }
     }
-    /**
-     * Emit individual contact status update
-     */
     emitContactStatus(organizationId, campaignId, data) {
-        if (!io) {
-            console.warn('⚠️ Socket.IO not initialized - cannot emit campaign:contact');
+        if (!io)
             return;
-        }
         const payload = {
             campaignId,
             organizationId,
@@ -106,18 +83,10 @@ class CampaignSocketService {
         io.to(`org:${organizationId}`).emit('campaign:contact', payload);
         io.to(`campaign:${campaignId}`).emit('campaign:contact', payload);
         io.to(`campaign:${campaignId}`).emit('campaign:contact:status', payload);
-        if (data.status === 'FAILED') {
-            console.warn(`❌ [SOCKET] Contact failed: ${data.phone} - ${data.error || 'Unknown error'}`);
-        }
     }
-    /**
-     * Emit campaign completion event
-     */
     emitCampaignCompleted(organizationId, campaignId, stats) {
-        if (!io) {
-            console.warn('⚠️ Socket.IO not initialized - cannot emit campaign:completed');
+        if (!io)
             return;
-        }
         const payload = {
             campaignId,
             organizationId,
@@ -127,56 +96,33 @@ class CampaignSocketService {
         io.to(`org:${organizationId}`).emit('campaign:completed', payload);
         io.to(`campaign:${campaignId}`).emit('campaign:completed', payload);
         io.to(`org:${organizationId}:campaigns`).emit('campaign:completed', payload);
-        console.log(`🎉 [SOCKET] Campaign completed: ${campaignId}`, {
-            sent: stats.sentCount,
-            failed: stats.failedCount,
-            total: stats.totalRecipients,
-        });
+        console.log(`🎉 Campaign completed: ${campaignId} | sent=${stats.sentCount} failed=${stats.failedCount}`);
     }
-    /**
-     * Emit campaign error
-     */
     emitCampaignError(organizationId, campaignId, error) {
         if (!io)
             return;
-        io.to(`org:${organizationId}`).emit('campaign:error', {
+        const payload = {
             campaignId,
+            organizationId,
             ...error,
             timestamp: new Date().toISOString(),
-        });
-        console.error(`❌ Campaign ${campaignId} error:`, error.message);
+        };
+        io.to(`org:${organizationId}`).emit('campaign:error', payload);
+        io.to(`campaign:${campaignId}`).emit('campaign:error', payload);
     }
-    /**
-     * Emit CSV upload progress
-     */
     emitCsvUploadProgress(userId, data) {
         if (!io)
             return;
-        io.to(`user:${userId}`).emit('csv:upload:progress', {
-            ...data,
-            timestamp: new Date().toISOString(),
-        });
+        io.to(`user:${userId}`).emit('csv:upload:progress', { ...data, timestamp: new Date().toISOString() });
     }
-    /**
-     * Emit contact validation results
-     */
     emitContactValidation(userId, data) {
         if (!io)
             return;
-        io.to(`user:${userId}`).emit('csv:validation:batch', {
-            ...data,
-            timestamp: new Date().toISOString(),
-        });
+        io.to(`user:${userId}`).emit('csv:validation:batch', { ...data, timestamp: new Date().toISOString() });
     }
-    /**
-     * Check if socket is initialized
-     */
     isInitialized() {
         return io !== null;
     }
-    /**
-     * Get Socket.IO instance (for advanced usage)
-     */
     getIO() {
         return io;
     }

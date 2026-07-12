@@ -144,23 +144,26 @@ export class CampaignsService {
     };
   }
 
-  // ✅ HEAVY: Full sync - only called at start, end, and on retry
+  // ✅ FIXED: Return CUMULATIVE numbers for frontend
   private async syncCampaignCounters(campaignId: string): Promise<{
     totalContacts: number;
-    sentCount: number;
-    deliveredCount: number;
+    sentCount: number;       // cumulative
+    deliveredCount: number;  // cumulative
     readCount: number;
     failedCount: number;
     pendingCount: number;
   }> {
     const counts = await this.getQuickCounts(campaignId);
 
+    const cumulativeSent = counts.sent + counts.delivered + counts.read;
+    const cumulativeDelivered = counts.delivered + counts.read;
+
     await prisma.campaign.update({
       where: { id: campaignId },
       data: {
         totalContacts: counts.total,
-        sentCount: counts.sent + counts.delivered + counts.read,
-        deliveredCount: counts.delivered + counts.read,
+        sentCount: cumulativeSent,
+        deliveredCount: cumulativeDelivered,
         readCount: counts.read,
         failedCount: counts.failed,
       },
@@ -168,8 +171,8 @@ export class CampaignsService {
 
     return {
       totalContacts: counts.total,
-      sentCount: counts.sent,
-      deliveredCount: counts.delivered,
+      sentCount: cumulativeSent,
+      deliveredCount: cumulativeDelivered,
       readCount: counts.read,
       failedCount: counts.failed,
       pendingCount: counts.pending,
@@ -1015,6 +1018,19 @@ export class CampaignsService {
       // ✅ Sync counters ONLY at start
       await this.syncCampaignCounters(campaignId);
 
+      const initialCounts = await this.getQuickCounts(campaignId);
+      const totalCampaignSize = initialCounts.total;
+
+      // ✅ ADAPTIVE EMIT: Small campaigns emit every message, large ones every 50
+      const EMIT_PROGRESS_EVERY = 
+        totalCampaignSize <= 10 ? 1 :
+        totalCampaignSize <= 50 ? 2 :
+        totalCampaignSize <= 200 ? 10 :
+        totalCampaignSize <= 1000 ? 25 :
+        50;
+
+      console.log(`📊 Campaign size: ${totalCampaignSize}, EMIT_PROGRESS_EVERY: ${EMIT_PROGRESS_EVERY}`);
+
       const accessToken = this.getDecryptedToken(campaign.whatsappAccount.accessToken);
       if (!accessToken || !accessToken.startsWith('EAA')) {
         throw new Error('Invalid access token');
@@ -1135,7 +1151,6 @@ export class CampaignsService {
       const BATCH_SIZE = 1000;              // Fetch more contacts per batch
       const CONCURRENCY = 30;               // Send 30 parallel requests
       const FLUSH_EVERY = 100;              // DB write every 100 messages
-      const EMIT_PROGRESS_EVERY = 50;       // Socket update every 50 messages
       const DELAY_BETWEEN_CHUNKS_MS = 30;   // Very small delay
       const MAX_CONSECUTIVE_FAILURES = 30;
       const RATE_LIMIT_PAUSE_MS = 3000;
@@ -1292,21 +1307,35 @@ export class CampaignsService {
             batchFailed = [];
           }
           // ✅ EMIT PROGRESS (lightweight, no DB query)
-          if (totalProcessed - lastProgressEmit >= EMIT_PROGRESS_EVERY) {
+          if (totalProcessed - lastProgressEmit >= EMIT_PROGRESS_EVERY || 
+              i + CONCURRENCY >= contacts.length) {  // ✅ Always emit on chunk end
             lastProgressEmit = totalProcessed;
 
-            // ✅ LIGHT: Quick count from DB (no campaign update)
+            // ✅ LIGHT: Quick count from DB
             const counts = await this.getQuickCounts(campaignId);
-            const processed = counts.sent + counts.delivered + counts.read + counts.failed;
+            const cumulativeSent = counts.sent + counts.delivered + counts.read;
+            const cumulativeDelivered = counts.delivered + counts.read;
+            const processed = cumulativeSent + counts.failed;
 
             campaignSocketService.emitCampaignProgress(organizationId, campaignId, {
-              sent: counts.sent + counts.delivered + counts.read,
+              sent: cumulativeSent,
               failed: counts.failed,
-              delivered: counts.delivered + counts.read,
+              delivered: cumulativeDelivered,
               read: counts.read,
               total: counts.total,
               percentage: Math.min(100, Math.round((processed / Math.max(counts.total, 1)) * 100)),
               status: 'RUNNING',
+            });
+
+            // ✅ ALSO emit campaign:update for list page
+            campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
+              status: 'RUNNING',
+              message: 'Campaign in progress',
+              totalContacts: counts.total,
+              sentCount: cumulativeSent,
+              deliveredCount: cumulativeDelivered,
+              readCount: counts.read,
+              failedCount: counts.failed,
             });
           }
 

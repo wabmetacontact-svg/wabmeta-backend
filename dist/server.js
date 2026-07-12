@@ -48,6 +48,7 @@ const database_1 = __importDefault(require("./config/database"));
 const socket_1 = require("./socket");
 const encryption_1 = require("./utils/encryption");
 const scheduler_service_1 = require("./services/scheduler.service");
+const wallet_reconciliation_service_1 = require("./modules/wallet/wallet.reconciliation.service");
 let webhookService = null;
 async function loadOptionalServices() {
     try {
@@ -101,6 +102,8 @@ async function bootstrap() {
         console.log('🔌 Initializing Socket.io...');
         (0, socket_1.initializeSocket)(server);
         console.log('✅ Socket.io initialized');
+        // ✅ Start wallet reconciliation cron
+        wallet_reconciliation_service_1.walletReconciliationService.startCron();
         // Step 6: Scheduler
         // ✅ NOTE: Pre-warm is handled by scheduler (daily 3 AM cron)
         // DO NOT add pre-warm here - it will cause double execution

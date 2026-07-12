@@ -1,7 +1,7 @@
 export declare class CloudinaryService {
     isConfigured(): boolean;
     /**
-     * Upload template media to Cloudinary
+     * ✅ FIXED: Always builds URL with proper extension
      */
     uploadTemplateMedia(file: Buffer, filename: string, mimeType: string, organizationId: string): Promise<{
         url: string;
@@ -10,9 +10,6 @@ export declare class CloudinaryService {
         format: string;
         resourceType: string;
     }>;
-    /**
-     * Delete media from Cloudinary
-     */
     deleteMedia(publicId: string, resourceType?: 'image' | 'video' | 'raw'): Promise<void>;
 }
 export declare const cloudinaryService: CloudinaryService;

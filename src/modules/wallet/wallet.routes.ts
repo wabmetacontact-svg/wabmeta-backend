@@ -13,6 +13,12 @@ router.get('/wallet/transactions', authenticate, walletController.getTransaction
 router.post('/wallet/topup/create-order', authenticate, walletController.createTopUp);
 router.post('/wallet/topup/verify', authenticate, walletController.verifyTopUp);
 
+// ✅ NEW: Get pending/failed topups (user can see stuck payments)
+router.get('/wallet/pending-topups', authenticate, walletController.getPendingTopUps);
+
+// ✅ NEW: Retry failed topup verification
+router.post('/wallet/topup/retry', authenticate, walletController.retryTopUp);
+
 // ─── Admin Routes ──────────────────────────────────────────────────────────────
 router.get('/admin/wallets', adminAuth, walletController.adminGetAllWallets);
 router.get('/admin/wallets/requests', adminAuth, walletController.adminGetRequests);

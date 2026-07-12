@@ -11,6 +11,7 @@ import prisma from './config/database';
 import { initializeSocket } from './socket';
 import { validateEncryptionKey } from './utils/encryption';
 import { initializeScheduler, startTemplateMediaPreWarmJob } from './services/scheduler.service';
+import { walletReconciliationService } from './modules/wallet/wallet.reconciliation.service';
 
 let webhookService: any = null;
 
@@ -68,6 +69,9 @@ async function bootstrap() {
     console.log('🔌 Initializing Socket.io...');
     initializeSocket(server);
     console.log('✅ Socket.io initialized');
+
+    // ✅ Start wallet reconciliation cron
+    walletReconciliationService.startCron();
 
     // Step 6: Scheduler
     // ✅ NOTE: Pre-warm is handled by scheduler (daily 3 AM cron)

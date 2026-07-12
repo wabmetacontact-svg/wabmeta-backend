@@ -1,45 +1,39 @@
 import { Server as SocketServer } from 'socket.io';
-/**
- * Initialize campaign socket service with Socket.IO instance
- */
 export declare const initializeCampaignSocket: (socketServer: SocketServer) => void;
-/**
- * Campaign Socket Service Class
- */
 declare class CampaignSocketService {
-    /**
-     * Emit campaign status update
-     */
     emitCampaignUpdate(organizationId: string, campaignId: string, data: {
         status: string;
         message: string;
         totalContacts?: number;
+        sentCount?: number;
+        deliveredCount?: number;
+        readCount?: number;
+        failedCount?: number;
     }): void;
     /**
-     * Emit campaign progress updates
+     * ✅ CRITICAL FIX: Progress emit with proper capped values
+     * Backend sends CUMULATIVE numbers (sent = actually sent + delivered + read)
      */
     emitCampaignProgress(organizationId: string, campaignId: string, data: {
         sent: number;
         failed: number;
-        delivered?: number;
-        read?: number;
+        delivered: number;
+        read: number;
         total: number;
         percentage: number;
         status: string;
     }): void;
-    /**
-     * Emit individual contact status update
-     */
     emitContactStatus(organizationId: string, campaignId: string, data: {
         contactId: string;
         phone: string;
         status: string;
         messageId?: string;
         error?: string;
+        sentAt?: string;
+        deliveredAt?: string;
+        readAt?: string;
+        failedAt?: string;
     }): void;
-    /**
-     * Emit campaign completion event
-     */
     emitCampaignCompleted(organizationId: string, campaignId: string, stats: {
         sentCount: number;
         failedCount: number;
@@ -47,40 +41,13 @@ declare class CampaignSocketService {
         readCount: number;
         totalRecipients: number;
     }): void;
-    /**
-     * Emit campaign error
-     */
     emitCampaignError(organizationId: string, campaignId: string, error: {
         message: string;
         code?: string;
     }): void;
-    /**
-     * Emit CSV upload progress
-     */
-    emitCsvUploadProgress(userId: string, data: {
-        uploadId: string;
-        progress: number;
-        totalRows: number;
-        processedRows: number;
-        validRows: number;
-        invalidRows: number;
-        duplicateRows: number;
-        status: string;
-    }): void;
-    /**
-     * Emit contact validation results
-     */
-    emitContactValidation(userId: string, data: {
-        uploadId: string;
-        contacts: any[];
-    }): void;
-    /**
-     * Check if socket is initialized
-     */
+    emitCsvUploadProgress(userId: string, data: any): void;
+    emitContactValidation(userId: string, data: any): void;
     isInitialized(): boolean;
-    /**
-     * Get Socket.IO instance (for advanced usage)
-     */
     getIO(): SocketServer | null;
 }
 export declare const campaignSocketService: CampaignSocketService;

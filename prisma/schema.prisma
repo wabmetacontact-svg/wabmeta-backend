@@ -1444,6 +1444,46 @@ model WalletTransaction {
   @@index([razorpayPaymentId])
 }
 
+model WalletTopUpOrder {
+  id                String   @id @default(cuid())
+  organizationId    String
+  walletId          String
+  
+  // Razorpay data
+  razorpayOrderId   String   @unique
+  razorpayPaymentId String?  @unique
+  razorpaySignature String?
+  
+  // Amount
+  amountPaise       Int
+  currency          String   @default("INR")
+  
+  // Status: PENDING, PROCESSING, COMPLETED, FAILED, REFUNDED
+  status            String   @default("PENDING")
+  
+  // Tracking
+  attemptCount      Int      @default(0)
+  lastAttemptAt     DateTime?
+  completedAt       DateTime?
+  failureReason     String?
+  
+  // Source: 'user_verify', 'webhook', 'cron_reconciliation', 'manual'
+  creditedVia       String?
+  
+  // Audit
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Related transaction
+  transactionId     String?  @unique
+  
+  @@index([organizationId])
+  @@index([status])
+  @@index([razorpayOrderId])
+  @@index([razorpayPaymentId])
+  @@index([createdAt])
+}
+
 model PushSubscription {
   id        String   @id @default(cuid())
   userId    String

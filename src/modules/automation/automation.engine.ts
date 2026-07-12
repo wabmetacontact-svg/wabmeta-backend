@@ -274,8 +274,11 @@ class AutomationEngine {
       const currentDay = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
       const isWeekday = currentDay >= 1 && currentDay <= 5;
       const isWeekend = currentDay === 0 || currentDay === 6;
+      let triggeredCount = 0;
 
-      console.log(`⏰ [SCHEDULE] Checking triggers at ${currentHHMM} (day ${currentDay})`);
+      if (process.env.LOG_SCHEDULER === 'verbose') {
+        console.log(`⏰ [SCHEDULE] Checking triggers at ${currentHHMM} (day ${currentDay})`);
+      }
 
       // ✅ FIX: undefined orgId = get all orgs
       const automations = await automationService.getActiveByTrigger(undefined, 'SCHEDULE');
@@ -328,6 +331,7 @@ class AutomationEngine {
             }
           }
 
+          triggeredCount++;
           console.log(`🚀 [SCHEDULE] Executing: ${automation.name} for org: ${automation.organizationId}`);
 
           // ✅ Get target contacts
@@ -399,6 +403,10 @@ class AutomationEngine {
             console.error(`❌ [SCHEDULE] Automation ${automation.id} failed:`, err.message);
           }
         }
+      }
+
+      if (triggeredCount > 0) {
+        console.log(`✅ [SCHEDULE] Fired ${triggeredCount} triggers at ${currentHHMM}`);
       }
     } catch (error: any) {
       if (error?.code !== 'P2024') {
