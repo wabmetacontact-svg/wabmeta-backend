@@ -1188,23 +1188,49 @@ export class AuthService {
   // ────────────────────────────────────────────
   async refreshToken(refreshToken: string): Promise<AuthTokens> {
     let payload: any;
+    
     try {
       payload = verifyRefreshToken(refreshToken);
     } catch {
       throw new AppError('Invalid refresh token', 401);
     }
 
+    // ✅ FIX: Race condition ke liye - agar token nahi mila but recently
+    // valid tha, toh "reuse" mat samjho
     const stored = await prisma.refreshToken.findUnique({
       where: { token: refreshToken },
       include: { user: true },
     });
 
     if (!stored) {
-      if (payload && payload.userId) {
-        console.warn(`🚨 TOKEN REUSE DETECTED! Revoking all sessions for user: ${payload.userId}`);
-        await prisma.refreshToken.deleteMany({ where: { userId: payload.userId } });
+      // ✅ FIX: Reuse detection - lekin aggressive nahi
+      // Check karo: kya recent tokens exist hain is user ke liye?
+      if (payload?.userId) {
+        const recentTokens = await prisma.refreshToken.count({
+          where: {
+            userId: payload.userId,
+            createdAt: {
+              // Last 30 seconds mein create kiya?
+              gte: new Date(Date.now() - 30 * 1000)
+            }
+          }
+        });
+
+        // ✅ Agar recent tokens hain, ye likely race condition hai
+        // Reuse nahi, sirf rotation delay
+        if (recentTokens > 0) {
+          console.warn(`⚠️ Token not found but recent tokens exist - likely race condition for user: ${payload.userId}`);
+          throw new AppError('Token rotation in progress. Please retry.', 401);
+        }
+
+        // ✅ Genuinely reused token - tabhi revoke karo
+        console.warn(`🚨 TOKEN REUSE DETECTED for user: ${payload.userId}`);
+        await prisma.refreshToken.deleteMany({ 
+          where: { userId: payload.userId } 
+        });
       }
-      throw new AppError('Refresh token reused or not found. All sessions revoked for security.', 401);
+      
+      throw new AppError('Invalid refresh token', 401);
     }
 
     if (stored.expiresAt < new Date()) {
@@ -1212,11 +1238,16 @@ export class AuthService {
       throw new AppError('Refresh token expired', 401);
     }
 
+    // ✅ Token rotation - old delete, new create
     await prisma.refreshToken.delete({ where: { id: stored.id } });
 
     const org = await getDefaultOrg(stored.userId);
 
-    return generateTokenPair(stored.userId, stored.user.email, org?.id);
+    return generateTokenPair(
+      stored.userId, 
+      stored.user.email, 
+      org?.id
+    );
   }
 
   // ────────────────────────────────────────────

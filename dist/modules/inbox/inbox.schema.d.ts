@@ -14,7 +14,7 @@ export declare const getConversationsSchema: z.ZodObject<{
         limit: number;
         page: number;
         sortBy: "createdAt" | "lastMessageAt" | "unreadCount";
-        sortOrder: "asc" | "desc";
+        sortOrder: "desc" | "asc";
         search?: string | undefined;
         isArchived?: boolean | undefined;
         isRead?: boolean | undefined;
@@ -29,14 +29,14 @@ export declare const getConversationsSchema: z.ZodObject<{
         assignedTo?: string | undefined;
         labels?: string | undefined;
         sortBy?: "createdAt" | "lastMessageAt" | "unreadCount" | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
         limit: number;
         page: number;
         sortBy: "createdAt" | "lastMessageAt" | "unreadCount";
-        sortOrder: "asc" | "desc";
+        sortOrder: "desc" | "asc";
         search?: string | undefined;
         isArchived?: boolean | undefined;
         isRead?: boolean | undefined;
@@ -53,7 +53,7 @@ export declare const getConversationsSchema: z.ZodObject<{
         assignedTo?: string | undefined;
         labels?: string | undefined;
         sortBy?: "createdAt" | "lastMessageAt" | "unreadCount" | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     };
 }>;
 export declare const getConversationByIdSchema: z.ZodObject<{
@@ -209,7 +209,6 @@ export declare const sendMessageSchema: z.ZodObject<{
         }>>;
     }, "strip", z.ZodTypeAny, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
-        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -226,13 +225,13 @@ export declare const sendMessageSchema: z.ZodObject<{
             }[] | undefined;
             buttonText?: string | undefined;
         } | undefined;
+        filename?: string | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
     }, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
-        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -249,13 +248,13 @@ export declare const sendMessageSchema: z.ZodObject<{
             }[] | undefined;
             buttonText?: string | undefined;
         } | undefined;
+        filename?: string | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
     }>, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
-        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -272,13 +271,13 @@ export declare const sendMessageSchema: z.ZodObject<{
             }[] | undefined;
             buttonText?: string | undefined;
         } | undefined;
+        filename?: string | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
         replyToMessageId?: string | undefined;
     }, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
-        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -295,6 +294,7 @@ export declare const sendMessageSchema: z.ZodObject<{
             }[] | undefined;
             buttonText?: string | undefined;
         } | undefined;
+        filename?: string | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
@@ -303,7 +303,6 @@ export declare const sendMessageSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     body: {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
-        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -320,6 +319,7 @@ export declare const sendMessageSchema: z.ZodObject<{
             }[] | undefined;
             buttonText?: string | undefined;
         } | undefined;
+        filename?: string | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;
@@ -331,7 +331,6 @@ export declare const sendMessageSchema: z.ZodObject<{
 }, {
     body: {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
-        filename?: string | undefined;
         interactive?: {
             type: "button" | "list";
             buttons?: {
@@ -348,6 +347,7 @@ export declare const sendMessageSchema: z.ZodObject<{
             }[] | undefined;
             buttonText?: string | undefined;
         } | undefined;
+        filename?: string | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
         mediaType?: string | undefined;

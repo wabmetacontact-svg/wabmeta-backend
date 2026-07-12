@@ -339,7 +339,7 @@ export declare const getCampaignsSchema: z.ZodObject<{
         limit: number;
         page: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
-        sortOrder: "asc" | "desc";
+        sortOrder: "desc" | "asc";
         search?: string | undefined;
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
     }, {
@@ -348,14 +348,14 @@ export declare const getCampaignsSchema: z.ZodObject<{
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
         page?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
         limit: number;
         page: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
-        sortOrder: "asc" | "desc";
+        sortOrder: "desc" | "asc";
         search?: string | undefined;
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
     };
@@ -366,7 +366,7 @@ export declare const getCampaignsSchema: z.ZodObject<{
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
         page?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     };
 }>;
 export declare const getCampaignByIdSchema: z.ZodObject<{

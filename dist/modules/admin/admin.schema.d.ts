@@ -68,21 +68,21 @@ export declare const updateAdminSchema: z.ZodObject<{
         password: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         password?: string | undefined;
         role?: "admin" | "super_admin" | undefined;
-        isActive?: boolean | undefined;
     }, {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         password?: string | undefined;
         role?: "admin" | "super_admin" | undefined;
-        isActive?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         password?: string | undefined;
         role?: "admin" | "super_admin" | undefined;
-        isActive?: boolean | undefined;
     };
     params: {
         id: string;
@@ -90,9 +90,9 @@ export declare const updateAdminSchema: z.ZodObject<{
 }, {
     body: {
         name?: string | undefined;
+        isActive?: boolean | undefined;
         password?: string | undefined;
         role?: "admin" | "super_admin" | undefined;
-        isActive?: boolean | undefined;
     };
     params: {
         id: string;
@@ -112,14 +112,14 @@ export declare const getUsersSchema: z.ZodObject<{
         status?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }, {
         search?: string | undefined;
         limit?: string | undefined;
         status?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
@@ -128,7 +128,7 @@ export declare const getUsersSchema: z.ZodObject<{
         status?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     };
 }, {
     query: {
@@ -137,7 +137,7 @@ export declare const getUsersSchema: z.ZodObject<{
         status?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     };
 }>;
 export declare const getUserByIdSchema: z.ZodObject<{
@@ -303,14 +303,14 @@ export declare const getOrganizationsSchema: z.ZodObject<{
         planType?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }, {
         search?: string | undefined;
         limit?: string | undefined;
         planType?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
@@ -319,7 +319,7 @@ export declare const getOrganizationsSchema: z.ZodObject<{
         planType?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     };
 }, {
     query: {
@@ -328,7 +328,7 @@ export declare const getOrganizationsSchema: z.ZodObject<{
         planType?: string | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     };
 }>;
 export declare const getOrganizationByIdSchema: z.ZodObject<{

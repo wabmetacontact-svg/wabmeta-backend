@@ -451,46 +451,46 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
         limit: number;
         page: number;
         search?: string | undefined;
+        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }, {
         search?: string | undefined;
         limit?: string | undefined;
+        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
     query?: {
         limit: number;
         page: number;
         search?: string | undefined;
+        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     } | undefined;
 }, {
     query?: {
         search?: string | undefined;
         limit?: string | undefined;
+        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         page?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     } | undefined;
 }>;
 //# sourceMappingURL=templates.schema.d.ts.map

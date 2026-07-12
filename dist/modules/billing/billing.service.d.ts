@@ -54,8 +54,8 @@ declare class BillingService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            slug: string;
             isActive: boolean;
+            slug: string;
             description: string | null;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -121,8 +121,8 @@ declare class BillingService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        slug: string;
         isActive: boolean;
+        slug: string;
         description: string | null;
         maxContacts: number;
         maxMessages: number;
@@ -205,8 +205,8 @@ declare class BillingService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            slug: string;
             isActive: boolean;
+            slug: string;
             description: string | null;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -303,8 +303,8 @@ declare class BillingService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
+                slug: string;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;

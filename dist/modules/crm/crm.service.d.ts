@@ -17,9 +17,9 @@ export declare class CRMService {
         name: string;
         organizationId: string;
         id: string;
+        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
-        isDefault: boolean;
         isActive: boolean;
         description: string | null;
     }>;
@@ -40,9 +40,9 @@ export declare class CRMService {
         name: string;
         organizationId: string;
         id: string;
+        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
-        isDefault: boolean;
         isActive: boolean;
         description: string | null;
     })[]>;
@@ -71,9 +71,9 @@ export declare class CRMService {
         name: string;
         organizationId: string;
         id: string;
+        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
-        isDefault: boolean;
         isActive: boolean;
         description: string | null;
     }>;
@@ -457,9 +457,9 @@ export declare class CRMService {
             name: string;
             organizationId: string;
             id: string;
+            isDefault: boolean;
             createdAt: Date;
             updatedAt: Date;
-            isDefault: boolean;
             isActive: boolean;
             description: string | null;
         }) | null;
@@ -578,9 +578,9 @@ export declare class CRMService {
             name: string;
             organizationId: string;
             id: string;
+            isDefault: boolean;
             createdAt: Date;
             updatedAt: Date;
-            isDefault: boolean;
             isActive: boolean;
             description: string | null;
         } | null;
@@ -666,9 +666,9 @@ export declare class CRMService {
             name: string;
             organizationId: string;
             id: string;
+            isDefault: boolean;
             createdAt: Date;
             updatedAt: Date;
-            isDefault: boolean;
             isActive: boolean;
             description: string | null;
         } | null;

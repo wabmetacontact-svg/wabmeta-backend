@@ -43,9 +43,9 @@ export declare class InboxService {
     } & {
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -69,10 +69,10 @@ export declare class InboxService {
             type: import(".prisma/client").$Enums.MessageType;
             waMessageId: string | null;
             id: string;
-            whatsappAccountId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
+            whatsappAccountId: string | null;
             templateName: string | null;
             conversationId: string;
             metadata: Prisma.JsonValue | null;
@@ -109,9 +109,9 @@ export declare class InboxService {
     markAsRead(organizationId: string, conversationId: string): Promise<{
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -132,9 +132,9 @@ export declare class InboxService {
     archiveConversation(organizationId: string, conversationId: string, isArchived: boolean): Promise<{
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -155,9 +155,9 @@ export declare class InboxService {
     assignConversation(organizationId: string, conversationId: string, userId: string | null): Promise<{
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -178,9 +178,9 @@ export declare class InboxService {
     updateLabels(organizationId: string, conversationId: string, labels: string[]): Promise<{
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -201,9 +201,9 @@ export declare class InboxService {
     addLabels(organizationId: string, conversationId: string, newLabels: string[]): Promise<{
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -224,9 +224,9 @@ export declare class InboxService {
     removeLabel(organizationId: string, conversationId: string, label: string): Promise<{
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -304,9 +304,9 @@ export declare class InboxService {
             } & {
                 organizationId: string;
                 id: string;
+                phoneNumberId: string | null;
                 createdAt: Date;
                 updatedAt: Date;
-                phoneNumberId: string | null;
                 lastMessageAt: Date | null;
                 contactId: string;
                 isPinned: boolean;
@@ -325,10 +325,10 @@ export declare class InboxService {
             type: import(".prisma/client").$Enums.MessageType;
             waMessageId: string | null;
             id: string;
-            whatsappAccountId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
+            whatsappAccountId: string | null;
             templateName: string | null;
             conversationId: string;
             metadata: Prisma.JsonValue | null;
@@ -395,9 +395,9 @@ export declare class InboxService {
     updateConversation(organizationId: string, conversationId: string, updates: Partial<Prisma.ConversationUpdateInput>): Promise<{
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -443,9 +443,9 @@ export declare class InboxService {
     } & {
         organizationId: string;
         id: string;
+        phoneNumberId: string | null;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
         isPinned: boolean;
@@ -475,10 +475,10 @@ export declare class InboxService {
         type: import(".prisma/client").$Enums.MessageType;
         waMessageId: string | null;
         id: string;
-        whatsappAccountId: string | null;
         status: import(".prisma/client").$Enums.MessageStatus;
         createdAt: Date;
         updatedAt: Date;
+        whatsappAccountId: string | null;
         templateName: string | null;
         conversationId: string;
         metadata: Prisma.JsonValue | null;
@@ -511,10 +511,10 @@ export declare class InboxService {
         type: import(".prisma/client").$Enums.MessageType;
         waMessageId: string | null;
         id: string;
-        whatsappAccountId: string | null;
         status: import(".prisma/client").$Enums.MessageStatus;
         createdAt: Date;
         updatedAt: Date;
+        whatsappAccountId: string | null;
         templateName: string | null;
         conversationId: string;
         metadata: Prisma.JsonValue | null;

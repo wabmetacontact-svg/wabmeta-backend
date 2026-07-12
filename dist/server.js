@@ -141,6 +141,8 @@ async function bootstrap() {
             console.log(`   🔐 Encryption  : ${encryptionValid ? 'ENABLED ✓' : 'DISABLED ✗'}`);
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
             console.log('');
+            // ✅ Start template media pre-warm job
+            (0, scheduler_service_1.startTemplateMediaPreWarmJob)();
         });
         setupGracefulShutdown(server);
         setupErrorHandlers();
@@ -287,29 +289,6 @@ function startBackgroundJobs() {
             }
         }, 2 * 60 * 60 * 1000);
     }
-    // ✅ 4. Template pre-warm - Once daily at 3 AM
-    const scheduleNextPreWarm = () => {
-        const now = new Date();
-        const next3AM = new Date();
-        next3AM.setHours(3, 0, 0, 0);
-        if (next3AM <= now)
-            next3AM.setDate(next3AM.getDate() + 1);
-        const msUntil3AM = next3AM.getTime() - now.getTime();
-        setTimeout(async () => {
-            if (!inPoolPressureMode) {
-                try {
-                    const { templateMediaPreWarmService } = await Promise.resolve().then(() => __importStar(require('./services/templateMediaPreWarm.service')));
-                    await templateMediaPreWarmService.preWarmExpiringMedia();
-                }
-                catch (error) {
-                    console.error('❌ Pre-warm error:', error);
-                }
-            }
-            scheduleNextPreWarm(); // Schedule next
-        }, msUntil3AM);
-        console.log(`⏰ Next pre-warm scheduled: ${next3AM.toLocaleString()}`);
-    };
-    scheduleNextPreWarm();
     console.log('✅ Background jobs started (with pool pressure protection)');
 }
 // ============================================

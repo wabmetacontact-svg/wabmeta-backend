@@ -42,9 +42,9 @@ export declare class AdminService {
         email: string;
         id: string;
         createdAt: Date;
+        isActive: boolean;
         lastLoginAt: Date | null;
         role: string;
-        isActive: boolean;
     } | null>;
     getDashboardStats(): Promise<{
         users: {
@@ -115,6 +115,11 @@ export declare class AdminService {
             slug: string;
             planType: import(".prisma/client").$Enums.PlanType;
         }[];
+        _count: {
+            activityLogs: number;
+            notifications: number;
+            refreshTokens: number;
+        };
         ownedOrganizations: {
             name: string;
             id: string;
@@ -137,11 +142,6 @@ export declare class AdminService {
             invitedAt: Date;
             joinedAt: Date | null;
         })[];
-        _count: {
-            activityLogs: number;
-            notifications: number;
-            refreshTokens: number;
-        };
         email: string;
         tokenVersion: number;
         id: string;
@@ -238,8 +238,8 @@ export declare class AdminService {
                 cancelledAt: Date | null;
             }) | null;
             _count: {
-                campaigns: number;
                 contacts: number;
+                campaigns: number;
                 members: number;
                 whatsappAccounts: number;
             };
@@ -281,8 +281,8 @@ export declare class AdminService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
+                slug: string;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -319,10 +319,10 @@ export declare class AdminService {
             cancelledAt: Date | null;
         }) | null;
         _count: {
-            campaigns: number;
-            chatbots: number;
             contacts: number;
+            campaigns: number;
             templates: number;
+            chatbots: number;
         };
         owner: {
             email: string;
@@ -408,8 +408,8 @@ export declare class AdminService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
+                slug: string;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -446,10 +446,10 @@ export declare class AdminService {
             cancelledAt: Date | null;
         }) | null;
         _count: {
-            campaigns: number;
-            chatbots: number;
             contacts: number;
+            campaigns: number;
             templates: number;
+            chatbots: number;
         };
         owner: {
             email: string;
@@ -512,8 +512,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        slug: string;
         isActive: boolean;
+        slug: string;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -538,8 +538,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        slug: string;
         isActive: boolean;
+        slug: string;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -564,8 +564,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        slug: string;
         isActive: boolean;
+        slug: string;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -592,24 +592,24 @@ export declare class AdminService {
         email: string;
         id: string;
         createdAt: Date;
+        isActive: boolean;
         lastLoginAt: Date | null;
         role: string;
-        isActive: boolean;
     }[]>;
     createAdmin(data: any): Promise<{
         name: string;
         email: string;
         id: string;
         createdAt: Date;
-        role: string;
         isActive: boolean;
+        role: string;
     }>;
     updateAdmin(id: string, data: any): Promise<{
         name: string;
         email: string;
         id: string;
-        role: string;
         isActive: boolean;
+        role: string;
     }>;
     deleteAdmin(id: string): Promise<{
         message: string;
@@ -677,26 +677,26 @@ export declare class AdminService {
         account: {
             phoneNumber: string;
             organizationId: string;
-            id: string;
-            wabaId: string;
-            status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
-            createdAt: Date;
-            updatedAt: Date;
-            phoneNumberId: string;
             accessToken: string | null;
-            displayName: string;
+            id: string;
+            verifiedName: string | null;
             qualityRating: string | null;
-            tokenExpiresAt: Date | null;
-            webhookSecret: string | null;
             codeVerificationStatus: string | null;
             nameStatus: string | null;
-            verifiedName: string | null;
+            status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
+            phoneNumberId: string;
+            wabaId: string;
+            displayName: string;
+            tokenExpiresAt: Date | null;
+            webhookSecret: string | null;
             messagingLimit: string | null;
             dailyMessageLimit: number;
             dailyMessagesUsed: number;
             lastLimitReset: Date;
             businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
             isDefault: boolean;
+            createdAt: Date;
+            updatedAt: Date;
             isActive: boolean;
             connectionType: string;
         };

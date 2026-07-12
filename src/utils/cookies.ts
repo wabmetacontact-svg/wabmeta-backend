@@ -14,6 +14,8 @@ export const getCookieOptions = (isRefresh: boolean = false) => ({
     sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
     maxAge: isRefresh ? 7 * 24 * 60 * 60 * 1000 : 15 * 60 * 1000, // access cookie now matches 15m JWT expiry
     path: '/',
+    // ✅ KEY FIX: Domain mat set karo cross-domain ke liye
+    // domain set karne se browser BLOCK karta hai
 });
 
 // IMPORTANT: clear options must match the attributes used when the cookie was SET

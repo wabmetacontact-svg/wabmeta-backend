@@ -7299,7 +7299,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
         }>>;
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectOutputType<{
@@ -8031,7 +8031,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
         fallbackMessage?: string | null | undefined;
     }, {
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectInputType<{
@@ -8765,7 +8765,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     body: {
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectOutputType<{
@@ -9502,7 +9502,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
 }, {
     body: {
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         isDefault?: boolean | undefined;
         description?: string | null | undefined;
         flowData?: z.objectInputType<{
@@ -10253,34 +10253,34 @@ export declare const getChatbotsSchema: z.ZodObject<{
         limit: number;
         page: number;
         sortBy: "name" | "status" | "createdAt";
-        sortOrder: "asc" | "desc";
+        sortOrder: "desc" | "asc";
         search?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
     }, {
         search?: string | undefined;
         limit?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         page?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
         limit: number;
         page: number;
         sortBy: "name" | "status" | "createdAt";
-        sortOrder: "asc" | "desc";
+        sortOrder: "desc" | "asc";
         search?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
     };
 }, {
     query: {
         search?: string | undefined;
         limit?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         page?: string | undefined;
         sortBy?: "name" | "status" | "createdAt" | undefined;
-        sortOrder?: "asc" | "desc" | undefined;
+        sortOrder?: "desc" | "asc" | undefined;
     };
 }>;
 export declare const getChatbotByIdSchema: z.ZodObject<{
