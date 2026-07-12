@@ -809,13 +809,25 @@ class MetaApiClient {
         `/${phoneNumberId}`,
         {
           params: {
+            // ✅ FIX: name_status add kiya + status field
             fields:
-              'verified_name,code_verification_status,display_phone_number,quality_rating,messaging_limit_tier,platform_type,throughput',
+              'verified_name,code_verification_status,display_phone_number,' +
+              'quality_rating,messaging_limit_tier,platform_type,throughput,' +
+              'name_status,status,id',
             access_token: accessToken,
           },
           timeout: 30000,
         }
       );
+
+      console.log('📊 Phone Info from Meta:', {
+        verified_name: response.data?.verified_name,
+        quality_rating: response.data?.quality_rating,
+        messaging_limit_tier: response.data?.messaging_limit_tier,
+        code_verification_status: response.data?.code_verification_status,
+        name_status: response.data?.name_status,
+      });
+
       return response.data;
     } catch (error: any) {
       console.error('Failed to get phone info:', error?.response?.data);

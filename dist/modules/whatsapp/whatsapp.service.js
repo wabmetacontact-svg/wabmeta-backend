@@ -1168,13 +1168,16 @@ class WhatsAppService {
         try {
             console.log(`🔄 Syncing quality for account: ${accountId}`);
             const { account, accessToken } = await this.getAccountWithToken(accountId);
+            // ✅ Fresh data from Meta
             const phoneInfo = await meta_api_1.metaApi.getPhoneNumberInfo(account.phoneNumberId, accessToken);
-            console.log(`📊 Phone info from Meta:`, {
+            console.log(`📊 Meta returned:`, {
                 quality_rating: phoneInfo?.quality_rating,
                 messaging_limit_tier: phoneInfo?.messaging_limit_tier,
+                code_verification_status: phoneInfo?.code_verification_status,
+                name_status: phoneInfo?.name_status,
                 verified_name: phoneInfo?.verified_name,
-                platform_type: phoneInfo?.platform_type,
             });
+            // ✅ Update database with FRESH data
             const updated = await database_1.default.whatsAppAccount.update({
                 where: { id: accountId },
                 data: {
@@ -1182,12 +1185,16 @@ class WhatsAppService {
                     messagingLimit: phoneInfo?.messaging_limit_tier || account.messagingLimit,
                     verifiedName: phoneInfo?.verified_name || account.verifiedName,
                     displayName: phoneInfo?.verified_name || account.displayName,
-                    codeVerificationStatus: phoneInfo?.code_verification_status ||
-                        account.codeVerificationStatus,
+                    codeVerificationStatus: phoneInfo?.code_verification_status || account.codeVerificationStatus,
+                    nameStatus: phoneInfo?.name_status || account.nameStatus,
                     updatedAt: new Date(),
                 },
             });
-            console.log(`✅ Quality synced for ${account.phoneNumber}: ${updated.qualityRating}`);
+            console.log(`✅ Quality synced for ${account.phoneNumber}:`, {
+                quality: updated.qualityRating,
+                tier: updated.messagingLimit,
+                verification: updated.codeVerificationStatus,
+            });
             return { success: true, account: updated };
         }
         catch (error) {

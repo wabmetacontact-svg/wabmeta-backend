@@ -348,6 +348,33 @@ export declare function getWalletMessageAnalytics(organizationId: string, option
             cost: number;
         }[];
     };
+    countryBreakdown: {
+        code: string;
+        name: string;
+        flag: string;
+        sent: number;
+        delivered: number;
+        failed: number;
+        cost: number;
+        costPaise: number;
+        deliveryRate: number;
+        categories: Record<string, number>;
+    }[];
+    countrySummary: {
+        totalCountries: number;
+        topCountry: {
+            code: string;
+            name: string;
+            flag: string;
+            sent: number;
+            delivered: number;
+            failed: number;
+            cost: number;
+            costPaise: number;
+            deliveryRate: number;
+            categories: Record<string, number>;
+        };
+    };
     rates: {
         currency: string;
         unit: string;
@@ -356,6 +383,7 @@ export declare function getWalletMessageAnalytics(organizationId: string, option
             MARKETING: number;
             UTILITY: number;
             AUTHENTICATION: number;
+            AUTHENTICATION_INTERNATIONAL: number;
             SERVICE: number;
         };
     };

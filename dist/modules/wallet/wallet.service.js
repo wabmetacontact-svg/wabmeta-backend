@@ -922,20 +922,17 @@ async function setWalletActive(organizationId, adminId, activate, reason) {
     };
 }
 async function getWalletMessageAnalytics(organizationId, options) {
-    // ✅ Import deduction service for accurate rates
-    const { getRateForCategory, DEFAULT_RATE, LANGUAGE_TO_PREFIX, COUNTRY_RATES, } = await Promise.resolve().then(() => __importStar(require('./wallet.deduction.service')));
+    const { getRateForCategory, DEFAULT_RATE, LANGUAGE_TO_PREFIX, COUNTRY_RATES, COUNTRY_NAMES_MAP, } = await Promise.resolve().then(() => __importStar(require('./wallet.deduction.service')));
     const wallet = await database_1.default.wallet.findUnique({
         where: { organizationId },
     });
-    // ✅ Date range - default last 30 days
+    // Date range - default last 30 days
     const endDate = options?.endDate || new Date();
     const startDate = options?.startDate ||
         new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const dateFilter = { gte: startDate, lte: endDate };
     // ============================================
     // 1. FETCH ALL OUTBOUND MESSAGES
-    // ✅ Include template info for category detection
-    // ✅ Include conversation for free-tier detection
     // ============================================
     const outboundMessages = await database_1.default.message.findMany({
         where: {
@@ -961,7 +958,7 @@ async function getWalletMessageAnalytics(organizationId, options) {
         },
     });
     // ============================================
-    // 2. FETCH TEMPLATES (bulk fetch for speed)
+    // 2. BULK FETCH TEMPLATES
     // ============================================
     const templateIds = Array.from(new Set(outboundMessages
         .map((m) => m.templateId)
@@ -969,7 +966,6 @@ async function getWalletMessageAnalytics(organizationId, options) {
     const templateNames = Array.from(new Set(outboundMessages
         .map((m) => m.templateName)
         .filter((n) => !!n)));
-    // ✅ Fetch by ID first, then by name (fallback)
     const templates = await database_1.default.template.findMany({
         where: {
             organizationId,
@@ -985,7 +981,6 @@ async function getWalletMessageAnalytics(organizationId, options) {
             language: true,
         },
     });
-    // ✅ Build lookup maps
     const templateById = new Map(templates.map((t) => [t.id, t]));
     const templateByName = new Map(templates.map((t) => [t.name, t]));
     // ============================================
@@ -999,18 +994,15 @@ async function getWalletMessageAnalytics(organizationId, options) {
         },
     });
     // ============================================
-    // 4. FETCH LAST CUSTOMER MESSAGE TIMES
-    // ✅ 24-hour free window ke liye per-conversation
+    // 4. FREE WINDOW DETECTION (24-hour rule)
     // ============================================
     const conversationIds = Array.from(new Set(outboundMessages
         .map((m) => m.conversation?.id)
         .filter((id) => !!id)));
-    // ✅ Har conversation ke inbound messages fetch karo
     const inboundMessagesInPeriod = await database_1.default.message.findMany({
         where: {
             conversationId: { in: conversationIds },
             direction: 'INBOUND',
-            // ✅ Include messages before period too (for context)
             createdAt: {
                 gte: new Date(startDate.getTime() - 24 * 60 * 60 * 1000),
                 lte: endDate,
@@ -1022,7 +1014,6 @@ async function getWalletMessageAnalytics(organizationId, options) {
         },
         orderBy: { createdAt: 'asc' },
     });
-    // ✅ Build conversation → sorted inbound times map
     const inboundTimesByConv = new Map();
     for (const msg of inboundMessagesInPeriod) {
         if (!msg.conversationId)
@@ -1031,12 +1022,10 @@ async function getWalletMessageAnalytics(organizationId, options) {
         times.push(msg.createdAt);
         inboundTimesByConv.set(msg.conversationId, times);
     }
-    // ✅ Helper: Check if outbound msg is within 24h of any inbound
     const isWithinFreeWindow = (conversationId, outboundTime) => {
         const inboundTimes = inboundTimesByConv.get(conversationId);
         if (!inboundTimes || inboundTimes.length === 0)
             return false;
-        // Binary search for the closest inbound before outbound
         for (let i = inboundTimes.length - 1; i >= 0; i--) {
             const inboundTime = inboundTimes[i];
             if (inboundTime.getTime() > outboundTime.getTime())
@@ -1046,6 +1035,26 @@ async function getWalletMessageAnalytics(organizationId, options) {
             return hoursDiff <= 24;
         }
         return false;
+    };
+    // ============================================
+    // 5. COUNTRY DETECTION HELPER
+    // ============================================
+    const getCountryFromPhone = (phone) => {
+        if (!phone)
+            return { code: 'UNKNOWN', name: 'Unknown', flag: '🌐' };
+        const digits = phone.replace(/\D/g, '').replace(/^0+/, '');
+        for (const len of [4, 3, 2, 1]) {
+            const prefix = digits.slice(0, len);
+            if (COUNTRY_RATES[prefix]) {
+                const name = COUNTRY_NAMES_MAP[prefix] || 'Unknown';
+                return {
+                    code: prefix,
+                    name,
+                    flag: getCountryFlag(prefix),
+                };
+            }
+        }
+        return { code: 'UNKNOWN', name: 'Unknown', flag: '🌐' };
     };
     const emptyStats = () => ({
         sent: 0,
@@ -1065,6 +1074,7 @@ async function getWalletMessageAnalytics(organizationId, options) {
         customerService: emptyStats(),
         entryPoint: emptyStats(),
     };
+    const countryStats = new Map();
     let totalSent = 0;
     let totalDelivered = 0;
     let totalFailed = 0;
@@ -1080,11 +1090,9 @@ async function getWalletMessageAnalytics(organizationId, options) {
             totalFailed++;
         if (isRead)
             totalRead++;
-        // ✅ Determine if template message
         const isTemplateMsg = msg.type === 'TEMPLATE' ||
             !!msg.templateId ||
             !!msg.templateName;
-        // ✅ Get template info (from lookup maps)
         const template = (msg.templateId ? templateById.get(msg.templateId) : undefined) ||
             (msg.templateName ? templateByName.get(msg.templateName) : undefined);
         const category = (template && typeof template === 'object' && 'category' in template
@@ -1092,16 +1100,38 @@ async function getWalletMessageAnalytics(organizationId, options) {
             : 'SERVICE').toUpperCase();
         const language = template?.language;
         const recipientPhone = msg.conversation?.contact?.phone;
-        // ✅ Free window check for non-template messages
+        const country = getCountryFromPhone(recipientPhone);
+        // Country stats update
+        if (!countryStats.has(country.code)) {
+            countryStats.set(country.code, {
+                code: country.code,
+                name: country.name,
+                flag: country.flag,
+                sent: 0,
+                delivered: 0,
+                failed: 0,
+                costPaise: 0,
+                categories: {
+                    MARKETING: 0,
+                    UTILITY: 0,
+                    AUTHENTICATION: 0,
+                    SERVICE: 0,
+                },
+            });
+        }
+        const cStats = countryStats.get(country.code);
+        cStats.sent++;
+        if (isDelivered)
+            cStats.delivered++;
+        if (isFailed)
+            cStats.failed++;
+        // Free window check
         let isFreeWindow = false;
         if (!isTemplateMsg && msg.conversation?.id) {
             isFreeWindow = isWithinFreeWindow(msg.conversation.id, msg.createdAt);
         }
-        // ============================================
-        // ROUTE TO CORRECT BUCKET
-        // ============================================
+        // Route to correct bucket
         if (!isTemplateMsg && isFreeWindow) {
-            // ✅ FREE - Customer service window
             freeStats.customerService.sent++;
             if (isDelivered)
                 freeStats.customerService.delivered++;
@@ -1109,10 +1139,8 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 freeStats.customerService.failed++;
             if (isRead)
                 freeStats.customerService.read++;
-            // No cost
         }
         else if (!isTemplateMsg) {
-            // ✅ Non-template outside window (rare) - Service category
             paidStats.SERVICE.sent++;
             if (isDelivered)
                 paidStats.SERVICE.delivered++;
@@ -1120,11 +1148,9 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 paidStats.SERVICE.failed++;
             if (isRead)
                 paidStats.SERVICE.read++;
-            // Service is FREE in Meta pricing
+            cStats.categories.SERVICE++;
         }
         else {
-            // ✅ Template message - use category
-            // Detect international authentication
             const isIntlAuth = category === 'AUTHENTICATION' &&
                 language &&
                 !language.startsWith('en_IN') &&
@@ -1142,21 +1168,24 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 paidStats[bucketKey].failed++;
             if (isRead)
                 paidStats[bucketKey].read++;
-            // ✅ Calculate cost ONLY for delivered
+            // Country category count
+            const catKey = category === 'AUTHENTICATION'
+                ? 'AUTHENTICATION'
+                : (category in cStats.categories ? category : 'MARKETING');
+            cStats.categories[catKey]++;
+            // Cost calculation
             if (isDelivered) {
                 const rateRupees = getRateForCategory(category, recipientPhone || undefined, language || undefined);
                 const ratePaise = Math.round(rateRupees * 100);
                 paidStats[bucketKey].estimatedCostPaise += ratePaise;
+                cStats.costPaise += ratePaise;
             }
         }
     }
     // ============================================
-    // 6. TOTAL APPROXIMATE COST
+    // 7. TOTAL COST + WALLET DEBITS
     // ============================================
     const totalEstimatedCostPaise = Object.values(paidStats).reduce((sum, s) => sum + s.estimatedCostPaise, 0);
-    // ============================================
-    // 7. ACTUAL WALLET DEBITS (Real data)
-    // ============================================
     let actualDebitedPaise = 0;
     const actualDebitByCategory = {
         MARKETING: 0,
@@ -1184,10 +1213,8 @@ async function getWalletMessageAnalytics(organizationId, options) {
             actualDebitedPaise += d.amountPaise;
             const desc = (d.description || '').toUpperCase();
             if (desc.includes('AUTHENTICATION') &&
-                (desc.includes('INTL') ||
-                    desc.includes('INTERNATIONAL'))) {
-                actualDebitByCategory.AUTHENTICATION_INTERNATIONAL +=
-                    d.amountPaise;
+                (desc.includes('INTL') || desc.includes('INTERNATIONAL'))) {
+                actualDebitByCategory.AUTHENTICATION_INTERNATIONAL += d.amountPaise;
             }
             else if (desc.includes('AUTHENTICATION')) {
                 actualDebitByCategory.AUTHENTICATION += d.amountPaise;
@@ -1202,7 +1229,6 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 actualDebitByCategory.MARKETING += d.amountPaise;
             }
             else {
-                // Default - assume marketing
                 actualDebitByCategory.MARKETING += d.amountPaise;
             }
         }
@@ -1224,30 +1250,33 @@ async function getWalletMessageAnalytics(organizationId, options) {
         'AUTHENTICATION_INTERNATIONAL',
         'SERVICE',
     ];
-    // ✅ Delivery rate
-    const deliveryRate = totalSent > 0
-        ? Math.round((totalDelivered / totalSent) * 100)
-        : 0;
+    const deliveryRate = totalSent > 0 ? Math.round((totalDelivered / totalSent) * 100) : 0;
     const readRate = totalDelivered > 0
         ? Math.round((totalRead / totalDelivered) * 100)
         : 0;
-    // ✅ Free totals
-    const freeTotal = freeStats.customerService.delivered +
-        freeStats.entryPoint.delivered;
+    const freeTotal = freeStats.customerService.delivered + freeStats.entryPoint.delivered;
     const paidTotal = Object.values(paidStats).reduce((sum, s) => sum + s.delivered, 0);
+    // ✅ Country stats sorted by cost/count
+    const countryBreakdown = Array.from(countryStats.values())
+        .sort((a, b) => b.sent - a.sent)
+        .map((c) => ({
+        code: c.code,
+        name: c.name,
+        flag: c.flag,
+        sent: c.sent,
+        delivered: c.delivered,
+        failed: c.failed,
+        cost: toRupees(c.costPaise),
+        costPaise: c.costPaise,
+        deliveryRate: c.sent > 0 ? Math.round((c.delivered / c.sent) * 100) : 0,
+        categories: c.categories,
+    }));
     return {
-        // ============================================
-        // PERIOD INFO
-        // ============================================
         period: {
             startDate: startDate.toISOString(),
             endDate: endDate.toISOString(),
-            days: Math.ceil((endDate.getTime() - startDate.getTime()) /
-                (1000 * 60 * 60 * 24)),
+            days: Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)),
         },
-        // ============================================
-        // ALL MESSAGES (Top card - "All Messages")
-        // ============================================
         allMessages: {
             sent: totalSent,
             delivered: totalDelivered,
@@ -1257,35 +1286,21 @@ async function getWalletMessageAnalytics(organizationId, options) {
             deliveryRate,
             readRate,
         },
-        // ============================================
-        // MESSAGES DELIVERED (Middle card)
-        // ✅ Breakdown by category
-        // ============================================
         messagesDelivered: {
             total: totalDelivered,
             byCategory: categoryOrder.map((cat) => ({
                 category: cat,
                 label: categoryLabels[cat],
                 delivered: paidStats[cat].delivered +
-                    (cat === 'SERVICE'
-                        ? freeStats.customerService.delivered
-                        : 0),
+                    (cat === 'SERVICE' ? freeStats.customerService.delivered : 0),
             })),
         },
-        // ============================================
-        // FREE MESSAGES DELIVERED (Right card)
-        // ✅ 24-hour window replies
-        // ============================================
         freeMessagesDelivered: {
             freeCustomerService: freeStats.customerService.delivered,
             freeEntryPoint: freeStats.entryPoint.delivered,
             total: freeTotal,
-            sent: freeStats.customerService.sent +
-                freeStats.entryPoint.sent,
+            sent: freeStats.customerService.sent + freeStats.entryPoint.sent,
         },
-        // ============================================
-        // PAID MESSAGES DELIVERED (Bottom left card)
-        // ============================================
         paidMessagesDelivered: {
             total: paidTotal,
             byCategory: categoryOrder.map((cat) => ({
@@ -1295,10 +1310,6 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 sent: paidStats[cat].sent,
             })),
         },
-        // ============================================
-        // APPROXIMATE CHARGES (Bottom right card)
-        // ✅ Meta rates ke hisaab se calculated
-        // ============================================
         approximateCharges: {
             total: toRupees(totalEstimatedCostPaise),
             totalPaise: totalEstimatedCostPaise,
@@ -1309,10 +1320,6 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 delivered: paidStats[cat].delivered,
             })),
         },
-        // ============================================
-        // ACTUAL CHARGES (From wallet transactions)
-        // ✅ Real deducted amount
-        // ============================================
         actualCharges: {
             total: toRupees(actualDebitedPaise),
             totalPaise: actualDebitedPaise,
@@ -1322,9 +1329,12 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 cost: toRupees(actualDebitByCategory[cat] || 0),
             })),
         },
-        // ============================================
-        // RATES REFERENCE (India rates)
-        // ============================================
+        // ✅ NEW: Country-wise breakdown
+        countryBreakdown,
+        countrySummary: {
+            totalCountries: countryStats.size,
+            topCountry: countryBreakdown[0] || null,
+        },
         rates: {
             currency: 'INR',
             unit: 'per delivered message',
@@ -1333,9 +1343,32 @@ async function getWalletMessageAnalytics(organizationId, options) {
                 MARKETING: DEFAULT_RATE.marketing,
                 UTILITY: DEFAULT_RATE.utility,
                 AUTHENTICATION: DEFAULT_RATE.authentication,
+                AUTHENTICATION_INTERNATIONAL: 2.5,
                 SERVICE: 0,
             },
         },
     };
+}
+// ============================================
+// HELPER: Country Flag Emoji
+// ============================================
+function getCountryFlag(prefix) {
+    const flagMap = {
+        '91': '🇮🇳', '1': '🇺🇸', '44': '🇬🇧', '61': '🇦🇺',
+        '86': '🇨🇳', '81': '🇯🇵', '49': '🇩🇪', '33': '🇫🇷',
+        '39': '🇮🇹', '34': '🇪🇸', '7': '🇷🇺', '55': '🇧🇷',
+        '52': '🇲🇽', '62': '🇮🇩', '234': '🇳🇬', '27': '🇿🇦',
+        '971': '🇦🇪', '966': '🇸🇦', '65': '🇸🇬', '60': '🇲🇾',
+        '92': '🇵🇰', '880': '🇧🇩', '94': '🇱🇰', '977': '🇳🇵',
+        '20': '🇪🇬', '90': '🇹🇷', '31': '🇳🇱', '46': '🇸🇪',
+        '47': '🇳🇴', '45': '🇩🇰', '32': '🇧🇪', '41': '🇨🇭',
+        '43': '🇦🇹', '30': '🇬🇷', '351': '🇵🇹', '48': '🇵🇱',
+        '82': '🇰🇷', '66': '🇹🇭', '84': '🇻🇳', '63': '🇵🇭',
+        '972': '🇮🇱', '974': '🇶🇦', '965': '🇰🇼', '973': '🇧🇭',
+        '968': '🇴🇲', '54': '🇦🇷', '56': '🇨🇱', '57': '🇨🇴',
+        '51': '🇵🇪', '58': '🇻🇪', '254': '🇰🇪', '256': '🇺🇬',
+        '255': '🇹🇿', '233': '🇬🇭', '212': '🇲🇦', '213': '🇩🇿',
+    };
+    return flagMap[prefix] || '🌐';
 }
 //# sourceMappingURL=wallet.service.js.map
