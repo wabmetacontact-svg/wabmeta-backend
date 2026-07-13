@@ -1114,34 +1114,47 @@ export class CampaignsService {
       console.log(`   pendingContacts : ${pendingCount}`);
       console.log('💳 ─────────────────────────────────────────────────────────');
 
+      // ═══════════════════════════════════════════════════════════════════════════════
+      // ✅ FIXED: STRICT WALLET CHECK - NEVER ALLOW INSUFFICIENT BALANCE CAMPAIGN
+      // Bug fix: Previously "warn but continue" allowed campaigns to run with insufficient
+      // balance, causing Meta to charge business account. Now we STRICTLY block.
+      // ═══════════════════════════════════════════════════════════════════════════════
       if (walletCheck.walletActive && !walletCheck.canProceed) {
-        // Hard block only when balance is ≤ ₹20 (absolute minimum)
-        if (walletCheck.availableBalance <= 20) {
-          await prisma.campaign.update({
-            where: { id: campaignId },
-            data: { status: 'PAUSED' },
-          });
+        // Determine block reason
+        const isLowBalance = walletCheck.availableBalance <= 20;
+        const isInsufficient = walletCheck.estimatedCost > walletCheck.availableBalance;
 
-          campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
-            status: 'PAUSED',
-            message: `⚠️ Campaign paused: Wallet balance very low (₹${walletCheck.availableBalance.toFixed(2)}). Please add balance.`,
-          });
-
-          campaignSocketService.emitCampaignError(organizationId, campaignId, {
-            message: `Your wallet balance is very low (₹${walletCheck.availableBalance.toFixed(2)}). You need to add balance to resume.`,
-            code: 'LOW_BALANCE_ERROR',
-          });
-
-          this.processingCampaigns.delete(campaignId);
-          return;
-        }
-
-        // Balance is between ₹20 and estimated cost — warn but continue.
-        // Deduction will use whatever is available.
-        console.warn(
-          `⚠️ Wallet balance (₹${walletCheck.availableBalance.toFixed(2)}) < estimated cost ` +
-          `(₹${walletCheck.estimatedCost.toFixed(2)}) — campaign will run but wallet may empty out.`
+        console.error(
+          `🚨 WALLET CHECK FAILED - Campaign will be PAUSED:\n` +
+          `   Available: ₹${walletCheck.availableBalance.toFixed(2)}\n` +
+          `   Required:  ₹${walletCheck.estimatedCost.toFixed(2)}\n` +
+          `   Shortfall: ₹${walletCheck.shortfall.toFixed(2)}\n` +
+          `   Reason:    ${isLowBalance ? 'LOW_BALANCE' : 'INSUFFICIENT_FOR_CAMPAIGN'}`
         );
+
+        // ✅ ALWAYS pause campaign - no exceptions
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'PAUSED' },
+        });
+
+        // Build user-friendly message
+        const userMessage = isLowBalance
+          ? `Campaign paused: Wallet balance very low (₹${walletCheck.availableBalance.toFixed(2)}). Minimum ₹20 required. Please add funds.`
+          : `Campaign paused: Insufficient balance. Need ₹${walletCheck.estimatedCost.toFixed(2)}, have ₹${walletCheck.availableBalance.toFixed(2)} (short by ₹${walletCheck.shortfall.toFixed(2)}). Please add funds and resume.`;
+
+        campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
+          status: 'PAUSED',
+          message: userMessage,
+        });
+
+        campaignSocketService.emitCampaignError(organizationId, campaignId, {
+          message: userMessage,
+          code: isLowBalance ? 'LOW_BALANCE_ERROR' : 'INSUFFICIENT_BALANCE',
+        });
+
+        this.processingCampaigns.delete(campaignId);
+        return; // ✅ STOP - do not send any messages
       }
       // ───────────────────────────────────────────────────────────────────────────
 
@@ -1201,6 +1214,68 @@ export class CampaignsService {
               select: { status: true },
             });
             if (check?.status !== 'RUNNING') break;
+          }
+
+          // ═══════════════════════════════════════════════════════════════════════
+          // ✅ NEW: Real-time balance monitoring (every 50 messages during send)
+          // Prevents mid-campaign wallet depletion below safe threshold
+          // ═══════════════════════════════════════════════════════════════════════
+          if (walletCheck.walletActive && totalProcessed > 0 && totalProcessed % 50 === 0) {
+            const currentWallet = await prisma.wallet.findUnique({ 
+              where: { organizationId },
+              select: { 
+                balancePaise: true, 
+                creditEnabled: true, 
+                creditLimitPaise: true, 
+                creditUsedPaise: true 
+              },
+            });
+
+            if (currentWallet) {
+              const currentBalanceRupees = currentWallet.balancePaise / 100 + 
+                (currentWallet.creditEnabled 
+                  ? Math.max(0, (currentWallet.creditLimitPaise - currentWallet.creditUsedPaise) / 100)
+                  : 0);
+
+              // Estimate cost for remaining recipients
+              const remainingCount = contacts.length - i;
+              const avgRatePaisePerMsg = totalSentCount > 0 
+                ? totalSentAmountPaise / totalSentCount
+                : Math.round(walletCheck.rateUsed * 100);
+              const remainingCostRupees = (avgRatePaisePerMsg * remainingCount) / 100;
+
+              // ✅ Pause if current balance < 105% of remaining cost OR balance < ₹5
+              if (currentBalanceRupees < remainingCostRupees * 1.05 || currentBalanceRupees < 5) {
+                console.error(
+                  `🚨 Balance depleted mid-campaign at ${totalProcessed}/${totalCampaignSize} messages:\n` +
+                  `   Current balance: ₹${currentBalanceRupees.toFixed(2)}\n` +
+                  `   Need for remaining ${remainingCount} msgs: ₹${remainingCostRupees.toFixed(2)}`
+                );
+
+                await prisma.campaign.update({
+                  where: { id: campaignId },
+                  data: { status: 'PAUSED' },
+                });
+
+                campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
+                  status: 'PAUSED',
+                  message: `Campaign auto-paused: Wallet balance depleted (₹${currentBalanceRupees.toFixed(2)}). Need ₹${remainingCostRupees.toFixed(2)} for remaining ${remainingCount} messages. Please add funds to resume.`,
+                });
+
+                campaignSocketService.emitCampaignError(organizationId, campaignId, {
+                  message: `Campaign paused due to insufficient balance. Please top-up wallet and resume.`,
+                  code: 'BALANCE_DEPLETED_MID_CAMPAIGN',
+                });
+
+                // Flush any pending batch results before stopping
+                if (batchSent.length > 0 || batchFailed.length > 0) {
+                  await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
+                }
+
+                this.processingCampaigns.delete(campaignId);
+                return;
+              }
+            }
           }
 
           // ✅ Auto-pause on high failure rate
