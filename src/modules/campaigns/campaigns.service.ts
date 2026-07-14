@@ -1039,44 +1039,45 @@ export class CampaignsService {
       const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
       const template = campaign.template;
 
-      // ✅ NEW: Pre-warm media using shared resolver (single upload, cached for all recipients)
+      // ✅ NEW: Validate permanent URL exists (NO upload needed!)
       if (template.headerType && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType.toUpperCase())) {
-        try {
-          console.log(`🖼️ Pre-warming media for template: ${template.name}...`);
-          const freshMediaId = await getFreshMediaIdForSending(template.id);
+        const mediaUrl = template.headerContent;
+        
+        if (!mediaUrl || !mediaUrl.startsWith('http')) {
+          const errorMsg = `Template "${template.name}" has no valid media URL. Please edit the template and re-upload media.`;
+          console.error(`❌ ${errorMsg}`);
           
-          if (!freshMediaId) {
-            throw new Error(
-              `Template "${template.name}" media could not be prepared. ` +
-              `Please edit the template and re-upload the media file.`
-            );
-          }
-
-          // ✅ Update in-memory template with fresh ID (all 1000+ recipients use this cached ID)
-          template.headerMediaId = freshMediaId;
-          template.headerMediaUploadedAt = new Date();
-          template.headerMediaLastVerified = new Date();
-          
-          console.log(`✅ Media ready for campaign: ${freshMediaId}`);
-        } catch (err: any) {
-          console.error(`❌ Media pre-warm failed:`, err.message);
-          
-          // Mark campaign as failed with clear reason
           await prisma.campaign.update({
             where: { id: campaignId },
-            data: { 
-              status: 'FAILED', 
-              completedAt: new Date() 
-            },
+            data: { status: 'FAILED', completedAt: new Date() },
           });
           
           campaignSocketService.emitCampaignError(organizationId, campaignId, {
-            message: err.message,
-            code: 'MEDIA_UPLOAD_FAILED',
+            message: errorMsg,
+            code: 'INVALID_MEDIA_URL',
           });
           
-          throw err;
+          throw new Error(errorMsg);
         }
+
+        if (mediaUrl.includes('scontent.whatsapp') || mediaUrl.includes('lookaside.fbsbx.com')) {
+          const errorMsg = `Template "${template.name}" has expired Meta CDN URL. Please edit template and re-upload media.`;
+          console.error(`❌ ${errorMsg}`);
+          
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'FAILED', completedAt: new Date() },
+          });
+          
+          campaignSocketService.emitCampaignError(organizationId, campaignId, {
+            message: errorMsg,
+            code: 'EXPIRED_MEDIA_URL',
+          });
+          
+          throw new Error(errorMsg);
+        }
+        
+        console.log(`✅ Template "${template.name}" has valid permanent URL - ready to send!`);
       }
 
       // ✅ ── WALLET PRE-CHECK (country-aware) ─────────────────────────────────
@@ -2147,22 +2148,32 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
       });
     }
   }
-  // ✅ MEDIA header - use PRE-CACHED media ID (already pre-warmed in processCampaignContacts)
+  // ✅ MEDIA header - Use LINK (URL) instead of media ID
+  // This NEVER expires as long as Cloudinary has the file!
   else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    const mediaId = template.headerMediaId;
+    const mediaUrl = template.headerContent;
     
-    if (!mediaId || !/^\d+$/.test(mediaId)) {
+    if (!mediaUrl || !mediaUrl.startsWith('http')) {
       throw new Error(
-        `Template "${template.name}" media ID is invalid or missing. ` +
-        `Pre-warm should have handled this.`
+        `Template "${template.name}" has no valid media URL. ` +
+        `Please edit template and re-upload media.`
+      );
+    }
+
+    if (mediaUrl.includes('scontent.whatsapp') || mediaUrl.includes('lookaside.fbsbx.com')) {
+      throw new Error(
+        `Template "${template.name}" has expired Meta CDN URL. ` +
+        `Please re-upload media in template editor.`
       );
     }
 
     const mediaType = headerType.toLowerCase();
-    const mediaParam: any = { id: mediaId };
+    const mediaParam: any = { link: mediaUrl };  // ✅ USE LINK, NOT ID!
     
     if (mediaType === 'document') {
-      mediaParam.filename = template.name + '.pdf';
+      // Extract filename from URL or use template name
+      const urlFilename = mediaUrl.split('/').pop()?.split('?')[0] || `${template.name}.pdf`;
+      mediaParam.filename = urlFilename;
     }
 
     components.push({
@@ -2172,6 +2183,8 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
         [mediaType]: mediaParam,
       }],
     });
+    
+    console.log(`✅ Using permanent URL for ${mediaType}: ${mediaUrl.substring(0, 60)}...`);
   }
 
   // ✅ BODY variables
