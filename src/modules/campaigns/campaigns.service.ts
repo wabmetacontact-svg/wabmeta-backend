@@ -1162,12 +1162,12 @@ export class CampaignsService {
       // ============================================
       // ✅ SPEED CONFIG - TUNED FOR MAXIMUM THROUGHPUT
       // ============================================
-      const BATCH_SIZE = 1000;              // Fetch more contacts per batch
-      const CONCURRENCY = 30;               // Send 30 parallel requests
-      const FLUSH_EVERY = 100;              // DB write every 100 messages
-      const DELAY_BETWEEN_CHUNKS_MS = 30;   // Very small delay
-      const MAX_CONSECUTIVE_FAILURES = 30;
-      const RATE_LIMIT_PAUSE_MS = 3000;
+      const BATCH_SIZE = 500;
+      const CONCURRENCY = 20;                    // ✅ Fast but safe
+      const FLUSH_EVERY = 50;
+      const DELAY_BETWEEN_CHUNKS_MS = 150;       // ✅ ~130 msgs/sec
+      const MAX_CONSECUTIVE_FAILURES = 20;
+      const RATE_LIMIT_PAUSE_MS = 8000;
 
       let hasMore = true;
       let totalProcessed = 0;
