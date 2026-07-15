@@ -994,6 +994,133 @@ export class CampaignsService {
     };
   }
 
+  // ============================================
+  // ✅ PERMANENT FIX: Upload media to Meta ONCE per campaign
+  // Returns Meta media ID - can be reused for all contacts
+  // ============================================
+  private async ensureMetaMediaId(
+    template: any,
+    phoneNumberId: string,
+    accessToken: string,
+    wabaId: string
+  ): Promise<string | null> {
+    const headerType = (template.headerType || '').toUpperCase();
+    
+    // Not a media template - skip
+    if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+      return null;
+    }
+
+    const cloudinaryUrl = template.headerContent;
+    
+    // ✅ Check if we already have a fresh Meta media ID
+    // Meta media IDs are valid for 30 days
+    const TTL_MS = 25 * 24 * 60 * 60 * 1000; // 25 days (safe buffer)
+    const existingId = template.headerMediaId;
+    const uploadedAt = template.headerMediaUploadedAt;
+    
+    if (existingId && /^\d+$/.test(existingId) && uploadedAt) {
+      const ageMs = Date.now() - new Date(uploadedAt).getTime();
+      if (ageMs < TTL_MS) {
+        console.log(`✅ Using cached Meta media ID: ${existingId} (age: ${Math.floor(ageMs / 1000 / 60 / 60 / 24)}d)`);
+        return existingId;
+      }
+      console.log(`⏰ Cached media ID expired (${Math.floor(ageMs / 1000 / 60 / 60 / 24)}d old), refreshing...`);
+    }
+
+    // ✅ Need to upload/re-upload
+    if (!cloudinaryUrl || !cloudinaryUrl.startsWith('http')) {
+      console.error(`❌ Template "${template.name}" has no valid media URL for upload`);
+      return null;
+    }
+
+    try {
+      console.log(`📤 Uploading media to Meta for template "${template.name}"...`);
+      
+      // Step 1: Download from Cloudinary
+      const response = await axios.get(cloudinaryUrl, {
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        maxContentLength: 100 * 1024 * 1024, // 100MB max
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)',
+          'Accept': '*/*',
+        },
+      });
+
+      const buffer = Buffer.from(response.data);
+      const contentType = (response.headers['content-type'] || '').split(';')[0].trim();
+      
+      // Detect proper MIME type
+      const detectMime = (): string => {
+        if (contentType && !contentType.includes('octet-stream')) {
+          return contentType;
+        }
+        // Fallback based on headerType
+        const defaults: Record<string, string> = {
+          IMAGE: 'image/jpeg',
+          VIDEO: 'video/mp4',
+          DOCUMENT: 'application/pdf',
+        };
+        return defaults[headerType] || 'application/octet-stream';
+      };
+
+      const mimeType = detectMime();
+      
+      // Detect filename with extension
+      const urlPath = cloudinaryUrl.split('?')[0];
+      let filename = urlPath.split('/').pop() || 'media';
+      if (!filename.includes('.')) {
+        const extMap: Record<string, string> = {
+          'image/jpeg': '.jpg',
+          'image/png': '.png',
+          'video/mp4': '.mp4',
+          'application/pdf': '.pdf',
+        };
+        filename += extMap[mimeType] || '.bin';
+      }
+
+      console.log(`📦 Downloaded: ${(buffer.length / 1024 / 1024).toFixed(2)} MB, ${mimeType}`);
+
+      // Step 2: Upload to Meta (returns numeric media ID)
+      const uploadResult = await metaApi.uploadMedia(
+        phoneNumberId,
+        accessToken,
+        buffer,
+        mimeType,
+        filename,
+        wabaId
+      );
+
+      const metaMediaId = uploadResult.id;
+      console.log(`✅ Meta upload success! Media ID: ${metaMediaId}`);
+
+      // Step 3: Cache in database for reuse
+      await prisma.template.update({
+        where: { id: template.id },
+        data: {
+          headerMediaId: metaMediaId,
+          headerMediaUploadedAt: new Date(),
+          headerMediaLastVerified: new Date(),
+        } as any,
+      }).catch(err => {
+        console.warn('⚠️ Failed to cache media ID in DB:', err.message);
+      });
+
+      return metaMediaId;
+    } catch (error: any) {
+      console.error(`❌ Meta media upload failed for "${template.name}":`, error.message);
+      
+      // Detailed error info
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+      }
+      
+      return null;
+    }
+  }
+
   // ✅ HIGH PERFORMANCE: Process campaign contacts
   private async processCampaignContacts(
     campaignId: string,
@@ -1046,11 +1173,37 @@ export class CampaignsService {
       const phoneNumberId = campaign.whatsappAccount.phoneNumberId;
       const template = campaign.template;
 
-      // ✅ NEW: Validate permanent URL exists (NO upload needed!)
-      // Media validation NOT needed - Meta stores approved template media permanently.
-      // When we send template by name, Meta automatically attaches the approved media.
+      // ✅ PERMANENT FIX: Upload media to Meta ONCE per campaign
+      // This prevents 403 errors and works for all contacts
+      let cachedMetaMediaId: string | null = null;
+      
       if (template.headerType && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType.toUpperCase())) {
-        console.log(`✅ Template "${template.name}" has ${template.headerType} header - Meta will use approved media`);
+        console.log(`📤 Preparing media for template "${template.name}"...`);
+        
+        cachedMetaMediaId = await this.ensureMetaMediaId(
+          template,
+          phoneNumberId,
+          accessToken,
+          campaign.whatsappAccount.wabaId
+        );
+        
+        if (!cachedMetaMediaId) {
+          // Media upload failed - pause campaign with clear error
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'PAUSED' },
+          });
+          
+          campaignSocketService.emitCampaignError(organizationId, campaignId, {
+            message: `Template "${template.name}" media could not be uploaded to WhatsApp. Please edit the template and re-upload the ${template.headerType.toLowerCase()}.`,
+            code: 'MEDIA_UPLOAD_FAILED',
+          });
+          
+          this.processingCampaigns.delete(campaignId);
+          return;
+        }
+        
+        console.log(`✅ Media ready! Media ID: ${cachedMetaMediaId} - will be used for all ${totalCampaignSize} contacts`);
       }
 
       // ✅ ── WALLET PRE-CHECK (country-aware) ─────────────────────────────────
@@ -1279,7 +1432,15 @@ export class CampaignsService {
               }
 
               try {
-                const payload = await this.buildTemplatePayload(template, cc);
+                const payload = await this.buildTemplatePayload(
+                  template,
+                  cc,
+                  cleanPhone,
+                  phoneNumberId,
+                  accessToken,
+                  campaign.whatsappAccount.wabaId,
+                  cachedMetaMediaId  // ✅ Pass cached media ID
+                );
                 const result = await metaApi.sendMessage(phoneNumberId, accessToken, cleanPhone, payload);
 
                 return { type: 'sent' as const, id: cc.id, contactId: cc.contactId, phone: cleanPhone, waMessageId: result.messageId, metaCode: 0 };
@@ -1826,7 +1987,12 @@ export class CampaignsService {
 
   private async buildTemplatePayload(
     template: any,
-    cc: any
+    cc: any,
+    _phone: string,
+    _phoneNumberId: string,
+    _accessToken: string,
+    _wabaId: string,
+    metaMediaId?: string | null  // ✅ Cached media ID
   ): Promise<any> {
     const headerMatches = (template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [];
     const bodyMatches = (template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
@@ -1839,6 +2005,11 @@ export class CampaignsService {
     const variables: Record<string, string> = {};
     for (let i = 0; i < params.length; i++) {
       variables[String(i + 1)] = params[i];
+    }
+
+    // ✅ Pass Meta media ID for use in payload
+    if (metaMediaId) {
+      variables.__meta_media_id__ = metaMediaId;
     }
 
     return buildTemplateMessage(template, variables);
@@ -1898,12 +2069,17 @@ function extractVariables(text: string): number[] {
 // Meta already stores approved template media.
 // We only send template name + variables. No media needed!
 // ============================================
+// ============================================
+// ✅ PERMANENT FIX: buildTemplateMessage
+// Uses Meta media ID (numeric) instead of URL
+// No more 403 Forbidden errors!
+// ============================================
 async function buildTemplateMessage(template: any, variables: Record<string, string>) {
   const components: any[] = [];
   const headerType = template.headerType?.toUpperCase();
 
   // ============================================
-  // ✅ TEXT HEADER with variables
+  // TEXT HEADER with variables
   // ============================================
   if (headerType === 'TEXT' && template.headerContent) {
     const headerVars = extractVariables(template.headerContent);
@@ -1919,45 +2095,71 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
   }
 
   // ============================================
-  // ✅ MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT)
-  // Send Cloudinary URL directly - NO upload needed!
-  // Meta accepts direct HTTPS URLs for template media
+  // ✅ MEDIA HEADERS - USE META MEDIA ID (NOT URL!)
+  // This is the PERMANENT fix for 403 errors
   // ============================================
   else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    // Get media URL - prefer dynamic, fallback to template's stored URL
-    const mediaUrl = 
-      variables.header_media ||           // Dynamic per-contact media
-      template.headerContent ||            // Stored Cloudinary URL
-      null;
-
-    if (mediaUrl && mediaUrl.startsWith('http')) {
-      const mediaType = headerType.toLowerCase(); // image | video | document
-      
+    const mediaType = headerType.toLowerCase(); // image | video | document
+    
+    // ✅ PRIORITY 1: Use cached Meta media ID (numeric, no download needed)
+    const metaMediaId = variables.__meta_media_id__;
+    
+    if (metaMediaId && /^\d+$/.test(metaMediaId)) {
+      // ✅ BEST: Send by media ID - Meta doesn't need to download anything
       const mediaParam: any = {
         type: mediaType,
-        [mediaType]: { link: mediaUrl }
+        [mediaType]: { id: metaMediaId }
       };
-
-      // For documents, add filename
+      
+      // Documents need filename
       if (mediaType === 'document') {
-        const urlPath = mediaUrl.split('?')[0];
-        const filename = urlPath.split('/').pop() || 'document.pdf';
+        const url = template.headerContent || '';
+        const filename = url.split('/').pop()?.split('?')[0] || 'document.pdf';
         mediaParam.document.filename = filename;
       }
-
+      
       components.push({
         type: 'header',
         parameters: [mediaParam],
       });
-
-      console.log(`✅ Media header attached: ${mediaType} → ${mediaUrl.substring(0, 60)}...`);
+      
+      console.log(`✅ Media header: using Meta ID ${metaMediaId}`);
+    }
+    // ✅ PRIORITY 2: Dynamic media URL (rare - per-contact media)
+    else if (variables.header_media && variables.header_media.startsWith('http')) {
+      components.push({
+        type: 'header',
+        parameters: [{
+          type: mediaType,
+          [mediaType]: { link: variables.header_media },
+        }],
+      });
+      console.log(`⚡ Media header: using dynamic URL`);
+    }
+    // ✅ PRIORITY 3: Fallback to URL (last resort - may fail with 403)
+    else if (template.headerContent && template.headerContent.startsWith('http')) {
+      const mediaParam: any = {
+        type: mediaType,
+        [mediaType]: { link: template.headerContent }
+      };
+      
+      if (mediaType === 'document') {
+        const filename = template.headerContent.split('/').pop()?.split('?')[0] || 'document.pdf';
+        mediaParam.document.filename = filename;
+      }
+      
+      components.push({
+        type: 'header',
+        parameters: [mediaParam],
+      });
+      console.warn(`⚠️ Media header: fallback to URL (may fail with 403)`);
     } else {
-      console.warn(`⚠️ Template "${template.name}" has ${headerType} header but no valid media URL`);
+      console.error(`❌ Template "${template.name}" has ${headerType} header but no valid media reference`);
     }
   }
 
   // ============================================
-  // ✅ BODY variables
+  // BODY variables
   // ============================================
   const bodyVars = extractVariables(template.bodyText);
   if (bodyVars.length > 0) {
@@ -1971,7 +2173,7 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
   }
 
   // ============================================
-  // ✅ BUTTON variables (URL buttons with dynamic parameters)
+  // BUTTON variables (URL buttons with dynamic parameters)
   // ============================================
   if (template.buttons && Array.isArray(template.buttons)) {
     template.buttons.forEach((btn: any, index: number) => {
