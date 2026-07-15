@@ -1245,103 +1245,112 @@ class WhatsAppService {
   // TEMPLATE HELPER METHODS
   // ============================================
 
-  private buildTemplateComponents(
-    template: any,
-    variables: Record<string, string>
-  ): any[] {
-    const components: any[] = [];
+// ============================================
+// ✅ FIXED: buildTemplateComponents
+// Meta stores approved template media permanently.
+// Only send TEXT variables, buttons - NO media!
+// ============================================
+private buildTemplateComponents(
+  template: any,
+  variables: Record<string, string>
+): any[] {
+  const components: any[] = [];
 
-    const isValidHttpUrl = (str: string): boolean => {
-      try {
-        const url = new URL(str);
-        return url.protocol === 'http:' || url.protocol === 'https:';
-      } catch {
-        return false;
+  // ✅ HEADER - Only TEXT with variables
+  if (template.headerType) {
+    const hType = String(template.headerType).toUpperCase();
+
+    if (hType === 'TEXT' && template.headerContent) {
+      const headerVars = this.extractVariables(template.headerContent, variables);
+      if (headerVars.length > 0) {
+        components.push({ 
+          type: 'header', 
+          parameters: headerVars 
+        });
       }
-    };
-
-    const isWhatsAppMediaId = (str: string): boolean => {
-      if (!str) return false;
-      if (/^\d{10,}$/.test(str)) return true;
-      if (/^\d+:[A-Za-z0-9+/=:_-]+$/.test(str)) return true;
-      if (str.length > 20 && !str.includes('http') &&
-        !str.includes('.') && /^[A-Za-z0-9+/=_-]+$/.test(str)) {
-        return true;
-      }
-      return false;
-    };
-
-    const buildMediaParam = (mediaType: string, mediaValue: string) => {
-      const type = mediaType.toLowerCase();
-      if (isValidHttpUrl(mediaValue)) {
-        return { type, [type]: { link: mediaValue } };
-      } else if (isWhatsAppMediaId(mediaValue)) {
-        return { type, [type]: { id: mediaValue } };
-      }
-      return { type, [type]: { link: mediaValue } };
-    };
-
-    if (template.headerType) {
-      const hType = String(template.headerType).toUpperCase();
-
-      if (hType === 'TEXT' && template.headerContent) {
-        const headerVars = this.extractVariables(template.headerContent, variables);
-        if (headerVars.length > 0) {
-          components.push({ type: 'header', parameters: headerVars });
-        }
-
-      } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
-        const mediaValue =
-          variables.header_media ||
-          template.headerMediaId ||
-          template.headerMediaUrl ||
-          template.headerContent;
-
-        if (mediaValue) {
-          const mediaParam = buildMediaParam(hType.toLowerCase(), mediaValue);
-          components.push({ type: 'header', parameters: [mediaParam] });
-        } else {
-          console.warn(`⚠️ No media for ${hType} header in template: ${template.name}`);
-        }
-      }
+      // Static text header - no component needed
     }
-
-    const bodyVarNames = this.extractVariablesFromText(template.bodyText);
-    if (bodyVarNames.length > 0) {
-      const bodyParams = bodyVarNames.map((_: string, index: number) => ({
-        type: 'text',
-        text:
-          variables[`var_${index + 1}`] ||
-          variables[`body_${index + 1}`] ||
-          'Customer',
-      }));
-      components.push({ type: 'body', parameters: bodyParams });
+    
+    // ✅ MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT):
+    // SKIP! Meta already has approved media stored permanently.
+    // When template is sent by name, Meta auto-attaches the media.
+    //
+    // Exception: Dynamic media (rare) - only if user provides header_media variable
+    else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType) && variables.header_media) {
+      const mediaType = hType.toLowerCase();
+      const mediaValue = variables.header_media;
+      
+      const mediaParam: any = {
+        type: mediaType,
+        [mediaType]: {}
+      };
+      
+      // Check if it's URL or media ID
+      if (mediaValue.startsWith('http')) {
+        mediaParam[mediaType].link = mediaValue;
+      } else {
+        mediaParam[mediaType].id = mediaValue;
+      }
+      
+      components.push({ 
+        type: 'header', 
+        parameters: [mediaParam] 
+      });
+      
+      console.log(`⚡ Using dynamic media for ${template.name}`);
     }
+    // else: Static media - Meta uses approved media automatically ✅
+  }
 
-    if (template.buttons) {
-      const buttons = typeof template.buttons === 'string'
-        ? JSON.parse(template.buttons)
-        : template.buttons;
+  // ✅ BODY variables
+  const bodyVarNames = this.extractVariablesFromText(template.bodyText);
+  if (bodyVarNames.length > 0) {
+    const bodyParams = bodyVarNames.map((_: string, index: number) => ({
+      type: 'text',
+      text:
+        variables[`var_${index + 1}`] ||
+        variables[`body_${index + 1}`] ||
+        variables[String(index + 1)] ||  // Support {{1}}, {{2}} format
+        'Customer',
+    }));
+    components.push({ 
+      type: 'body', 
+      parameters: bodyParams 
+    });
+  }
 
-      if (Array.isArray(buttons)) {
-        buttons.forEach((button: any, index: number) => {
-          if (button.type === 'URL' && button.url?.includes('{{')) {
+  // ✅ BUTTON variables (URL buttons with {{1}} in URL)
+  if (template.buttons) {
+    const buttons = typeof template.buttons === 'string'
+      ? JSON.parse(template.buttons)
+      : template.buttons;
+
+    if (Array.isArray(buttons)) {
+      buttons.forEach((button: any, index: number) => {
+        if (button.type === 'URL' && button.url?.includes('{{')) {
+          const btnVarValue = 
+            variables[`button_${index}`] || 
+            variables[`button_${index + 1}`] || 
+            '';
+            
+          if (btnVarValue) {
             components.push({
               type: 'button',
               sub_type: 'url',
               index,
               parameters: [{
                 type: 'text',
-                text: variables[`button_${index}`] || '',
+                text: btnVarValue,
               }],
             });
           }
-        });
-      }
+        }
+      });
     }
-
-    return components;
   }
+
+  return components;
+}
 
   private extractVariablesFromText(text: string): string[] {
     if (!text) return [];

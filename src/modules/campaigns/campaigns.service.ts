@@ -1040,44 +1040,10 @@ export class CampaignsService {
       const template = campaign.template;
 
       // ✅ NEW: Validate permanent URL exists (NO upload needed!)
+      // Media validation NOT needed - Meta stores approved template media permanently.
+      // When we send template by name, Meta automatically attaches the approved media.
       if (template.headerType && ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType.toUpperCase())) {
-        const mediaUrl = template.headerContent;
-        
-        if (!mediaUrl || !mediaUrl.startsWith('http')) {
-          const errorMsg = `Template "${template.name}" has no valid media URL. Please edit the template and re-upload media.`;
-          console.error(`❌ ${errorMsg}`);
-          
-          await prisma.campaign.update({
-            where: { id: campaignId },
-            data: { status: 'FAILED', completedAt: new Date() },
-          });
-          
-          campaignSocketService.emitCampaignError(organizationId, campaignId, {
-            message: errorMsg,
-            code: 'INVALID_MEDIA_URL',
-          });
-          
-          throw new Error(errorMsg);
-        }
-
-        if (mediaUrl.includes('scontent.whatsapp') || mediaUrl.includes('lookaside.fbsbx.com')) {
-          const errorMsg = `Template "${template.name}" has expired Meta CDN URL. Please edit template and re-upload media.`;
-          console.error(`❌ ${errorMsg}`);
-          
-          await prisma.campaign.update({
-            where: { id: campaignId },
-            data: { status: 'FAILED', completedAt: new Date() },
-          });
-          
-          campaignSocketService.emitCampaignError(organizationId, campaignId, {
-            message: errorMsg,
-            code: 'EXPIRED_MEDIA_URL',
-          });
-          
-          throw new Error(errorMsg);
-        }
-        
-        console.log(`✅ Template "${template.name}" has valid permanent URL - ready to send!`);
+        console.log(`✅ Template "${template.name}" has ${template.headerType} header - Meta will use approved media`);
       }
 
       // ✅ ── WALLET PRE-CHECK (country-aware) ─────────────────────────────────
@@ -2131,11 +2097,16 @@ function extractVariables(text: string): number[] {
   return [...new Set(vars)].sort((a, b) => a - b);
 }
 
+// ============================================
+// ✅ FIXED: buildTemplateMessage
+// Meta already stores approved template media.
+// We only send template name + variables. No media needed!
+// ============================================
 async function buildTemplateMessage(template: any, variables: Record<string, string>) {
   const components: any[] = [];
   const headerType = template.headerType?.toUpperCase();
 
-  // ✅ TEXT header with variables
+  // ✅ TEXT header with variables - ONLY if variables exist
   if (headerType === 'TEXT' && template.headerContent) {
     const headerVars = extractVariables(template.headerContent);
     if (headerVars.length > 0) {
@@ -2147,45 +2118,29 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
         })),
       });
     }
+    // If TEXT header has no variables, skip entirely (static text)
   }
-  // ✅ MEDIA header - Use LINK (URL) instead of media ID
-  // This NEVER expires as long as Cloudinary has the file!
-  else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    const mediaUrl = template.headerContent;
-    
-    if (!mediaUrl || !mediaUrl.startsWith('http')) {
-      throw new Error(
-        `Template "${template.name}" has no valid media URL. ` +
-        `Please edit template and re-upload media.`
-      );
-    }
 
-    if (mediaUrl.includes('scontent.whatsapp') || mediaUrl.includes('lookaside.fbsbx.com')) {
-      throw new Error(
-        `Template "${template.name}" has expired Meta CDN URL. ` +
-        `Please re-upload media in template editor.`
-      );
-    }
-
+  // ✅ MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT):
+  // SKIP! Meta already has the approved media stored permanently.
+  // When we send the template by name, Meta automatically attaches
+  // the approved media. No need to send media URL or ID.
+  //
+  // Exception: Only send media if template has DYNAMIC media
+  // (rare case - user uploaded custom image per contact via variables.header_media)
+  else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) && variables.header_media) {
+    // Only for dynamic media use case (< 1% of templates)
     const mediaType = headerType.toLowerCase();
-    const mediaParam: any = { link: mediaUrl };  // ✅ USE LINK, NOT ID!
-    
-    if (mediaType === 'document') {
-      // Extract filename from URL or use template name
-      const urlFilename = mediaUrl.split('/').pop()?.split('?')[0] || `${template.name}.pdf`;
-      mediaParam.filename = urlFilename;
-    }
-
     components.push({
       type: 'header',
       parameters: [{
         type: mediaType,
-        [mediaType]: mediaParam,
+        [mediaType]: { link: variables.header_media },
       }],
     });
-    
-    console.log(`✅ Using permanent URL for ${mediaType}: ${mediaUrl.substring(0, 60)}...`);
+    console.log(`⚡ Using dynamic media for ${template.name}`);
   }
+  // else: Static media - Meta will use approved media automatically ✅
 
   // ✅ BODY variables
   const bodyVars = extractVariables(template.bodyText);
@@ -2196,6 +2151,26 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
         type: 'text',
         text: variables[String(idx)] || '',
       })),
+    });
+  }
+
+  // ✅ BUTTON variables (URL buttons with dynamic parameters)
+  if (template.buttons && Array.isArray(template.buttons)) {
+    template.buttons.forEach((btn: any, index: number) => {
+      if (btn.type === 'URL' && btn.url && btn.url.includes('{{')) {
+        const btnVarKey = `button_${index + 1}`;
+        if (variables[btnVarKey]) {
+          components.push({
+            type: 'button',
+            sub_type: 'url',
+            index: index,
+            parameters: [{
+              type: 'text',
+              text: variables[btnVarKey],
+            }],
+          });
+        }
+      }
     });
   }
 
