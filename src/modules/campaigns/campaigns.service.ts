@@ -1117,6 +1117,21 @@ export class CampaignsService {
         console.error('Response data:', JSON.stringify(error.response.data, null, 2));
       }
       
+      // ✅ Specific error handling
+      const metaError = error.response?.data?.error;
+      if (metaError?.code === 131053) {
+        const details = metaError.error_data?.details || '';
+        
+        if (details.includes('No video stream')) {
+          console.error(
+            `🎥 Video file corrupted or invalid format for "${template.name}". ` +
+            `User needs to re-encode video with H.264 codec.`
+          );
+        } else if (details.includes('403') || details.includes('Forbidden')) {
+          console.error(`🔒 Cloudinary URL access denied - check public access`);
+        }
+      }
+      
       return null;
     }
   }
@@ -2015,27 +2030,50 @@ export class CampaignsService {
     return buildTemplateMessage(template, variables);
   }
 
-  // ✅ IMPROVED: Extract failure reason with better Meta error mapping
   private extractFailureReason(error: any): string {
     const me = error.response?.data?.error;
     if (!me) return error.message || 'Unknown error';
 
     const code = me.code;
+    
+    // ✅ SPECIAL HANDLING for 131053 (media errors have different causes)
+    if (code === 131053) {
+      const details = me.error_data?.details || '';
+      
+      if (details.includes('No video stream')) {
+        return 'Video file corrupted - Please re-encode video with H.264 codec (try HandBrake)';
+      }
+      if (details.includes('403') || details.includes('Forbidden')) {
+        return 'Media URL access denied - Please re-upload the media';
+      }
+      if (details.includes('too large')) {
+        return 'Media file too large for WhatsApp - Please compress';
+      }
+      if (details.includes('unsupported')) {
+        return 'Unsupported media format - Use MP4 for video, JPG/PNG for image';
+      }
+      return `Media upload error: ${details || me.message}`;
+    }
 
     const errorMap: Record<number, string> = {
       100: 'Invalid parameter - Template format mismatch or media ID invalid',
-      131030: 'Phone not on WhatsApp',
-      131026: 'Message undeliverable',
-      131048: 'Rate limit reached',
-      131021: 'Rate limit reached',
+      131030: 'Phone number not registered on WhatsApp',
+      131026: 'Message undeliverable to this number',
+      131048: 'Rate limit reached - please wait',
+      131021: 'Rate limit reached - please wait',
       131056: 'Number restricted by Meta',
+      131042: 'Meta Business Account payment issue - Please add/update payment method in Facebook Business Manager',
       132000: 'Template parameters mismatch',
       132001: 'Template not found or not approved',
       132005: 'Template hydration failed',
-      132007: 'Template format character policy violated',
+      132007: 'Template violates WhatsApp content policy',
       132012: 'Template format mismatch (Media/link invalid or variables missing)',
-      132015: 'Template PAUSED - Too many messages blocked by users',
-      190: 'Access token expired - Reconnect WhatsApp',
+      132015: 'Template PAUSED by Meta - Too many messages were blocked/reported by users',
+      132016: 'Template DISABLED by Meta - Severe policy violation',
+      190: 'WhatsApp access token expired - Please reconnect WhatsApp in Settings',
+      368: 'Message blocked - Sender temporarily restricted',
+      4: 'API rate limit exceeded',
+      80007: 'Rate limit for messages',
     };
 
     if (errorMap[code]) return errorMap[code];

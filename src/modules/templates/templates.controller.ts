@@ -45,6 +45,59 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 };
 
+// ============================================
+// ✅ VIDEO FILE VALIDATION
+// Checks if buffer contains valid video stream
+// ============================================
+async function validateVideoFile(
+  buffer: Buffer,
+  mimeType: string
+): Promise<{ valid: boolean; error?: string }> {
+  // Check minimum file size
+  if (buffer.length < 1024) {
+    return { valid: false, error: 'File too small to be a valid video' };
+  }
+
+  // Check MP4 signature (ftyp box)
+  // MP4 files start with: [size][ftyp][brand]
+  const ftypIndex = buffer.indexOf('ftyp');
+  if (ftypIndex === -1 || ftypIndex > 100) {
+    return { 
+      valid: false, 
+      error: 'File does not appear to be a valid MP4 (missing ftyp signature)' 
+    };
+  }
+
+  // Check for video-related atoms/boxes
+  const bufferStr = buffer.toString('binary', 0, Math.min(buffer.length, 100000));
+  
+  // Look for video track indicators
+  const hasVideoIndicator = 
+    bufferStr.includes('vide') ||     // Video track type
+    bufferStr.includes('mdat') ||     // Media data
+    bufferStr.includes('moov');       // Movie box
+    
+  if (!hasVideoIndicator) {
+    return { 
+      valid: false, 
+      error: 'File does not contain video track data' 
+    };
+  }
+
+  // Check for common codec indicators
+  const hasKnownCodec = 
+    bufferStr.includes('avc1') ||     // H.264
+    bufferStr.includes('hev1') ||     // H.265
+    bufferStr.includes('hvc1') ||     // H.265 alt
+    bufferStr.includes('mp4v');       // MPEG-4
+    
+  if (!hasKnownCodec) {
+    console.warn('⚠️ Video codec unknown - may still work');
+  }
+
+  return { valid: true };
+}
+
 class TemplatesController {
 
   // ==========================================
@@ -751,6 +804,22 @@ class TemplatesController {
           `Allowed: ${ALLOWED_MIMES[mediaCategory].join(', ')}`,
           400
         );
+      }
+
+      // ============================================
+      // ✅ STEP 2.5: VALIDATE VIDEO FILE STRUCTURE
+      // ============================================
+      if (mediaCategory === 'video') {
+        const videoValidation = await validateVideoFile(file.buffer, file.mimetype);
+        if (!videoValidation.valid) {
+          throw new AppError(
+            `Invalid video file: ${videoValidation.error}. ` +
+            `Please ensure your video is a valid MP4 file with H.264 video codec. ` +
+            `Try re-encoding with tools like HandBrake (free) or online converters.`,
+            400
+          );
+        }
+        console.log('✅ Video validation passed');
       }
 
       // ============================================

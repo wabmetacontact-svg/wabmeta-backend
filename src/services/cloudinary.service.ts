@@ -127,31 +127,36 @@ export class CloudinaryService {
       const transformations: any[] = [];
       const eagerTransformations: any[] = [];
 
+      // ✅ SAFER video compression - preserves video stream integrity
       if (resourceType === 'video' && needsCompression) {
-        // ✅ VIDEO COMPRESSION - target under 16MB
+        // For videos needing compression, use conservative settings
+        // that preserve video stream quality and integrity
         const videoTransform = {
           width: 720,                    // Max 720p width
-          height: 1280,                  // Max 720p height (portrait)
-          crop: 'limit',                 // Don't upscale
-          quality: 'auto:low',           // Aggressive compression
-          bit_rate: '900k',              // ~900 Kbps (safe for 16MB)
-          video_codec: 'h264',           // WhatsApp compatible
-          audio_codec: 'aac',            // WhatsApp compatible
-          format: 'mp4',                 // Force MP4
-          fetch_format: 'mp4',
-          flags: 'faststart',            // Enable streaming
+          crop: 'scale',                 // Scale instead of limit (safer)
+          quality: 70,                   // Fixed quality (safer than auto:low)
+          video_codec: 'h264:baseline:3.0',  // Baseline profile (max compatibility)
+          audio_codec: 'aac',
+          audio_frequency: 44100,        // Standard audio frequency
+          bit_rate: '1000k',             // 1 Mbps (safe for 16MB)
+          format: 'mp4',
+          // Removed: flags: 'faststart' (causes issues with some videos)
+          // Removed: height (let it scale proportionally)
         };
         transformations.push(videoTransform);
         eagerTransformations.push(videoTransform);
-        console.log('🎥 Video compression enabled');
+        console.log('🎥 Video compression enabled (safe settings)');
       } else if (resourceType === 'video') {
-        // Video already small - just ensure MP4 format
-        transformations.push({
-          video_codec: 'h264',
+        // For videos NOT needing compression, minimal transformation
+        // Just ensure MP4 + H.264 for WhatsApp compatibility
+        const videoTransform = {
+          video_codec: 'h264:baseline:3.0',
           audio_codec: 'aac',
           format: 'mp4',
-          flags: 'faststart',
-        });
+        };
+        transformations.push(videoTransform);
+        eagerTransformations.push(videoTransform);
+        console.log('🎥 Video format conversion only (no compression)');
       } else if (resourceType === 'image') {
         // ✅ IMAGE OPTIMIZATION - always optimize
         transformations.push({
