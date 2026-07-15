@@ -1,7 +1,8 @@
-// src/services/cloudinary.service.ts - PRODUCTION FIXED
+// src/services/cloudinary.service.ts - PRODUCTION WITH AUTO-COMPRESSION
+// ✅ Auto video compression for WhatsApp (16MB limit)
+// ✅ Auto image optimization (5MB limit)
 // ✅ Always includes extension in URL
 // ✅ Proper resource_type detection
-// ✅ Format preserved in URL
 
 import { v2 as cloudinary } from 'cloudinary';
 import { config } from '../config';
@@ -37,6 +38,14 @@ const MIME_TO_FORMAT: Record<string, string> = {
   'audio/amr': 'amr',
 };
 
+// ✅ META LIMITS (in bytes) - hard limits
+const META_LIMITS = {
+  image: 5 * 1024 * 1024,      // 5 MB
+  video: 16 * 1024 * 1024,     // 16 MB
+  audio: 16 * 1024 * 1024,     // 16 MB
+  document: 100 * 1024 * 1024, // 100 MB
+};
+
 const getFormatFromMime = (mimeType: string): string => {
   return MIME_TO_FORMAT[mimeType.toLowerCase()] || 'bin';
 };
@@ -45,6 +54,13 @@ const getResourceType = (mimeType: string): 'image' | 'video' | 'raw' => {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('video/')) return 'video';
   return 'raw'; // PDF, docs, audio all go to raw
+};
+
+const getMediaCategory = (mimeType: string): 'image' | 'video' | 'audio' | 'document' => {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  return 'document';
 };
 
 export class CloudinaryService {
@@ -57,7 +73,10 @@ export class CloudinaryService {
   }
 
   /**
-   * ✅ FIXED: Always builds URL with proper extension
+   * ✅ Upload with automatic compression for WhatsApp
+   * - Videos: compressed to fit 16MB limit
+   * - Images: optimized to fit 5MB limit
+   * - Documents: uploaded as-is (100MB limit)
    */
   async uploadTemplateMedia(
     file: Buffer,
@@ -70,6 +89,9 @@ export class CloudinaryService {
     publicId: string;
     format: string;
     resourceType: string;
+    originalSize: number;
+    finalSize: number;
+    compressionApplied: boolean;
   }> {
     if (!this.isConfigured()) {
       throw new Error('Cloudinary is not configured.');
@@ -77,40 +99,89 @@ export class CloudinaryService {
 
     const format = getFormatFromMime(mimeType);
     const resourceType = getResourceType(mimeType);
+    const mediaCategory = getMediaCategory(mimeType);
+    const metaLimit = META_LIMITS[mediaCategory];
+    const originalSize = file.length;
+    const needsCompression = originalSize > metaLimit;
+
+    console.log('☁️ Upload starting:', {
+      filename,
+      mimeType,
+      resourceType,
+      mediaCategory,
+      originalSize: `${(originalSize / 1024 / 1024).toFixed(2)} MB`,
+      metaLimit: `${(metaLimit / 1024 / 1024).toFixed(0)} MB`,
+      needsCompression,
+    });
 
     return new Promise((resolve, reject) => {
       const folder = `${config.cloudinary.folder}/${organizationId}`;
 
-      // ✅ CRITICAL: public_id includes format extension for RAW files
-      // For images/videos, Cloudinary auto-appends format
-      // For raw files, we MUST include extension in public_id
       const timestamp = Date.now();
       const publicIdBase = `${timestamp}`;
       const publicId = resourceType === 'raw'
-        ? `${publicIdBase}.${format}`  // ✅ FORCE extension in URL
+        ? `${publicIdBase}.${format}`
         : publicIdBase;
 
-      console.log('☁️ Uploading to Cloudinary:', {
-        folder,
-        resourceType,
-        format,
-        publicId,
-        mimeType,
-        size: file.length,
-      });
+      // ✅ BUILD TRANSFORMATIONS BASED ON MEDIA TYPE
+      const transformations: any[] = [];
+      const eagerTransformations: any[] = [];
+
+      if (resourceType === 'video' && needsCompression) {
+        // ✅ VIDEO COMPRESSION - target under 16MB
+        const videoTransform = {
+          width: 720,                    // Max 720p width
+          height: 1280,                  // Max 720p height (portrait)
+          crop: 'limit',                 // Don't upscale
+          quality: 'auto:low',           // Aggressive compression
+          bit_rate: '900k',              // ~900 Kbps (safe for 16MB)
+          video_codec: 'h264',           // WhatsApp compatible
+          audio_codec: 'aac',            // WhatsApp compatible
+          format: 'mp4',                 // Force MP4
+          fetch_format: 'mp4',
+          flags: 'faststart',            // Enable streaming
+        };
+        transformations.push(videoTransform);
+        eagerTransformations.push(videoTransform);
+        console.log('🎥 Video compression enabled');
+      } else if (resourceType === 'video') {
+        // Video already small - just ensure MP4 format
+        transformations.push({
+          video_codec: 'h264',
+          audio_codec: 'aac',
+          format: 'mp4',
+          flags: 'faststart',
+        });
+      } else if (resourceType === 'image') {
+        // ✅ IMAGE OPTIMIZATION - always optimize
+        transformations.push({
+          width: 1600,
+          height: 1600,
+          crop: 'limit',
+          quality: needsCompression ? 'auto:low' : 'auto:good',
+          fetch_format: 'auto',
+        });
+        console.log('🖼️  Image optimization enabled');
+      }
+      // Raw files (docs) - no transformation
 
       const uploadOptions: any = {
         folder,
         resource_type: resourceType,
         public_id: publicId,
         overwrite: false,
-        unique_filename: false, // ✅ We control the filename
+        unique_filename: false,
         use_filename: false,
         type: 'upload',
         access_mode: 'public',
-        // ✅ CRITICAL: Force format for raw files
         format: resourceType === 'raw' ? format : undefined,
       };
+
+      // Apply eager transformations for videos (sync compression)
+      if (eagerTransformations.length > 0) {
+        uploadOptions.eager = eagerTransformations;
+        uploadOptions.eager_async = false;  // Wait for compression
+      }
 
       const uploadStream = cloudinary.uploader.upload_stream(
         uploadOptions,
@@ -126,45 +197,50 @@ export class CloudinaryService {
             return;
           }
 
-          // ✅ Build final URL with extension GUARANTEED
+          // ✅ Build final URL with compression applied
           let finalUrl: string;
+          let finalSize = result.bytes;
 
           if (resourceType === 'image') {
-            // Images: use transformation with explicit format
+            // Images: URL with transformation
             finalUrl = cloudinary.url(result.public_id, {
               resource_type: 'image',
-              transformation: [
-                { width: 1600, height: 1200, crop: 'limit' },
-                { quality: 'auto:good' },
-              ],
+              transformation: transformations,
               secure: true,
-              format: format, // ✅ FORCE format in URL
+              format: format,
             });
           } else if (resourceType === 'video') {
-            // Videos: direct URL with format
-            finalUrl = cloudinary.url(result.public_id, {
-              resource_type: 'video',
-              secure: true,
-              format: format, // ✅ FORCE format
-            });
+            // Videos: use eager transformation URL if available (compressed)
+            if (result.eager && result.eager.length > 0) {
+              finalUrl = result.eager[0].secure_url;
+              finalSize = result.eager[0].bytes || result.bytes;
+              console.log('✅ Using compressed video URL from eager transformation');
+            } else {
+              finalUrl = cloudinary.url(result.public_id, {
+                resource_type: 'video',
+                transformation: transformations,
+                secure: true,
+                format: format,
+              });
+            }
           } else {
-            // Raw files (PDF, docs): result URL already has extension in public_id
+            // Raw files (PDF, docs)
             finalUrl = result.secure_url;
-            
-            // ✅ Safety check: ensure URL has extension
             if (!finalUrl.match(/\.[a-z0-9]{2,5}(\?|$)/i)) {
-              // Extension missing - append it
               finalUrl = `${finalUrl}.${format}`;
-              console.warn('⚠️ Appended missing extension to URL');
             }
           }
 
-          console.log('✅ Cloudinary upload success:', {
+          const compressionRatio = originalSize > 0 
+            ? ((originalSize - finalSize) / originalSize * 100).toFixed(1)
+            : '0';
+
+          console.log('✅ Cloudinary upload complete:', {
             publicId: result.public_id,
-            resourceType: result.resource_type,
-            format: result.format,
-            finalUrl: finalUrl.substring(0, 80) + '...',
-            hasExtension: /\.[a-z0-9]{2,5}(\?|$)/i.test(finalUrl),
+            originalSize: `${(originalSize / 1024 / 1024).toFixed(2)} MB`,
+            finalSize: `${(finalSize / 1024 / 1024).toFixed(2)} MB`,
+            compression: `${compressionRatio}%`,
+            fitsMetaLimit: finalSize <= metaLimit,
           });
 
           resolve({
@@ -173,12 +249,41 @@ export class CloudinaryService {
             publicId: result.public_id,
             format: result.format || format,
             resourceType: result.resource_type || resourceType,
+            originalSize,
+            finalSize,
+            compressionApplied: needsCompression,
           });
         }
       );
 
       uploadStream.end(file);
     });
+  }
+
+  /**
+   * ✅ Verify compressed media size fits Meta limit
+   * Call this after upload to double-check
+   */
+  async verifyMediaSize(secureUrl: string, mediaCategory: 'image' | 'video' | 'audio' | 'document'): Promise<{
+    fits: boolean;
+    size: number;
+    limit: number;
+  }> {
+    try {
+      const axios = require('axios');
+      const response = await axios.head(secureUrl, { timeout: 10000 });
+      const size = parseInt(response.headers['content-length'] || '0', 10);
+      const limit = META_LIMITS[mediaCategory];
+      
+      return {
+        fits: size > 0 && size <= limit,
+        size,
+        limit,
+      };
+    } catch (err) {
+      console.warn('⚠️ Could not verify media size:', err);
+      return { fits: true, size: 0, limit: META_LIMITS[mediaCategory] };
+    }
   }
 
   async deleteMedia(

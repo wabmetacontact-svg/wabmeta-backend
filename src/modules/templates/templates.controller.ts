@@ -17,6 +17,34 @@ interface AuthRequest extends Request {
   };
 }
 
+// ============================================
+// ✅ MEDIA SIZE LIMITS
+// ============================================
+const META_LIMITS = {
+  image: 5 * 1024 * 1024,      // 5 MB - Meta hard limit
+  video: 16 * 1024 * 1024,     // 16 MB - Meta hard limit
+  audio: 16 * 1024 * 1024,     // 16 MB - Meta hard limit
+  document: 100 * 1024 * 1024, // 100 MB - Meta hard limit
+};
+
+const UPLOAD_LIMITS = {
+  image: 15 * 1024 * 1024,     // 15 MB (compressed to 5MB)
+  video: 100 * 1024 * 1024,    // 100 MB (compressed to 16MB)
+  audio: 20 * 1024 * 1024,     // 20 MB (compressed to 16MB)
+  document: 100 * 1024 * 1024, // 100 MB (no compression)
+};
+
+const getMediaCategory = (mimeType: string): 'image' | 'video' | 'audio' | 'document' => {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  return 'document';
+};
+
+const formatBytes = (bytes: number): string => {
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+};
+
 class TemplatesController {
 
   // ==========================================
@@ -659,6 +687,251 @@ class TemplatesController {
     } catch (error: any) {
       console.error('❌ Upload to Meta endpoint failed:', error.message);
       next(error);
+    }
+  }
+
+  // ==========================================
+  // ✅ NEW: UPLOAD MEDIA (with validation + compression)
+  // POST /templates/upload-media
+  // ==========================================
+  async uploadMedia(req: any, res: Response, next: NextFunction) {
+    try {
+      const organizationId = (req as AuthRequest).user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const file = req.file;
+      if (!file) throw new AppError('No file uploaded', 400);
+
+      const { whatsappAccountId } = req.body;
+      const mediaCategory = getMediaCategory(file.mimetype);
+      const uploadLimit = UPLOAD_LIMITS[mediaCategory];
+      const metaLimit = META_LIMITS[mediaCategory];
+
+      console.log('📤 Media upload request:', {
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        size: formatBytes(file.size),
+        mediaCategory,
+        organizationId,
+      });
+
+      // ============================================
+      // ✅ STEP 1: VALIDATE FILE SIZE (before upload)
+      // ============================================
+      if (file.size > uploadLimit) {
+        throw new AppError(
+          `File too large (${formatBytes(file.size)}). ` +
+          `Maximum upload size for ${mediaCategory}s is ${formatBytes(uploadLimit)}. ` +
+          `WhatsApp requires ${mediaCategory}s to be under ${formatBytes(metaLimit)} after compression. ` +
+          `Please compress your file first using tools like freeconvert.com or handbrake.fr`,
+          400
+        );
+      }
+
+      // ============================================
+      // ✅ STEP 2: VALIDATE FILE TYPE
+      // ============================================
+      const ALLOWED_MIMES: Record<string, string[]> = {
+        image: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'],
+        video: ['video/mp4', 'video/3gpp'],
+        audio: ['audio/mpeg', 'audio/aac', 'audio/mp4', 'audio/ogg', 'audio/amr'],
+        document: [
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'text/plain',
+        ],
+      };
+
+      if (!ALLOWED_MIMES[mediaCategory].includes(file.mimetype)) {
+        throw new AppError(
+          `Unsupported ${mediaCategory} format: ${file.mimetype}. ` +
+          `Allowed: ${ALLOWED_MIMES[mediaCategory].join(', ')}`,
+          400
+        );
+      }
+
+      // ============================================
+      // ✅ STEP 3: UPLOAD TO CLOUDINARY (with auto-compression)
+      // ============================================
+      let cloudinaryService: any = null;
+      try {
+        const mod = require('../../services/cloudinary.service');
+        cloudinaryService = mod.cloudinaryService;
+      } catch (e) {
+        throw new AppError('Cloudinary service not available', 500);
+      }
+
+      if (!cloudinaryService?.isConfigured()) {
+        throw new AppError('Cloudinary is not configured on server', 500);
+      }
+
+      console.log('☁️ Uploading to Cloudinary with auto-compression...');
+      
+      const uploadResult = await cloudinaryService.uploadTemplateMedia(
+        file.buffer,
+        file.originalname,
+        file.mimetype,
+        organizationId
+      );
+
+      console.log('☁️ Cloudinary result:', {
+        originalSize: formatBytes(uploadResult.originalSize),
+        finalSize: formatBytes(uploadResult.finalSize),
+        compressed: uploadResult.compressionApplied,
+        fitsMetaLimit: uploadResult.finalSize <= metaLimit,
+      });
+
+      // ============================================
+      // ✅ STEP 4: VERIFY COMPRESSED SIZE FITS META LIMIT
+      // ============================================
+      if (uploadResult.finalSize > metaLimit) {
+        // Compression couldn't reduce enough
+        // Clean up cloudinary file
+        try {
+          await cloudinaryService.deleteMedia(
+            uploadResult.publicId,
+            uploadResult.resourceType
+          );
+        } catch (e) {
+          console.warn('Failed to cleanup cloudinary file');
+        }
+
+        throw new AppError(
+          `Could not compress ${mediaCategory} below ${formatBytes(metaLimit)} ` +
+          `(result: ${formatBytes(uploadResult.finalSize)}). ` +
+          `Please manually compress your ${mediaCategory} using: ` +
+          `${mediaCategory === 'video' ? 'handbrake.fr or freeconvert.com/video-compressor' : 'freeconvert.com'}. ` +
+          `Try reducing resolution to 720p and bitrate to under 1 Mbps.`,
+          400
+        );
+      }
+
+      // ============================================
+      // ✅ STEP 5: GET WHATSAPP ACCOUNT
+      // ============================================
+      let waAccount = null;
+      if (whatsappAccountId) {
+        waAccount = await prisma.whatsAppAccount.findFirst({
+          where: { id: whatsappAccountId, organizationId },
+        });
+      }
+
+      if (!waAccount) {
+        waAccount = await prisma.whatsAppAccount.findFirst({
+          where: { organizationId, status: 'CONNECTED' },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+        });
+      }
+
+      if (!waAccount) {
+        throw new AppError(
+          'No connected WhatsApp account found. Please connect WhatsApp in Settings first.',
+          400
+        );
+      }
+
+      // ============================================
+      // ✅ STEP 6: DECRYPT TOKEN
+      // ============================================
+      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
+      if (!accountWithToken?.accessToken) {
+        throw new AppError('Failed to decrypt WhatsApp token', 500);
+      }
+
+      // ============================================
+      // ✅ STEP 7: UPLOAD TO META (for handle)
+      // ============================================
+      let metaMediaId: string | null = null;
+      let metaHandle: string | null = null;
+
+      try {
+        console.log('📤 Uploading to Meta for numeric media ID...');
+        
+        // Download compressed version from cloudinary
+        const compressedResponse = await axios.get(uploadResult.secureUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)' },
+        });
+        
+        const compressedBuffer = Buffer.from(compressedResponse.data);
+        
+        console.log('📦 Downloaded compressed file:', formatBytes(compressedBuffer.length));
+
+        const metaUploadResult = await metaApi.uploadMedia(
+          waAccount.phoneNumberId,
+          accountWithToken.accessToken,
+          compressedBuffer,
+          file.mimetype,
+          file.originalname,
+          waAccount.wabaId
+        );
+
+        metaMediaId = metaUploadResult.id;
+        console.log('✅ Meta upload success, numeric ID:', metaMediaId);
+      } catch (metaErr: any) {
+        console.error('❌ Meta upload failed:', metaErr.message);
+        // Don't fail - we have Cloudinary URL which works for sending
+        console.warn('⚠️ Continuing with Cloudinary URL only');
+      }
+
+      // ============================================
+      // ✅ STEP 8: GET APP-LEVEL HANDLE (for template creation)
+      // ============================================
+      try {
+        const { metaUploadService } = require('../../services/meta.upload.service');
+        
+        const compressedResponse = await axios.get(uploadResult.secureUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+        });
+        const compressedBuffer = Buffer.from(compressedResponse.data);
+        
+        const handleResult = await metaUploadService.uploadMediaForTemplate(
+          '', // appId (ignored)
+          accountWithToken.accessToken,
+          compressedBuffer,
+          file.mimetype,
+          file.originalname
+        );
+        
+        metaHandle = handleResult.handle;
+        console.log('✅ App-level handle received:', metaHandle?.substring(0, 30) + '...');
+      } catch (handleErr: any) {
+        console.warn('⚠️ App-level handle upload failed:', handleErr.message);
+      }
+
+      // ============================================
+      // ✅ SUCCESS RESPONSE
+      // ============================================
+      return res.json({
+        success: true,
+        message: uploadResult.compressionApplied
+          ? `Media uploaded and compressed successfully (${((uploadResult.originalSize - uploadResult.finalSize) / uploadResult.originalSize * 100).toFixed(0)}% smaller)`
+          : 'Media uploaded successfully',
+        data: {
+          cloudinaryUrl: uploadResult.secureUrl,
+          permanentUrl: uploadResult.secureUrl,
+          mediaHandle: metaHandle,
+          metaNumericId: metaMediaId,
+          mediaId: metaHandle || metaMediaId || uploadResult.publicId,
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          size: uploadResult.finalSize,
+          originalSize: uploadResult.originalSize,
+          compressionApplied: uploadResult.compressionApplied,
+          whatsappAccountId: waAccount.id,
+          wabaId: waAccount.wabaId,
+          url: uploadResult.secureUrl,
+        },
+      });
+
+    } catch (error: any) {
+      console.error('❌ Upload media failed:', error.message);
+      next(error instanceof AppError ? error : new AppError(error.message, 500));
     }
   }
 

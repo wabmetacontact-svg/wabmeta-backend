@@ -3,7 +3,15 @@
 import { Router } from 'express';
 import { templatesController } from './templates.controller';
 import { authenticate } from '../../middleware/auth';
-import { uploadMiddleware, uploadTemplateMedia } from './templates.media';
+import multer from 'multer';
+import { uploadMiddleware } from './templates.media';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100 MB absolute max
+  },
+});
 
 const router = Router();
 
@@ -11,7 +19,11 @@ const router = Router();
 router.use(authenticate);
 
 // ✅ CRITICAL: Media upload MUST be BEFORE /:id routes
-router.post('/upload-media', uploadMiddleware.single('file'), uploadTemplateMedia);
+router.post(
+  '/upload-media',
+  upload.single('file'),
+  (req, res, next) => templatesController.uploadMedia(req, res, next)
+);
 
 // Template CRUD & Operations
 router.post('/', templatesController.create.bind(templatesController));
