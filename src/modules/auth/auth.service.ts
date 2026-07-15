@@ -27,7 +27,7 @@ import {
 import { OAuth2Client } from 'google-auth-library';
 import { getRedis } from '../../config/redis';
 import { whatsappApi } from '../whatsapp/whatsapp.api';
-import { resolveTemplateHeaderMedia } from '../../utils/templateMediaResolver';
+
 
 // ============================================
 // CONSTANTS
@@ -124,7 +124,7 @@ const sendWhatsAppTemplate = (
       }
 
       if (tpl?.headerContent) {
-        const resolvedUrl = await resolveTemplateHeaderMedia(tpl);
+        const resolvedUrl = tpl.headerContent;
         const typeLower = tpl.headerType?.toLowerCase();
         if (typeLower === 'image' || typeLower === 'video' || typeLower === 'document') {
           templateComponents.header = [

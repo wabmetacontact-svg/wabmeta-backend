@@ -10,7 +10,7 @@ import { config } from './config';
 import prisma from './config/database';
 import { initializeSocket } from './socket';
 import { validateEncryptionKey } from './utils/encryption';
-import { initializeScheduler, startTemplateMediaPreWarmJob } from './services/scheduler.service';
+import { initializeScheduler } from './services/scheduler.service';
 import { walletReconciliationService } from './modules/wallet/wallet.reconciliation.service';
 
 let webhookService: any = null;
@@ -121,8 +121,7 @@ async function bootstrap() {
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('');
 
-      // ✅ Start template media pre-warm job
-      startTemplateMediaPreWarmJob();
+
     });
 
     setupGracefulShutdown(server);

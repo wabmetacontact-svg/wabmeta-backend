@@ -16,7 +16,7 @@ import { metaApi, generatePhonePin } from './meta.api'; // ✅ FIX: import gener
 import { config } from '../../config';
 import { encrypt, safeDecryptStrict, maskToken, isMetaToken } from '../../utils/encryption';
 import { getAccountWithDecryptedToken } from '../../utils/tokenDecryption'; // ✅ FIX: shared helper
-import { resolveTemplateHeaderMedia } from '../../utils/templateMediaResolver';
+
 import { v4 as uuidv4 } from 'uuid';
 import { ConnectionProgress } from './meta.types';
 import { AppError } from '../../middleware/errorHandler';
@@ -962,12 +962,7 @@ export class MetaService {
           created++;
         }
 
-        // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
-        if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
-          await resolveTemplateHeaderMedia(dbTemplate).catch((err) => {
-            console.error(`Failed to resolve template media in syncTemplates:`, err.message);
-          });
-        }
+
       } catch (err: any) {
         console.error(`Failed to sync ${metaTemplate.name}:`, err.message);
         skipped++;
@@ -1068,12 +1063,7 @@ export class MetaService {
             dbTemplate = await prisma.template.create({ data: baseData });
           }
 
-          // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
-          if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
-            await resolveTemplateHeaderMedia(dbTemplate).catch((err) => {
-              console.error(`Failed to resolve template media in syncTemplatesBackground:`, err.message);
-            });
-          }
+
 
           synced++;
         } catch (err: any) {
