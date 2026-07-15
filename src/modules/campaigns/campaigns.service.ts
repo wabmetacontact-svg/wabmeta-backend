@@ -1902,7 +1902,9 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
   const components: any[] = [];
   const headerType = template.headerType?.toUpperCase();
 
-  // ✅ TEXT header with variables - ONLY if variables exist
+  // ============================================
+  // ✅ TEXT HEADER with variables
+  // ============================================
   if (headerType === 'TEXT' && template.headerContent) {
     const headerVars = extractVariables(template.headerContent);
     if (headerVars.length > 0) {
@@ -1914,31 +1916,49 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
         })),
       });
     }
-    // If TEXT header has no variables, skip entirely (static text)
   }
 
-  // ✅ MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT):
-  // SKIP! Meta already has the approved media stored permanently.
-  // When we send the template by name, Meta automatically attaches
-  // the approved media. No need to send media URL or ID.
-  //
-  // Exception: Only send media if template has DYNAMIC media
-  // (rare case - user uploaded custom image per contact via variables.header_media)
-  else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) && variables.header_media) {
-    // Only for dynamic media use case (< 1% of templates)
-    const mediaType = headerType.toLowerCase();
-    components.push({
-      type: 'header',
-      parameters: [{
+  // ============================================
+  // ✅ MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT)
+  // Send Cloudinary URL directly - NO upload needed!
+  // Meta accepts direct HTTPS URLs for template media
+  // ============================================
+  else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+    // Get media URL - prefer dynamic, fallback to template's stored URL
+    const mediaUrl = 
+      variables.header_media ||           // Dynamic per-contact media
+      template.headerContent ||            // Stored Cloudinary URL
+      null;
+
+    if (mediaUrl && mediaUrl.startsWith('http')) {
+      const mediaType = headerType.toLowerCase(); // image | video | document
+      
+      const mediaParam: any = {
         type: mediaType,
-        [mediaType]: { link: variables.header_media },
-      }],
-    });
-    console.log(`⚡ Using dynamic media for ${template.name}`);
-  }
-  // else: Static media - Meta will use approved media automatically ✅
+        [mediaType]: { link: mediaUrl }
+      };
 
+      // For documents, add filename
+      if (mediaType === 'document') {
+        const urlPath = mediaUrl.split('?')[0];
+        const filename = urlPath.split('/').pop() || 'document.pdf';
+        mediaParam.document.filename = filename;
+      }
+
+      components.push({
+        type: 'header',
+        parameters: [mediaParam],
+      });
+
+      console.log(`✅ Media header attached: ${mediaType} → ${mediaUrl.substring(0, 60)}...`);
+    } else {
+      console.warn(`⚠️ Template "${template.name}" has ${headerType} header but no valid media URL`);
+    }
+  }
+
+  // ============================================
   // ✅ BODY variables
+  // ============================================
   const bodyVars = extractVariables(template.bodyText);
   if (bodyVars.length > 0) {
     components.push({
@@ -1950,7 +1970,9 @@ async function buildTemplateMessage(template: any, variables: Record<string, str
     });
   }
 
+  // ============================================
   // ✅ BUTTON variables (URL buttons with dynamic parameters)
+  // ============================================
   if (template.buttons && Array.isArray(template.buttons)) {
     template.buttons.forEach((btn: any, index: number) => {
       if (btn.type === 'URL' && btn.url && btn.url.includes('{{')) {
