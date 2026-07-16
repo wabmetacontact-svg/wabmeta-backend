@@ -53,7 +53,19 @@ router.get('/country-codes', contactsController.getCountryCodes.bind(contactsCon
 
 router.get('/stats', contactsController.getStats.bind(contactsController));
 router.get('/import-stats', contactsController.getImportStats.bind(contactsController));
-router.get('/audience-count', contactsController.getAudienceCount.bind(contactsController));
+
+// Audience count (for campaign creation)
+router.get(
+  '/audience-count',
+  contactsController.getAudienceCount.bind(contactsController)
+);
+
+// Contact search (for manual selection)
+router.get(
+  '/search',
+  contactsController.searchContacts.bind(contactsController)
+);
+
 router.get('/tags', contactsController.getTags.bind(contactsController));
 router.get('/export', contactsController.export.bind(contactsController));
 

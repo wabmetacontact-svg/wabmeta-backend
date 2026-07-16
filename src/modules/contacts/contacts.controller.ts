@@ -769,7 +769,7 @@ export class ContactsController {
     } catch (error) { next(error); }
   }
 
-  // ── GET AUDIENCE COUNT ───────────────────────────────────────
+  // ─── GET AUDIENCE COUNT ─────────────────────────────────────
   async getAudienceCount(
     req: AuthRequest,
     res: Response,
@@ -781,7 +781,9 @@ export class ContactsController {
         throw new AppError('Organization context required', 400);
       }
 
-      const { type, tags, groupId } = req.query;
+      const type    = String(req.query.type || 'all');
+      const tags    = req.query.tags    ? String(req.query.tags).split(',').filter(Boolean) : [];
+      const groupId = req.query.groupId ? String(req.query.groupId) : undefined;
 
       let count = 0;
 
@@ -792,21 +794,18 @@ export class ContactsController {
             status: 'ACTIVE',
           },
         });
-      } else if (type === 'tags' && tags) {
-        const tagArr = String(tags).split(',').filter(Boolean);
-        if (tagArr.length > 0) {
-          count = await prisma.contact.count({
-            where: {
-              organizationId,
-              status: 'ACTIVE',
-              tags: { hasSome: tagArr },
-            },
-          });
-        }
+      } else if (type === 'tags' && tags.length > 0) {
+        count = await prisma.contact.count({
+          where: {
+            organizationId,
+            status: 'ACTIVE',
+            tags:   { hasSome: tags },
+          },
+        });
       } else if (type === 'group' && groupId) {
         count = await prisma.contactGroupMember.count({
           where: {
-            groupId: String(groupId),
+            groupId,
             contact: {
               organizationId,
               status: 'ACTIVE',
@@ -815,7 +814,73 @@ export class ContactsController {
         });
       }
 
-      sendSuccess(res, { count }, 'Audience count fetched');
+      sendSuccess(res, { count, type }, 'Audience count fetched');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ─── SEARCH CONTACTS (for manual selection) ─────────────────
+  async searchContacts(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) {
+        throw new AppError('Organization context required', 400);
+      }
+
+      const query = String(req.query.q || '').trim();
+      const limit = Math.min(50, parseInt(req.query.limit as string) || 30);
+
+      // Empty query returns first N contacts
+      const where: any = {
+        organizationId,
+        status: 'ACTIVE',
+      };
+
+      if (query.length >= 1) {
+        where.OR = [
+          { phone:     { contains: query, mode: 'insensitive' } },
+          { firstName: { contains: query, mode: 'insensitive' } },
+          { lastName:  { contains: query, mode: 'insensitive' } },
+          { email:     { contains: query, mode: 'insensitive' } },
+        ];
+      }
+
+      const contacts = await prisma.contact.findMany({
+        where,
+        take: limit,
+        select: {
+          id:                  true,
+          firstName:           true,
+          lastName:            true,
+          phone:               true,
+          countryCode:         true,
+          email:               true,
+          tags:                true,
+          whatsappProfileName: true,
+        },
+        orderBy: [
+          { firstName: 'asc' },
+          { createdAt: 'desc' },
+        ],
+      });
+
+      // Format response
+      const formatted = contacts.map(c => ({
+        id:    c.id,
+        name:  c.whatsappProfileName ||
+               [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+               c.phone,
+        phone: c.phone,
+        email: c.email,
+        tags:  c.tags || [],
+      }));
+
+      sendSuccess(res, { contacts: formatted, total: formatted.length }, 'Contacts found');
     } catch (error) {
       next(error);
     }
