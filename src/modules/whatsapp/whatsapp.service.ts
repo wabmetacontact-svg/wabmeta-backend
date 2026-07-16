@@ -1532,6 +1532,34 @@ private buildTemplateComponents(
 
       return { success: true, account: updated };
     } catch (error: any) {
+      const errorData = error.response?.data?.error;
+      const code      = errorData?.code;
+      const message   = errorData?.message || '';
+
+      // ✅ FIX: Handle deleted phone (code 100, subcode 33)
+      if (
+        code === 100 &&
+        (message.includes('does not exist') ||
+         message.includes('missing permissions'))
+      ) {
+        console.warn(
+          `⚠️ Phone no longer exists in Meta. ` +
+          `Marking account as DISCONNECTED.`
+        );
+
+        // Mark account as disconnected
+        await prisma.whatsAppAccount.update({
+          where: { id: accountId },
+          data: {
+            status: 'DISCONNECTED',
+            disconnectedAt: new Date(),
+            disconnectReason: 'Phone number deleted from Meta',
+          } as any,
+        });
+
+        return { success: false, error: 'Phone number deleted from Meta' };
+      }
+
       console.error(`❌ Quality sync failed for ${accountId}:`, error.message);
       return { success: false, error: error.message };
     }

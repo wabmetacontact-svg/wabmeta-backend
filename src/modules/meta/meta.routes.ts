@@ -281,7 +281,15 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
 
     if (result.success) {
       console.log('✅ FB.login connection successful');
-      return sendSuccess(res, result.account, 'WhatsApp connected successfully');
+      return sendSuccess(
+        res,
+        {
+          account: result.account,
+          warning: (result as any).warning,
+          message: (result as any).message,
+        },
+        'WhatsApp connected successfully'
+      );
     } else {
       console.error('❌ FB.login connection failed:', result.error);
       throw new AppError(result.error || 'Connection failed', 400);

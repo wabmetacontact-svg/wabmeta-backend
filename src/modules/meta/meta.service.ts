@@ -332,17 +332,18 @@ export class MetaService {
         message: 'Registering phone number to Cloud API...',
       });
 
-      // ✅ FIX: generate a random, per-account 6-digit PIN instead of hardcoded '000000'.
-      // We check if this phoneNumberId already has a persisted PIN (previous reconnection)
-      // and reuse it — Meta rejects PIN changes without prior 2FA disable.
+      // ─── Register phone (with proper error handling) ─────────
       let phonePin: string;
+      let registrationWarning: string | undefined;
+      let registrationMessage: string | undefined;
+
       try {
         const existingRecord = await prisma.whatsAppAccount.findUnique({
           where: { phoneNumberId: primaryPhone.id },
           select: { webhookSecret: true },
         });
 
-        // We reuse webhookSecret column to also stash the encrypted PIN with a marker
+        // We reuse webhookSecret column to stashe the encrypted PIN with a marker
         // (schema-safe: no new column needed). Marker prefix = "PIN::"
         let reusedPin: string | null = null;
         if (existingRecord?.webhookSecret) {
@@ -362,11 +363,45 @@ export class MetaService {
         phonePin = reusedPin || generatePhonePin();
         console.log(`[Meta Service] Using ${reusedPin ? 'existing' : 'new'} PIN for phone ${primaryPhone.id}`);
 
-        await metaApi.registerPhoneNumber(primaryPhone.id, accessToken, phonePin);
-        console.log('✅ Phone number registered successfully');
+        console.log(`[Meta Service] Registering phone ${primaryPhone.id}...`);
+
+        const registerResult = await metaApi.registerPhone(
+          primaryPhone.id,
+          phonePin,
+          accessToken
+        );
+
+        // ✅ FIX: Only log success if actually successful
+        if (registerResult.success) {
+          if (registerResult.alreadyRegistered) {
+            console.log(`ℹ️ Phone ${primaryPhone.id} already registered`);
+          } else {
+            console.log(`✅ Phone ${primaryPhone.id} newly registered`);
+          }
+        } else {
+          // ❌ Registration failed - CRITICAL warning
+          console.error(
+            `❌ PHONE REGISTRATION FAILED for ${primaryPhone.id}\n` +
+            `   Messages will NOT work until this is fixed.\n` +
+            `   Common causes:\n` +
+            `   1. 2FA PIN mismatch\n` +
+            `   2. Number pending verification\n` +
+            `   3. Number already registered elsewhere\n` +
+            `   4. Payment method missing in Meta Business Manager\n`
+          );
+
+          registrationWarning = 'PHONE_NOT_REGISTERED';
+          registrationMessage =
+            'Phone number connected but registration failed. ' +
+            'Please verify phone number in Meta Business Manager first.';
+        }
       } catch (registerError: any) {
         console.warn('⚠️ Phone number registration failed:', registerError.message);
-        phonePin = generatePhonePin(); // ensure we still have a value to persist below
+        phonePin = generatePhonePin(); // ensure we still stashe a value to persist
+        registrationWarning = 'PHONE_NOT_REGISTERED';
+        registrationMessage =
+          'Phone number connected but registration failed. ' +
+          'Please verify phone number in Meta Business Manager first.';
       }
 
       onProgress?.({
@@ -595,7 +630,9 @@ export class MetaService {
       return {
         success: true,
         account: this.sanitizeAccount(savedAccount),
-      };
+        warning: registrationWarning,
+        message: registrationMessage,
+      } as any;
     } catch (error: any) {
       console.error('❌ Meta connection error:', error);
 
