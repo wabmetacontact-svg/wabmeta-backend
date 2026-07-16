@@ -15,12 +15,7 @@ const audienceFilterSchema = z.object({
   hasMessaged: z.boolean().optional(),
 }).optional();
 
-const variableMappingSchema = z.record(
-  z.object({
-    type: z.enum(['field', 'static']),
-    value: z.string().min(1),
-  })
-).optional();
+const variableMappingSchema = z.record(z.string()).optional();
 
 // ============================================
 // REQUEST SCHEMAS

@@ -50,22 +50,73 @@ const toMetaLang = (lang?: string): string => {
 };
 
 const buildParamsFromContact = (
-  cc: any,
-  varCount: number
+  cc:              any,
+  varCount:        number,
+  variableMapping?: Record<string, string>  // ✅ NEW parameter
 ): string[] => {
-  const cd = cc?.customData || {};
+  const cd  = cc?.customData || {};
   const cnt = cc?.contact || cc?.Contact || cc || {};
-  const fallback = [
-    cnt?.firstName || '',
-    cnt?.lastName || '',
-    cnt?.phone || '',
-    cnt?.email || '',
-  ].filter(Boolean);
 
   const params: string[] = [];
+
   for (let i = 0; i < varCount; i++) {
-    params.push(cd[String(i + 1)] || fallback[i] || 'NA');
+    const varKey = String(i + 1);
+    let value: string = 'NA';
+
+    // ✅ Priority 1: Check variableMapping from campaign
+    if (variableMapping && variableMapping[varKey]) {
+      const mappedValue = variableMapping[varKey];
+
+      // If it's a field reference like "{{contact.firstName}}"
+      if (mappedValue.startsWith('{{contact.') && mappedValue.endsWith('}}')) {
+        const fieldName = mappedValue.slice(10, -2); // Extract "firstName"
+        
+        // Resolve to actual contact value
+        switch (fieldName) {
+          case 'firstName':
+            value = cnt.firstName || 'NA';
+            break;
+          case 'lastName':
+            value = cnt.lastName || '';
+            break;
+          case 'fullName':
+            value = [cnt.firstName, cnt.lastName].filter(Boolean).join(' ') || 'NA';
+            break;
+          case 'phone':
+            value = cnt.phone || 'NA';
+            break;
+          case 'email':
+            value = cnt.email || 'NA';
+            break;
+          case 'company':
+            value = cnt.customFields?.company || 'NA';
+            break;
+          default:
+            value = cnt[fieldName] || 'NA';
+        }
+      } else {
+        // ✅ Custom text - use as-is for all recipients
+        value = mappedValue;
+      }
+    }
+    // Priority 2: customData from CSV
+    else if (cd[varKey]) {
+      value = cd[varKey];
+    }
+    // Priority 3: Fallback to standard fields
+    else {
+      const fallback = [
+        cnt.firstName || '',
+        cnt.lastName  || '',
+        cnt.phone     || '',
+        cnt.email     || '',
+      ].filter(Boolean);
+      value = fallback[i] || 'NA';
+    }
+
+    params.push(String(value));
   }
+
   return params;
 };
 
@@ -1674,7 +1725,15 @@ export class CampaignsService {
                   ...bodyMatches.map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10)),
                   ...headerMatches.map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10)),
                 );
-                const params = buildParamsFromContact(cc, maxIdx);
+
+                // ✅ Get variableMapping from campaign
+                const campaignVariableMapping = (campaign as any).variableMapping || {};
+
+                const params = buildParamsFromContact(
+                  cc,
+                  maxIdx,
+                  campaignVariableMapping  // ✅ Pass mapping
+                );
                 const variables: Record<string, string> = {};
                 for (let j = 0; j < params.length; j++) {
                   variables[String(j + 1)] = params[j];
