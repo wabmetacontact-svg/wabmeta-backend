@@ -1048,13 +1048,12 @@ export class TemplatesService {
         const isScontent = (url: string | null | undefined) =>
           !!url && url.includes('scontent.whatsapp');
 
-        let finalHeaderContent = isScontent(headerContent) ? null : headerContent;
-
-        if (existing && existing.headerContent && !isScontent(existing.headerContent)) {
-          if (!finalHeaderContent) {
-            finalHeaderContent = existing.headerContent;
-          }
-        }
+        const finalHeaderContent =
+          (headerContent && !isScontent(headerContent))
+            ? headerContent
+            : (existing && !isScontent(existing.headerContent)
+                ? existing.headerContent
+                : null);
 
         if (existing) {
           const updateData: any = {

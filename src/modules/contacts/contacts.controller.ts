@@ -1,5 +1,4 @@
-// src/modules/contacts/contacts.controller.ts
-
+// src/modules/contacts/contacts.controller.ts - FIXED
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from '../../types/express';
 import { contactsService } from './contacts.service';
@@ -9,61 +8,65 @@ import { AppError } from '../../middleware/errorHandler';
 import { contactFeaturesService } from './contacts.features';
 import { parseMultiplePhones, COUNTRY_CODES } from '../../utils/phoneInternational';
 import {
-  CreateContactInput,
-  UpdateContactInput,
-  ImportContactsInput,
-  BulkUpdateContactsInput,
-  ContactsQueryInput,
-  CreateContactGroupInput,
-  UpdateContactGroupInput,
+  CreateContactInput, UpdateContactInput, ImportContactsInput,
+  BulkUpdateContactsInput, ContactsQueryInput,
+  CreateContactGroupInput, UpdateContactGroupInput,
 } from './contacts.types';
+
+// ─── CSV Injection Protection ─────────────────────────────────
+// ✅ FIX Bug4: Escape values that could be formula injections
+const escapeCsvValue = (value: string): string => {
+  const str = String(value ?? '').replace(/"/g, '""');
+  // Escape formula injection characters
+  if (/^[=+\-@\t\r]/.test(str)) {
+    return `"'${str}"`;
+  }
+  return `"${str}"`;
+};
 
 export class ContactsController {
 
-  // ==========================================
-  // CREATE CONTACT
-  // ==========================================
-  async create(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── CREATE ──────────────────────────────────────────────────
+  async create(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const input: CreateContactInput = req.body;
       const contact = await contactsService.create(organizationId, input);
 
-      const message = contact.whatsappProfileFetched
-        ? 'Contact created with provided name'
-        : 'Contact created - name will update when they send a message';
-
-      sendSuccess(res, contact, message, 201);
-    } catch (error) {
-      next(error);
-    }
+      sendSuccess(res, contact, 'Contact created successfully', 201);
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET CONTACTS LIST
-  // ==========================================
-  async getList(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── LIST ────────────────────────────────────────────────────
+  async getList(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      // ✅ FIX Bug5: Validated bounds
+      const rawPage = parseInt(req.query.page as string) || 1;
+      const rawLimit = parseInt(req.query.limit as string) || 20;
 
       const query: ContactsQueryInput = {
-        page: parseInt(req.query.page as string) || 1,
-        limit: parseInt(req.query.limit as string) || 20,
-        search: req.query.search as string,
+        page: Math.max(1, rawPage),
+        limit: Math.min(500, Math.max(1, rawLimit)), // ✅ Max 500
+        search: (req.query.search as string)?.trim() || undefined,
         status: req.query.status as any,
-        tags: req.query.tags ? (req.query.tags as string).split(',') : undefined,
-        groupId: req.query.groupId as string,
+        tags: req.query.tags
+          ? (req.query.tags as string).split(',').filter(Boolean)
+          : undefined,
+        groupId: req.query.groupId as string || undefined,
         sortBy: (req.query.sortBy as any) || 'createdAt',
         sortOrder: (req.query.sortOrder as any) || 'desc',
-        hasWhatsAppProfile: req.query.hasWhatsAppProfile === 'true' ? true :
-          req.query.hasWhatsAppProfile === 'false' ? false : undefined,
+        hasWhatsAppProfile:
+          req.query.hasWhatsAppProfile === 'true' ? true :
+            req.query.hasWhatsAppProfile === 'false' ? false : undefined,
       };
 
       const result = await contactsService.getList(organizationId, query);
@@ -73,581 +76,518 @@ export class ContactsController {
         data: result.contacts,
         meta: result.meta,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET CONTACT BY ID
-  // ==========================================
-  async getById(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── GET BY ID ───────────────────────────────────────────────
+  async getById(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const id = req.params.id as string;
-      const contact = await contactsService.getById(organizationId, id);
+      const contact = await contactsService.getById(
+        organizationId, req.params.id as string
+      );
       sendSuccess(res, contact, 'Contact fetched successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // UPDATE CONTACT
-  // ==========================================
-  async update(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── UPDATE ──────────────────────────────────────────────────
+  async update(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const id = req.params.id as string;
       const input: UpdateContactInput = req.body;
-      const contact = await contactsService.update(organizationId, id, input);
+      const contact = await contactsService.update(
+        organizationId, req.params.id as string, input
+      );
       sendSuccess(res, contact, 'Contact updated successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // DELETE CONTACT
-  // ==========================================
-  async delete(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── DELETE ──────────────────────────────────────────────────
+  async delete(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      const userId = req.user?.id; // ✅ NEW
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      const userId = req.user?.id;
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const id = req.params.id as string;
-      const result = await contactsService.delete(organizationId, id, userId); // ✅ Pass userId
+      const result = await contactsService.delete(
+        organizationId, req.params.id as string, userId
+      );
       sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // IMPORT CONTACTS (FIXED)
-  // ==========================================
-  async import(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── IMPORT ──────────────────────────────────────────────────
+  // ✅ FIX Bug1: Clean separation of file/body parsing
+  async import(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      let input: ImportContactsInput & { csvData?: string; groupName?: string; groupId?: string } = req.body;
+      // ✅ Build clean input object
+      const input: any = {};
 
-      // ✅ Handle file upload (multer)
+      // File upload (multer)
       const file = (req as any).file;
       if (file) {
-        const csvData = file.buffer.toString('utf-8');
-        console.log(`📁 Received CSV file: ${file.originalname}, Size: ${file.size} bytes`);
-        input.csvData = csvData;
+        input.csvData = file.buffer.toString('utf-8');
       }
 
-      // ✅ Handle raw CSV in body
-      if (req.body.csvData && typeof req.body.csvData === 'string') {
-        input.csvData = req.body.csvData;
+      // Raw CSV in body
+      if (!input.csvData && req.body.csvData) {
+        input.csvData = String(req.body.csvData);
       }
 
-      // ✅ Handle contacts array directly
-      if (req.body.contacts && Array.isArray(req.body.contacts)) {
+      // Contacts array
+      if (Array.isArray(req.body.contacts)) {
         input.contacts = req.body.contacts;
       }
 
-      // Get tags
+      // Tags
       if (req.body.tags) {
-        if (typeof req.body.tags === 'string') {
+        if (Array.isArray(req.body.tags)) {
+          input.tags = req.body.tags;
+        } else if (typeof req.body.tags === 'string') {
           try {
             input.tags = JSON.parse(req.body.tags);
           } catch {
-            input.tags = req.body.tags.split(',').map((t: string) => t.trim());
+            input.tags = req.body.tags.split(',').map((t: string) => t.trim()).filter(Boolean);
           }
-        } else if (Array.isArray(req.body.tags)) {
-          input.tags = req.body.tags;
         }
+      } else {
+        input.tags = [];
       }
 
-      // Get group info
-      input.groupId = req.body.groupId;
-      input.groupName = req.body.groupName;
+      // Group
+      if (req.body.groupId) input.groupId = String(req.body.groupId);
+      if (req.body.groupName) input.groupName = String(req.body.groupName);
 
-      console.log('Import input:', {
-        hasCSVData: !!input.csvData,
-        csvLength: input.csvData?.length,
-        contactsCount: input.contacts?.length,
-        tags: input.tags,
-        groupId: input.groupId,
-        groupName: input.groupName,
-      });
+      if (!input.csvData && !input.contacts?.length) {
+        throw new AppError('No contact data provided', 400);
+      }
 
       const result = await contactsService.import(organizationId, input);
 
       const message = result.failed > 0
-        ? `Imported ${result.imported} contacts. ${result.failed} failed (only Indian +91 numbers allowed).`
+        ? `Imported ${result.imported} contacts. ${result.failed} failed.`
         : `Successfully imported ${result.imported} contacts.`;
 
       sendSuccess(res, result, message);
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // BULK UPDATE CONTACTS
-  // ==========================================
-  async bulkUpdate(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── BULK UPDATE ─────────────────────────────────────────────
+  async bulkUpdate(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const input: BulkUpdateContactsInput = req.body;
+
+      if (!Array.isArray(input.contactIds) || input.contactIds.length === 0) {
+        throw new AppError('contactIds array required', 400);
+      }
+
       const result = await contactsService.bulkUpdate(organizationId, input);
       sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // BULK DELETE CONTACTS
-  // ==========================================
-  async bulkDelete(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── BULK DELETE ─────────────────────────────────────────────
+  async bulkDelete(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      const userId = req.user?.id; // ✅ NEW
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      const userId = req.user?.id;
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const { contactIds } = req.body;
-      const result = await contactsService.bulkDelete(organizationId, contactIds, userId); // ✅
-      sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
-  }
 
-  // ==========================================
-  // DELETE ALL CONTACTS
-  // ==========================================
-  async deleteAll(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const organizationId = req.user?.organizationId;
-      const userId = req.user?.id; // ✅ NEW
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
+      if (!Array.isArray(contactIds) || contactIds.length === 0) {
+        throw new AppError('contactIds array required', 400);
       }
 
-      const result = await contactsService.deleteAll(organizationId, userId); // ✅
+      const result = await contactsService.bulkDelete(
+        organizationId, contactIds, userId
+      );
       sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET CONTACT STATS
-  // ==========================================
-  async getStats(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── DELETE ALL ──────────────────────────────────────────────
+  async deleteAll(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      const userId = req.user?.id;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const result = await contactsService.deleteAll(organizationId, userId);
+      sendSuccess(res, result, result.message);
+    } catch (error) { next(error); }
+  }
+
+  // ── STATS ───────────────────────────────────────────────────
+  async getStats(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const stats = await contactsService.getStats(organizationId);
       sendSuccess(res, stats, 'Stats fetched successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET ALL TAGS
-  // ==========================================
-  async getTags(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── TAGS ────────────────────────────────────────────────────
+  async getTags(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const tags = await contactsService.getAllTags(organizationId);
       sendSuccess(res, tags, 'Tags fetched successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // EXPORT CONTACTS
-  // ==========================================
-  async export(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── EXPORT ──────────────────────────────────────────────────
+  async export(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const { groupId } = req.query;
-      const contacts = await contactsService.export(organizationId, groupId as string);
+      const contacts = await contactsService.export(
+        organizationId, groupId as string
+      );
 
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename=contacts.csv');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename=contacts.csv'
+      );
 
       if (contacts.length === 0) {
         res.send('No contacts found');
         return;
       }
 
+      // ✅ FIX Bug4: CSV injection protection
       const headers = Object.keys(contacts[0]).join(',');
-      const rows = contacts.map((contact) =>
+      const rows = contacts.map(contact =>
         Object.values(contact)
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .map(v => escapeCsvValue(String(v ?? '')))
           .join(',')
       );
 
-      const csv = [headers, ...rows].join('\n');
-      res.send(csv);
-    } catch (error) {
-      next(error);
-    }
+      res.send([headers, ...rows].join('\n'));
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // REFRESH UNKNOWN NAMES (NEW)
-  // ==========================================
-  async refreshUnknownNames(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── REFRESH UNKNOWN NAMES ───────────────────────────────────
+  async refreshUnknownNames(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const result = await contactsService.refreshUnknownNames(organizationId);
       sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // CONTACT GROUPS
-  // ==========================================
-
-  async createGroup(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── GROUP CRUD ──────────────────────────────────────────────
+  async createGroup(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const input: CreateContactGroupInput = req.body;
+      if (!input.name?.trim()) {
+        throw new AppError('Group name is required', 400);
+      }
+
       const group = await contactsService.createGroup(organizationId, input);
       sendSuccess(res, group, 'Group created successfully', 201);
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  async getGroups(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  async getGroups(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const groups = await contactsService.getGroups(organizationId);
       sendSuccess(res, groups, 'Groups fetched successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  async getGroupById(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  async getGroupById(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const groupId = req.params.groupId as string;
-      const group = await contactsService.getGroupById(organizationId, groupId);
+      const group = await contactsService.getGroupById(
+        organizationId, req.params.groupId as string
+      );
       sendSuccess(res, group, 'Group fetched successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  async updateGroup(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  async updateGroup(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const groupId = req.params.groupId as string;
       const input: UpdateContactGroupInput = req.body;
-      const group = await contactsService.updateGroup(organizationId, groupId, input);
+      const group = await contactsService.updateGroup(
+        organizationId, req.params.groupId as string, input
+      );
       sendSuccess(res, group, 'Group updated successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  async deleteGroup(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  async deleteGroup(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const groupId = req.params.groupId as string;
-      const result = await contactsService.deleteGroup(organizationId, groupId);
+      const result = await contactsService.deleteGroup(
+        organizationId, req.params.groupId as string
+      );
       sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  async addContactsToGroup(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  async addContactsToGroup(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const groupId = req.params.groupId as string;
       const { contactIds } = req.body;
-      const result = await contactsService.addContactsToGroup(organizationId, groupId, contactIds);
-      sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async removeContactsFromGroup(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
+      if (!Array.isArray(contactIds) || contactIds.length === 0) {
+        throw new AppError('contactIds array required', 400);
       }
 
-      const groupId = req.params.groupId as string;
+      const result = await contactsService.addContactsToGroup(
+        organizationId, req.params.groupId as string, contactIds
+      );
+      sendSuccess(res, result, result.message);
+    } catch (error) { next(error); }
+  }
+
+  async removeContactsFromGroup(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
       const { contactIds } = req.body;
-      const result = await contactsService.removeContactsFromGroup(organizationId, groupId, contactIds);
-      sendSuccess(res, result, result.message);
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async getGroupContacts(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
-    try {
-      const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
+      if (!Array.isArray(contactIds) || contactIds.length === 0) {
+        throw new AppError('contactIds array required', 400);
       }
 
-      const groupId = req.params.groupId as string;
+      const result = await contactsService.removeContactsFromGroup(
+        organizationId, req.params.groupId as string, contactIds
+      );
+      sendSuccess(res, result, result.message);
+    } catch (error) { next(error); }
+  }
+
+  async getGroupContacts(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const rawPage = parseInt(req.query.page as string) || 1;
+      const rawLimit = parseInt(req.query.limit as string) || 20;
+
       const query: ContactsQueryInput = {
-        page: parseInt(req.query.page as string) || 1,
-        limit: parseInt(req.query.limit as string) || 20,
-        search: req.query.search as string,
+        page: Math.max(1, rawPage),
+        limit: Math.min(500, Math.max(1, rawLimit)),
+        search: (req.query.search as string)?.trim() || undefined,
         sortBy: (req.query.sortBy as any) || 'createdAt',
         sortOrder: (req.query.sortOrder as any) || 'desc',
       };
 
-      const result = await contactsService.getGroupContacts(organizationId, groupId, query);
+      const result = await contactsService.getGroupContacts(
+        organizationId, req.params.groupId as string, query
+      );
       res.json({
         success: true,
         message: 'Group contacts fetched successfully',
         data: result.contacts,
         meta: result.meta,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ============================================
-  // FEATURE ACCESS
-  // ============================================
-
-  async getFeatureAccess(req: AuthRequest, res: Response, next: NextFunction) {
+  // ── FEATURE ACCESS ──────────────────────────────────────────
+  async getFeatureAccess(
+    req: AuthRequest, res: Response, next: NextFunction
+  ) {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization not found', 404);
-      }
+      if (!organizationId) throw new AppError('Organization not found', 404);
 
-      const access = await contactFeaturesService.getFeatureAccess(organizationId);
-
-      return res.json({
-        success: true,
-        data: access
-      });
-    } catch (error) {
-      next(error);
-    }
+      const access = await contactFeaturesService.getFeatureAccess(
+        organizationId
+      );
+      return res.json({ success: true, data: access });
+    } catch (error) { next(error); }
   }
 
-  // ============================================
-  // GET COUNTRY CODES
-  // ============================================
-
+  // ── COUNTRY CODES ───────────────────────────────────────────
   async getCountryCodes(req: AuthRequest, res: Response) {
-    return res.json({
-      success: true,
-      data: COUNTRY_CODES
-    });
+    return res.json({ success: true, data: COUNTRY_CODES });
   }
 
-  // ============================================
-  // SIMPLE BULK PASTE (₹2,500+ Plans)
-  // ============================================
-
-  async simpleBulkPaste(req: AuthRequest, res: Response, next: NextFunction) {
+  // ── SIMPLE BULK PASTE ───────────────────────────────────────
+  async simpleBulkPaste(
+    req: AuthRequest, res: Response, next: NextFunction
+  ) {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization not found', 404);
-      }
+      if (!organizationId) throw new AppError('Organization not found', 404);
 
-      // ✅ Check feature access (Quarterly+)
-      await contactFeaturesService.validateAccess(organizationId, 'simpleBulkPaste');
+      await contactFeaturesService.validateAccess(
+        organizationId, 'simpleBulkPaste'
+      );
 
-      const {
-        phoneNumbers,      // Raw string with numbers
-        // ❌ No countryCode parameter - auto detect
-        tags = [],
-        groupId
-      } = req.body;
+      const { phoneNumbers, tags = [], groupId } = req.body;
 
       if (!phoneNumbers || typeof phoneNumbers !== 'string') {
-        throw new AppError('Phone numbers are required', 400);
+        throw new AppError('Phone numbers string required', 400);
       }
 
-      // ✅ Parse with auto-detection
       const { valid, invalid } = parseMultiplePhones(phoneNumbers);
 
       if (valid.length === 0) {
-        throw new AppError('No valid phone numbers found. Make sure to include country code (e.g., +91, +1)', 400);
+        throw new AppError(
+          'No valid phone numbers found. Include country code (e.g. +91, +1).',
+          400
+        );
       }
 
-      // ✅ Limit check
       const MAX_BULK = 5000;
       if (valid.length > MAX_BULK) {
         throw new AppError(`Maximum ${MAX_BULK} contacts per upload`, 400);
       }
 
-      // 1. Identify deleted contacts
-      const deletedContacts = await prisma.contact.findMany({
-        where: {
-          organizationId,
-          phone: { in: valid.map(p => p.fullNumber) },
-          status: 'DELETED'
-        },
-        select: { id: true, phone: true }
+      const phones = valid.map(p => p.fullNumber);
+
+      // 1. Find existing (active + deleted)
+      const existing = await prisma.contact.findMany({
+        where: { organizationId, phone: { in: phones } },
+        select: { id: true, phone: true, status: true },
       });
 
-      // 2. Restore deleted contacts
+      const existingMap = new Map(existing.map(c => [c.phone, c]));
+
+      const toRestore = existing
+        .filter(c => c.status === 'DELETED')
+        .map(c => c.id);
+      const existingActive = new Set(
+        existing.filter(c => c.status !== 'DELETED').map(c => c.phone)
+      );
+      const toCreate = valid.filter(
+        p => !existingMap.has(p.fullNumber)
+      );
+
+      // 2. Restore deleted
       let restoredCount = 0;
-      if (deletedContacts.length > 0) {
-        const restored = await prisma.contact.updateMany({
-          where: {
-            id: { in: deletedContacts.map(c => c.id) }
-          },
-          data: {
-            status: 'ACTIVE',
-            deletedAt: null,
-            deletedBy: null,
-            source: 'BULK_PASTE'
-          }
+      if (toRestore.length > 0) {
+        const r = await prisma.contact.updateMany({
+          where: { id: { in: toRestore } },
+          data: { status: 'ACTIVE', deletedAt: null, deletedBy: null, source: 'BULK_PASTE' },
         });
-        restoredCount = restored.count;
+        restoredCount = r.count;
       }
 
-      // 3. Get existing contacts (check duplicates)
-      const existingContacts = await prisma.contact.findMany({
-        where: {
-          organizationId,
-          phone: { in: valid.map(p => p.fullNumber) }
-        },
-        select: { phone: true }
-      });
-
-      const existingPhones = new Set(existingContacts.map(c => c.phone));
-      const newContacts = valid.filter(p => !existingPhones.has(p.fullNumber));
-
-      // 4. Create contacts
-      const contactsToCreate = newContacts.map((parsed, index) => ({
-        organizationId,
-        phone: parsed.fullNumber,
-        countryCode: parsed.countryCode,
-        firstName: `Contact ${index + 1}`,
-        tags: Array.isArray(tags) ? tags : [],
-        source: 'BULK_PASTE',
-        status: 'ACTIVE' as const
-      }));
-
+      // 3. Create new
+      // ✅ FIX Bug3: Use 'Unknown' instead of generic "Contact N"
       let createdCount = 0;
+      if (toCreate.length > 0) {
+        const createData = toCreate.map(p => ({
+          organizationId,
+          phone: p.fullNumber,
+          countryCode: p.countryCode || '+91',
+          firstName: 'Unknown',          // ✅ WhatsApp name baad mein update karega
+          tags: Array.isArray(tags) ? tags : [],
+          source: 'BULK_PASTE',
+          status: 'ACTIVE' as const,
+        }));
 
-      if (contactsToCreate.length > 0) {
-        const result = await prisma.contact.createMany({
-          data: contactsToCreate,
-          skipDuplicates: true
+        const r = await prisma.contact.createMany({
+          data: createData,
+          skipDuplicates: true,
         });
-        createdCount = result.count;
+        createdCount = r.count;
       }
 
-      // 5. Add to group if specified
-      const totalProcessedCount = createdCount + restoredCount;
-      if (groupId && totalProcessedCount > 0) {
+      // 4. Add to group if specified
+      const total = createdCount + restoredCount;
+      if (groupId && total > 0) {
         const processedPhones = [
-          ...newContacts.map(p => p.fullNumber),
-          ...deletedContacts.map(c => c.phone)
+          ...toCreate.map(p => p.fullNumber),
+          ...existing.filter(c => c.status === 'DELETED').map(c => c.phone),
         ];
 
         const contactIds = await prisma.contact.findMany({
-          where: {
-            organizationId,
-            phone: { in: processedPhones }
-          },
-          select: { id: true }
+          where: { organizationId, phone: { in: processedPhones } },
+          select: { id: true },
         });
 
         await prisma.contactGroupMember.createMany({
-          data: contactIds.map(c => ({
-            groupId,
-            contactId: c.id
-          })),
-          skipDuplicates: true
+          data: contactIds.map(c => ({ groupId, contactId: c.id })),
+          skipDuplicates: true,
         });
       }
 
-      let message = '';
-      if (createdCount > 0 && restoredCount > 0) {
-        message = `${createdCount} created, ${restoredCount} restored successfully`;
-      } else if (createdCount > 0) {
-        message = `${createdCount} contacts created successfully`;
-      } else if (restoredCount > 0) {
-        message = `${restoredCount} contacts restored successfully`;
-      } else {
-        message = 'All contacts already exist as active contacts';
-      }
+      const message =
+        createdCount > 0 && restoredCount > 0
+          ? `${createdCount} created, ${restoredCount} restored`
+          : createdCount > 0
+            ? `${createdCount} contacts created`
+            : restoredCount > 0
+              ? `${restoredCount} contacts restored`
+              : 'All contacts already exist';
 
       return res.json({
         success: true,
@@ -655,185 +595,151 @@ export class ContactsController {
           totalInput: valid.length + invalid.length,
           validNumbers: valid.length,
           invalidNumbers: invalid.length,
-          created: createdCount + restoredCount, // Sum to trigger onSuccess
+          created: total,
           newCreated: createdCount,
           restored: restoredCount,
-          duplicatesSkipped: valid.length - createdCount - restoredCount,
-          invalidDetails: invalid.slice(0, 10) // Return first 10 invalid
+          duplicatesSkipped: valid.length - total,
+          invalidDetails: invalid.slice(0, 10),
         },
-        message
+        message,
       });
-
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ============================================
-  // CSV UPLOAD (₹899+ Plans)
-  // ============================================
-
-  async csvUpload(req: AuthRequest, res: Response, next: NextFunction) {
+  // ── CSV UPLOAD ──────────────────────────────────────────────
+  async csvUpload(
+    req: AuthRequest, res: Response, next: NextFunction
+  ) {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization not found', 404);
-      }
+      if (!organizationId) throw new AppError('Organization not found', 404);
 
-      // ✅ Check feature access (Monthly+)
       await contactFeaturesService.validateAccess(organizationId, 'csvUpload');
 
-      const {
-        contacts,           // Array of contact objects from CSV
-        groupId,
-        tags = []
-      } = req.body;
+      const { contacts, groupId, tags = [] } = req.body;
 
-      if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+      if (!Array.isArray(contacts) || contacts.length === 0) {
         throw new AppError('No contacts provided', 400);
       }
 
-      // ✅ Limit check
-      const MAX_CSV = 10000;
+      const MAX_CSV = 10_000;
       if (contacts.length > MAX_CSV) {
         throw new AppError(`Maximum ${MAX_CSV} contacts per CSV upload`, 400);
       }
 
-      const results = {
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        errors: [] as string[]
-      };
+      const results = { created: 0, updated: 0, skipped: 0, errors: [] as string[] };
 
-      // 1. Pre-process and validate phone numbers
-      const phoneToContactMap = new Map<string, any>();
+      // 1. Parse + validate phones
+      const phoneToData = new Map<string, any>();
       const validPhones: string[] = [];
 
-      for (const contact of contacts) {
-        const phoneInput = contact.phone || contact.phoneNumber || contact.mobile;
-        if (!phoneInput) {
+      for (const c of contacts) {
+        const raw = String(
+          c.phone || c.phoneNumber || c.mobile || ''
+        ).trim();
+
+        if (!raw) { results.skipped++; continue; }
+
+        const { valid } = parseMultiplePhones(raw);
+        if (!valid.length) {
           results.skipped++;
+          results.errors.push(`Invalid: ${raw}`);
           continue;
         }
 
-        const { valid } = parseMultiplePhones(String(phoneInput));
-        if (valid.length === 0) {
-          results.skipped++;
-          results.errors.push(`Invalid: ${phoneInput}`);
-          continue;
-        }
-
-        const parsed = valid[0];
-        // If multiple contacts have the same phone in the same CSV, last one wins or we can handle it
-        if (!phoneToContactMap.has(parsed.fullNumber)) {
-          validPhones.push(parsed.fullNumber);
-        }
-        phoneToContactMap.set(parsed.fullNumber, {
-          ...contact,
-          fullNumber: parsed.fullNumber,
-          countryCode: parsed.countryCode
+        const full = valid[0].fullNumber;
+        if (!phoneToData.has(full)) validPhones.push(full);
+        phoneToData.set(full, {
+          ...c,
+          fullNumber: full,
+          countryCode: valid[0].countryCode,
         });
       }
 
-      if (validPhones.length === 0) {
+      if (!validPhones.length) {
         return res.json({
           success: true,
           data: results,
-          message: 'No valid contacts found to process'
+          message: 'No valid contacts found',
         });
       }
 
-      // 2. Fetch existing contacts in one query
-      const existingContacts = await prisma.contact.findMany({
-        where: {
-          organizationId,
-          phone: { in: validPhones }
-        },
-        select: { id: true, phone: true, firstName: true, lastName: true, email: true }
+      // 2. Fetch existing
+      const existing = await prisma.contact.findMany({
+        where: { organizationId, phone: { in: validPhones } },
+        select: { id: true, phone: true, firstName: true, lastName: true, email: true },
       });
+      const existingMap = new Map(existing.map(c => [c.phone, c]));
 
-      const existingPhoneMap = new Map(existingContacts.map(c => [c.phone, c]));
-      const news: any[] = [];
-      const updates: any[] = [];
+      const toCreate: any[] = [];
+      const toUpdate: any[] = [];
 
-      // 3. Categorize into news and updates
-      for (const [fullPhone, contactData] of phoneToContactMap.entries()) {
-        const existing = existingPhoneMap.get(fullPhone);
-        if (existing) {
-          updates.push({
-            id: existing.id,
-            data: {
-              firstName: contactData.firstName || contactData.first_name || existing.firstName,
-              lastName: contactData.lastName || contactData.last_name || existing.lastName,
-              email: contactData.email || existing.email,
-              tags: Array.isArray(tags) && tags.length > 0 ? { push: tags } : undefined
-            }
+      for (const [phone, data] of phoneToData) {
+        const ex = existingMap.get(phone);
+        if (ex) {
+          toUpdate.push({
+            id: ex.id,
+            firstName: data.firstName || data.first_name || ex.firstName,
+            lastName: data.lastName || data.last_name || ex.lastName,
+            email: data.email || ex.email,
           });
         } else {
-          news.push({
+          toCreate.push({
             organizationId,
-            phone: fullPhone,
-            countryCode: contactData.countryCode,
-            firstName: contactData.firstName || contactData.first_name || 'Unknown',
-            lastName: contactData.lastName || contactData.last_name || undefined,
-            email: contactData.email || undefined,
-            tags: tags,
+            phone,
+            countryCode: data.countryCode || '+91',
+            firstName: (data.firstName || data.first_name || 'Unknown').toString().trim(),
+            lastName: (data.lastName || data.last_name || '').toString().trim() || undefined,
+            email: (data.email || '').toString().trim() || undefined,
+            tags: Array.isArray(tags) ? tags : [],
             source: 'CSV_IMPORT',
-            status: 'ACTIVE'
+            status: 'ACTIVE' as const,
           });
         }
       }
 
-      // 4. Bulk Create
-      if (news.length > 0) {
-        const createResult = await prisma.contact.createMany({
-          data: news,
-          skipDuplicates: true
+      // 3. Bulk create
+      if (toCreate.length > 0) {
+        const r = await prisma.contact.createMany({
+          data: toCreate,
+          skipDuplicates: true,
         });
-        results.created = createResult.count;
+        results.created = r.count;
       }
 
-      // 5. Sequential or Batched Updates (Prisma doesn't have bulk unique update)
-      // We'll do them in small batches or Promise.all to speed up, 
-      // but for very large numbers we still need to be careful.
-      // 50-100 updates at a time is usually fine.
-      if (updates.length > 0) {
-        const updateBatchSize = 100;
-        for (let i = 0; i < updates.length; i += updateBatchSize) {
-          const batch = updates.slice(i, i + updateBatchSize);
-          await Promise.all(batch.map(u => 
-            prisma.contact.update({
+      // ✅ FIX Bug2: Sequential updates instead of parallel
+      // Batch size of 25 to prevent DB overload
+      if (toUpdate.length > 0) {
+        const BATCH = 25;
+        for (let i = 0; i < toUpdate.length; i += BATCH) {
+          const batch = toUpdate.slice(i, i + BATCH);
+          // Sequential in each batch
+          for (const u of batch) {
+            await prisma.contact.update({
               where: { id: u.id },
-              data: u.data
-            }).catch(err => {
-              results.errors.push(`Update failed for ${u.id}: ${err.message}`);
-            })
-          ));
+              data: {
+                firstName: u.firstName,
+                lastName: u.lastName || undefined,
+                email: u.email || undefined,
+                ...(tags.length > 0 ? { tags: { push: tags } } : {}),
+              },
+            }).catch(() => { results.errors.push(`Update failed: ${u.id}`); });
+          }
         }
-        results.updated = updates.length;
+        results.updated = toUpdate.length;
       }
 
-      // 6. Bulk Add to Group if specified
+      // 4. Add to group
       if (groupId && (results.created > 0 || results.updated > 0)) {
-        // Fetch fresh IDs for new contacts
-        const allTargetContactIds = await prisma.contact.findMany({
-          where: {
-            organizationId,
-            phone: { in: validPhones }
-          },
-          select: { id: true }
+        const allIds = await prisma.contact.findMany({
+          where: { organizationId, phone: { in: validPhones } },
+          select: { id: true },
         });
-
-        const memberData = allTargetContactIds.map(c => ({
-          groupId,
-          contactId: c.id
-        }));
 
         await prisma.contactGroupMember.createMany({
-          data: memberData,
-          skipDuplicates: true
-        }).catch(() => {});
+          data: allIds.map(c => ({ groupId, contactId: c.id })),
+          skipDuplicates: true,
+        }).catch(() => { });
       }
 
       return res.json({
@@ -843,31 +749,24 @@ export class ContactsController {
           created: results.created,
           updated: results.updated,
           skipped: results.skipped,
-          errors: results.errors.slice(0, 10)
+          errors: results.errors.slice(0, 10),
         },
-        message: `${results.created} created, ${results.updated} updated`
+        message: `${results.created} created, ${results.updated} updated`,
       });
-
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET IMPORT STATS
-  // ==========================================
-  async getImportStats(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  // ── IMPORT STATS ────────────────────────────────────────────
+  async getImportStats(
+    req: AuthRequest, res: Response, next: NextFunction
+  ): Promise<void> {
     try {
       const organizationId = req.user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const stats = await contactsService.getImportStats(organizationId);
       sendSuccess(res, stats, 'Import stats fetched successfully');
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 }
 

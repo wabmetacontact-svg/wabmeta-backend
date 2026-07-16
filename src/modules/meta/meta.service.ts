@@ -896,6 +896,7 @@ export class MetaService {
         language: true,
         metaTemplateId: true,
         headerMediaId: true,
+        headerContent: true,
       },
     });
 
@@ -923,6 +924,17 @@ export class MetaService {
 
         const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
 
+        const headerContent = this.extractHeaderContent(metaTemplate.components);
+        const isScontent = (url: string | null | undefined) =>
+          !!url && url.includes('scontent.whatsapp');
+
+        const finalHeaderContent =
+          (headerContent && !isScontent(headerContent))
+            ? headerContent
+            : (existing && !isScontent(existing.headerContent)
+                ? existing.headerContent
+                : null);
+
         const baseTemplateData: any = {
           organizationId,
           whatsappAccountId: accountId,
@@ -934,7 +946,7 @@ export class MetaService {
           status: status as TemplateStatus,
           bodyText: this.extractBodyText(metaTemplate.components),
           headerType: this.extractHeaderType(metaTemplate.components),
-          headerContent: this.extractHeaderContent(metaTemplate.components),
+          headerContent: finalHeaderContent,
           footerText: this.extractFooterText(metaTemplate.components),
           buttons: this.extractButtons(metaTemplate.components),
           variables: this.extractVariables(metaTemplate.components),
@@ -1028,6 +1040,17 @@ export class MetaService {
 
           const extractedHandle = this.extractHeaderHandle(template.components);
 
+          const headerContent = this.extractHeaderContent(template.components);
+          const isScontent = (url: string | null | undefined) =>
+            !!url && url.includes('scontent.whatsapp');
+
+          const finalHeaderContent =
+            (headerContent && !isScontent(headerContent))
+              ? headerContent
+              : (existing && !isScontent(existing.headerContent)
+                  ? existing.headerContent
+                  : null);
+
           const baseData: any = {
             organizationId: account.organizationId,
             whatsappAccountId: accountId,
@@ -1039,7 +1062,7 @@ export class MetaService {
             status: status as TemplateStatus,
             bodyText: this.extractBodyText(template.components),
             headerType: this.extractHeaderType(template.components),
-            headerContent: this.extractHeaderContent(template.components),
+            headerContent: finalHeaderContent,
             footerText: this.extractFooterText(template.components),
             buttons: this.extractButtons(template.components),
             variables: this.extractVariables(template.components),

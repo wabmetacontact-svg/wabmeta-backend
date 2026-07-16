@@ -404,27 +404,49 @@ export class WebhookService {
   // -----------------------------
   // Template webhook processing
   // -----------------------------
+  private async handleTemplateStatusUpdate(
+    metaTemplateId: string,
+    newStatus: string,
+    rejectionReason?: string
+  ) {
+    const template = await prisma.template.findFirst({
+      where: { metaTemplateId },
+    });
+
+    if (!template) {
+      console.warn(`⚠️ Webhook: Template not found: ${metaTemplateId}`);
+      return;
+    }
+
+    // ✅ Sirf status update karo - headerContent mat touch karo
+    await prisma.template.update({
+      where: { id: template.id },
+      data: {
+        status: newStatus as any,
+        rejectionReason: rejectionReason || null,
+        // ✅ headerContent (Cloudinary URL) NEVER overwrite karo from webhook
+        // Meta webhook mein media URL scontent hota hai (expires)
+      },
+    });
+
+    console.log(`✅ Webhook: Template ${metaTemplateId} → ${newStatus}`);
+  }
+
   private async handleTemplateUpdate(payload: any, value: any) {
     try {
-      const wabaId = payload.entry[0].id;
-      const event = value.event;
-      const templateName = value.message_template_name;
+      const metaTemplateId = String(value.message_template_id || '');
+      const event = String(value.event || '').toUpperCase();
+      const rejectionReason = value.reason || value.rejection_reason || undefined;
 
-      console.log(`🔄 Template update webhook received [${event}] for template: ${templateName} (WABA: ${wabaId})`);
+      console.log(`🔄 Template update webhook received [${event}] for template ID: ${metaTemplateId}`);
 
-      const account = await prisma.whatsAppAccount.findFirst({
-        where: { wabaId },
-        select: { id: true, organizationId: true },
-      });
+      if (metaTemplateId) {
+        let newStatus = 'PENDING';
+        if (event === 'APPROVED') newStatus = 'APPROVED';
+        else if (event === 'REJECTED') newStatus = 'REJECTED';
+        else if (event === 'PAUSED') newStatus = 'PAUSED';
 
-      if (account) {
-        const { metaService } = await import('../meta/meta.service');
-        console.log(`📡 Triggering background template sync for Org: ${account.organizationId}`);
-        metaService.syncTemplates(account.id, account.organizationId).catch(e => {
-          console.error('❌ Background template sync failed:', e);
-        });
-      } else {
-        console.log(`⚠️ No account found associated with WABA ID: ${wabaId}`);
+        await this.handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason);
       }
     } catch (e) {
       console.error('❌ Template update handling error:', e);
@@ -1159,7 +1181,7 @@ export class WebhookService {
             deliveredAt: newStatus === 'DELIVERED' ? statusTime.toISOString() : undefined,
             readAt: newStatus === 'READ' ? statusTime.toISOString() : undefined,
             failedAt: newStatus === 'FAILED' ? statusTime.toISOString() : undefined,
-          });
+          } as any);
 
           // Emit progress update
           const processed = cumulativeSent + failed;

@@ -168,7 +168,7 @@ export class CampaignUploadService {
 
                             if (processedRows % 50 === 0 || processedRows === totalRows) {
                                 const batch = validationResults.slice(-50);
-                                campaignSocketService?.emitContactValidation?.(userId, {
+                                (campaignSocketService as any)?.emitContactValidation?.(userId, {
                                     uploadId,
                                     contacts: batch,
                                 });

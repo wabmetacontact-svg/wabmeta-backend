@@ -1,8 +1,8 @@
-// src/modules/templates/templates.media.ts - FIXED
-// ✅ FIX 1: Simplified flow - Cloudinary + Meta Resumable only
-// ✅ FIX 2: No more numeric ID (not needed for templates)
-// ✅ FIX 3: Pre-upload validation (size, format, dimensions)
-// ✅ FIX 4: Clear separation: handle (temp) vs cloudinaryUrl (permanent)
+// src/modules/templates/templates.media.ts
+// ✅ FINAL: Single upload flow
+// - Cloudinary: permanent storage
+// - Meta Resumable: handle for template creation only
+// - No dual upload, no confusion
 
 import { Response, NextFunction } from 'express';
 import multer from 'multer';
@@ -11,80 +11,83 @@ import { metaUploadService } from '../../services/meta.upload.service';
 import { metaService } from '../meta/meta.service';
 import prisma from '../../config/database';
 
-let cloudinaryService: any = null;
-try {
-  const mod = require('../../services/cloudinary.service');
-  cloudinaryService = mod.cloudinaryService;
-} catch (e) {
-  console.warn('⚠️ Cloudinary not available');
-}
-
-// ============================================
-// MULTER CONFIG
-// ============================================
-const storage = multer.memoryStorage();
-
-const fileFilter = (req: any, file: any, cb: any) => {
-  const allowedMimes = [
-    'image/jpeg', 'image/png', 'image/jpg',
-    'video/mp4', 'video/3gpp',
-    'application/pdf',
-  ];
-  if (allowedMimes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(
-      new AppError(
-        `Invalid file type: ${file.mimetype}. Allowed: JPEG, PNG, MP4, 3GPP, PDF`,
-        400
-      ),
-      false
-    );
+// ─── Lazy load cloudinary ─────────────────────────────────────
+let _cloudinary: any = null;
+const getCloudinary = () => {
+  if (!_cloudinary) {
+    try {
+      _cloudinary = require('../../services/cloudinary.service').cloudinaryService;
+    } catch {
+      throw new AppError('Media storage not configured. Contact support.', 500);
+    }
   }
+  if (!_cloudinary.isConfigured()) {
+    throw new AppError('Media storage not configured. Contact support.', 500);
+  }
+  return _cloudinary;
 };
 
+// ─── Meta size limits (hard limits) ──────────────────────────
+const META_SIZE_LIMITS: Record<string, number> = {
+  'image/jpeg': 5 * 1024 * 1024,
+  'image/jpg': 5 * 1024 * 1024,
+  'image/png': 5 * 1024 * 1024,
+  'image/webp': 5 * 1024 * 1024,
+  'video/mp4': 16 * 1024 * 1024,
+  'video/3gpp': 16 * 1024 * 1024,
+  'application/pdf': 100 * 1024 * 1024,
+};
+
+// Upload limits (before compression)
+const UPLOAD_SIZE_LIMITS: Record<string, number> = {
+  'image/jpeg': 15 * 1024 * 1024,
+  'image/jpg': 15 * 1024 * 1024,
+  'image/png': 15 * 1024 * 1024,
+  'image/webp': 15 * 1024 * 1024,
+  'video/mp4': 100 * 1024 * 1024,
+  'video/3gpp': 100 * 1024 * 1024,
+  'application/pdf': 100 * 1024 * 1024,
+};
+
+const ALLOWED_MIMES = Object.keys(META_SIZE_LIMITS);
+
+const formatMB = (bytes: number) =>
+  `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+// ─── Multer config ────────────────────────────────────────────
 export const uploadMiddleware = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB (PDF ke liye)
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIMES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new AppError(
+        `Unsupported file type: ${file.mimetype}. ` +
+        `Allowed: JPEG, PNG, WebP, MP4, 3GPP, PDF`,
+        400
+      ));
+    }
+  },
 });
 
-// ============================================
-// VALIDATION HELPER
-// ============================================
-const validateFileForMeta = (file: any): void => {
-  // Meta's strict size limits
-  const LIMITS: Record<string, number> = {
-    'image/jpeg': 5 * 1024 * 1024,      // 5MB
-    'image/png': 5 * 1024 * 1024,       // 5MB
-    'image/jpg': 5 * 1024 * 1024,
-    'video/mp4': 16 * 1024 * 1024,      // 16MB
-    'video/3gpp': 16 * 1024 * 1024,
-    'application/pdf': 100 * 1024 * 1024, // 100MB
-  };
-
-  const maxSize = LIMITS[file.mimetype];
-  if (!maxSize) {
-    throw new AppError(`Unsupported file type: ${file.mimetype}`, 400);
-  }
-
-  if (file.size > maxSize) {
-    const maxMB = (maxSize / 1024 / 1024).toFixed(0);
-    const fileMB = (file.size / 1024 / 1024).toFixed(2);
-    throw new AppError(
-      `File too large. ${file.mimetype} max: ${maxMB}MB, got: ${fileMB}MB`,
-      400
-    );
-  }
-
-  if (file.size === 0) {
-    throw new AppError('File is empty', 400);
-  }
+// ─── Validate handle ──────────────────────────────────────────
+const sanitizeHandle = (raw: string): string | null => {
+  if (!raw) return null;
+  let h = raw.trim();
+  // Remove concatenations (double upload bug)
+  if (h.includes('\n')) h = h.split('\n')[0].trim();
+  if (h.includes('\r')) h = h.split('\r')[0].trim();
+  if (h.includes(',')) h = h.split(',')[0].trim();
+  if (h.includes(':::')) h = h.split(':::')[0].trim();
+  // Must not be a URL
+  if (h.startsWith('http')) return null;
+  // Minimum valid length
+  if (h.length < 10) return null;
+  return h;
 };
 
-// ============================================
-// MAIN UPLOAD HANDLER
-// ============================================
+// ─── Main upload handler ──────────────────────────────────────
 export const uploadTemplateMedia = async (
   req: any,
   res: Response,
@@ -98,23 +101,39 @@ export const uploadTemplateMedia = async (
     if (!file) throw new AppError('No file uploaded', 400);
     if (!organizationId) throw new AppError('Organization required', 400);
 
-    // ✅ Pre-validate file
-    validateFileForMeta(file);
+    // ── Size validation ──────────────────────────────────────
+    const uploadLimit = UPLOAD_SIZE_LIMITS[file.mimetype];
+    if (!uploadLimit) {
+      throw new AppError(`Unsupported file type: ${file.mimetype}`, 400);
+    }
+    if (file.size === 0) {
+      throw new AppError('File is empty', 400);
+    }
+    if (file.size > uploadLimit) {
+      throw new AppError(
+        `File too large (${formatMB(file.size)}). ` +
+        `Maximum: ${formatMB(uploadLimit)}. Please compress first.`,
+        400
+      );
+    }
 
     console.log('📤 Template media upload:', {
       filename: file.originalname,
-      size: `${(file.size / 1024).toFixed(2)} KB`,
+      size: formatMB(file.size),
       mime: file.mimetype,
+      orgId: organizationId,
     });
 
-    // ============================================
-    // STEP 1: Get WhatsApp Account
-    // ============================================
+    // ── Step 1: Get WA account ───────────────────────────────
     let account = null;
 
-    if (whatsappAccountId) {
+    if (whatsappAccountId?.trim()) {
       account = await prisma.whatsAppAccount.findFirst({
-        where: { id: whatsappAccountId, organizationId, status: 'CONNECTED' },
+        where: {
+          id: whatsappAccountId.trim(),
+          organizationId,
+          status: 'CONNECTED',
+        },
       });
     }
 
@@ -127,121 +146,102 @@ export const uploadTemplateMedia = async (
 
     if (!account) {
       throw new AppError(
-        'No connected WhatsApp account. Please connect in Settings.',
+        'No connected WhatsApp account found. ' +
+        'Please connect WhatsApp in Settings.',
         400
       );
     }
 
     const accountWithToken = await metaService.getAccountWithToken(account.id);
     if (!accountWithToken?.accessToken) {
-      throw new AppError('Failed to get WhatsApp credentials', 500);
-    }
-
-    // ============================================
-    // STEP 2: Upload to Cloudinary (PERMANENT)
-    // ✅ Ye DB mein hamesha rahega
-    // ✅ Campaign send ke time se fresh Meta ID banane ke liye
-    // ============================================
-    let cloudinaryUrl = '';
-
-    if (cloudinaryService?.isConfigured()) {
-      try {
-        console.log('☁️ Uploading to Cloudinary...');
-        const result = await cloudinaryService.uploadTemplateMedia(
-          file.buffer,
-          file.originalname,
-          file.mimetype,
-          organizationId
-        );
-        cloudinaryUrl = result.secureUrl;
-        console.log('✅ Cloudinary:', cloudinaryUrl.substring(0, 60));
-      } catch (cloudErr: any) {
-        console.error('❌ Cloudinary FAILED:', cloudErr.message);
-        // Cloudinary fail = critical for permanent storage
-        throw new AppError(
-          'Failed to store media permanently. Please try again.',
-          500
-        );
-      }
-    } else {
       throw new AppError(
-        'Media storage not configured. Contact support.',
+        'Failed to decrypt WhatsApp token. Please reconnect.',
         500
       );
     }
 
-    // ============================================
-    // STEP 3: Upload to Meta - Get HANDLE ONLY
-    // ✅ Ye handle SIRF template creation ke liye hai
-    // ✅ Once approved, Meta stores media permanently
-    // ============================================
-    let metaHandle = '';
+    // ── Step 2: Upload to Cloudinary (PERMANENT) ─────────────
+    // Ye URL hamesha DB mein rahega
+    // Campaign send ke time ye URL se fresh Meta ID ban sakti hai
+    const cloudinary = getCloudinary();
 
+    console.log('☁️ Uploading to Cloudinary...');
+    let cloudinaryResult: any;
     try {
-      console.log('📱 Uploading to Meta (resumable for handle)...');
+      cloudinaryResult = await cloudinary.uploadTemplateMedia(
+        file.buffer,
+        file.originalname,
+        file.mimetype,
+        organizationId
+      );
+    } catch (err: any) {
+      throw new AppError(
+        `Cloudinary upload failed: ${err.message}. Please try again.`,
+        500
+      );
+    }
+
+    const permanentUrl = cloudinaryResult.secureUrl as string;
+    if (!permanentUrl?.startsWith('http')) {
+      throw new AppError('Cloudinary did not return a valid URL', 500);
+    }
+    console.log('✅ Cloudinary done:', permanentUrl.substring(0, 60));
+
+    // ── Step 3: Upload to Meta (handle for template creation) ─
+    // Handle sirf ek baar use hoga - template create karte waqt
+    // Approve hone ke baad Meta khud media store karta hai
+    console.log('📱 Getting Meta handle...');
+    let metaHandle: string;
+    try {
       const result = await metaUploadService.uploadMediaForTemplate(
-        '', // ignored - uses config.meta.appId
+        '',
         accountWithToken.accessToken,
         file.buffer,
         file.mimetype,
         file.originalname
       );
-      metaHandle = result.handle;
-      console.log('✅ Meta handle:', metaHandle.substring(0, 40) + '...');
-    } catch (metaErr: any) {
-      console.error('❌ Meta handle upload FAILED:', metaErr.message);
+
+      const clean = sanitizeHandle(result.handle);
+      if (!clean) {
+        throw new Error('Invalid handle received from Meta');
+      }
+      metaHandle = clean;
+    } catch (err: any) {
+      // ✅ Meta handle fail hone pe bhi Cloudinary URL save hai
+      // Frontend ko batao ki handle nahi mila
       throw new AppError(
-        `Meta upload failed: ${metaErr.message}. ` +
+        `Meta upload failed: ${err.message}. ` +
         `Please check file format and try again.`,
         500
       );
     }
 
-    // ============================================
-    // STEP 4: Clean response
-    // ✅ mediaHandle: Template creation ke liye (Meta)
-    // ✅ cloudinaryUrl: PERMANENT storage (DB backup + auto-refresh)
-    // ❌ NO metaNumericId (not needed for templates)
-    // ❌ NO ":::" smuggling
-    // ============================================
-    // ✅ FIX: Ensure single clean handle
-    let cleanHandle = String(metaHandle || '').trim();
-    if (cleanHandle.includes('\n')) {
-      cleanHandle = cleanHandle.split('\n')[0].trim();
-    }
+    console.log('✅ Meta handle:', metaHandle.substring(0, 40) + '...');
 
-    // Validate handle
-    if (!cleanHandle || cleanHandle.length < 10) {
-      throw new AppError('Meta upload succeeded but handle is invalid', 500);
-    }
-
-    const responseData = {
-      // ✅ SINGLE clean handle
-      mediaHandle: cleanHandle,
-      cloudinaryUrl: cloudinaryUrl,
-      permanentUrl: cloudinaryUrl,
-      
-      // Backward compat
-      mediaId: cleanHandle,
-      url: cloudinaryUrl,
-      
-      // Metadata
-      filename: file.originalname,
-      mimeType: file.mimetype,
-      size: file.size,
-      wabaId: account.wabaId,
-      whatsappAccountId: account.id,
-    };
-
-    console.log('✅ Upload complete:', {
-      handle: `${cleanHandle.substring(0, 30)}... (${cleanHandle.length} chars)`,
-      cloudinary: `${cloudinaryUrl.substring(0, 50)}...`,
-    });
-
+    // ── Response ─────────────────────────────────────────────
+    // ✅ Clean response - no metaNumericId, no ":::" smuggling
     return res.json({
       success: true,
       message: 'Media uploaded successfully',
-      data: responseData,
+      data: {
+        // Primary fields
+        mediaHandle: metaHandle,    // For Meta template creation
+        cloudinaryUrl: permanentUrl,  // For DB storage (permanent)
+        permanentUrl: permanentUrl,  // Same (backward compat)
+
+        // Backward compat
+        mediaId: metaHandle,
+        url: permanentUrl,
+
+        // Metadata
+        filename: file.originalname,
+        mimeType: file.mimetype,
+        size: cloudinaryResult.finalSize || file.size,
+        originalSize: file.size,
+        compressionApplied: !!(cloudinaryResult.compressionApplied),
+        wabaId: account.wabaId,
+        whatsappAccountId: account.id,
+      },
     });
 
   } catch (error: any) {

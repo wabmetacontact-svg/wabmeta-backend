@@ -6,161 +6,53 @@ import { TemplateStatus, TemplateCategory } from '@prisma/client';
 import prisma from '../../config/database';
 import { metaService } from '../meta/meta.service';
 import { metaApi } from '../meta/meta.api';
-import { safeDecryptStrict } from '../../utils/encryption';
 
-// Extended Request interface
 interface AuthRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    organizationId: string;
-  };
+  user?: { id: string; email: string; organizationId: string };
 }
 
-// ============================================
-// ✅ MEDIA SIZE LIMITS
-// ============================================
-const META_LIMITS = {
-  image: 5 * 1024 * 1024,      // 5 MB - Meta hard limit
-  video: 16 * 1024 * 1024,     // 16 MB - Meta hard limit
-  audio: 16 * 1024 * 1024,     // 16 MB - Meta hard limit
-  document: 100 * 1024 * 1024, // 100 MB - Meta hard limit
+// ─── Helper: Get default WA account ──────────────────────────
+const getDefaultAccountId = async (
+  organizationId: string
+): Promise<string | undefined> => {
+  const account = await prisma.whatsAppAccount.findFirst({
+    where: {
+      organizationId,
+      status: 'CONNECTED',
+    },
+    orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+    select: { id: true },
+  });
+  return account?.id;
 };
 
-const UPLOAD_LIMITS = {
-  image: 15 * 1024 * 1024,     // 15 MB (compressed to 5MB)
-  video: 100 * 1024 * 1024,    // 100 MB (compressed to 16MB)
-  audio: 20 * 1024 * 1024,     // 20 MB (compressed to 16MB)
-  document: 100 * 1024 * 1024, // 100 MB (no compression)
+// ─── Helper: Lazy load cloudinary ─────────────────────────────
+const getCloudinary = () => {
+  let cloudinaryService: any = null;
+  try {
+    cloudinaryService = require('../../services/cloudinary.service').cloudinaryService;
+  } catch {
+    throw new AppError('Media storage not configured. Contact support.', 500);
+  }
+  if (!cloudinaryService?.isConfigured()) {
+    throw new AppError('Media storage not configured. Contact support.', 500);
+  }
+  return cloudinaryService;
 };
-
-const getMediaCategory = (mimeType: string): 'image' | 'video' | 'audio' | 'document' => {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('video/')) return 'video';
-  if (mimeType.startsWith('audio/')) return 'audio';
-  return 'document';
-};
-
-const formatBytes = (bytes: number): string => {
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-};
-
-// ============================================
-// ✅ VIDEO FILE VALIDATION
-// Checks if buffer contains valid video stream
-// ============================================
-async function validateVideoFile(
-  buffer: Buffer,
-  mimeType: string
-): Promise<{ valid: boolean; error?: string }> {
-  // Check minimum file size
-  if (buffer.length < 1024) {
-    return { valid: false, error: 'File too small to be a valid video' };
-  }
-
-  // Check MP4 signature (ftyp box)
-  // MP4 files start with: [size][ftyp][brand]
-  const ftypIndex = buffer.indexOf('ftyp');
-  if (ftypIndex === -1 || ftypIndex > 100) {
-    return { 
-      valid: false, 
-      error: 'File does not appear to be a valid MP4 (missing ftyp signature)' 
-    };
-  }
-
-  // Check for video-related atoms/boxes
-  const bufferStr = buffer.toString('binary', 0, Math.min(buffer.length, 100000));
-  
-  // Look for video track indicators
-  const hasVideoIndicator = 
-    bufferStr.includes('vide') ||     // Video track type
-    bufferStr.includes('mdat') ||     // Media data
-    bufferStr.includes('moov');       // Movie box
-    
-  if (!hasVideoIndicator) {
-    return { 
-      valid: false, 
-      error: 'File does not contain video track data' 
-    };
-  }
-
-  // Check for common codec indicators
-  const hasKnownCodec = 
-    bufferStr.includes('avc1') ||     // H.264
-    bufferStr.includes('hev1') ||     // H.265
-    bufferStr.includes('hvc1') ||     // H.265 alt
-    bufferStr.includes('mp4v');       // MPEG-4
-    
-  if (!hasKnownCodec) {
-    console.warn('⚠️ Video codec unknown - may still work');
-  }
-
-  return { valid: true };
-}
 
 class TemplatesController {
 
-  // ==========================================
-  // HELPER: Get default WhatsApp account
-  // ==========================================
-  private async getDefaultAccountId(organizationId: string): Promise<string | undefined> {
-    // First try default account
-    let account = await prisma.whatsAppAccount.findFirst({
-      where: {
-        organizationId,
-        status: 'CONNECTED',
-        isDefault: true,
-      },
-      select: { id: true },
-    });
-
-    // If no default, get any connected account
-    if (!account) {
-      account = await prisma.whatsAppAccount.findFirst({
-        where: {
-          organizationId,
-          status: 'CONNECTED',
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true },
-      });
-    }
-
-    return account?.id;
-  }
-
-  // ✅ NEW HELPER: Get wabaId for an account
-  private async getWabaIdForAccount(accountId: string): Promise<string | undefined> {
-    const account = await prisma.whatsAppAccount.findUnique({
-      where: { id: accountId },
-      select: { wabaId: true },
-    });
-    return account?.wabaId || undefined;
-  }
-
-  // ==========================================
-  // CREATE TEMPLATE
-  // ==========================================
+  // ── CREATE ──────────────────────────────────────────────────
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const input = req.body;
 
-      console.log('📝 Creating template:', {
-        organizationId,
-        name: input.name,
-        language: input.language,
-        whatsappAccountId: input.whatsappAccountId,
-        headerMediaId: input.headerMediaId,
-      });
-
-      // If no whatsappAccountId provided, use default
+      // Auto-detect account if not provided
       if (!input.whatsappAccountId) {
-        input.whatsappAccountId = await this.getDefaultAccountId(organizationId);
+        input.whatsappAccountId = await getDefaultAccountId(organizationId);
       }
 
       const template = await templatesService.create(organizationId, input);
@@ -170,60 +62,35 @@ class TemplatesController {
         message: 'Template created successfully',
         data: template,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET TEMPLATES LIST
-  // ✅ FIX: Added wabaId query param support
-  // ==========================================
+  // ── LIST ────────────────────────────────────────────────────
   async getList(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      // Parse query params safely
-      const page = req.query.page ? parseInt(req.query.page as string) : 1;
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
-      const search = (req.query.search as string)?.trim() || undefined;
-      const status = req.query.status as TemplateStatus | undefined;
+      const page     = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit    = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+      const search   = (req.query.search   as string)?.trim() || undefined;
+      const status   = req.query.status   as TemplateStatus   | undefined;
       const category = req.query.category as TemplateCategory | undefined;
       const language = (req.query.language as string)?.trim() || undefined;
-      const sortBy = (req.query.sortBy as string) || 'createdAt';
-      const sortOrder = (req.query.sortOrder as 'asc' | 'desc') || 'desc';
-      let whatsappAccountId = (req.query.whatsappAccountId as string)?.trim() || undefined;
-      const wabaId = (req.query.wabaId as string)?.trim() || undefined;  // ✅ NEW
+      const sortBy   = (req.query.sortBy   as string) || 'createdAt';
+      const sortOrder= (req.query.sortOrder as 'asc' | 'desc') || 'desc';
 
-      // ✅ FIX: Default to the active connected WhatsApp account if none is provided
+      let whatsappAccountId = (req.query.whatsappAccountId as string)?.trim() || undefined;
+      const wabaId          = (req.query.wabaId            as string)?.trim() || undefined;
+
       if (!whatsappAccountId && !wabaId) {
-        whatsappAccountId = await this.getDefaultAccountId(organizationId);
+        whatsappAccountId = await getDefaultAccountId(organizationId);
       }
 
-      console.log('📋 Fetching templates:', {
-        organizationId,
-        page,
-        limit,
-        search,
-        status,
-        whatsappAccountId,
-        wabaId,  // ✅ log it
-      });
-
       const result = await templatesService.getList(organizationId, {
-        page,
-        limit,
-        search,
-        status,
-        category,
-        language,
-        sortBy: sortBy as any,
-        sortOrder,
-        whatsappAccountId,
-        wabaId,  // ✅ pass to service
+        page, limit, search, status, category, language,
+        sortBy: sortBy as any, sortOrder,
+        whatsappAccountId, wabaId,
       });
 
       return res.json({
@@ -232,117 +99,71 @@ class TemplatesController {
         data: result.templates,
         meta: result.meta,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET TEMPLATE BY ID
-  // ==========================================
+  // ── GET BY ID ───────────────────────────────────────────────
   async getById(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const id = req.params.id as string;
-      if (!id) {
-        throw new AppError('Template ID is required', 400);
-      }
-
-      const template = await templatesService.getById(organizationId, id);
+      const template = await templatesService.getById(
+        organizationId,
+        req.params.id as string
+      );
 
       return res.json({
         success: true,
         message: 'Template fetched successfully',
         data: template,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // UPDATE TEMPLATE
-  // ==========================================
+  // ── UPDATE ──────────────────────────────────────────────────
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const id = req.params.id as string;
-      if (!id) {
-        throw new AppError('Template ID is required', 400);
-      }
-
-      const input = req.body;
-      const template = await templatesService.update(organizationId, id, input);
+      const template = await templatesService.update(
+        organizationId,
+        req.params.id as string,
+        req.body
+      );
 
       return res.json({
         success: true,
         message: 'Template updated successfully',
         data: template,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // DELETE TEMPLATE
-  // ==========================================
+  // ── DELETE ──────────────────────────────────────────────────
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const id = req.params.id as string;
-      if (!id) {
-        throw new AppError('Template ID is required', 400);
-      }
+      const result = await templatesService.delete(organizationId, req.params.id as string);
 
-      const result = await templatesService.delete(organizationId, id);
-
-      return res.json({
-        success: true,
-        message: result.message,
-      });
-    } catch (error) {
-      next(error);
-    }
+      return res.json({ success: true, message: result.message });
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // DUPLICATE TEMPLATE
-  // ==========================================
+  // ── DUPLICATE ───────────────────────────────────────────────
   async duplicate(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
-
-      const id = req.params.id as string;
-      if (!id) {
-        throw new AppError('Template ID is required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const { name, whatsappAccountId } = req.body;
-      if (!name) {
-        throw new AppError('New template name is required', 400);
-      }
+      if (!name) throw new AppError('New template name is required', 400);
 
       const template = await templatesService.duplicate(
-        organizationId,
-        id,
-        name,
-        whatsappAccountId
+        organizationId, req.params.id as string, name, whatsappAccountId
       );
 
       return res.status(201).json({
@@ -350,90 +171,60 @@ class TemplatesController {
         message: 'Template duplicated successfully',
         data: template,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET TEMPLATE STATS
-  // ==========================================
+  // ── STATS ───────────────────────────────────────────────────
   async getStats(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const whatsappAccountId = (req.query.whatsappAccountId as string)?.trim() || undefined;
+      const whatsappAccountId =
+        (req.query.whatsappAccountId as string)?.trim() || undefined;
 
-      const stats = await templatesService.getStats(organizationId, whatsappAccountId);
-
-      return res.json({
-        success: true,
-        message: 'Stats fetched successfully',
-        data: stats,
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  // ==========================================
-  // PREVIEW TEMPLATE
-  // ==========================================
-  async preview(req: Request, res: Response, next: NextFunction) {
-    try {
-      const { bodyText, variables, headerType, headerContent, footerText, buttons } = req.body;
-
-      if (!bodyText) {
-        throw new AppError('Body text is required', 400);
-      }
-
-      const preview = await templatesService.preview(
-        bodyText,
-        variables || {},
-        headerType,
-        headerContent,
-        footerText,
-        buttons
+      const stats = await templatesService.getStats(
+        organizationId, whatsappAccountId
       );
 
-      return res.json({
-        success: true,
-        message: 'Preview generated successfully',
-        data: preview,
-      });
-    } catch (error) {
-      next(error);
-    }
+      return res.json({ success: true, data: stats });
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET APPROVED TEMPLATES
-  // ✅ FIX: Added wabaId support
-  // ==========================================
+  // ── PREVIEW ─────────────────────────────────────────────────
+  async preview(req: Request, res: Response, next: NextFunction) {
+    try {
+      const {
+        bodyText, variables, headerType,
+        headerContent, footerText, buttons,
+      } = req.body;
+
+      if (!bodyText) throw new AppError('Body text is required', 400);
+
+      const preview = await templatesService.preview(
+        bodyText, variables || {}, headerType,
+        headerContent, footerText, buttons
+      );
+
+      return res.json({ success: true, data: preview });
+    } catch (error) { next(error); }
+  }
+
+  // ── APPROVED LIST ───────────────────────────────────────────
   async getApproved(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      let whatsappAccountId = (req.query.whatsappAccountId as string)?.trim() || undefined;
-      let wabaId = (req.query.wabaId as string)?.trim() || undefined;  // ✅ NEW
+      let whatsappAccountId =
+        (req.query.whatsappAccountId as string)?.trim() || undefined;
+      const wabaId =
+        (req.query.wabaId as string)?.trim() || undefined;
 
-      // If no account specified, use default
       if (!whatsappAccountId && !wabaId) {
-        whatsappAccountId = await this.getDefaultAccountId(organizationId);
+        whatsappAccountId = await getDefaultAccountId(organizationId);
       }
 
-      // ✅ If whatsappAccountId provided but no wabaId, resolve wabaId
-      if (whatsappAccountId && !wabaId) {
-        wabaId = await this.getWabaIdForAccount(whatsappAccountId);
-      }
-
-      // If still no account, return empty array
       if (!whatsappAccountId && !wabaId) {
         return res.json({
           success: true,
@@ -442,141 +233,94 @@ class TemplatesController {
         });
       }
 
-      const templates = await templatesService.getApprovedTemplates(
-        organizationId,
-        whatsappAccountId,
-        wabaId  // ✅ pass wabaId
+      const templatesList = await templatesService.getApprovedTemplates(
+        organizationId, whatsappAccountId, wabaId
       );
 
       return res.json({
         success: true,
-        message: 'Approved templates fetched successfully',
-        data: templates,
+        data: templatesList,
       });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // GET LANGUAGES
-  // ==========================================
+  // ── LANGUAGES ───────────────────────────────────────────────
   async getLanguages(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const whatsappAccountId = (req.query.whatsappAccountId as string)?.trim() || undefined;
+      const whatsappAccountId =
+        (req.query.whatsappAccountId as string)?.trim() || undefined;
 
-      const languages = await templatesService.getLanguages(organizationId, whatsappAccountId);
+      const langs = await templatesService.getLanguages(
+        organizationId, whatsappAccountId
+      );
 
-      return res.json({
-        success: true,
-        message: 'Languages fetched successfully',
-        data: languages,
-      });
-    } catch (error) {
-      next(error);
-    }
+      return res.json({ success: true, data: langs });
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // SUBMIT TO META
-  // ==========================================
+  // ── SUBMIT TO META ──────────────────────────────────────────
   async submit(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const id = req.params.id as string;
-      if (!id) {
-        throw new AppError('Template ID is required', 400);
-      }
+      const { whatsappAccountId, forceResubmit } = req.body || {};
 
-      const { whatsappAccountId } = req.body;
+      const result = await templatesService.submitToMeta(
+        organizationId,
+        req.params.id as string,
+        whatsappAccountId
+      );
 
-      const result = await templatesService.submitToMeta(organizationId, id, whatsappAccountId);
-
-      return res.json({
-        success: true,
-        message: result.message,
-        data: result,
-      });
-    } catch (error) {
-      next(error);
-    }
+      return res.json({ success: true, ...result });
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // SYNC FROM META
-  // ==========================================
+  // ── SYNC FROM META ──────────────────────────────────────────
   async sync(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      let whatsappAccountId = req.body?.whatsappAccountId?.trim() || undefined;
+      let whatsappAccountId =
+        req.body?.whatsappAccountId?.trim() || undefined;
 
-      // If no account specified, use default
       if (!whatsappAccountId) {
-        whatsappAccountId = await this.getDefaultAccountId(organizationId);
+        whatsappAccountId = await getDefaultAccountId(organizationId);
       }
 
-      // If still no account, return error
       if (!whatsappAccountId) {
         return res.status(400).json({
           success: false,
-          message: 'No WhatsApp account connected. Please connect a WhatsApp account first.',
+          message: 'No WhatsApp account connected. Please connect first.',
         });
       }
 
-      console.log('🔄 Syncing templates for account:', whatsappAccountId);
+      const result = await templatesService.syncFromMeta(
+        organizationId, whatsappAccountId
+      );
 
-      const result = await templatesService.syncFromMeta(organizationId, whatsappAccountId);
-
-      return res.json({
-        success: true,
-        message: result.message,
-        data: result,
-      });
-    } catch (error) {
-      next(error);
-    }
+      return res.json({ success: true, ...result });
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // CHECK WHATSAPP CONNECTION
-  // ==========================================
+  // ── CHECK CONNECTION ────────────────────────────────────────
   async checkConnection(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
-      // Check for any WhatsApp accounts
       const accounts = await prisma.whatsAppAccount.findMany({
         where: { organizationId },
         select: {
-          id: true,
-          phoneNumber: true,
-          displayName: true,
-          status: true,
-          isDefault: true,
-          wabaId: true,
-          createdAt: true,
-          tokenExpiresAt: true,
+          id: true, phoneNumber: true, displayName: true,
+          status: true, isDefault: true, wabaId: true,
+          createdAt: true, tokenExpiresAt: true,
         },
-        orderBy: [
-          { isDefault: 'desc' },
-          { createdAt: 'desc' },
-        ],
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
       });
 
       if (accounts.length === 0) {
@@ -590,164 +334,211 @@ class TemplatesController {
         });
       }
 
-      // Check which accounts are truly connected
       const accountsWithStatus = await Promise.all(
         accounts.map(async (account) => {
-          let canDecrypt = false;
-          let isExpired = false;
+          let tokenValid = false;
+          const isExpired = account.tokenExpiresAt
+            ? account.tokenExpiresAt < new Date()
+            : false;
 
           try {
             const result = await metaService.getAccountWithToken(account.id);
-            canDecrypt = !!result;
-          } catch (err) {
-            // Silent fail
-          }
-
-          if (account.tokenExpiresAt) {
-            isExpired = account.tokenExpiresAt < new Date();
-          }
+            tokenValid = !!result?.accessToken;
+          } catch { /* silent */ }
 
           return {
             ...account,
-            canDecrypt,
+            tokenValid,
             isExpired,
-            isReady: account.status === 'CONNECTED' && canDecrypt && !isExpired,
+            isReady:
+              account.status === 'CONNECTED' && tokenValid && !isExpired,
           };
         })
       );
 
-      const connectedAccounts = accountsWithStatus.filter(a => a.isReady);
-      const defaultAccount = accountsWithStatus.find(a => a.isDefault);
+      const connected = accountsWithStatus.filter(a => a.isReady);
+      const defaultAcc = accountsWithStatus.find(a => a.isDefault);
 
       return res.json({
         success: true,
-        hasConnection: connectedAccounts.length > 0,
-        defaultAccount: defaultAccount || connectedAccounts[0] || null,
+        hasConnection: connected.length > 0,
+        defaultAccount: defaultAcc || connected[0] || null,
         accounts: accountsWithStatus,
-        connectedCount: connectedAccounts.length,
+        connectedCount: connected.length,
         totalCount: accounts.length,
       });
-    } catch (error: any) {
-      console.error('❌ Error checking connection:', error.message);
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 
-  // ==========================================
-  // UPLOAD TO META (Helper for Frontend)
-  // ==========================================
+  // ── UPLOAD TO META (Re-upload helper) ───────────────────────
+  // Sirf tab use hota hai jab:
+  // - Cloudinary URL hai
+  // - Fresh handle chahiye (resubmit ke liye)
   async uploadToMeta(req: Request, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
+      if (!organizationId) throw new AppError('Organization context required', 400);
 
       const { cloudinaryUrl, mimeType, filename, whatsappAccountId } = req.body;
-
-      if (!cloudinaryUrl) {
-        throw new AppError('cloudinaryUrl is required', 400);
+      if (!cloudinaryUrl) throw new AppError('cloudinaryUrl is required', 400);
+      if (!cloudinaryUrl.startsWith('http')) {
+        throw new AppError('Invalid cloudinaryUrl', 400);
       }
 
-      console.log('📤 Backend helper: Uploading to Meta from', cloudinaryUrl);
-
-      // 1. Get WhatsApp account
-      let waAccount = null;
+      // Get account
+      let account = null;
       if (whatsappAccountId) {
-        waAccount = await prisma.whatsAppAccount.findFirst({
-          where: { id: whatsappAccountId, organizationId }
+        account = await prisma.whatsAppAccount.findFirst({
+          where: { id: whatsappAccountId, organizationId },
         });
       }
-
-      if (!waAccount) {
-        waAccount = await prisma.whatsAppAccount.findFirst({
+      if (!account) {
+        account = await prisma.whatsAppAccount.findFirst({
           where: { organizationId, status: 'CONNECTED' },
-          orderBy: { isDefault: 'desc' }
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
         });
       }
-
-      if (!waAccount) {
-        // Try MetaConnection (new structure)
-        const metaConn = await (prisma as any).metaConnection.findUnique({
-          where: { organizationId },
-          include: { phoneNumbers: { where: { isActive: true }, take: 1 } }
-        });
-
-        if (metaConn && metaConn.phoneNumbers?.length > 0) {
-          const phone = metaConn.phoneNumbers[0];
-          const token = safeDecryptStrict(metaConn.accessToken);
-          
-          if (!token) throw new AppError('Failed to decrypt MetaConnection token', 500);
-
-          // Download from URL
-          const response = await axios.get(cloudinaryUrl, {
-            responseType: 'arraybuffer',
-            timeout: 30000
-          });
-
-          const buffer = Buffer.from(response.data);
-          
-          // Upload to Meta
-          const result = await metaApi.uploadMedia(
-            phone.phoneNumberId,
-            token,
-            buffer,
-            mimeType || response.headers['content-type'] || 'image/jpeg',
-            filename || cloudinaryUrl.split('/').pop() || 'media',
-            metaConn.wabaId
-          );
-
-          return res.json({
-            success: true,
-            mediaId: result.id,
-            cloudinaryUrl
-          });
-        }
-
+      if (!account) {
         throw new AppError('No connected WhatsApp account found', 400);
       }
 
-      // 2. Decrypt token
-      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
-      if (!accountWithToken) {
+      const accountWithToken = await metaService.getAccountWithToken(account.id);
+      if (!accountWithToken?.accessToken) {
         throw new AppError('Failed to decrypt WhatsApp token', 500);
       }
 
-      // 3. Download from Cloudinary
+      // Download from Cloudinary
       const response = await axios.get(cloudinaryUrl, {
         responseType: 'arraybuffer',
-        timeout: 30000
+        timeout: 60_000,
+        headers: { 'User-Agent': 'WabMeta/1.0', Accept: '*/*' },
       });
 
-      const buffer = Buffer.from(response.data);
+      const buffer      = Buffer.from(response.data);
+      const contentType = (response.headers['content-type'] || '')
+        .split(';')[0].trim();
+      const finalMime   = (contentType && contentType !== 'application/octet-stream')
+        ? contentType
+        : (mimeType || 'image/jpeg');
+      const finalName   = filename ||
+        cloudinaryUrl.split('/').pop()?.split('?')[0] || 'media';
 
-      // 4. Upload to Meta
-      const metaUpload = await metaApi.uploadMedia(
-        waAccount.phoneNumberId,
+      // Upload to Meta
+      const result = await metaApi.uploadMedia(
+        account.phoneNumberId,
         accountWithToken.accessToken,
         buffer,
-        mimeType || response.headers['content-type'] || 'image/jpeg',
-        filename || cloudinaryUrl.split('/').pop() || 'media',
-        waAccount.wabaId
+        finalMime,
+        finalName,
+        account.wabaId
       );
 
       return res.json({
         success: true,
-        mediaId: metaUpload.id,
-        cloudinaryUrl
+        mediaId: result.id,
+        cloudinaryUrl,
       });
-
     } catch (error: any) {
-      console.error('❌ Upload to Meta endpoint failed:', error.message);
+      console.error('❌ uploadToMeta failed:', error.message);
       next(error);
     }
   }
 
-  // ==========================================
-  // ✅ NEW: UPLOAD MEDIA (with validation + compression)
-  // POST /templates/upload-media
-  // ==========================================
-  async uploadMedia(req: any, res: Response, next: NextFunction) {
+  // ── REUPLOAD MEDIA ──────────────────────────────────────────
+  // Existing template ka Cloudinary URL use karke
+  // fresh handle banao aur DB update karo
+  async reuploadMedia(req: Request, res: Response, next: NextFunction) {
+    try {
+      const organizationId = (req as AuthRequest).user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const template = await prisma.template.findFirst({
+        where: { id: req.params.id as string, organizationId },
+      });
+
+      if (!template) throw new AppError('Template not found', 404);
+
+      const mediaTypes = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+      if (!mediaTypes.includes(
+        String(template.headerType || '').toUpperCase()
+      )) {
+        throw new AppError('Template has no media header', 400);
+      }
+
+      const cloudinaryUrl = template.headerContent;
+      if (!cloudinaryUrl?.startsWith('http')) {
+        throw new AppError(
+          'No valid Cloudinary URL found in this template. ' +
+          'Please use fix-media to upload a new file.',
+          400
+        );
+      }
+
+      // Get WA account
+      const account = await prisma.whatsAppAccount.findFirst({
+        where: { organizationId, status: 'CONNECTED' },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+      });
+      if (!account) throw new AppError('No connected WhatsApp account', 400);
+
+      const accountWithToken = await metaService.getAccountWithToken(account.id);
+      if (!accountWithToken?.accessToken) {
+        throw new AppError('Failed to decrypt token', 500);
+      }
+
+      // Download from Cloudinary
+      console.log('📥 Downloading from Cloudinary:', cloudinaryUrl);
+      const response = await axios.get(cloudinaryUrl, {
+        responseType: 'arraybuffer',
+        timeout: 60_000,
+        headers: { 'User-Agent': 'WabMeta/1.0' },
+      });
+
+      const buffer = Buffer.from(response.data);
+      const mime   = (response.headers['content-type'] || 'image/jpeg')
+        .split(';')[0].trim();
+      const fname  = cloudinaryUrl.split('/').pop()?.split('?')[0] || 'media';
+
+      // Upload to Meta
+      const result = await metaApi.uploadMedia(
+        account.phoneNumberId,
+        accountWithToken.accessToken,
+        buffer,
+        mime,
+        fname,
+        account.wabaId
+      );
+
+      console.log('✅ Reupload success, numeric ID:', result.id);
+
+      // Update DB - sirf timestamp update karo
+      // headerContent (Cloudinary URL) same rahega
+      // headerMediaId DB mein store nahi karte
+      await prisma.template.update({
+        where: { id: template.id },
+        data: {
+          headerMediaUploadedAt:   new Date(),
+          headerMediaLastVerified: new Date(),
+        } as any,
+      });
+
+      return res.json({
+        success: true,
+        message: 'Media re-uploaded successfully. Now submit template for approval.',
+        data: {
+          metaMediaId:   result.id,
+          cloudinaryUrl: cloudinaryUrl,
+        },
+      });
+    } catch (error: any) {
+      console.error('❌ Reupload failed:', error.message);
+      next(error);
+    }
+  }
+
+  // ── FIX MEDIA ───────────────────────────────────────────────
+  // Jab Cloudinary URL bhi nahi hai - fresh file upload karo
+  async fixMedia(req: any, res: Response, next: NextFunction) {
     try {
       const organizationId = (req as AuthRequest).user?.organizationId;
       if (!organizationId) throw new AppError('Organization context required', 400);
@@ -755,479 +546,95 @@ class TemplatesController {
       const file = req.file;
       if (!file) throw new AppError('No file uploaded', 400);
 
-      const { whatsappAccountId } = req.body;
-      const mediaCategory = getMediaCategory(file.mimetype);
-      const uploadLimit = UPLOAD_LIMITS[mediaCategory];
-      const metaLimit = META_LIMITS[mediaCategory];
-
-      console.log('📤 Media upload request:', {
-        filename: file.originalname,
-        mimeType: file.mimetype,
-        size: formatBytes(file.size),
-        mediaCategory,
-        organizationId,
-      });
-
-      // ============================================
-      // ✅ STEP 1: VALIDATE FILE SIZE (before upload)
-      // ============================================
-      if (file.size > uploadLimit) {
-        throw new AppError(
-          `File too large (${formatBytes(file.size)}). ` +
-          `Maximum upload size for ${mediaCategory}s is ${formatBytes(uploadLimit)}. ` +
-          `WhatsApp requires ${mediaCategory}s to be under ${formatBytes(metaLimit)} after compression. ` +
-          `Please compress your file first using tools like freeconvert.com or handbrake.fr`,
-          400
-        );
-      }
-
-      // ============================================
-      // ✅ STEP 2: VALIDATE FILE TYPE
-      // ============================================
-      const ALLOWED_MIMES: Record<string, string[]> = {
-        image: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'],
-        video: ['video/mp4', 'video/3gpp'],
-        audio: ['audio/mpeg', 'audio/aac', 'audio/mp4', 'audio/ogg', 'audio/amr'],
-        document: [
-          'application/pdf',
-          'application/msword',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'application/vnd.ms-excel',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'text/plain',
-        ],
-      };
-
-      if (!ALLOWED_MIMES[mediaCategory].includes(file.mimetype)) {
-        throw new AppError(
-          `Unsupported ${mediaCategory} format: ${file.mimetype}. ` +
-          `Allowed: ${ALLOWED_MIMES[mediaCategory].join(', ')}`,
-          400
-        );
-      }
-
-      // ============================================
-      // ✅ STEP 2.5: VALIDATE VIDEO FILE STRUCTURE
-      // ============================================
-      if (mediaCategory === 'video') {
-        const videoValidation = await validateVideoFile(file.buffer, file.mimetype);
-        if (!videoValidation.valid) {
-          throw new AppError(
-            `Invalid video file: ${videoValidation.error}. ` +
-            `Please ensure your video is a valid MP4 file with H.264 video codec. ` +
-            `Try re-encoding with tools like HandBrake (free) or online converters.`,
-            400
-          );
-        }
-        console.log('✅ Video validation passed');
-      }
-
-      // ============================================
-      // ✅ STEP 3: UPLOAD TO CLOUDINARY (with auto-compression)
-      // ============================================
-      let cloudinaryService: any = null;
-      try {
-        const mod = require('../../services/cloudinary.service');
-        cloudinaryService = mod.cloudinaryService;
-      } catch (e) {
-        throw new AppError('Cloudinary service not available', 500);
-      }
-
-      if (!cloudinaryService?.isConfigured()) {
-        throw new AppError('Cloudinary is not configured on server', 500);
-      }
-
-      console.log('☁️ Uploading to Cloudinary with auto-compression...');
-      
-      const uploadResult = await cloudinaryService.uploadTemplateMedia(
-        file.buffer,
-        file.originalname,
-        file.mimetype,
-        organizationId
-      );
-
-      console.log('☁️ Cloudinary result:', {
-        originalSize: formatBytes(uploadResult.originalSize),
-        finalSize: formatBytes(uploadResult.finalSize),
-        compressed: uploadResult.compressionApplied,
-        fitsMetaLimit: uploadResult.finalSize <= metaLimit,
-      });
-
-      // ============================================
-      // ✅ STEP 4: VERIFY COMPRESSED SIZE FITS META LIMIT
-      // ============================================
-      if (uploadResult.finalSize > metaLimit) {
-        // Compression couldn't reduce enough
-        // Clean up cloudinary file
-        try {
-          await cloudinaryService.deleteMedia(
-            uploadResult.publicId,
-            uploadResult.resourceType
-          );
-        } catch (e) {
-          console.warn('Failed to cleanup cloudinary file');
-        }
-
-        throw new AppError(
-          `Could not compress ${mediaCategory} below ${formatBytes(metaLimit)} ` +
-          `(result: ${formatBytes(uploadResult.finalSize)}). ` +
-          `Please manually compress your ${mediaCategory} using: ` +
-          `${mediaCategory === 'video' ? 'handbrake.fr or freeconvert.com/video-compressor' : 'freeconvert.com'}. ` +
-          `Try reducing resolution to 720p and bitrate to under 1 Mbps.`,
-          400
-        );
-      }
-
-      // ============================================
-      // ✅ STEP 5: GET WHATSAPP ACCOUNT
-      // ============================================
-      let waAccount = null;
-      if (whatsappAccountId) {
-        waAccount = await prisma.whatsAppAccount.findFirst({
-          where: { id: whatsappAccountId, organizationId },
-        });
-      }
-
-      if (!waAccount) {
-        waAccount = await prisma.whatsAppAccount.findFirst({
-          where: { organizationId, status: 'CONNECTED' },
-          orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-        });
-      }
-
-      if (!waAccount) {
-        throw new AppError(
-          'No connected WhatsApp account found. Please connect WhatsApp in Settings first.',
-          400
-        );
-      }
-
-      // ============================================
-      // ✅ STEP 6: DECRYPT TOKEN
-      // ============================================
-      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
-      if (!accountWithToken?.accessToken) {
-        throw new AppError('Failed to decrypt WhatsApp token', 500);
-      }
-
-      // ============================================
-      // ✅ STEP 7: UPLOAD TO META (for handle)
-      // ============================================
-      let metaMediaId: string | null = null;
-      let metaHandle: string | null = null;
-
-      try {
-        console.log('📤 Uploading to Meta for numeric media ID...');
-        
-        // Download compressed version from cloudinary
-        const compressedResponse = await axios.get(uploadResult.secureUrl, {
-          responseType: 'arraybuffer',
-          timeout: 30000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)' },
-        });
-        
-        const compressedBuffer = Buffer.from(compressedResponse.data);
-        
-        console.log('📦 Downloaded compressed file:', formatBytes(compressedBuffer.length));
-
-        const metaUploadResult = await metaApi.uploadMedia(
-          waAccount.phoneNumberId,
-          accountWithToken.accessToken,
-          compressedBuffer,
-          file.mimetype,
-          file.originalname,
-          waAccount.wabaId
-        );
-
-        metaMediaId = metaUploadResult.id;
-        console.log('✅ Meta upload success, numeric ID:', metaMediaId);
-      } catch (metaErr: any) {
-        console.error('❌ Meta upload failed:', metaErr.message);
-        // Don't fail - we have Cloudinary URL which works for sending
-        console.warn('⚠️ Continuing with Cloudinary URL only');
-      }
-
-      // ============================================
-      // ✅ STEP 8: GET APP-LEVEL HANDLE (for template creation)
-      // ============================================
-      try {
-        const { metaUploadService } = require('../../services/meta.upload.service');
-        
-        const compressedResponse = await axios.get(uploadResult.secureUrl, {
-          responseType: 'arraybuffer',
-          timeout: 30000,
-        });
-        const compressedBuffer = Buffer.from(compressedResponse.data);
-        
-        const handleResult = await metaUploadService.uploadMediaForTemplate(
-          '', // appId (ignored)
-          accountWithToken.accessToken,
-          compressedBuffer,
-          file.mimetype,
-          file.originalname
-        );
-        
-        metaHandle = handleResult.handle;
-        console.log('✅ App-level handle received:', metaHandle?.substring(0, 30) + '...');
-      } catch (handleErr: any) {
-        console.warn('⚠️ App-level handle upload failed:', handleErr.message);
-      }
-
-      // ============================================
-      // ✅ SUCCESS RESPONSE
-      // ============================================
-      return res.json({
-        success: true,
-        message: uploadResult.compressionApplied
-          ? `Media uploaded and compressed successfully (${((uploadResult.originalSize - uploadResult.finalSize) / uploadResult.originalSize * 100).toFixed(0)}% smaller)`
-          : 'Media uploaded successfully',
-        data: {
-          cloudinaryUrl: uploadResult.secureUrl,
-          permanentUrl: uploadResult.secureUrl,
-          mediaHandle: metaHandle,
-          metaNumericId: metaMediaId,
-          mediaId: metaHandle || metaMediaId || uploadResult.publicId,
-          filename: file.originalname,
-          mimeType: file.mimetype,
-          size: uploadResult.finalSize,
-          originalSize: uploadResult.originalSize,
-          compressionApplied: uploadResult.compressionApplied,
-          whatsappAccountId: waAccount.id,
-          wabaId: waAccount.wabaId,
-          url: uploadResult.secureUrl,
-        },
-      });
-
-    } catch (error: any) {
-      console.error('❌ Upload media failed:', error.message);
-      next(error instanceof AppError ? error : new AppError(error.message, 500));
-    }
-  }
-
-  // ==========================================
-  // RE-UPLOAD MEDIA (Fix for old templates)
-  // ==========================================
-  async reuploadMedia(req: Request, res: Response, next: NextFunction) {
-    try {
-      const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) {
-        throw new AppError('Organization context required', 400);
-      }
-
-      const id = req.params.id as string;
-      if (!id) {
-        throw new AppError('Template ID is required', 400);
-      }
-
       const template = await prisma.template.findFirst({
-        where: { id, organizationId }
+        where: { id: req.params.id as string, organizationId },
       });
+      if (!template) throw new AppError('Template not found', 404);
 
-      if (!template) {
-        throw new AppError('Template not found', 404);
-      }
-
-      if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType?.toUpperCase() || '')) {
+      const mediaTypes = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+      if (!mediaTypes.includes(
+        String(template.headerType || '').toUpperCase()
+      )) {
         throw new AppError('Template has no media header', 400);
       }
 
-      const cloudinaryUrl = template.headerContent;
-      if (!cloudinaryUrl?.startsWith('http')) {
-        throw new AppError('Invalid or missing media URL in template content', 400);
-      }
-
-      // 1. Get WhatsApp account
-      const waAccount = await prisma.whatsAppAccount.findFirst({
-        where: { 
-          organizationId,
-          status: 'CONNECTED'
-        },
-        orderBy: { isDefault: 'desc' }
-      });
-
-      if (!waAccount) {
-        throw new AppError('No connected WhatsApp account found', 400);
-      }
-
-      // 2. Decrypt token
-      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
-      if (!accountWithToken) {
-        throw new AppError('Failed to decrypt WhatsApp token', 500);
-      }
-
-      // 3. Download from Cloudinary
-      console.log('📥 Re-upload Fix: Downloading from Cloudinary:', cloudinaryUrl);
-      
-      const response = await axios.get(cloudinaryUrl, {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; WabMeta/1.0)'
-        }
-      });
-
-      const buffer = Buffer.from(response.data);
-      const mimeType = response.headers['content-type'] || 'image/jpeg';
-      const filename = cloudinaryUrl.split('/').pop()?.split('?')[0] || 'media';
-
-      console.log('📤 Re-upload Fix: Uploading to Meta:', { size: buffer.length, mimeType });
-
-      // 4. Upload to Meta
-      const result = await metaApi.uploadMedia(
-        waAccount.phoneNumberId,
-        accountWithToken.accessToken,
-        buffer,
-        mimeType,
-        filename,
-        waAccount.wabaId
-      );
-
-      console.log('✅ Re-upload Fix successful, Meta Media ID:', result.id);
-
-      // 5. Update template in database
-      await prisma.template.update({
-        where: { id },
-        data: {
-          headerMediaId: result.id,
-          headerMediaUploadedAt: new Date(),
-          headerMediaLastVerified: new Date(),
-        } as any
-      });
-
-      return res.json({
-        success: true,
-        message: 'Media re-uploaded to Meta successfully',
-        metaMediaId: result.id,
-        cloudinaryUrl
-      });
-
-    } catch (error: any) {
-      console.error('❌ Re-upload failed:', error.message);
-      next(error);
-    }
-  }
-
-  // ==========================================
-  // FIX MEDIA — Direct file upload to fix broken templates
-  // Works even when headerContent (Cloudinary URL) is null/missing
-  // POST /:id/fix-media (multipart/form-data with 'file' field)
-  // ==========================================
-  async fixMedia(req: any, res: Response, next: NextFunction) {
-
-    try {
-      const organizationId = (req as AuthRequest).user?.organizationId;
-      if (!organizationId) throw new AppError('Organization context required', 400);
-
-      const id = req.params.id as string;
-      if (!id) throw new AppError('Template ID is required', 400);
-
-      const file = req.file;
-      if (!file) throw new AppError('No file uploaded. Send file in "file" field (multipart/form-data)', 400);
-
-      // 1. Find template
-      const template = await prisma.template.findFirst({ where: { id, organizationId } });
-      if (!template) throw new AppError('Template not found', 404);
-
-      if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType?.toUpperCase() || '')) {
-        throw new AppError('Template does not have a media header', 400);
-      }
-
-      console.log('🔧 Fix-media: Starting for template:', template.name, {
-        mimetype: file.mimetype,
-        size: file.size,
-        currentHeaderContent: template.headerContent ? template.headerContent.substring(0, 40) : 'NULL',
-        currentHeaderMediaId: template.headerMediaId ? template.headerMediaId.substring(0, 30) : 'NULL',
-      });
-
-      // 2. Get WhatsApp account
-      let waAccount = await prisma.whatsAppAccount.findFirst({
+      // Get WA account
+      const account = await prisma.whatsAppAccount.findFirst({
         where: { organizationId, status: 'CONNECTED' },
         orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
       });
+      if (!account) throw new AppError('No connected WhatsApp account', 400);
 
-      if (!waAccount) throw new AppError('No connected WhatsApp account found', 400);
-
-      const accountWithToken = await metaService.getAccountWithToken(waAccount.id);
-      if (!accountWithToken?.accessToken) throw new AppError('Failed to decrypt WhatsApp token', 500);
-
-      let cloudinaryUrl = template.headerContent || '';
-      let metaNumericId = '';
-
-      // 3. Upload to Cloudinary (permanent URL)
-      let cloudinaryService: any = null;
-      try {
-        const mod = require('../../services/cloudinary.service');
-        cloudinaryService = mod.cloudinaryService;
-      } catch (e) {}
-
-      if (cloudinaryService?.isConfigured()) {
-        try {
-          console.log('☁️ Fix-media: Uploading to Cloudinary...');
-          const result = await cloudinaryService.uploadTemplateMedia(
-            file.buffer,
-            file.originalname,
-            file.mimetype,
-            organizationId
-          );
-          cloudinaryUrl = result.secureUrl;
-          console.log('✅ Fix-media: Cloudinary success:', cloudinaryUrl.substring(0, 60));
-        } catch (cloudErr: any) {
-          console.warn('⚠️ Fix-media: Cloudinary failed:', cloudErr.message);
-        }
+      const accountWithToken = await metaService.getAccountWithToken(account.id);
+      if (!accountWithToken?.accessToken) {
+        throw new AppError('Failed to decrypt token', 500);
       }
 
-      // 4. Upload to Meta (get numeric media ID)
+      // 1. Upload to Cloudinary (permanent backup)
+      let newCloudinaryUrl = template.headerContent || '';
       try {
-        console.log('☁️ Fix-media: Uploading to Meta...');
-        const result = await metaApi.uploadMedia(
-          waAccount.phoneNumberId,
-          accountWithToken.accessToken,
-          file.buffer,
-          file.mimetype,
-          file.originalname,
-          waAccount.wabaId
+        const cloudinary = getCloudinary();
+        const result = await cloudinary.uploadTemplateMedia(
+          file.buffer, file.originalname, file.mimetype, organizationId
         );
-        metaNumericId = result.id;
-        console.log('✅ Fix-media: Meta upload success, numeric ID:', metaNumericId);
-      } catch (metaErr: any) {
-        console.error('❌ Fix-media: Meta upload failed:', metaErr.message);
-        throw new AppError(`Failed to upload to Meta: ${metaErr.message}`, 500);
+        newCloudinaryUrl = result.secureUrl;
+        console.log('✅ Fix-media: Cloudinary done');
+      } catch (err: any) {
+        console.warn('⚠️ Fix-media: Cloudinary failed:', err.message);
+        // Continue - Meta upload is critical
       }
 
-      // 5. Save both to DB
+      // 2. Upload to Meta (get numeric ID for verification)
+      const metaResult = await metaApi.uploadMedia(
+        account.phoneNumberId,
+        accountWithToken.accessToken,
+        file.buffer,
+        file.mimetype,
+        file.originalname,
+        account.wabaId
+      );
+
+      console.log('✅ Fix-media: Meta done, ID:', metaResult.id);
+
+      // 3. Update DB
       const updateData: any = {
-        headerMediaId: metaNumericId,
-        headerMediaUploadedAt: new Date(),
+        headerMediaUploadedAt:   new Date(),
         headerMediaLastVerified: new Date(),
       };
-      if (cloudinaryUrl) {
-        updateData.headerContent = cloudinaryUrl;
+      // Only update cloudinaryUrl if we got a new one
+      if (newCloudinaryUrl?.startsWith('http')) {
+        updateData.headerContent = newCloudinaryUrl;
       }
 
       await prisma.template.update({
-        where: { id },
+        where: { id: template.id },
         data: updateData,
       });
 
-      console.log('✅ Fix-media: Template updated:', { id, metaNumericId, cloudinaryUrl: cloudinaryUrl ? 'set' : 'unchanged' });
-
       return res.json({
         success: true,
-        message: 'Media fixed successfully. Template can now be used in campaigns.',
+        message: 'Media fixed. Template is ready for campaigns.',
         data: {
-          templateId: id,
-          metaMediaId: metaNumericId,
-          cloudinaryUrl: cloudinaryUrl || null,
-          headerType: template.headerType,
+          templateId:    template.id,
+          metaMediaId:   metaResult.id,
+          cloudinaryUrl: newCloudinaryUrl || null,
+          headerType:    template.headerType,
         },
       });
-
     } catch (error: any) {
       console.error('❌ Fix-media failed:', error.message);
       next(error instanceof AppError ? error : new AppError(error.message, 500));
     }
   }
+
+  // ── UPLOAD MEDIA ─────────────────────────────────────────────
+  // ✅ Controller mein sirf delegate karo - sab logic media.ts mein hai
+  async uploadMedia(req: any, res: Response, next: NextFunction) {
+    // templates.media.ts ka uploadTemplateMedia call hota hai route se directly
+    // Ye method sirf fallback ke liye hai agar route directly call kare
+    return next(new AppError('Use /upload-media route directly', 500));
+  }
 }
 
 export const templatesController = new TemplatesController();
-export default templatesController;
+export default templatesController;

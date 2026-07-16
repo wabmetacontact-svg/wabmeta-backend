@@ -159,3 +159,15 @@ export const getTemplatesQuerySchema = z.object({
     whatsappAccountId: z.string().optional(),
   }).optional(),
 });
+
+// ============================================
+// UPLOAD TO META
+// ============================================
+export const uploadToMetaSchema = z.object({
+  body: z.object({
+    cloudinaryUrl: z.string().url('Invalid cloudinaryUrl'),
+    mimeType: z.string().optional(),
+    filename: z.string().optional(),
+    whatsappAccountId: z.string().optional(),
+  }),
+});

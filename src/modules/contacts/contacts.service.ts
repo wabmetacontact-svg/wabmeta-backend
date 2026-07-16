@@ -73,6 +73,36 @@ const formatContactGroup = (group: any): ContactGroupResponse => ({
   updatedAt: group.updatedAt,
 });
 
+/**
+ * Extract country code from canonical E.164 phone number
+ * E.g. "+919876543210" → "+91"
+ *      "+14155551234"  → "+1"
+ *      "+447911123456" → "+44"
+ */
+const extractCountryCode = (canonical: string): string => {
+  // canonical is always "+XXXXXXXXXXX" format
+  // Try longest prefix match
+  const digits = canonical.slice(1); // Remove leading +
+
+  // Common country code lengths: 1, 2, 3 digits
+  // Try 3-digit first (more specific), then 2, then 1
+  const prefixes3 = ['971', '966', '965', '974', '973', '968', '967', '972',
+    '351', '353', '354', '355', '356', '880', '977', '855', '856', '234',
+    '233', '254', '255', '256', '257', '237', '213', '212', '216'];
+  const prefixes2 = ['91', '92', '93', '94', '95', '98', '20', '27', '30',
+    '31', '32', '33', '34', '36', '39', '40', '41', '43', '44', '45', '46',
+    '47', '48', '49', '51', '52', '55', '56', '57', '60', '61', '62', '63',
+    '64', '65', '66', '81', '82', '84', '86', '90', '54'];
+
+  for (const p of prefixes3) {
+    if (digits.startsWith(p)) return `+${p}`;
+  }
+  for (const p of prefixes2) {
+    if (digits.startsWith(p)) return `+${p}`;
+  }
+  return '+1'; // US/Canada fallback
+};
+
 // ============================================
 // CONTACTS SERVICE CLASS
 // ============================================
@@ -110,8 +140,8 @@ export class ContactsService {
   // ==========================================
 
   async updateContactFromWebhook(
-    phone: string,
-    profileName: string,
+    phone:          string,
+    profileName:    string,
     organizationId: string
   ): Promise<ContactResponse | null> {
     try {
@@ -123,78 +153,70 @@ export class ContactsService {
       let contact = await prisma.contact.findFirst({
         where: {
           organizationId,
-          OR: variants.map((p) => ({ phone: p })),
+          OR: variants.map(p => ({ phone: p })),
         },
       });
 
       if (contact) {
-        if (
+        const shouldUpdate =
           !contact.firstName ||
           contact.firstName === 'Unknown' ||
-          (profileName && profileName !== 'Unknown' && contact.firstName !== profileName)
-        ) {
+          (profileName &&
+            profileName !== 'Unknown' &&
+            contact.firstName !== profileName);
+
+        if (shouldUpdate) {
           try {
             contact = await prisma.contact.update({
               where: { id: contact.id },
               data: {
-                firstName: profileName,
-                whatsappProfileName: profileName,
-                phone: normalized,
+                firstName:              profileName,
+                whatsappProfileName:    profileName,
+                phone:                  normalized,
                 whatsappProfileFetched: true,
-                lastProfileFetchAt: new Date(),
-                updatedAt: new Date(),
+                lastProfileFetchAt:     new Date(),
               },
             });
-            console.log(`✅ Updated contact: ${contact.phone} → ${profileName}`);
           } catch (e: any) {
-            // Handle unique constraint failure (P2002) - phone number collision
             if (e.code === 'P2002') {
-              console.warn(`⚠️ Phone collision for ${normalized}. Updating name only.`);
               contact = await prisma.contact.update({
                 where: { id: contact.id },
                 data: {
-                  firstName: profileName,
-                  whatsappProfileName: profileName,
+                  firstName:              profileName,
+                  whatsappProfileName:    profileName,
                   whatsappProfileFetched: true,
-                  lastProfileFetchAt: new Date(),
-                  updatedAt: new Date(),
+                  lastProfileFetchAt:     new Date(),
                 },
               });
-            } else {
-              throw e;
-            }
+            } else throw e;
           }
         }
       } else {
+        // New contact from webhook
         contact = await prisma.contact.create({
           data: {
             organizationId,
-            phone: normalized,
-            countryCode: '+91',
-            firstName: profileName,
-            whatsappProfileName: profileName,
-            source: 'whatsapp',
-            status: 'ACTIVE',
+            phone:                  normalized,
+            countryCode:            extractCountryCode(normalized), // ✅ Fixed
+            firstName:              profileName,
+            whatsappProfileName:    profileName,
+            source:                 'whatsapp',
+            status:                 'ACTIVE',
             whatsappProfileFetched: true,
-            lastProfileFetchAt: new Date(),
+            lastProfileFetchAt:     new Date(),
           },
         });
-        console.log(`✅ Created contact from webhook: ${profileName}`);
 
-        const subscription = await prisma.subscription.findFirst({
+        // ✅ FIX Bug6: Single optimized upsert instead of findFirst + update
+        await prisma.subscription.updateMany({
           where: { organizationId },
+          data:  { contactsUsed: { increment: 1 } },
         });
-        if (subscription) {
-          await prisma.subscription.update({
-            where: { id: subscription.id },
-            data: { contactsUsed: { increment: 1 } },
-          });
-        }
       }
 
       return formatContact(contact);
     } catch (error) {
-      console.error('Error updating contact from webhook:', error);
+      console.error('Error in updateContactFromWebhook:', error);
       return null;
     }
   }
@@ -347,56 +369,63 @@ export class ContactsService {
   // GET CONTACTS LIST
   // ==========================================
 
-  async getList(organizationId: string, query: ContactsQueryInput): Promise<ContactsListResponse> {
+  async getList(
+    organizationId: string,
+    query:          ContactsQueryInput
+  ): Promise<ContactsListResponse> {
     const {
-      page = 1,
-      limit = 20,
-      search,
-      status,
-      tags,
-      groupId,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
+      page = 1, limit = 20, search, status, tags,
+      groupId, sortBy = 'createdAt', sortOrder = 'desc',
       hasWhatsAppProfile,
     } = query;
 
-    const safeLimit = Math.min(limit, 10000);
-    const skip = (page - 1) * safeLimit;
-    
-    // ✅ Default: deleted contacts exclude karo
-    const where: Prisma.ContactWhereInput = { 
+    // ✅ FIX Bug5: Max 500 per page
+    const safeLimit = Math.min(500, Math.max(1, limit));
+    const skip      = (Math.max(1, page) - 1) * safeLimit;
+
+    const where: Prisma.ContactWhereInput = {
       organizationId,
       status: { not: 'DELETED' },
     };
 
-    if (search) {
+    if (search?.trim()) {
       where.OR = [
-        { phone: { contains: search, mode: 'insensitive' } },
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
+        { phone:     { contains: search.trim(), mode: 'insensitive' } },
+        { firstName: { contains: search.trim(), mode: 'insensitive' } },
+        { lastName:  { contains: search.trim(), mode: 'insensitive' } },
+        { email:     { contains: search.trim(), mode: 'insensitive' } },
       ];
     }
 
-    // ✅ Agar user specific status filter de (ACTIVE, BLOCKED, UNSUBSCRIBED) toh wo override karega
     if (status) where.status = status;
-    if (tags && tags.length > 0) where.tags = { hasSome: tags };
+    if (tags?.length) where.tags = { hasSome: tags };
     if (groupId) where.groupMemberships = { some: { groupId } };
-    if (hasWhatsAppProfile !== undefined) where.whatsappProfileFetched = hasWhatsAppProfile;
+    if (hasWhatsAppProfile !== undefined) {
+      where.whatsappProfileFetched = hasWhatsAppProfile;
+    }
+
+    // ✅ Only allow safe sort fields
+    const ALLOWED_SORT = ['createdAt', 'updatedAt', 'firstName', 'lastName', 'phone', 'lastMessageAt'];
+    const safeSortBy   = ALLOWED_SORT.includes(sortBy) ? sortBy : 'createdAt';
 
     const [contacts, total] = await Promise.all([
       prisma.contact.findMany({
         where,
         skip,
-        take: safeLimit,
-        orderBy: { [sortBy]: sortOrder },
+        take:    safeLimit,
+        orderBy: { [safeSortBy]: sortOrder },
       }),
       prisma.contact.count({ where }),
     ]);
 
     return {
       contacts: contacts.map(formatContact),
-      meta: { page, limit: safeLimit, total, totalPages: Math.ceil(total / safeLimit) },
+      meta: {
+        page:       Math.max(1, page),
+        limit:      safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit),
+      },
     };
   }
 
@@ -681,9 +710,7 @@ export class ContactsService {
         validContacts.push({
           organizationId,
           phone: normalized,
-          countryCode: normalized.length > 11 
-            ? '+' + normalized.slice(1, -10) 
-            : '+91',
+          countryCode: extractCountryCode(normalized), // ✅ Fixed
           firstName: firstName.toString().trim() || 'Unknown',
           lastName: lastName.toString().trim() || null,
           email: email.toString().trim() || null,
@@ -710,7 +737,8 @@ export class ContactsService {
         imported: 0,
         skipped: 0,
         failed: errors.length,
-        errors: errors.slice(0, 100),
+        totalErrors: errors.length,     // ✅ Total count
+        errors: errors.slice(0, 100),   // ✅ First 100 for display
       };
     }
 
@@ -812,7 +840,8 @@ export class ContactsService {
       imported,
       skipped,
       failed: errors.length,
-      errors: errors.slice(0, 100),
+      totalErrors: errors.length,     // ✅ Total count
+      errors: errors.slice(0, 100),   // ✅ First 100 for display
     };
   }
 
@@ -938,47 +967,59 @@ export class ContactsService {
 
   async bulkUpdate(
     organizationId: string,
-    input: BulkUpdateContactsInput
+    input:          BulkUpdateContactsInput
   ): Promise<{ message: string; updated: number }> {
     const { contactIds, tags, groupIds, status } = input;
 
-    const contacts = await prisma.contact.findMany({
+    // Verify all contacts belong to org
+    const count = await prisma.contact.count({
       where: { id: { in: contactIds }, organizationId },
     });
 
-    if (contacts.length !== contactIds.length) {
+    if (count !== contactIds.length) {
       throw new AppError('Some contacts not found or access denied', 400);
     }
 
+    // ✅ FIX Bug4: Tags update - do it in batches, not N+1
     if (tags && tags.length > 0) {
-      for (const contact of contacts) {
-        const newTags = [...new Set([...(contact.tags || []), ...tags])];
-        await prisma.contact.update({
-          where: { id: contact.id },
-          data: { tags: newTags },
-        });
+      // Get existing tags for all contacts in one query
+      const contacts = await prisma.contact.findMany({
+        where:  { id: { in: contactIds }, organizationId },
+        select: { id: true, tags: true },
+      });
+
+      // Batch update: group contacts with same resulting tags
+      const BATCH = 50;
+      for (let i = 0; i < contacts.length; i += BATCH) {
+        const batch = contacts.slice(i, i + BATCH);
+        await Promise.all(
+          batch.map(c =>
+            prisma.contact.update({
+              where: { id: c.id },
+              data:  { tags: [...new Set([...(c.tags || []), ...tags])] },
+            })
+          )
+        );
       }
     }
 
     if (status) {
       await prisma.contact.updateMany({
         where: { id: { in: contactIds } },
-        data: { status },
+        data:  { status },
       });
     }
 
     if (groupIds && groupIds.length > 0) {
-      const memberData = contactIds.flatMap((contactId) =>
-        groupIds.map((groupId) => ({ contactId, groupId }))
-      );
-
       await prisma.contactGroupMember.createMany({
-        data: memberData,
+        data: contactIds.flatMap(contactId =>
+          groupIds.map(groupId => ({ contactId, groupId }))
+        ),
         skipDuplicates: true,
       });
     }
 
-    return { message: 'Contacts updated successfully', updated: contacts.length };
+    return { message: 'Contacts updated successfully', updated: count };
   }
 
   // ==========================================
@@ -1221,53 +1262,40 @@ export class ContactsService {
     return formatContactGroup(updated);
   }
 
-  async deleteGroup(organizationId: string, groupId: string): Promise<{ message: string }> {
+  async deleteGroup(
+    organizationId: string,
+    groupId:        string
+  ): Promise<{ message: string }> {
     const group = await prisma.contactGroup.findFirst({
-      where: { id: groupId, organizationId },
-      include: { members: { select: { contactId: true } } }
+      where:   { id: groupId, organizationId },
+      include: { _count: { select: { members: true } } },
     });
 
     if (!group) throw new AppError('Group not found', 404);
 
-    const contactIds = group.members.map(m => m.contactId);
+    const memberCount = group._count.members;
 
-    console.log(`🗑️ Deleting group ${group.name} and its ${contactIds.length} members`);
+    // ✅ FIX Bug1: Only nullify campaigns + delete memberships
+    // Do NOT delete contacts themselves
+    await prisma.$transaction([
+      // 1. Nullify campaigns using this group
+      prisma.campaign.updateMany({
+        where: { contactGroupId: groupId },
+        data:  { contactGroupId: null },
+      }),
+      // 2. Delete group memberships
+      prisma.contactGroupMember.deleteMany({
+        where: { groupId },
+      }),
+      // 3. Delete the group
+      prisma.contactGroup.delete({
+        where: { id: groupId },
+      }),
+    ]);
 
-    // ✅ 1. Nullify this group in any campaigns using it
-    await prisma.campaign.updateMany({
-      where: { contactGroupId: groupId },
-      data: { contactGroupId: null },
-    });
-
-    // ✅ 2. Soft delete contacts that were members of this group
-    if (contactIds.length > 0) {
-      await prisma.contact.updateMany({
-        where: {
-          id: { in: contactIds },
-          organizationId,
-          status: { not: 'DELETED' }
-        },
-        data: {
-          status: 'DELETED',
-          deletedAt: new Date()
-        }
-      });
-    }
-
-    // ✅ 3. Delete the group itself
-    await prisma.contactGroup.delete({ where: { id: groupId } });
-
-    // ✅ 4. Sync organization subscription count
-    const subscription = await prisma.subscription.findFirst({ where: { organizationId } });
-    if (subscription) {
-      const remainingCount = await prisma.contact.count({ where: { organizationId } });
-      await prisma.subscription.update({
-        where: { id: subscription.id },
-        data: { contactsUsed: remainingCount }
-      });
-    }
-
-    return { message: `Group "${group.name}" and ${contactIds.length} contacts deleted successfully` };
+    return {
+      message: `Group "${group.name}" deleted. ${memberCount} contacts remain in your contacts list.`,
+    };
   }
 
   async addContactsToGroup(organizationId: string, groupId: string, contactIds: string[]): Promise<{ message: string; added: number }> {

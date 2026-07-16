@@ -130,30 +130,32 @@ async function resetMonthlyIfNeeded(wallet: any): Promise<any> {
 
 // ─── 1. Get Wallet Details ─────────────────────────────────────────────────────
 export async function getWalletDetails(organizationId: string) {
-  const wallet = await prisma.wallet.findUnique({
-    where: { organizationId },
-  });
-
-  const pendingRequest = await prisma.walletAccessRequest.findFirst({
-    where: { organizationId, status: 'pending' },
-    select: { id: true, status: true, requestedAt: true },
-  });
+  const [wallet, pendingRequest] = await Promise.all([
+    prisma.wallet.findUnique({ where: { organizationId } }),
+    prisma.walletAccessRequest.findFirst({
+      where: { organizationId, status: 'pending' },
+      select: { id: true, status: true, requestedAt: true },
+    }),
+  ]);
 
   if (!wallet) {
     return {
-      exists: false,
-      isActive: false,
-      balance: 0,
-      hasPendingRequest: !!pendingRequest,
-      pendingRequest: pendingRequest || null,
+      exists:           false,
+      isActive:         false,
+      balance:          0,
+      hasPendingRequest: !!pendingRequest,  // ✅ Always included
+      pendingRequest:   pendingRequest || null,
     };
   }
 
+  // ✅ Reset monthly if needed
+  const freshWallet = await resetMonthlyIfNeeded(wallet);
+
   return {
-    exists: true,
-    hasPendingRequest: !!pendingRequest,
-    pendingRequest: pendingRequest || null,
-    ...formatWallet(wallet),
+    exists:           true,
+    hasPendingRequest: !!pendingRequest,   // ✅ Always included
+    pendingRequest:   pendingRequest || null,
+    ...formatWallet(freshWallet),
   };
 }
 
@@ -275,33 +277,34 @@ export async function getTransactionHistory(
   };
 }
 
-// ─── 4. Create TopUp Order ─────────────────────────────────────────────────────
-// ─── 4. Create TopUp Order (FIXED with tracking) ───────────────────────────
 export async function createTopUpOrder(
   organizationId: string,
-  amountRupees: number
+  amountRupees:   number
 ) {
-  const wallet = await prisma.wallet.findUnique({
-    where: { organizationId },
-  });
-
-  if (!wallet) throw new AppError('Wallet not found', 404);
-  if (!wallet.isActive) throw new AppError('Wallet is not active', 403);
-  if (wallet.flagged) {
-    throw new AppError('Wallet is flagged. Please contact support.', 403);
+  // ✅ FIX Bug2: Service-level validation
+  if (!amountRupees || isNaN(amountRupees) || amountRupees <= 0) {
+    throw new AppError('Valid amount required', 400);
   }
 
-  if (amountRupees > 100000) {
+  if (amountRupees > 100_000) {
     throw new AppError(
-      `Amount too large. Maximum is ₹1,00,000 per transaction. ` +
-        `Did you enter paise instead of rupees?`,
+      'Amount too large. Maximum is ₹1,00,000 per transaction. ' +
+      'Did you enter paise instead of rupees?',
       400
     );
   }
 
+  const wallet = await prisma.wallet.findUnique({
+    where: { organizationId },
+  });
+
+  if (!wallet)        throw new AppError('Wallet not found', 404);
+  if (!wallet.isActive) throw new AppError('Wallet is not active', 403);
+  if (wallet.flagged)   throw new AppError('Wallet flagged. Contact support.', 403);
+
   const amountPaise = toPaise(amountRupees);
 
-  if (amountPaise < 10000) {
+  if (amountPaise < 10_000) {
     throw new AppError('Minimum top-up amount is ₹100', 400);
   }
 
@@ -314,10 +317,13 @@ export async function createTopUpOrder(
 
   const updatedWallet = await resetMonthlyIfNeeded(wallet);
 
-  if (updatedWallet.currentMonthPaise + amountPaise > updatedWallet.maxMonthlyPaise) {
-    const remainingPaise = updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
+  if (
+    updatedWallet.currentMonthPaise + amountPaise >
+    updatedWallet.maxMonthlyPaise
+  ) {
+    const remaining = updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
     throw new AppError(
-      `Monthly limit exceeded. Remaining: ₹${toRupees(remainingPaise).toLocaleString('en-IN')}`,
+      `Monthly limit exceeded. Remaining: ₹${toRupees(remaining).toLocaleString('en-IN')}`,
       400
     );
   }
@@ -325,181 +331,168 @@ export async function createTopUpOrder(
   const { instance: rzp, keyId } = getWalletRazorpay();
 
   const timestamp = Date.now().toString().slice(-8);
-  const orgShort = organizationId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
-  const receipt = `wlt_${orgShort}_${timestamp}`;
+  const orgShort  = organizationId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
+  const receipt   = `wlt_${orgShort}_${timestamp}`;
 
   const order = await rzp.orders.create({
-    amount: amountPaise,
-    currency: 'INR',
+    amount:          amountPaise,
+    currency:        'INR',
     receipt,
     payment_capture: 1,
     notes: {
       organizationId,
-      purpose: 'wallet_topup',
-      walletId: wallet.id,
-      amountPaise: String(amountPaise),
+      purpose:      'wallet_topup',
+      walletId:     wallet.id,
+      amountPaise:  String(amountPaise),
       amountRupees: String(amountRupees),
     },
   });
 
-  // ✅ CRITICAL: Save order to DB for tracking
-  await db.walletTopUpOrder.create({
+  await (prisma as any).walletTopUpOrder.create({
     data: {
       organizationId,
-      walletId: wallet.id,
+      walletId:        wallet.id,
       razorpayOrderId: order.id,
       amountPaise,
-      currency: 'INR',
-      status: 'PENDING',
+      currency:        'INR',
+      status:          'PENDING',
     },
   });
 
-  console.log('✅ Wallet TopUp order created & tracked:', {
-    orderId: order.id,
-    amount: `₹${amountRupees}`,
-    org: organizationId,
-  });
-
   return {
-    orderId: order.id,
-    amount: amountRupees,
+    orderId:       order.id,
+    amount:        amountRupees,
     amountPaise,
-    currency: 'INR',
+    currency:      'INR',
     razorpayKeyId: keyId,
-    receipt: order.receipt,
+    receipt:       order.receipt,
   };
 }
 
 // ─── 5. BULLETPROOF Credit Function - Idempotent & Atomic ────────────────
 async function creditWalletAtomic(params: {
-  organizationId: string;
-  razorpayOrderId: string;
-  razorpayPaymentId: string;
+  organizationId:     string;
+  razorpayOrderId:    string;
+  razorpayPaymentId:  string;
   razorpaySignature?: string;
-  amountPaise: number;
+  amountPaise:        number;
   creditedVia: 'user_verify' | 'webhook' | 'cron_reconciliation' | 'manual';
 }) {
-  const { organizationId, razorpayOrderId, razorpayPaymentId, razorpaySignature, amountPaise, creditedVia } = params;
+  const {
+    organizationId, razorpayOrderId, razorpayPaymentId,
+    razorpaySignature, amountPaise, creditedVia,
+  } = params;
 
-  return await prisma.$transaction(async (tx) => {
-    const txDb = tx as any;
+  // ✅ FIX Bug4: Validate amount before transaction
+  if (!amountPaise || amountPaise <= 0) {
+    throw new AppError('Invalid payment amount', 400);
+  }
 
-    // ✅ STEP 1: Check duplicate (by orderId OR paymentId)
-    const existingTxn = await tx.walletTransaction.findFirst({
-      where: {
-        OR: [
-          { razorpayPaymentId },
-          { razorpayOrderId },
-        ],
-      },
-    });
+  // ✅ FIX Bug3: Use ReadCommitted instead of Serializable
+  // Serializable can cause deadlocks under load
+  // Idempotency check + atomic update is sufficient
+  return await prisma.$transaction(
+    async (tx) => {
+      const txDb = tx as any;
 
-    if (existingTxn) {
-      // Update topup order status if needed
-      await txDb.walletTopUpOrder.updateMany({
-        where: { razorpayOrderId, status: { not: 'COMPLETED' } },
+      // ✅ Idempotency check
+      const existing = await tx.walletTransaction.findFirst({
+        where: {
+          OR: [
+            { razorpayPaymentId },
+            { razorpayOrderId },
+          ],
+        },
+      });
+
+      if (existing) {
+        await txDb.walletTopUpOrder.updateMany({
+          where: { razorpayOrderId, status: { not: 'COMPLETED' } },
+          data: {
+            status:          'COMPLETED',
+            razorpayPaymentId,
+            completedAt:     new Date(),
+            transactionId:   existing.id,
+            creditedVia,
+          },
+        });
+
+        return { alreadyCredited: true, transaction: existing, newBalance: 0 };
+      }
+
+      // Get wallet
+      const wallet = await tx.wallet.findUnique({
+        where: { organizationId },
+      });
+
+      if (!wallet) {
+        throw new AppError(`Wallet not found for org ${organizationId}`, 404);
+      }
+      if (!wallet.isActive) {
+        throw new AppError(`Wallet inactive. Payment: ${razorpayPaymentId}`, 403);
+      }
+
+      const balanceBeforePaise = wallet.balancePaise;
+      const balanceAfterPaise  = balanceBeforePaise + amountPaise;
+
+      const updatedWallet = await tx.wallet.update({
+        where: { id: wallet.id },
         data: {
-          status: 'COMPLETED',
+          balancePaise:       balanceAfterPaise,
+          totalCreditedPaise: { increment: amountPaise },
+          currentMonthPaise:  { increment: amountPaise },
+          lastTransactionAt:  new Date(),
+          lowAlertSent:       false,
+        },
+      });
+
+      const transaction = await tx.walletTransaction.create({
+        data: {
+          walletId:          wallet.id,
+          type:              'credit',
+          amountPaise,
+          balanceBeforePaise,
+          balanceAfterPaise,
+          description:
+            `Wallet top-up via Razorpay - ₹${toRupees(amountPaise)}`,
+          status:            'completed',
+          razorpayOrderId,
           razorpayPaymentId,
-          completedAt: new Date(),
-          transactionId: existingTxn.id,
+          note:              `Credited via: ${creditedVia}`,
+        },
+      });
+
+      await txDb.walletTopUpOrder.upsert({
+        where:  { razorpayOrderId },
+        create: {
+          organizationId, walletId: wallet.id,
+          razorpayOrderId, razorpayPaymentId, razorpaySignature,
+          amountPaise, status: 'COMPLETED',
+          completedAt: new Date(), transactionId: transaction.id,
           creditedVia,
+        },
+        update: {
+          razorpayPaymentId, razorpaySignature,
+          status: 'COMPLETED', completedAt: new Date(),
+          transactionId: transaction.id, creditedVia,
         },
       });
 
       return {
-        alreadyCredited: true,
-        transaction: existingTxn,
-        newBalance: 0, // Will be fetched
+        alreadyCredited: false,
+        transaction,
+        wallet:         updatedWallet,
+        newBalance:     toRupees(updatedWallet.balancePaise),
+        amountAdded:    toRupees(amountPaise),
       };
+    },
+    {
+      // ✅ FIX Bug3: ReadCommitted is sufficient with idempotency check
+      // Serializable causes deadlocks under concurrent load
+      isolationLevel: 'ReadCommitted',
+      timeout:        15000,
     }
-
-    // ✅ STEP 2: Get wallet with lock
-    const wallet = await tx.wallet.findUnique({
-      where: { organizationId },
-    });
-
-    if (!wallet) {
-      throw new AppError(
-        `Wallet not found for org ${organizationId}. Payment ID: ${razorpayPaymentId}`,
-        404
-      );
-    }
-
-    if (!wallet.isActive) {
-      throw new AppError(
-        `Wallet inactive. Payment ID: ${razorpayPaymentId}`,
-        403
-      );
-    }
-
-    // ✅ STEP 3: Credit atomically
-    const balanceBeforePaise = wallet.balancePaise;
-    const balanceAfterPaise = balanceBeforePaise + amountPaise;
-
-    const updatedWallet = await tx.wallet.update({
-      where: { id: wallet.id },
-      data: {
-        balancePaise: balanceAfterPaise,
-        totalCreditedPaise: { increment: amountPaise },
-        currentMonthPaise: { increment: amountPaise },
-        lastTransactionAt: new Date(),
-        lowAlertSent: false,
-      },
-    });
-
-    // ✅ STEP 4: Create transaction record
-    const transaction = await tx.walletTransaction.create({
-      data: {
-        walletId: wallet.id,
-        type: 'credit',
-        amountPaise,
-        balanceBeforePaise,
-        balanceAfterPaise,
-        description: `Wallet top-up via Razorpay - ₹${toRupees(amountPaise)}`,
-        status: 'completed',
-        razorpayOrderId,
-        razorpayPaymentId,
-        note: `Credited via: ${creditedVia}`,
-      },
-    });
-
-    // ✅ STEP 5: Update topup order
-    await txDb.walletTopUpOrder.upsert({
-      where: { razorpayOrderId },
-      create: {
-        organizationId,
-        walletId: wallet.id,
-        razorpayOrderId,
-        razorpayPaymentId,
-        razorpaySignature,
-        amountPaise,
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        transactionId: transaction.id,
-        creditedVia,
-      },
-      update: {
-        razorpayPaymentId,
-        razorpaySignature,
-        status: 'COMPLETED',
-        completedAt: new Date(),
-        transactionId: transaction.id,
-        creditedVia,
-      },
-    });
-
-    return {
-      alreadyCredited: false,
-      transaction,
-      wallet: updatedWallet,
-      newBalance: toRupees(updatedWallet.balancePaise),
-      amountAdded: toRupees(amountPaise),
-    };
-  }, {
-    isolationLevel: 'Serializable', // ✅ Highest isolation for race conditions
-    timeout: 15000,
-  });
+  );
 }
 
 // ─── 5B. Verify & Process TopUp (BULLETPROOF) ─────────────────────────────
@@ -757,96 +750,98 @@ export async function deductBalance(
   organizationId: string,
   data: {
     amountRupees: number;
-    description: string;
+    description:  string;
     metaChargeId?: string;
-    metaService?:
-      | 'message_sending'
-      | 'template_message'
-      | 'api_usage'
-      | 'other';
+    metaService?:  'message_sending' | 'template_message' | 'api_usage' | 'other';
   }
 ): Promise<{
-  success: boolean;
-  newBalance: number;
+  success:     boolean;
+  newBalance:  number;
   insufficient?: boolean;
-  message?: string;
+  message?:    string;
 }> {
   const wallet = await prisma.wallet.findUnique({
     where: { organizationId },
   });
 
   if (!wallet || !wallet.isActive) {
-    return {
-      success: false,
-      newBalance: 0,
-      insufficient: true,
-      message: 'Wallet not active',
-    };
+    return { success: false, newBalance: 0, insufficient: true, message: 'Wallet not active' };
   }
 
   const amountPaise = toPaise(data.amountRupees);
-  const availablePaise =
-    wallet.balancePaise +
-    (wallet.creditEnabled
-      ? wallet.creditLimitPaise - wallet.creditUsedPaise
-      : 0);
+
+  const creditHeadroom = wallet.creditEnabled
+    ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+    : 0;
+  const availablePaise = wallet.balancePaise + creditHeadroom;
 
   if (availablePaise < amountPaise) {
     await triggerLowBalanceAlert(wallet);
     return {
-      success: false,
-      newBalance: toRupees(wallet.balancePaise),
+      success:     false,
+      newBalance:  toRupees(wallet.balancePaise),
       insufficient: true,
-      message: `Insufficient balance. Available: ₹${toRupees(
-        availablePaise
-      ).toFixed(2)}`,
+      message:     `Insufficient balance. Available: ₹${toRupees(availablePaise).toFixed(2)}`,
     };
   }
 
   const balanceBeforePaise = wallet.balancePaise;
-  let newBalancePaise: number;
-  let creditDeductedPaise = 0;
+
+  // ✅ FIX Bug6: Correct credit deduction logic
+  let newBalancePaise:     number;
+  let creditDeductedPaise: number;
 
   if (wallet.balancePaise >= amountPaise) {
-    newBalancePaise = wallet.balancePaise - amountPaise;
+    // Enough balance - deduct from balance only
+    newBalancePaise     = wallet.balancePaise - amountPaise;
+    creditDeductedPaise = 0;
   } else {
+    // Not enough balance - use all balance, rest from credit
     creditDeductedPaise = amountPaise - wallet.balancePaise;
-    newBalancePaise = 0;
+    newBalancePaise     = 0;
+
+    // ✅ Safety check: credit deduction should not exceed headroom
+    if (creditDeductedPaise > creditHeadroom) {
+      return {
+        success:     false,
+        newBalance:  toRupees(wallet.balancePaise),
+        insufficient: true,
+        message:     'Insufficient balance and credit limit',
+      };
+    }
   }
 
-  const [updatedWallet, transaction] = await prisma.$transaction([
+  const [updatedWallet] = await prisma.$transaction([
     prisma.wallet.update({
       where: { id: wallet.id },
       data: {
-        balancePaise: newBalancePaise,
-        creditUsedPaise: { increment: creditDeductedPaise },
+        balancePaise:      newBalancePaise,
+        creditUsedPaise:   { increment: creditDeductedPaise },
         totalDebitedPaise: { increment: amountPaise },
         lastTransactionAt: new Date(),
       },
     }),
     prisma.walletTransaction.create({
       data: {
-        walletId: wallet.id,
-        type: 'debit',
+        walletId:          wallet.id,
+        type:              'debit',
         amountPaise,
         balanceBeforePaise,
         balanceAfterPaise: newBalancePaise,
-        description: data.description,
-        status: 'completed',
-        metaChargeId: data.metaChargeId,
-        metaService: data.metaService || 'message_sending',
+        description:       data.description,
+        status:            'completed',
+        metaChargeId:      data.metaChargeId,
+        metaService:       data.metaService || 'message_sending',
       },
     }),
   ]);
 
-  if (
-    updatedWallet.balancePaise < updatedWallet.lowThresholdPaise
-  ) {
+  if (updatedWallet.balancePaise < updatedWallet.lowThresholdPaise) {
     await triggerLowBalanceAlert(updatedWallet);
   }
 
   return {
-    success: true,
+    success:    true,
     newBalance: toRupees(updatedWallet.balancePaise),
   };
 }
@@ -1295,11 +1290,32 @@ export async function getWalletMessageAnalytics(
 
   // Date range - default last 30 days
   const endDate = options?.endDate || new Date();
-  const startDate =
+  let startDate =
     options?.startDate ||
     new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const dateFilter = { gte: startDate, lte: endDate };
+  let dateFilter = { gte: startDate, lte: endDate };
+
+  const messageCount = await prisma.message.count({
+    where: {
+      conversation: { organizationId },
+      direction: 'OUTBOUND',
+      createdAt: dateFilter,
+    },
+  });
+
+  // If too many messages, limit to last 7 days
+  if (messageCount > 50_000) {
+    console.warn(
+      `⚠️ Large message count (${messageCount}) for org ${organizationId}. ` +
+      `Limiting analytics to last 7 days.`
+    );
+    const limitedStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    if (startDate < limitedStart) {
+      startDate = limitedStart;
+      dateFilter = { gte: startDate, lte: endDate };
+    }
+  }
 
   // ============================================
   // 1. FETCH ALL OUTBOUND MESSAGES
