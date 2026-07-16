@@ -768,6 +768,58 @@ export class ContactsController {
       sendSuccess(res, stats, 'Import stats fetched successfully');
     } catch (error) { next(error); }
   }
+
+  // ── GET AUDIENCE COUNT ───────────────────────────────────────
+  async getAudienceCount(
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) {
+        throw new AppError('Organization context required', 400);
+      }
+
+      const { type, tags, groupId } = req.query;
+
+      let count = 0;
+
+      if (type === 'all') {
+        count = await prisma.contact.count({
+          where: {
+            organizationId,
+            status: 'ACTIVE',
+          },
+        });
+      } else if (type === 'tags' && tags) {
+        const tagArr = String(tags).split(',').filter(Boolean);
+        if (tagArr.length > 0) {
+          count = await prisma.contact.count({
+            where: {
+              organizationId,
+              status: 'ACTIVE',
+              tags: { hasSome: tagArr },
+            },
+          });
+        }
+      } else if (type === 'group' && groupId) {
+        count = await prisma.contactGroupMember.count({
+          where: {
+            groupId: String(groupId),
+            contact: {
+              organizationId,
+              status: 'ACTIVE',
+            },
+          },
+        });
+      }
+
+      sendSuccess(res, { count }, 'Audience count fetched');
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const contactsController = new ContactsController();
