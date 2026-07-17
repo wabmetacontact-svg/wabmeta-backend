@@ -41,6 +41,10 @@ router.get('/country-codes', contacts_controller_1.contactsController.getCountry
 // ============================================
 router.get('/stats', contacts_controller_1.contactsController.getStats.bind(contacts_controller_1.contactsController));
 router.get('/import-stats', contacts_controller_1.contactsController.getImportStats.bind(contacts_controller_1.contactsController));
+// Audience count (for campaign creation)
+router.get('/audience-count', contacts_controller_1.contactsController.getAudienceCount.bind(contacts_controller_1.contactsController));
+// Contact search (for manual selection)
+router.get('/search', contacts_controller_1.contactsController.searchContacts.bind(contacts_controller_1.contactsController));
 router.get('/tags', contacts_controller_1.contactsController.getTags.bind(contacts_controller_1.contactsController));
 router.get('/export', contacts_controller_1.contactsController.export.bind(contacts_controller_1.contactsController));
 router.post('/refresh-profiles/batch', contacts_controller_1.contactsController.refreshUnknownNames.bind(contacts_controller_1.contactsController));

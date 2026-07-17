@@ -5,6 +5,39 @@
 // ✅ FIX 2: getAccountWithToken now delegates to the shared
 //    getAccountWithDecryptedToken() helper — same logic used by whatsapp.service.ts,
 //    so message sending and connection health checks agree on token state.
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -15,10 +48,29 @@ const meta_api_1 = require("./meta.api"); // ✅ FIX: import generatePhonePin
 const config_1 = require("../../config");
 const encryption_1 = require("../../utils/encryption");
 const tokenDecryption_1 = require("../../utils/tokenDecryption"); // ✅ FIX: shared helper
-const templateMediaResolver_1 = require("../../utils/templateMediaResolver");
 const uuid_1 = require("uuid");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
+const redis_1 = require("../../config/redis");
+async function extractStoredPin(webhookSecretEncrypted) {
+    if (!webhookSecretEncrypted)
+        return null;
+    try {
+        const decrypted = (0, encryption_1.decrypt)(webhookSecretEncrypted);
+        if (!decrypted)
+            return null;
+        if (decrypted.startsWith('PIN::')) {
+            const parts = decrypted.split('::');
+            const pin = parts[1];
+            if (pin && /^\d{6}$/.test(pin))
+                return pin;
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
 class MetaService {
     sanitizeAccount(account) {
         if (!account)
@@ -277,40 +329,51 @@ class MetaService {
                 status: 'in_progress',
                 message: 'Registering phone number to Cloud API...',
             });
-            // ✅ FIX: generate a random, per-account 6-digit PIN instead of hardcoded '000000'.
-            // We check if this phoneNumberId already has a persisted PIN (previous reconnection)
-            // and reuse it — Meta rejects PIN changes without prior 2FA disable.
+            // ─── Register phone (with proper error handling) ─────────
             let phonePin;
+            let registrationWarning;
+            let registrationMessage;
             try {
                 const existingRecord = await database_1.default.whatsAppAccount.findUnique({
                     where: { phoneNumberId: primaryPhone.id },
                     select: { webhookSecret: true },
                 });
-                // We reuse webhookSecret column to also stash the encrypted PIN with a marker
-                // (schema-safe: no new column needed). Marker prefix = "PIN::"
-                let reusedPin = null;
-                if (existingRecord?.webhookSecret) {
-                    try {
-                        const decrypted = (0, encryption_1.safeDecryptStrict)(existingRecord.webhookSecret);
-                        if (decrypted?.startsWith('PIN::')) {
-                            const parts = decrypted.split('::');
-                            if (parts[1] && /^\d{6}$/.test(parts[1])) {
-                                reusedPin = parts[1];
-                            }
-                        }
-                    }
-                    catch {
-                        // ignore — treat as no existing PIN
-                    }
-                }
+                const reusedPin = await extractStoredPin(existingRecord?.webhookSecret ?? null);
                 phonePin = reusedPin || (0, meta_api_1.generatePhonePin)();
                 console.log(`[Meta Service] Using ${reusedPin ? 'existing' : 'new'} PIN for phone ${primaryPhone.id}`);
-                await meta_api_1.metaApi.registerPhoneNumber(primaryPhone.id, accessToken, phonePin);
-                console.log('✅ Phone number registered successfully');
+                console.log(`[Meta Service] Registering phone ${primaryPhone.id}...`);
+                const registerResult = await meta_api_1.metaApi.registerPhone(primaryPhone.id, phonePin, accessToken);
+                // ✅ FIX: Only log success if actually successful
+                if (registerResult.success) {
+                    if (registerResult.alreadyRegistered) {
+                        console.log(`ℹ️ Phone ${primaryPhone.id} already registered`);
+                    }
+                    else {
+                        console.log(`✅ Phone ${primaryPhone.id} newly registered`);
+                    }
+                }
+                else {
+                    // ❌ Registration failed - CRITICAL warning
+                    console.error(`❌ PHONE REGISTRATION FAILED for ${primaryPhone.id}\n` +
+                        `   Messages will NOT work until this is fixed.\n` +
+                        `   Common causes:\n` +
+                        `   1. 2FA PIN mismatch\n` +
+                        `   2. Number pending verification\n` +
+                        `   3. Number already registered elsewhere\n` +
+                        `   4. Payment method missing in Meta Business Manager\n`);
+                    registrationWarning = 'PHONE_NOT_REGISTERED';
+                    registrationMessage =
+                        'Phone number connected but registration failed. ' +
+                            'Please verify phone number in Meta Business Manager first.';
+                }
             }
             catch (registerError) {
                 console.warn('⚠️ Phone number registration failed:', registerError.message);
-                phonePin = (0, meta_api_1.generatePhonePin)(); // ensure we still have a value to persist below
+                phonePin = (0, meta_api_1.generatePhonePin)(); // ensure we still stashe a value to persist
+                registrationWarning = 'PHONE_NOT_REGISTERED';
+                registrationMessage =
+                    'Phone number connected but registration failed. ' +
+                        'Please verify phone number in Meta Business Manager first.';
             }
             onProgress?.({
                 step: 'REGISTER_PHONE',
@@ -521,6 +584,8 @@ class MetaService {
             return {
                 success: true,
                 account: this.sanitizeAccount(savedAccount),
+                warning: registrationWarning,
+                message: registrationMessage,
             };
         }
         catch (error) {
@@ -568,61 +633,72 @@ class MetaService {
         return (0, tokenDecryption_1.getAccountWithDecryptedToken)(accountId);
     }
     async disconnectAccount(accountId, organizationId) {
-        console.log(`🔌 Disconnecting account: ${accountId}`);
         const account = await database_1.default.whatsAppAccount.findFirst({
-            where: {
-                id: accountId,
-                organizationId,
-            },
+            where: { id: accountId, organizationId }
         });
         if (!account) {
-            console.log(`ℹ️  Account not found or already disconnected: ${accountId}`);
-            return {
-                success: true,
-                message: 'Account already disconnected (not found)',
-            };
+            return { success: true, message: 'Account not found' };
         }
-        if (account.status === client_1.WhatsAppAccountStatus.DISCONNECTED && !account.accessToken) {
-            console.log(`ℹ️  Account already disconnected: ${accountId}`);
-            return {
-                success: true,
-                message: 'Account already disconnected',
-            };
-        }
-        await database_1.default.whatsAppAccount.update({
-            where: { id: accountId },
-            data: {
-                status: client_1.WhatsAppAccountStatus.DISCONNECTED,
-                accessToken: null,
-                tokenExpiresAt: null,
-                isDefault: false,
-            },
+        // ✅ Transaction mein sab kuch karo
+        await database_1.default.$transaction(async (tx) => {
+            // 1. WhatsApp account disconnect
+            await tx.whatsAppAccount.update({
+                where: { id: accountId },
+                data: {
+                    status: client_1.WhatsAppAccountStatus.DISCONNECTED,
+                    accessToken: null,
+                    tokenExpiresAt: null,
+                    isDefault: false,
+                }
+            });
+            // 2. MetaConnection update
+            try {
+                await tx.metaConnection.updateMany({
+                    where: { organizationId },
+                    data: { status: 'DISCONNECTED' }
+                });
+            }
+            catch { /* Table may not exist */ }
+            // 3. PhoneNumber deactivate
+            try {
+                await tx.phoneNumber.updateMany({
+                    where: {
+                        metaConnection: { organizationId }
+                    },
+                    data: { isActive: false }
+                });
+            }
+            catch { /* Table may not exist */ }
         });
-        console.log(`✅ Account disconnected: ${accountId}`);
+        // 4. New default set karo
         if (account.isDefault) {
-            const anotherAccount = await database_1.default.whatsAppAccount.findFirst({
+            const another = await database_1.default.whatsAppAccount.findFirst({
                 where: {
                     organizationId,
                     status: client_1.WhatsAppAccountStatus.CONNECTED,
-                    id: { not: accountId },
+                    id: { not: accountId }
                 },
-                orderBy: { createdAt: 'asc' },
+                orderBy: { createdAt: 'asc' }
             });
-            if (anotherAccount) {
+            if (another) {
                 await database_1.default.whatsAppAccount.update({
-                    where: { id: anotherAccount.id },
-                    data: { isDefault: true },
+                    where: { id: another.id },
+                    data: { isDefault: true }
                 });
-                console.log(`✅ New default account: ${anotherAccount.id}`);
-            }
-            else {
-                console.log(`ℹ️  No other connected accounts found`);
             }
         }
-        return {
-            success: true,
-            message: 'Account disconnected successfully',
-        };
+        // 5. ✅ Socket emit
+        try {
+            const { webhookEvents } = await Promise.resolve().then(() => __importStar(require('../webhooks/webhook.service')));
+            webhookEvents.emit('accountDisconnected', {
+                organizationId,
+                accountId,
+            });
+        }
+        catch (e) {
+            console.warn('⚠️ Failed to emit accountDisconnected socket event:', e);
+        }
+        return { success: true, message: 'Account disconnected successfully' };
     }
     async setDefaultAccount(accountId, organizationId) {
         const account = await database_1.default.whatsAppAccount.findFirst({
@@ -649,12 +725,21 @@ class MetaService {
     async refreshAccountHealth(accountId, organizationId) {
         const accountData = await this.getAccountWithToken(accountId);
         if (!accountData) {
-            throw new errorHandler_1.AppError('Account not found or access denied', 404);
-        }
-        if (accountData.account.organizationId !== organizationId) {
-            throw new errorHandler_1.AppError('Account does not belong to this organization', 403);
+            throw new errorHandler_1.AppError('Account not found or token invalid', 404);
         }
         const { account, accessToken } = accountData;
+        // ✅ Org check
+        if (account.organizationId !== organizationId) {
+            throw new errorHandler_1.AppError('Access denied', 403);
+        }
+        // ✅ wabaId null check
+        if (!account.wabaId) {
+            return {
+                healthy: false,
+                reason: 'WABA ID missing - please reconnect account',
+                action: 'Reconnect'
+            };
+        }
         try {
             const debugInfo = await meta_api_1.metaApi.debugToken(accessToken);
             if (!debugInfo.data.is_valid) {
@@ -664,64 +749,56 @@ class MetaService {
                         status: client_1.WhatsAppAccountStatus.DISCONNECTED,
                         accessToken: null,
                         tokenExpiresAt: null,
+                    }
+                });
+                return { healthy: false, reason: 'Token expired', action: 'Reconnect' };
+            }
+            // ✅ Token valid - get phone info directly (faster than listing all phones)
+            try {
+                const phoneInfo = await meta_api_1.metaApi.getPhoneNumberInfo(account.phoneNumberId, accessToken);
+                await database_1.default.whatsAppAccount.update({
+                    where: { id: accountId },
+                    data: {
+                        qualityRating: phoneInfo?.quality_rating,
+                        displayName: phoneInfo?.verified_name || account.displayName,
+                        verifiedName: phoneInfo?.verified_name,
+                        status: client_1.WhatsAppAccountStatus.CONNECTED,
+                        codeVerificationStatus: phoneInfo?.code_verification_status,
+                        messagingLimit: phoneInfo?.messaging_limit_tier,
                     },
                 });
                 return {
-                    healthy: false,
-                    reason: 'Access token expired',
-                    action: 'Please reconnect',
+                    healthy: true,
+                    qualityRating: phoneInfo?.quality_rating,
+                    verifiedName: phoneInfo?.verified_name,
+                    messagingLimit: phoneInfo?.messaging_limit_tier,
                 };
             }
-            const phoneNumbers = await meta_api_1.metaApi.getPhoneNumbers(account.wabaId, accessToken);
-            const phone = phoneNumbers.find((p) => p.id === account.phoneNumberId);
-            if (!phone) {
+            catch (phoneErr) {
+                // Phone not found or deleted
                 await database_1.default.whatsAppAccount.update({
                     where: { id: accountId },
-                    data: { status: client_1.WhatsAppAccountStatus.DISCONNECTED },
+                    data: { status: client_1.WhatsAppAccountStatus.DISCONNECTED }
                 });
                 return {
                     healthy: false,
-                    reason: 'Phone number not found',
-                    action: 'Phone may have been removed',
+                    reason: 'Phone number not accessible',
+                    action: 'Reconnect'
                 };
             }
-            await database_1.default.whatsAppAccount.update({
-                where: { id: accountId },
-                data: {
-                    qualityRating: phone.qualityRating,
-                    displayName: phone.verifiedName || phone.displayPhoneNumber,
-                    verifiedName: phone.verifiedName,
-                    status: client_1.WhatsAppAccountStatus.CONNECTED,
-                    codeVerificationStatus: phone.codeVerificationStatus,
-                    nameStatus: phone.nameStatus,
-                    messagingLimit: phone.messagingLimitTier,
-                },
-            });
-            console.log(`✅ Health check passed: ${accountId}`);
-            return {
-                healthy: true,
-                qualityRating: phone.qualityRating,
-                verifiedName: phone.verifiedName,
-                displayPhoneNumber: phone.displayPhoneNumber,
-                status: phone.status,
-                codeVerificationStatus: phone.codeVerificationStatus,
-                nameStatus: phone.nameStatus,
-                messagingLimit: phone.messagingLimitTier,
-            };
         }
         catch (error) {
-            console.error(`❌ Health check failed: ${accountId}`, error);
             await database_1.default.whatsAppAccount.update({
                 where: { id: accountId },
                 data: {
                     status: client_1.WhatsAppAccountStatus.DISCONNECTED,
                     accessToken: null,
-                },
+                }
             });
             return {
                 healthy: false,
-                reason: error.message || 'Health check failed',
-                action: 'Please reconnect',
+                reason: error.message,
+                action: 'Reconnect'
             };
         }
     }
@@ -774,6 +851,7 @@ class MetaService {
                 language: true,
                 metaTemplateId: true,
                 headerMediaId: true,
+                headerContent: true,
             },
         });
         const existingMap = new Map(existingTemplates.map((t) => [`${t.name}_${t.language}`, t]));
@@ -793,6 +871,13 @@ class MetaService {
                 metaKeys.add(key);
                 const existing = existingMap.get(key);
                 const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
+                const headerContent = this.extractHeaderContent(metaTemplate.components);
+                const isScontent = (url) => !!url && url.includes('scontent.whatsapp');
+                const finalHeaderContent = (headerContent && !isScontent(headerContent))
+                    ? headerContent
+                    : (existing && !isScontent(existing.headerContent)
+                        ? existing.headerContent
+                        : null);
                 const baseTemplateData = {
                     organizationId,
                     whatsappAccountId: accountId,
@@ -804,7 +889,7 @@ class MetaService {
                     status: status,
                     bodyText: this.extractBodyText(metaTemplate.components),
                     headerType: this.extractHeaderType(metaTemplate.components),
-                    headerContent: this.extractHeaderContent(metaTemplate.components),
+                    headerContent: finalHeaderContent,
                     footerText: this.extractFooterText(metaTemplate.components),
                     buttons: this.extractButtons(metaTemplate.components),
                     variables: this.extractVariables(metaTemplate.components),
@@ -831,12 +916,6 @@ class MetaService {
                     }
                     dbTemplate = await database_1.default.template.create({ data: baseTemplateData });
                     created++;
-                }
-                // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
-                if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
-                    await (0, templateMediaResolver_1.resolveTemplateHeaderMedia)(dbTemplate).catch((err) => {
-                        console.error(`Failed to resolve template media in syncTemplates:`, err.message);
-                    });
                 }
             }
             catch (err) {
@@ -866,6 +945,14 @@ class MetaService {
         };
     }
     async syncTemplatesBackground(accountId, wabaId, accessToken) {
+        const redis = (0, redis_1.getRedis)();
+        const lockKey = `sync:templates:${accountId}`;
+        const exists = await redis.get(lockKey);
+        if (exists) {
+            console.log(`⚠️ Template sync already running for ${accountId}`);
+            return;
+        }
+        await redis.set(lockKey, '1', 'EX', 300);
         try {
             console.log(`🔄 Background template sync for account ${accountId}...`);
             const templates = await meta_api_1.metaApi.getTemplates(wabaId, accessToken);
@@ -891,6 +978,13 @@ class MetaService {
                         },
                     });
                     const extractedHandle = this.extractHeaderHandle(template.components);
+                    const headerContent = this.extractHeaderContent(template.components);
+                    const isScontent = (url) => !!url && url.includes('scontent.whatsapp');
+                    const finalHeaderContent = (headerContent && !isScontent(headerContent))
+                        ? headerContent
+                        : (existing && !isScontent(existing.headerContent)
+                            ? existing.headerContent
+                            : null);
                     const baseData = {
                         organizationId: account.organizationId,
                         whatsappAccountId: accountId,
@@ -902,7 +996,7 @@ class MetaService {
                         status: status,
                         bodyText: this.extractBodyText(template.components),
                         headerType: this.extractHeaderType(template.components),
-                        headerContent: this.extractHeaderContent(template.components),
+                        headerContent: finalHeaderContent,
                         footerText: this.extractFooterText(template.components),
                         buttons: this.extractButtons(template.components),
                         variables: this.extractVariables(template.components),
@@ -926,12 +1020,6 @@ class MetaService {
                         if (extractedHandle)
                             baseData.headerMediaId = extractedHandle;
                         dbTemplate = await database_1.default.template.create({ data: baseData });
-                    }
-                    // ✅ Automatically resolve media to Cloudinary if it's a Meta CDN URL
-                    if (dbTemplate && dbTemplate.headerContent?.includes('scontent.whatsapp')) {
-                        await (0, templateMediaResolver_1.resolveTemplateHeaderMedia)(dbTemplate).catch((err) => {
-                            console.error(`Failed to resolve template media in syncTemplatesBackground:`, err.message);
-                        });
                     }
                     synced++;
                 }
@@ -960,6 +1048,9 @@ class MetaService {
                     },
                 }).catch((e) => console.error('Failed to disconnect account in background sync error path:', e));
             }
+        }
+        finally {
+            await redis.del(lockKey);
         }
     }
     mapCategory(category) {

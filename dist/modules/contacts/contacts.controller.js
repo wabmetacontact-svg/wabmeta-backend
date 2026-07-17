@@ -1,5 +1,4 @@
 "use strict";
-// src/modules/contacts/contacts.controller.ts
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -11,43 +10,49 @@ const database_1 = __importDefault(require("../../config/database"));
 const errorHandler_1 = require("../../middleware/errorHandler");
 const contacts_features_1 = require("./contacts.features");
 const phoneInternational_1 = require("../../utils/phoneInternational");
+// ─── CSV Injection Protection ─────────────────────────────────
+// ✅ FIX Bug4: Escape values that could be formula injections
+const escapeCsvValue = (value) => {
+    const str = String(value ?? '').replace(/"/g, '""');
+    // Escape formula injection characters
+    if (/^[=+\-@\t\r]/.test(str)) {
+        return `"'${str}"`;
+    }
+    return `"${str}"`;
+};
 class ContactsController {
-    // ==========================================
-    // CREATE CONTACT
-    // ==========================================
+    // ── CREATE ──────────────────────────────────────────────────
     async create(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const input = req.body;
             const contact = await contacts_service_1.contactsService.create(organizationId, input);
-            const message = contact.whatsappProfileFetched
-                ? 'Contact created with provided name'
-                : 'Contact created - name will update when they send a message';
-            (0, response_1.sendSuccess)(res, contact, message, 201);
+            (0, response_1.sendSuccess)(res, contact, 'Contact created successfully', 201);
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // GET CONTACTS LIST
-    // ==========================================
+    // ── LIST ────────────────────────────────────────────────────
     async getList(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
+            // ✅ FIX Bug5: Validated bounds
+            const rawPage = parseInt(req.query.page) || 1;
+            const rawLimit = parseInt(req.query.limit) || 20;
             const query = {
-                page: parseInt(req.query.page) || 1,
-                limit: parseInt(req.query.limit) || 20,
-                search: req.query.search,
+                page: Math.max(1, rawPage),
+                limit: Math.min(500, Math.max(1, rawLimit)), // ✅ Max 500
+                search: req.query.search?.trim() || undefined,
                 status: req.query.status,
-                tags: req.query.tags ? req.query.tags.split(',') : undefined,
-                groupId: req.query.groupId,
+                tags: req.query.tags
+                    ? req.query.tags.split(',').filter(Boolean)
+                    : undefined,
+                groupId: req.query.groupId || undefined,
                 sortBy: req.query.sortBy || 'createdAt',
                 sortOrder: req.query.sortOrder || 'desc',
                 hasWhatsAppProfile: req.query.hasWhatsAppProfile === 'true' ? true :
@@ -65,112 +70,97 @@ class ContactsController {
             next(error);
         }
     }
-    // ==========================================
-    // GET CONTACT BY ID
-    // ==========================================
+    // ── GET BY ID ───────────────────────────────────────────────
     async getById(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const id = req.params.id;
-            const contact = await contacts_service_1.contactsService.getById(organizationId, id);
+            const contact = await contacts_service_1.contactsService.getById(organizationId, req.params.id);
             (0, response_1.sendSuccess)(res, contact, 'Contact fetched successfully');
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // UPDATE CONTACT
-    // ==========================================
+    // ── UPDATE ──────────────────────────────────────────────────
     async update(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const id = req.params.id;
             const input = req.body;
-            const contact = await contacts_service_1.contactsService.update(organizationId, id, input);
+            const contact = await contacts_service_1.contactsService.update(organizationId, req.params.id, input);
             (0, response_1.sendSuccess)(res, contact, 'Contact updated successfully');
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // DELETE CONTACT
-    // ==========================================
+    // ── DELETE ──────────────────────────────────────────────────
     async delete(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            const userId = req.user?.id; // ✅ NEW
-            if (!organizationId) {
+            const userId = req.user?.id;
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const id = req.params.id;
-            const result = await contacts_service_1.contactsService.delete(organizationId, id, userId); // ✅ Pass userId
+            const result = await contacts_service_1.contactsService.delete(organizationId, req.params.id, userId);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // IMPORT CONTACTS (FIXED)
-    // ==========================================
+    // ── IMPORT ──────────────────────────────────────────────────
+    // ✅ FIX Bug1: Clean separation of file/body parsing
     async import(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            let input = req.body;
-            // ✅ Handle file upload (multer)
+            // ✅ Build clean input object
+            const input = {};
+            // File upload (multer)
             const file = req.file;
             if (file) {
-                const csvData = file.buffer.toString('utf-8');
-                console.log(`📁 Received CSV file: ${file.originalname}, Size: ${file.size} bytes`);
-                input.csvData = csvData;
+                input.csvData = file.buffer.toString('utf-8');
             }
-            // ✅ Handle raw CSV in body
-            if (req.body.csvData && typeof req.body.csvData === 'string') {
-                input.csvData = req.body.csvData;
+            // Raw CSV in body
+            if (!input.csvData && req.body.csvData) {
+                input.csvData = String(req.body.csvData);
             }
-            // ✅ Handle contacts array directly
-            if (req.body.contacts && Array.isArray(req.body.contacts)) {
+            // Contacts array
+            if (Array.isArray(req.body.contacts)) {
                 input.contacts = req.body.contacts;
             }
-            // Get tags
+            // Tags
             if (req.body.tags) {
-                if (typeof req.body.tags === 'string') {
+                if (Array.isArray(req.body.tags)) {
+                    input.tags = req.body.tags;
+                }
+                else if (typeof req.body.tags === 'string') {
                     try {
                         input.tags = JSON.parse(req.body.tags);
                     }
                     catch {
-                        input.tags = req.body.tags.split(',').map((t) => t.trim());
+                        input.tags = req.body.tags.split(',').map((t) => t.trim()).filter(Boolean);
                     }
                 }
-                else if (Array.isArray(req.body.tags)) {
-                    input.tags = req.body.tags;
-                }
             }
-            // Get group info
-            input.groupId = req.body.groupId;
-            input.groupName = req.body.groupName;
-            console.log('Import input:', {
-                hasCSVData: !!input.csvData,
-                csvLength: input.csvData?.length,
-                contactsCount: input.contacts?.length,
-                tags: input.tags,
-                groupId: input.groupId,
-                groupName: input.groupName,
-            });
+            else {
+                input.tags = [];
+            }
+            // Group
+            if (req.body.groupId)
+                input.groupId = String(req.body.groupId);
+            if (req.body.groupName)
+                input.groupName = String(req.body.groupName);
+            if (!input.csvData && !input.contacts?.length) {
+                throw new errorHandler_1.AppError('No contact data provided', 400);
+            }
             const result = await contacts_service_1.contactsService.import(organizationId, input);
             const message = result.failed > 0
-                ? `Imported ${result.imported} contacts. ${result.failed} failed (only Indian +91 numbers allowed).`
+                ? `Imported ${result.imported} contacts. ${result.failed} failed.`
                 : `Successfully imported ${result.imported} contacts.`;
             (0, response_1.sendSuccess)(res, result, message);
         }
@@ -178,16 +168,16 @@ class ContactsController {
             next(error);
         }
     }
-    // ==========================================
-    // BULK UPDATE CONTACTS
-    // ==========================================
+    // ── BULK UPDATE ─────────────────────────────────────────────
     async bulkUpdate(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const input = req.body;
+            if (!Array.isArray(input.contactIds) || input.contactIds.length === 0) {
+                throw new errorHandler_1.AppError('contactIds array required', 400);
+            }
             const result = await contacts_service_1.contactsService.bulkUpdate(organizationId, input);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
@@ -195,50 +185,44 @@ class ContactsController {
             next(error);
         }
     }
-    // ==========================================
-    // BULK DELETE CONTACTS
-    // ==========================================
+    // ── BULK DELETE ─────────────────────────────────────────────
     async bulkDelete(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            const userId = req.user?.id; // ✅ NEW
-            if (!organizationId) {
+            const userId = req.user?.id;
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const { contactIds } = req.body;
-            const result = await contacts_service_1.contactsService.bulkDelete(organizationId, contactIds, userId); // ✅
+            if (!Array.isArray(contactIds) || contactIds.length === 0) {
+                throw new errorHandler_1.AppError('contactIds array required', 400);
+            }
+            const result = await contacts_service_1.contactsService.bulkDelete(organizationId, contactIds, userId);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // DELETE ALL CONTACTS
-    // ==========================================
+    // ── DELETE ALL ──────────────────────────────────────────────
     async deleteAll(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            const userId = req.user?.id; // ✅ NEW
-            if (!organizationId) {
+            const userId = req.user?.id;
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const result = await contacts_service_1.contactsService.deleteAll(organizationId, userId); // ✅
+            const result = await contacts_service_1.contactsService.deleteAll(organizationId, userId);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // GET CONTACT STATS
-    // ==========================================
+    // ── STATS ───────────────────────────────────────────────────
     async getStats(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const stats = await contacts_service_1.contactsService.getStats(organizationId);
             (0, response_1.sendSuccess)(res, stats, 'Stats fetched successfully');
         }
@@ -246,15 +230,12 @@ class ContactsController {
             next(error);
         }
     }
-    // ==========================================
-    // GET ALL TAGS
-    // ==========================================
+    // ── TAGS ────────────────────────────────────────────────────
     async getTags(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const tags = await contacts_service_1.contactsService.getAllTags(organizationId);
             (0, response_1.sendSuccess)(res, tags, 'Tags fetched successfully');
         }
@@ -262,43 +243,37 @@ class ContactsController {
             next(error);
         }
     }
-    // ==========================================
-    // EXPORT CONTACTS
-    // ==========================================
+    // ── EXPORT ──────────────────────────────────────────────────
     async export(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const { groupId } = req.query;
             const contacts = await contacts_service_1.contactsService.export(organizationId, groupId);
-            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
             res.setHeader('Content-Disposition', 'attachment; filename=contacts.csv');
             if (contacts.length === 0) {
                 res.send('No contacts found');
                 return;
             }
+            // ✅ FIX Bug4: CSV injection protection
             const headers = Object.keys(contacts[0]).join(',');
-            const rows = contacts.map((contact) => Object.values(contact)
-                .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+            const rows = contacts.map(contact => Object.values(contact)
+                .map(v => escapeCsvValue(String(v ?? '')))
                 .join(','));
-            const csv = [headers, ...rows].join('\n');
-            res.send(csv);
+            res.send([headers, ...rows].join('\n'));
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // REFRESH UNKNOWN NAMES (NEW)
-    // ==========================================
+    // ── REFRESH UNKNOWN NAMES ───────────────────────────────────
     async refreshUnknownNames(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const result = await contacts_service_1.contactsService.refreshUnknownNames(organizationId);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
@@ -306,16 +281,16 @@ class ContactsController {
             next(error);
         }
     }
-    // ==========================================
-    // CONTACT GROUPS
-    // ==========================================
+    // ── GROUP CRUD ──────────────────────────────────────────────
     async createGroup(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const input = req.body;
+            if (!input.name?.trim()) {
+                throw new errorHandler_1.AppError('Group name is required', 400);
+            }
             const group = await contacts_service_1.contactsService.createGroup(organizationId, input);
             (0, response_1.sendSuccess)(res, group, 'Group created successfully', 201);
         }
@@ -326,9 +301,8 @@ class ContactsController {
     async getGroups(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
             const groups = await contacts_service_1.contactsService.getGroups(organizationId);
             (0, response_1.sendSuccess)(res, groups, 'Groups fetched successfully');
         }
@@ -339,11 +313,9 @@ class ContactsController {
     async getGroupById(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const groupId = req.params.groupId;
-            const group = await contacts_service_1.contactsService.getGroupById(organizationId, groupId);
+            const group = await contacts_service_1.contactsService.getGroupById(organizationId, req.params.groupId);
             (0, response_1.sendSuccess)(res, group, 'Group fetched successfully');
         }
         catch (error) {
@@ -353,12 +325,10 @@ class ContactsController {
     async updateGroup(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const groupId = req.params.groupId;
             const input = req.body;
-            const group = await contacts_service_1.contactsService.updateGroup(organizationId, groupId, input);
+            const group = await contacts_service_1.contactsService.updateGroup(organizationId, req.params.groupId, input);
             (0, response_1.sendSuccess)(res, group, 'Group updated successfully');
         }
         catch (error) {
@@ -368,11 +338,9 @@ class ContactsController {
     async deleteGroup(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const groupId = req.params.groupId;
-            const result = await contacts_service_1.contactsService.deleteGroup(organizationId, groupId);
+            const result = await contacts_service_1.contactsService.deleteGroup(organizationId, req.params.groupId);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -382,12 +350,13 @@ class ContactsController {
     async addContactsToGroup(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const groupId = req.params.groupId;
             const { contactIds } = req.body;
-            const result = await contacts_service_1.contactsService.addContactsToGroup(organizationId, groupId, contactIds);
+            if (!Array.isArray(contactIds) || contactIds.length === 0) {
+                throw new errorHandler_1.AppError('contactIds array required', 400);
+            }
+            const result = await contacts_service_1.contactsService.addContactsToGroup(organizationId, req.params.groupId, contactIds);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -397,12 +366,13 @@ class ContactsController {
     async removeContactsFromGroup(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const groupId = req.params.groupId;
             const { contactIds } = req.body;
-            const result = await contacts_service_1.contactsService.removeContactsFromGroup(organizationId, groupId, contactIds);
+            if (!Array.isArray(contactIds) || contactIds.length === 0) {
+                throw new errorHandler_1.AppError('contactIds array required', 400);
+            }
+            const result = await contacts_service_1.contactsService.removeContactsFromGroup(organizationId, req.params.groupId, contactIds);
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -412,18 +382,18 @@ class ContactsController {
     async getGroupContacts(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            }
-            const groupId = req.params.groupId;
+            const rawPage = parseInt(req.query.page) || 1;
+            const rawLimit = parseInt(req.query.limit) || 20;
             const query = {
-                page: parseInt(req.query.page) || 1,
-                limit: parseInt(req.query.limit) || 20,
-                search: req.query.search,
+                page: Math.max(1, rawPage),
+                limit: Math.min(500, Math.max(1, rawLimit)),
+                search: req.query.search?.trim() || undefined,
                 sortBy: req.query.sortBy || 'createdAt',
                 sortOrder: req.query.sortOrder || 'desc',
             };
-            const result = await contacts_service_1.contactsService.getGroupContacts(organizationId, groupId, query);
+            const result = await contacts_service_1.contactsService.getGroupContacts(organizationId, req.params.groupId, query);
             res.json({
                 success: true,
                 message: 'Group contacts fetched successfully',
@@ -435,309 +405,241 @@ class ContactsController {
             next(error);
         }
     }
-    // ============================================
-    // FEATURE ACCESS
-    // ============================================
+    // ── FEATURE ACCESS ──────────────────────────────────────────
     async getFeatureAccess(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization not found', 404);
-            }
             const access = await contacts_features_1.contactFeaturesService.getFeatureAccess(organizationId);
-            return res.json({
-                success: true,
-                data: access
-            });
+            return res.json({ success: true, data: access });
         }
         catch (error) {
             next(error);
         }
     }
-    // ============================================
-    // GET COUNTRY CODES
-    // ============================================
+    // ── COUNTRY CODES ───────────────────────────────────────────
     async getCountryCodes(req, res) {
-        return res.json({
-            success: true,
-            data: phoneInternational_1.COUNTRY_CODES
-        });
+        return res.json({ success: true, data: phoneInternational_1.COUNTRY_CODES });
     }
-    // ============================================
-    // SIMPLE BULK PASTE (₹2,500+ Plans)
-    // ============================================
+    // ── SIMPLE BULK PASTE ───────────────────────────────────────
     async simpleBulkPaste(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization not found', 404);
-            }
-            // ✅ Check feature access (Quarterly+)
             await contacts_features_1.contactFeaturesService.validateAccess(organizationId, 'simpleBulkPaste');
-            const { phoneNumbers, // Raw string with numbers
-            // ❌ No countryCode parameter - auto detect
-            tags = [], groupId } = req.body;
+            const { phoneNumbers, tags = [], groupId } = req.body;
             if (!phoneNumbers || typeof phoneNumbers !== 'string') {
-                throw new errorHandler_1.AppError('Phone numbers are required', 400);
+                throw new errorHandler_1.AppError('Phone numbers string required', 400);
             }
-            // ✅ Parse with auto-detection
             const { valid, invalid } = (0, phoneInternational_1.parseMultiplePhones)(phoneNumbers);
             if (valid.length === 0) {
-                throw new errorHandler_1.AppError('No valid phone numbers found. Make sure to include country code (e.g., +91, +1)', 400);
+                throw new errorHandler_1.AppError('No valid phone numbers found. Include country code (e.g. +91, +1).', 400);
             }
-            // ✅ Limit check
             const MAX_BULK = 5000;
             if (valid.length > MAX_BULK) {
                 throw new errorHandler_1.AppError(`Maximum ${MAX_BULK} contacts per upload`, 400);
             }
-            // 1. Identify deleted contacts
-            const deletedContacts = await database_1.default.contact.findMany({
-                where: {
-                    organizationId,
-                    phone: { in: valid.map(p => p.fullNumber) },
-                    status: 'DELETED'
-                },
-                select: { id: true, phone: true }
+            const phones = valid.map(p => p.fullNumber);
+            // 1. Find existing (active + deleted)
+            const existing = await database_1.default.contact.findMany({
+                where: { organizationId, phone: { in: phones } },
+                select: { id: true, phone: true, status: true },
             });
-            // 2. Restore deleted contacts
+            const existingMap = new Map(existing.map(c => [c.phone, c]));
+            const toRestore = existing
+                .filter(c => c.status === 'DELETED')
+                .map(c => c.id);
+            const existingActive = new Set(existing.filter(c => c.status !== 'DELETED').map(c => c.phone));
+            const toCreate = valid.filter(p => !existingMap.has(p.fullNumber));
+            // 2. Restore deleted
             let restoredCount = 0;
-            if (deletedContacts.length > 0) {
-                const restored = await database_1.default.contact.updateMany({
-                    where: {
-                        id: { in: deletedContacts.map(c => c.id) }
-                    },
-                    data: {
-                        status: 'ACTIVE',
-                        deletedAt: null,
-                        deletedBy: null,
-                        source: 'BULK_PASTE'
-                    }
+            if (toRestore.length > 0) {
+                const r = await database_1.default.contact.updateMany({
+                    where: { id: { in: toRestore } },
+                    data: { status: 'ACTIVE', deletedAt: null, deletedBy: null, source: 'BULK_PASTE' },
                 });
-                restoredCount = restored.count;
+                restoredCount = r.count;
             }
-            // 3. Get existing contacts (check duplicates)
-            const existingContacts = await database_1.default.contact.findMany({
-                where: {
-                    organizationId,
-                    phone: { in: valid.map(p => p.fullNumber) }
-                },
-                select: { phone: true }
-            });
-            const existingPhones = new Set(existingContacts.map(c => c.phone));
-            const newContacts = valid.filter(p => !existingPhones.has(p.fullNumber));
-            // 4. Create contacts
-            const contactsToCreate = newContacts.map((parsed, index) => ({
-                organizationId,
-                phone: parsed.fullNumber,
-                countryCode: parsed.countryCode,
-                firstName: `Contact ${index + 1}`,
-                tags: Array.isArray(tags) ? tags : [],
-                source: 'BULK_PASTE',
-                status: 'ACTIVE'
-            }));
+            // 3. Create new
+            // ✅ FIX Bug3: Use 'Unknown' instead of generic "Contact N"
             let createdCount = 0;
-            if (contactsToCreate.length > 0) {
-                const result = await database_1.default.contact.createMany({
-                    data: contactsToCreate,
-                    skipDuplicates: true
+            if (toCreate.length > 0) {
+                const createData = toCreate.map(p => ({
+                    organizationId,
+                    phone: p.fullNumber,
+                    countryCode: p.countryCode || '+91',
+                    firstName: 'Unknown', // ✅ WhatsApp name baad mein update karega
+                    tags: Array.isArray(tags) ? tags : [],
+                    source: 'BULK_PASTE',
+                    status: 'ACTIVE',
+                }));
+                const r = await database_1.default.contact.createMany({
+                    data: createData,
+                    skipDuplicates: true,
                 });
-                createdCount = result.count;
+                createdCount = r.count;
             }
-            // 5. Add to group if specified
-            const totalProcessedCount = createdCount + restoredCount;
-            if (groupId && totalProcessedCount > 0) {
+            // 4. Add to group if specified
+            const total = createdCount + restoredCount;
+            if (groupId && total > 0) {
                 const processedPhones = [
-                    ...newContacts.map(p => p.fullNumber),
-                    ...deletedContacts.map(c => c.phone)
+                    ...toCreate.map(p => p.fullNumber),
+                    ...existing.filter(c => c.status === 'DELETED').map(c => c.phone),
                 ];
                 const contactIds = await database_1.default.contact.findMany({
-                    where: {
-                        organizationId,
-                        phone: { in: processedPhones }
-                    },
-                    select: { id: true }
+                    where: { organizationId, phone: { in: processedPhones } },
+                    select: { id: true },
                 });
                 await database_1.default.contactGroupMember.createMany({
-                    data: contactIds.map(c => ({
-                        groupId,
-                        contactId: c.id
-                    })),
-                    skipDuplicates: true
+                    data: contactIds.map(c => ({ groupId, contactId: c.id })),
+                    skipDuplicates: true,
                 });
             }
-            let message = '';
-            if (createdCount > 0 && restoredCount > 0) {
-                message = `${createdCount} created, ${restoredCount} restored successfully`;
-            }
-            else if (createdCount > 0) {
-                message = `${createdCount} contacts created successfully`;
-            }
-            else if (restoredCount > 0) {
-                message = `${restoredCount} contacts restored successfully`;
-            }
-            else {
-                message = 'All contacts already exist as active contacts';
-            }
+            const message = createdCount > 0 && restoredCount > 0
+                ? `${createdCount} created, ${restoredCount} restored`
+                : createdCount > 0
+                    ? `${createdCount} contacts created`
+                    : restoredCount > 0
+                        ? `${restoredCount} contacts restored`
+                        : 'All contacts already exist';
             return res.json({
                 success: true,
                 data: {
                     totalInput: valid.length + invalid.length,
                     validNumbers: valid.length,
                     invalidNumbers: invalid.length,
-                    created: createdCount + restoredCount, // Sum to trigger onSuccess
+                    created: total,
                     newCreated: createdCount,
                     restored: restoredCount,
-                    duplicatesSkipped: valid.length - createdCount - restoredCount,
-                    invalidDetails: invalid.slice(0, 10) // Return first 10 invalid
+                    duplicatesSkipped: valid.length - total,
+                    invalidDetails: invalid.slice(0, 10),
                 },
-                message
+                message,
             });
         }
         catch (error) {
             next(error);
         }
     }
-    // ============================================
-    // CSV UPLOAD (₹899+ Plans)
-    // ============================================
+    // ── CSV UPLOAD ──────────────────────────────────────────────
     async csvUpload(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
-            if (!organizationId) {
+            if (!organizationId)
                 throw new errorHandler_1.AppError('Organization not found', 404);
-            }
-            // ✅ Check feature access (Monthly+)
             await contacts_features_1.contactFeaturesService.validateAccess(organizationId, 'csvUpload');
-            const { contacts, // Array of contact objects from CSV
-            groupId, tags = [] } = req.body;
-            if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+            const { contacts, groupId, tags = [] } = req.body;
+            if (!Array.isArray(contacts) || contacts.length === 0) {
                 throw new errorHandler_1.AppError('No contacts provided', 400);
             }
-            // ✅ Limit check
-            const MAX_CSV = 10000;
+            const MAX_CSV = 10_000;
             if (contacts.length > MAX_CSV) {
                 throw new errorHandler_1.AppError(`Maximum ${MAX_CSV} contacts per CSV upload`, 400);
             }
-            const results = {
-                created: 0,
-                updated: 0,
-                skipped: 0,
-                errors: []
-            };
-            // 1. Pre-process and validate phone numbers
-            const phoneToContactMap = new Map();
+            const results = { created: 0, updated: 0, skipped: 0, errors: [] };
+            // 1. Parse + validate phones
+            const phoneToData = new Map();
             const validPhones = [];
-            for (const contact of contacts) {
-                const phoneInput = contact.phone || contact.phoneNumber || contact.mobile;
-                if (!phoneInput) {
+            for (const c of contacts) {
+                const raw = String(c.phone || c.phoneNumber || c.mobile || '').trim();
+                if (!raw) {
                     results.skipped++;
                     continue;
                 }
-                const { valid } = (0, phoneInternational_1.parseMultiplePhones)(String(phoneInput));
-                if (valid.length === 0) {
+                const { valid } = (0, phoneInternational_1.parseMultiplePhones)(raw);
+                if (!valid.length) {
                     results.skipped++;
-                    results.errors.push(`Invalid: ${phoneInput}`);
+                    results.errors.push(`Invalid: ${raw}`);
                     continue;
                 }
-                const parsed = valid[0];
-                // If multiple contacts have the same phone in the same CSV, last one wins or we can handle it
-                if (!phoneToContactMap.has(parsed.fullNumber)) {
-                    validPhones.push(parsed.fullNumber);
-                }
-                phoneToContactMap.set(parsed.fullNumber, {
-                    ...contact,
-                    fullNumber: parsed.fullNumber,
-                    countryCode: parsed.countryCode
+                const full = valid[0].fullNumber;
+                if (!phoneToData.has(full))
+                    validPhones.push(full);
+                phoneToData.set(full, {
+                    ...c,
+                    fullNumber: full,
+                    countryCode: valid[0].countryCode,
                 });
             }
-            if (validPhones.length === 0) {
+            if (!validPhones.length) {
                 return res.json({
                     success: true,
                     data: results,
-                    message: 'No valid contacts found to process'
+                    message: 'No valid contacts found',
                 });
             }
-            // 2. Fetch existing contacts in one query
-            const existingContacts = await database_1.default.contact.findMany({
-                where: {
-                    organizationId,
-                    phone: { in: validPhones }
-                },
-                select: { id: true, phone: true, firstName: true, lastName: true, email: true }
+            // 2. Fetch existing
+            const existing = await database_1.default.contact.findMany({
+                where: { organizationId, phone: { in: validPhones } },
+                select: { id: true, phone: true, firstName: true, lastName: true, email: true },
             });
-            const existingPhoneMap = new Map(existingContacts.map(c => [c.phone, c]));
-            const news = [];
-            const updates = [];
-            // 3. Categorize into news and updates
-            for (const [fullPhone, contactData] of phoneToContactMap.entries()) {
-                const existing = existingPhoneMap.get(fullPhone);
-                if (existing) {
-                    updates.push({
-                        id: existing.id,
-                        data: {
-                            firstName: contactData.firstName || contactData.first_name || existing.firstName,
-                            lastName: contactData.lastName || contactData.last_name || existing.lastName,
-                            email: contactData.email || existing.email,
-                            tags: Array.isArray(tags) && tags.length > 0 ? { push: tags } : undefined
-                        }
+            const existingMap = new Map(existing.map(c => [c.phone, c]));
+            const toCreate = [];
+            const toUpdate = [];
+            for (const [phone, data] of phoneToData) {
+                const ex = existingMap.get(phone);
+                if (ex) {
+                    toUpdate.push({
+                        id: ex.id,
+                        firstName: data.firstName || data.first_name || ex.firstName,
+                        lastName: data.lastName || data.last_name || ex.lastName,
+                        email: data.email || ex.email,
                     });
                 }
                 else {
-                    news.push({
+                    toCreate.push({
                         organizationId,
-                        phone: fullPhone,
-                        countryCode: contactData.countryCode,
-                        firstName: contactData.firstName || contactData.first_name || 'Unknown',
-                        lastName: contactData.lastName || contactData.last_name || undefined,
-                        email: contactData.email || undefined,
-                        tags: tags,
+                        phone,
+                        countryCode: data.countryCode || '+91',
+                        firstName: (data.firstName || data.first_name || 'Unknown').toString().trim(),
+                        lastName: (data.lastName || data.last_name || '').toString().trim() || undefined,
+                        email: (data.email || '').toString().trim() || undefined,
+                        tags: Array.isArray(tags) ? tags : [],
                         source: 'CSV_IMPORT',
-                        status: 'ACTIVE'
+                        status: 'ACTIVE',
                     });
                 }
             }
-            // 4. Bulk Create
-            if (news.length > 0) {
-                const createResult = await database_1.default.contact.createMany({
-                    data: news,
-                    skipDuplicates: true
+            // 3. Bulk create
+            if (toCreate.length > 0) {
+                const r = await database_1.default.contact.createMany({
+                    data: toCreate,
+                    skipDuplicates: true,
                 });
-                results.created = createResult.count;
+                results.created = r.count;
             }
-            // 5. Sequential or Batched Updates (Prisma doesn't have bulk unique update)
-            // We'll do them in small batches or Promise.all to speed up, 
-            // but for very large numbers we still need to be careful.
-            // 50-100 updates at a time is usually fine.
-            if (updates.length > 0) {
-                const updateBatchSize = 100;
-                for (let i = 0; i < updates.length; i += updateBatchSize) {
-                    const batch = updates.slice(i, i + updateBatchSize);
-                    await Promise.all(batch.map(u => database_1.default.contact.update({
-                        where: { id: u.id },
-                        data: u.data
-                    }).catch(err => {
-                        results.errors.push(`Update failed for ${u.id}: ${err.message}`);
-                    })));
+            // ✅ FIX Bug2: Sequential updates instead of parallel
+            // Batch size of 25 to prevent DB overload
+            if (toUpdate.length > 0) {
+                const BATCH = 25;
+                for (let i = 0; i < toUpdate.length; i += BATCH) {
+                    const batch = toUpdate.slice(i, i + BATCH);
+                    // Sequential in each batch
+                    for (const u of batch) {
+                        await database_1.default.contact.update({
+                            where: { id: u.id },
+                            data: {
+                                firstName: u.firstName,
+                                lastName: u.lastName || undefined,
+                                email: u.email || undefined,
+                                ...(tags.length > 0 ? { tags: { push: tags } } : {}),
+                            },
+                        }).catch(() => { results.errors.push(`Update failed: ${u.id}`); });
+                    }
                 }
-                results.updated = updates.length;
+                results.updated = toUpdate.length;
             }
-            // 6. Bulk Add to Group if specified
+            // 4. Add to group
             if (groupId && (results.created > 0 || results.updated > 0)) {
-                // Fetch fresh IDs for new contacts
-                const allTargetContactIds = await database_1.default.contact.findMany({
-                    where: {
-                        organizationId,
-                        phone: { in: validPhones }
-                    },
-                    select: { id: true }
+                const allIds = await database_1.default.contact.findMany({
+                    where: { organizationId, phone: { in: validPhones } },
+                    select: { id: true },
                 });
-                const memberData = allTargetContactIds.map(c => ({
-                    groupId,
-                    contactId: c.id
-                }));
                 await database_1.default.contactGroupMember.createMany({
-                    data: memberData,
-                    skipDuplicates: true
+                    data: allIds.map(c => ({ groupId, contactId: c.id })),
+                    skipDuplicates: true,
                 }).catch(() => { });
             }
             return res.json({
@@ -747,26 +649,124 @@ class ContactsController {
                     created: results.created,
                     updated: results.updated,
                     skipped: results.skipped,
-                    errors: results.errors.slice(0, 10)
+                    errors: results.errors.slice(0, 10),
                 },
-                message: `${results.created} created, ${results.updated} updated`
+                message: `${results.created} created, ${results.updated} updated`,
             });
         }
         catch (error) {
             next(error);
         }
     }
-    // ==========================================
-    // GET IMPORT STATS
-    // ==========================================
+    // ── IMPORT STATS ────────────────────────────────────────────
     async getImportStats(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const stats = await contacts_service_1.contactsService.getImportStats(organizationId);
+            (0, response_1.sendSuccess)(res, stats, 'Import stats fetched successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ─── GET AUDIENCE COUNT ─────────────────────────────────────
+    async getAudienceCount(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             }
-            const stats = await contacts_service_1.contactsService.getImportStats(organizationId);
-            (0, response_1.sendSuccess)(res, stats, 'Import stats fetched successfully');
+            const type = String(req.query.type || 'all');
+            const tags = req.query.tags ? String(req.query.tags).split(',').filter(Boolean) : [];
+            const groupId = req.query.groupId ? String(req.query.groupId) : undefined;
+            let count = 0;
+            if (type === 'all') {
+                count = await database_1.default.contact.count({
+                    where: {
+                        organizationId,
+                        status: 'ACTIVE',
+                    },
+                });
+            }
+            else if (type === 'tags' && tags.length > 0) {
+                count = await database_1.default.contact.count({
+                    where: {
+                        organizationId,
+                        status: 'ACTIVE',
+                        tags: { hasSome: tags },
+                    },
+                });
+            }
+            else if (type === 'group' && groupId) {
+                count = await database_1.default.contactGroupMember.count({
+                    where: {
+                        groupId,
+                        contact: {
+                            organizationId,
+                            status: 'ACTIVE',
+                        },
+                    },
+                });
+            }
+            (0, response_1.sendSuccess)(res, { count, type }, 'Audience count fetched');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ─── SEARCH CONTACTS (for manual selection) ─────────────────
+    async searchContacts(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId) {
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            }
+            const query = String(req.query.q || '').trim();
+            const limit = Math.min(50, parseInt(req.query.limit) || 30);
+            // Empty query returns first N contacts
+            const where = {
+                organizationId,
+                status: 'ACTIVE',
+            };
+            if (query.length >= 1) {
+                where.OR = [
+                    { phone: { contains: query, mode: 'insensitive' } },
+                    { firstName: { contains: query, mode: 'insensitive' } },
+                    { lastName: { contains: query, mode: 'insensitive' } },
+                    { email: { contains: query, mode: 'insensitive' } },
+                ];
+            }
+            const contacts = await database_1.default.contact.findMany({
+                where,
+                take: limit,
+                select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    phone: true,
+                    countryCode: true,
+                    email: true,
+                    tags: true,
+                    whatsappProfileName: true,
+                },
+                orderBy: [
+                    { firstName: 'asc' },
+                    { createdAt: 'desc' },
+                ],
+            });
+            // Format response
+            const formatted = contacts.map(c => ({
+                id: c.id,
+                name: c.whatsappProfileName ||
+                    [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+                    c.phone,
+                phone: c.phone,
+                email: c.email,
+                tags: c.tags || [],
+            }));
+            (0, response_1.sendSuccess)(res, { contacts: formatted, total: formatted.length }, 'Contacts found');
         }
         catch (error) {
             next(error);

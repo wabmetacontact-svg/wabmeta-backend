@@ -41,10 +41,10 @@ export declare class AdminService {
         name: string;
         email: string;
         id: string;
-        createdAt: Date;
-        isActive: boolean;
         lastLoginAt: Date | null;
+        createdAt: Date;
         role: string;
+        isActive: boolean;
     } | null>;
     getDashboardStats(): Promise<{
         users: {
@@ -95,15 +95,15 @@ export declare class AdminService {
             memberships: undefined;
             email: string;
             id: string;
-            status: import(".prisma/client").$Enums.UserStatus;
-            createdAt: Date;
             password: string | null;
             firstName: string;
             lastName: string | null;
             phone: string | null;
             avatar: string | null;
+            status: import(".prisma/client").$Enums.UserStatus;
             emailVerified: boolean;
             lastLoginAt: Date | null;
+            createdAt: Date;
         }[];
         total: number;
     }>;
@@ -115,11 +115,6 @@ export declare class AdminService {
             slug: string;
             planType: import(".prisma/client").$Enums.PlanType;
         }[];
-        _count: {
-            activityLogs: number;
-            notifications: number;
-            refreshTokens: number;
-        };
         ownedOrganizations: {
             name: string;
             id: string;
@@ -142,18 +137,21 @@ export declare class AdminService {
             invitedAt: Date;
             joinedAt: Date | null;
         })[];
+        _count: {
+            activityLogs: number;
+            notifications: number;
+            refreshTokens: number;
+        };
         email: string;
         tokenVersion: number;
         id: string;
-        status: import(".prisma/client").$Enums.UserStatus;
-        createdAt: Date;
-        updatedAt: Date;
         googleId: string | null;
         password: string | null;
         firstName: string;
         lastName: string | null;
         phone: string | null;
         avatar: string | null;
+        status: import(".prisma/client").$Enums.UserStatus;
         emailVerified: boolean;
         emailVerifyToken: string | null;
         emailVerifyExpires: Date | null;
@@ -163,6 +161,8 @@ export declare class AdminService {
         otpEnabled: boolean;
         lastLoginAt: Date | null;
         lastLoginIp: string | null;
+        createdAt: Date;
+        updatedAt: Date;
     }>;
     updateUserPassword(id: string, data: any): Promise<{
         id: string;
@@ -172,32 +172,32 @@ export declare class AdminService {
     updateUser(id: string, data: any): Promise<{
         email: string;
         id: string;
-        status: import(".prisma/client").$Enums.UserStatus;
         firstName: string;
         lastName: string | null;
         phone: string | null;
+        status: import(".prisma/client").$Enums.UserStatus;
         emailVerified: boolean;
     }>;
     updateUserStatus(id: string, status: string): Promise<{
         email: string;
         id: string;
-        status: import(".prisma/client").$Enums.UserStatus;
         firstName: string;
         lastName: string | null;
+        status: import(".prisma/client").$Enums.UserStatus;
     }>;
     suspendUser(id: string): Promise<{
         email: string;
         id: string;
-        status: import(".prisma/client").$Enums.UserStatus;
         firstName: string;
         lastName: string | null;
+        status: import(".prisma/client").$Enums.UserStatus;
     }>;
     activateUser(id: string): Promise<{
         email: string;
         id: string;
-        status: import(".prisma/client").$Enums.UserStatus;
         firstName: string;
         lastName: string | null;
+        status: import(".prisma/client").$Enums.UserStatus;
     }>;
     /**
      * Transfer organization ownership to another user
@@ -227,7 +227,6 @@ export declare class AdminService {
                 createdAt: Date;
                 updatedAt: Date;
                 messagesUsed: number;
-                planId: string;
                 billingCycle: string;
                 currentPeriodStart: Date;
                 currentPeriodEnd: Date;
@@ -236,10 +235,11 @@ export declare class AdminService {
                 lastPaymentAt: Date | null;
                 nextPaymentAt: Date | null;
                 cancelledAt: Date | null;
+                planId: string;
             }) | null;
             _count: {
-                contacts: number;
                 campaigns: number;
+                contacts: number;
                 members: number;
                 whatsappAccounts: number;
             };
@@ -281,8 +281,8 @@ export declare class AdminService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                isActive: boolean;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -308,7 +308,6 @@ export declare class AdminService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -317,12 +316,13 @@ export declare class AdminService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         }) | null;
         _count: {
-            contacts: number;
             campaigns: number;
-            templates: number;
             chatbots: number;
+            contacts: number;
+            templates: number;
         };
         owner: {
             email: string;
@@ -408,8 +408,8 @@ export declare class AdminService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                isActive: boolean;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -435,7 +435,6 @@ export declare class AdminService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -444,12 +443,13 @@ export declare class AdminService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         }) | null;
         _count: {
-            contacts: number;
             campaigns: number;
-            templates: number;
             chatbots: number;
+            contacts: number;
+            templates: number;
         };
         owner: {
             email: string;
@@ -512,8 +512,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        isActive: boolean;
         slug: string;
+        isActive: boolean;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -538,8 +538,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        isActive: boolean;
         slug: string;
+        isActive: boolean;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -564,8 +564,8 @@ export declare class AdminService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        isActive: boolean;
         slug: string;
+        isActive: boolean;
         description: string | null;
         monthlyPrice: import("@prisma/client/runtime/library").Decimal;
         yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -591,25 +591,25 @@ export declare class AdminService {
         name: string;
         email: string;
         id: string;
-        createdAt: Date;
-        isActive: boolean;
         lastLoginAt: Date | null;
+        createdAt: Date;
         role: string;
+        isActive: boolean;
     }[]>;
     createAdmin(data: any): Promise<{
         name: string;
         email: string;
         id: string;
         createdAt: Date;
-        isActive: boolean;
         role: string;
+        isActive: boolean;
     }>;
     updateAdmin(id: string, data: any): Promise<{
         name: string;
         email: string;
         id: string;
-        isActive: boolean;
         role: string;
+        isActive: boolean;
     }>;
     deleteAdmin(id: string): Promise<{
         message: string;
@@ -677,26 +677,26 @@ export declare class AdminService {
         account: {
             phoneNumber: string;
             organizationId: string;
-            accessToken: string | null;
             id: string;
-            verifiedName: string | null;
-            qualityRating: string | null;
-            codeVerificationStatus: string | null;
-            nameStatus: string | null;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
+            createdAt: Date;
+            updatedAt: Date;
             phoneNumberId: string;
+            accessToken: string | null;
             wabaId: string;
             displayName: string;
+            qualityRating: string | null;
             tokenExpiresAt: Date | null;
             webhookSecret: string | null;
+            codeVerificationStatus: string | null;
+            nameStatus: string | null;
+            verifiedName: string | null;
             messagingLimit: string | null;
             dailyMessageLimit: number;
             dailyMessagesUsed: number;
             lastLimitReset: Date;
             businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
             isDefault: boolean;
-            createdAt: Date;
-            updatedAt: Date;
             isActive: boolean;
             connectionType: string;
         };

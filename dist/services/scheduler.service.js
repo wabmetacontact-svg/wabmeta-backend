@@ -7,13 +7,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.startTemplateMediaPreWarmJob = void 0;
 exports.initializeScheduler = initializeScheduler;
 const node_cron_1 = __importDefault(require("node-cron"));
 const automation_engine_1 = require("../modules/automation/automation.engine");
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
-const templateMediaPreWarm_service_1 = require("./templateMediaPreWarm.service");
 // ✅ Global state tracking
 const state = {
     automation: false,
@@ -293,19 +291,4 @@ async function sendExpiryWarnings() {
         }
     }
 }
-// ✅ Run every day at 3 AM to refresh expiring media
-const startTemplateMediaPreWarmJob = () => {
-    node_cron_1.default.schedule('0 3 * * *', async () => {
-        console.log('⏰ [CRON] Starting template media pre-warm job...');
-        try {
-            const result = await templateMediaPreWarm_service_1.templateMediaPreWarmService.preWarmExpiringMedia();
-            console.log(`✅ [CRON] Pre-warm done:`, result);
-        }
-        catch (err) {
-            console.error('❌ [CRON] Pre-warm failed:', err.message);
-        }
-    });
-    console.log('⏰ Scheduled: Template media pre-warm (daily at 3 AM)');
-};
-exports.startTemplateMediaPreWarmJob = startTemplateMediaPreWarmJob;
 //# sourceMappingURL=scheduler.service.js.map

@@ -1,7 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 declare class TemplatesController {
-    private getDefaultAccountId;
-    private getWabaIdForAccount;
     create(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     getList(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     getById(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
@@ -18,6 +16,7 @@ declare class TemplatesController {
     uploadToMeta(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     reuploadMedia(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     fixMedia(req: any, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    uploadMedia(req: any, res: Response, next: NextFunction): Promise<void>;
 }
 export declare const templatesController: TemplatesController;
 export default templatesController;

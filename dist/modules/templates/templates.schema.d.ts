@@ -448,49 +448,81 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
         sortOrder: z.ZodOptional<z.ZodEnum<["asc", "desc"]>>;
         whatsappAccountId: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
-        limit: number;
         page: number;
+        limit: number;
         search?: string | undefined;
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "desc" | "asc" | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     }, {
         search?: string | undefined;
-        limit?: string | undefined;
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         page?: string | undefined;
+        limit?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "desc" | "asc" | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
     query?: {
-        limit: number;
         page: number;
+        limit: number;
         search?: string | undefined;
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "desc" | "asc" | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     } | undefined;
 }, {
     query?: {
         search?: string | undefined;
-        limit?: string | undefined;
-        status?: "APPROVED" | "PENDING" | "REJECTED" | undefined;
+        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         page?: string | undefined;
+        limit?: string | undefined;
         sortBy?: string | undefined;
-        sortOrder?: "desc" | "asc" | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     } | undefined;
+}>;
+export declare const uploadToMetaSchema: z.ZodObject<{
+    body: z.ZodObject<{
+        cloudinaryUrl: z.ZodString;
+        mimeType: z.ZodOptional<z.ZodString>;
+        filename: z.ZodOptional<z.ZodString>;
+        whatsappAccountId: z.ZodOptional<z.ZodString>;
+    }, "strip", z.ZodTypeAny, {
+        cloudinaryUrl: string;
+        whatsappAccountId?: string | undefined;
+        filename?: string | undefined;
+        mimeType?: string | undefined;
+    }, {
+        cloudinaryUrl: string;
+        whatsappAccountId?: string | undefined;
+        filename?: string | undefined;
+        mimeType?: string | undefined;
+    }>;
+}, "strip", z.ZodTypeAny, {
+    body: {
+        cloudinaryUrl: string;
+        whatsappAccountId?: string | undefined;
+        filename?: string | undefined;
+        mimeType?: string | undefined;
+    };
+}, {
+    body: {
+        cloudinaryUrl: string;
+        whatsappAccountId?: string | undefined;
+        filename?: string | undefined;
+        mimeType?: string | undefined;
+    };
 }>;
 //# sourceMappingURL=templates.schema.d.ts.map

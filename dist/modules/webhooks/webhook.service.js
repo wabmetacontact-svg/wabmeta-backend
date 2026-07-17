@@ -388,25 +388,41 @@ class WebhookService {
     // -----------------------------
     // Template webhook processing
     // -----------------------------
+    async handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason) {
+        const template = await database_1.default.template.findFirst({
+            where: { metaTemplateId },
+        });
+        if (!template) {
+            console.warn(`⚠️ Webhook: Template not found: ${metaTemplateId}`);
+            return;
+        }
+        // ✅ Sirf status update karo - headerContent mat touch karo
+        await database_1.default.template.update({
+            where: { id: template.id },
+            data: {
+                status: newStatus,
+                rejectionReason: rejectionReason || null,
+                // ✅ headerContent (Cloudinary URL) NEVER overwrite karo from webhook
+                // Meta webhook mein media URL scontent hota hai (expires)
+            },
+        });
+        console.log(`✅ Webhook: Template ${metaTemplateId} → ${newStatus}`);
+    }
     async handleTemplateUpdate(payload, value) {
         try {
-            const wabaId = payload.entry[0].id;
-            const event = value.event;
-            const templateName = value.message_template_name;
-            console.log(`🔄 Template update webhook received [${event}] for template: ${templateName} (WABA: ${wabaId})`);
-            const account = await database_1.default.whatsAppAccount.findFirst({
-                where: { wabaId },
-                select: { id: true, organizationId: true },
-            });
-            if (account) {
-                const { metaService } = await Promise.resolve().then(() => __importStar(require('../meta/meta.service')));
-                console.log(`📡 Triggering background template sync for Org: ${account.organizationId}`);
-                metaService.syncTemplates(account.id, account.organizationId).catch(e => {
-                    console.error('❌ Background template sync failed:', e);
-                });
-            }
-            else {
-                console.log(`⚠️ No account found associated with WABA ID: ${wabaId}`);
+            const metaTemplateId = String(value.message_template_id || '');
+            const event = String(value.event || '').toUpperCase();
+            const rejectionReason = value.reason || value.rejection_reason || undefined;
+            console.log(`🔄 Template update webhook received [${event}] for template ID: ${metaTemplateId}`);
+            if (metaTemplateId) {
+                let newStatus = 'PENDING';
+                if (event === 'APPROVED')
+                    newStatus = 'APPROVED';
+                else if (event === 'REJECTED')
+                    newStatus = 'REJECTED';
+                else if (event === 'PAUSED')
+                    newStatus = 'PAUSED';
+                await this.handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason);
             }
         }
         catch (e) {

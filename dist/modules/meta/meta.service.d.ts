@@ -45,13 +45,9 @@ export declare class MetaService {
     }>;
     refreshAccountHealth(accountId: string, organizationId: string): Promise<{
         healthy: boolean;
-        qualityRating: string;
-        verifiedName: string;
-        displayPhoneNumber: string;
-        status: string | undefined;
-        codeVerificationStatus: string | undefined;
-        nameStatus: string | undefined;
-        messagingLimit: string | undefined;
+        qualityRating: any;
+        verifiedName: any;
+        messagingLimit: any;
         reason?: undefined;
         action?: undefined;
     } | {
@@ -60,10 +56,6 @@ export declare class MetaService {
         action: string;
         qualityRating?: undefined;
         verifiedName?: undefined;
-        displayPhoneNumber?: undefined;
-        status?: undefined;
-        codeVerificationStatus?: undefined;
-        nameStatus?: undefined;
         messagingLimit?: undefined;
     }>;
     syncTemplates(accountId: string, organizationId: string): Promise<{

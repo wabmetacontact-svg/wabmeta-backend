@@ -8,7 +8,7 @@ exports.metaController = exports.MetaController = void 0;
 const errorHandler_1 = require("../../middleware/errorHandler");
 const response_1 = require("../../utils/response");
 const database_1 = __importDefault(require("../../config/database"));
-const client_1 = require("@prisma/client");
+const meta_service_1 = require("./meta.service");
 // Helper to safely get organization ID from headers
 const getOrgId = (req) => {
     const header = req.headers['x-organization-id'];
@@ -85,21 +85,8 @@ class MetaController {
             if (!membership) {
                 throw new errorHandler_1.AppError('You do not have permission to disconnect', 403);
             }
-            await database_1.default.whatsAppAccount.update({
-                where: { id },
-                data: { status: 'DISCONNECTED' },
-            });
-            // Also disconnect MetaConnection if exists
-            try {
-                await database_1.default.metaConnection.update({
-                    where: { organizationId },
-                    data: { status: 'DISCONNECTED' },
-                });
-            }
-            catch (e) {
-                console.log('⚠️ MetaConnection not updated (may not exist)');
-            }
-            return (0, response_1.sendSuccess)(res, { success: true }, 'Account disconnected successfully');
+            const result = await meta_service_1.metaService.disconnectAccount(id, organizationId);
+            return (0, response_1.sendSuccess)(res, result, 'Account disconnected successfully');
         }
         catch (error) {
             next(error);
@@ -137,173 +124,6 @@ class MetaController {
         }
         catch (error) {
             next(error);
-        }
-    }
-    // ============================================
-    // WEBHOOK VERIFICATION (META REQUIREMENT)
-    // ============================================
-    async verifyWebhook(req, res, next) {
-        try {
-            const mode = req.query['hub.mode'];
-            const token = req.query['hub.verify_token'];
-            const challenge = req.query['hub.challenge'];
-            const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN;
-            console.log('📞 Webhook verification request:', {
-                mode,
-                token: token ? '***' : 'missing',
-                challenge: challenge ? 'present' : 'missing',
-            });
-            if (mode === 'subscribe' && token === verifyToken) {
-                console.log('✅ Webhook verified successfully');
-                res.status(200).send(challenge);
-            }
-            else {
-                console.error('❌ Webhook verification failed');
-                res.sendStatus(403);
-            }
-        }
-        catch (error) {
-            console.error('❌ Webhook verification error:', error);
-            res.sendStatus(500);
-        }
-    }
-    // ============================================
-    // WEBHOOK HANDLER - ✅ COMPLETE WITH STATUS UPDATES
-    // ============================================
-    async handleWebhook(req, res) {
-        try {
-            const body = req.body;
-            console.log('\n📨 ========== WEBHOOK RECEIVED ==========');
-            console.log(JSON.stringify(body, null, 2));
-            // Acknowledge receipt immediately (Meta requirement)
-            res.sendStatus(200);
-            // Process webhook asynchronously
-            const entry = body?.entry;
-            if (!Array.isArray(entry) || entry.length === 0) {
-                console.warn('⚠️ Invalid webhook payload - no entries');
-                return;
-            }
-            for (const item of entry) {
-                const changes = item.changes || [];
-                for (const change of changes) {
-                    const field = change.field;
-                    const value = change.value;
-                    // ✅ HANDLE MESSAGE STATUS UPDATES
-                    if (field === 'messages' && value.statuses && Array.isArray(value.statuses)) {
-                        for (const statusUpdate of value.statuses) {
-                            console.log('📦 STATUS UPDATE:', {
-                                id: statusUpdate.id,
-                                status: statusUpdate.status,
-                                recipient_id: statusUpdate.recipient_id,
-                                timestamp: statusUpdate.timestamp,
-                                errors: statusUpdate.errors,
-                            });
-                            try {
-                                // Map Meta status to our MessageStatus enum
-                                let dbStatus = client_1.MessageStatus.SENT;
-                                let deliveredAt;
-                                let readAt;
-                                let failedAt;
-                                const metaStatus = statusUpdate.status;
-                                const timestamp = new Date(Number(statusUpdate.timestamp) * 1000);
-                                switch (metaStatus) {
-                                    case 'sent':
-                                        dbStatus = client_1.MessageStatus.SENT;
-                                        break;
-                                    case 'delivered':
-                                        dbStatus = client_1.MessageStatus.DELIVERED;
-                                        deliveredAt = timestamp;
-                                        break;
-                                    case 'read':
-                                        dbStatus = client_1.MessageStatus.READ;
-                                        readAt = timestamp;
-                                        break;
-                                    case 'failed':
-                                        dbStatus = client_1.MessageStatus.FAILED;
-                                        failedAt = timestamp;
-                                        break;
-                                    default:
-                                        console.warn(`⚠️ Unknown status: ${metaStatus}`);
-                                }
-                                // Extract failure reason if failed
-                                const failureReason = statusUpdate.errors?.[0]?.message || null;
-                                // ✅ Update Message in DB
-                                const updateData = {
-                                    status: dbStatus,
-                                };
-                                if (deliveredAt)
-                                    updateData.deliveredAt = deliveredAt;
-                                if (readAt)
-                                    updateData.readAt = readAt;
-                                if (failedAt)
-                                    updateData.failedAt = failedAt;
-                                if (failureReason)
-                                    updateData.failureReason = failureReason;
-                                const updated = await database_1.default.message.updateMany({
-                                    where: {
-                                        OR: [
-                                            { wamId: statusUpdate.id },
-                                            { waMessageId: statusUpdate.id },
-                                        ],
-                                    },
-                                    data: updateData,
-                                });
-                                if (updated.count > 0) {
-                                    console.log(`✅ Updated ${updated.count} message(s) to status: ${dbStatus}`);
-                                }
-                                else {
-                                    console.warn(`⚠️ No message found with ID: ${statusUpdate.id}`);
-                                }
-                                // ✅ Update CampaignContact status if this is a campaign message
-                                if (updated.count > 0) {
-                                    await database_1.default.campaignContact.updateMany({
-                                        where: { waMessageId: statusUpdate.id },
-                                        data: {
-                                            status: dbStatus,
-                                            deliveredAt,
-                                            readAt,
-                                            failedAt,
-                                            failureReason,
-                                        },
-                                    });
-                                }
-                            }
-                            catch (dbError) {
-                                console.error('❌ DB update error:', dbError.message);
-                            }
-                        }
-                    }
-                    // ✅ HANDLE INCOMING MESSAGES
-                    if (field === 'messages' && value.messages && Array.isArray(value.messages)) {
-                        for (const message of value.messages) {
-                            console.log('📩 INCOMING MESSAGE:', {
-                                id: message.id,
-                                from: message.from,
-                                type: message.type,
-                                timestamp: message.timestamp,
-                            });
-                            // TODO: Process incoming message
-                            // This would create a new Message record with direction: INBOUND
-                            // await this.processIncomingMessage(message, value.metadata);
-                        }
-                    }
-                    // ✅ HANDLE TEMPLATE STATUS UPDATES
-                    if (field === 'message_template_status_update') {
-                        console.log('📋 TEMPLATE STATUS UPDATE:', {
-                            messageTemplateId: value.message_template_id,
-                            event: value.event,
-                        });
-                        // TODO: Update template status in DB
-                        // await this.updateTemplateStatus(value);
-                    }
-                }
-            }
-            console.log('📨 ========== WEBHOOK PROCESSED ==========\n');
-        }
-        catch (error) {
-            console.error('❌ Webhook processing error:', error);
-            // Still return 200 to Meta to prevent retries
-            res.sendStatus(200);
         }
     }
 }

@@ -1,19 +1,17 @@
 import { Server as SocketServer } from 'socket.io';
 export declare const initializeCampaignSocket: (socketServer: SocketServer) => void;
 declare class CampaignSocketService {
+    private emit;
+    private getRooms;
     emitCampaignUpdate(organizationId: string, campaignId: string, data: {
         status: string;
-        message: string;
+        message?: string;
         totalContacts?: number;
         sentCount?: number;
         deliveredCount?: number;
         readCount?: number;
         failedCount?: number;
     }): void;
-    /**
-     * ✅ CRITICAL FIX: Progress emit with proper capped values
-     * Backend sends CUMULATIVE numbers (sent = actually sent + delivered + read)
-     */
     emitCampaignProgress(organizationId: string, campaignId: string, data: {
         sent: number;
         failed: number;
@@ -29,10 +27,6 @@ declare class CampaignSocketService {
         status: string;
         messageId?: string;
         error?: string;
-        sentAt?: string;
-        deliveredAt?: string;
-        readAt?: string;
-        failedAt?: string;
     }): void;
     emitCampaignCompleted(organizationId: string, campaignId: string, stats: {
         sentCount: number;
@@ -46,7 +40,6 @@ declare class CampaignSocketService {
         code?: string;
     }): void;
     emitCsvUploadProgress(userId: string, data: any): void;
-    emitContactValidation(userId: string, data: any): void;
     isInitialized(): boolean;
     getIO(): SocketServer | null;
 }

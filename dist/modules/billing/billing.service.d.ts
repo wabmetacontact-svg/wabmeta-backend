@@ -54,8 +54,8 @@ declare class BillingService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            isActive: boolean;
             slug: string;
+            isActive: boolean;
             description: string | null;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -80,7 +80,6 @@ declare class BillingService {
         createdAt: Date;
         updatedAt: Date;
         messagesUsed: number;
-        planId: string;
         billingCycle: string;
         currentPeriodStart: Date;
         currentPeriodEnd: Date;
@@ -89,6 +88,7 @@ declare class BillingService {
         lastPaymentAt: Date | null;
         nextPaymentAt: Date | null;
         cancelledAt: Date | null;
+        planId: string;
     }>;
     getPlans(): Promise<{
         features: string[];
@@ -121,8 +121,8 @@ declare class BillingService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        isActive: boolean;
         slug: string;
+        isActive: boolean;
         description: string | null;
         maxContacts: number;
         maxMessages: number;
@@ -189,7 +189,6 @@ declare class BillingService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -198,6 +197,7 @@ declare class BillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         };
         plan: {
             name: string;
@@ -205,8 +205,8 @@ declare class BillingService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            isActive: boolean;
             slug: string;
+            isActive: boolean;
             description: string | null;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -239,7 +239,6 @@ declare class BillingService {
         createdAt: Date;
         updatedAt: Date;
         messagesUsed: number;
-        planId: string;
         billingCycle: string;
         currentPeriodStart: Date;
         currentPeriodEnd: Date;
@@ -248,6 +247,7 @@ declare class BillingService {
         lastPaymentAt: Date | null;
         nextPaymentAt: Date | null;
         cancelledAt: Date | null;
+        planId: string;
     }>;
     cancelSubscription(organizationId: string, reason?: string): Promise<{
         message: string;
@@ -258,7 +258,6 @@ declare class BillingService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -267,6 +266,7 @@ declare class BillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         };
     }>;
     resumeSubscription(organizationId: string): Promise<{
@@ -276,7 +276,6 @@ declare class BillingService {
         createdAt: Date;
         updatedAt: Date;
         messagesUsed: number;
-        planId: string;
         billingCycle: string;
         currentPeriodStart: Date;
         currentPeriodEnd: Date;
@@ -285,6 +284,7 @@ declare class BillingService {
         lastPaymentAt: Date | null;
         nextPaymentAt: Date | null;
         cancelledAt: Date | null;
+        planId: string;
     }>;
     getInvoices(organizationId: string, limit?: number, offset?: number): Promise<any[]>;
     getInvoice(invoiceId: string, organizationId: string): Promise<any>;
@@ -303,8 +303,8 @@ declare class BillingService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                isActive: boolean;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -330,7 +330,6 @@ declare class BillingService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -339,6 +338,7 @@ declare class BillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         };
         daysRemaining: number;
         message?: undefined;

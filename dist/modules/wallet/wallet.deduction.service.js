@@ -275,38 +275,12 @@ function getRateForCategory(category, recipientPhone, language) {
     return rates.marketing; // Default fallback
 }
 // ─── Get country name for logging/display ─────────────────────────────────────
-const COUNTRY_NAMES = {
-    '93': 'Afghanistan', '355': 'Albania', '213': 'Algeria', '244': 'Angola',
-    '54': 'Argentina', '374': 'Armenia', '61': 'Australia', '43': 'Austria',
-    '994': 'Azerbaijan', '973': 'Bahrain', '880': 'Bangladesh', '375': 'Belarus',
-    '32': 'Belgium', '229': 'Benin', '591': 'Bolivia', '267': 'Botswana',
-    '55': 'Brazil', '359': 'Bulgaria', '226': 'Burkina Faso', '257': 'Burundi',
-    '855': 'Cambodia', '237': 'Cameroon', '235': 'Chad', '56': 'Chile',
-    '86': 'China', '57': 'Colombia', '506': 'Costa Rica', '385': 'Croatia',
-    '420': 'Czech Republic', '45': 'Denmark',
-    '1809': 'Dominican Republic', '1829': 'Dominican Republic', '1849': 'Dominican Republic',
-    '593': 'Ecuador', '20': 'Egypt',
-    '503': 'El Salvador', '291': 'Eritrea', '251': 'Ethiopia', '358': 'Finland',
-    '33': 'France', '49': 'Germany', '30': 'Greece', '502': 'Guatemala',
-    '509': 'Haiti', '852': 'Hong Kong', '36': 'Hungary', '91': 'India',
-    '62': 'Indonesia', '964': 'Iraq', '353': 'Ireland', '972': 'Israel',
-    '39': 'Italy', '81': 'Japan', '962': 'Jordan', '254': 'Kenya',
-    '965': 'Kuwait', '856': 'Laos', '961': 'Lebanon', '60': 'Malaysia',
-    '52': 'Mexico', '977': 'Nepal', '31': 'Netherlands', '64': 'New Zealand',
-    '234': 'Nigeria', '47': 'Norway', '968': 'Oman', '92': 'Pakistan',
-    '51': 'Peru', '63': 'Philippines', '48': 'Poland', '351': 'Portugal',
-    '974': 'Qatar', '40': 'Romania', '7': 'Russia', '966': 'Saudi Arabia',
-    '65': 'Singapore', '27': 'South Africa', '34': 'Spain', '94': 'Sri Lanka',
-    '46': 'Sweden', '41': 'Switzerland', '886': 'Taiwan', '66': 'Thailand',
-    '90': 'Turkey', '971': 'UAE', '44': 'UK', '1': 'USA/Canada',
-    '84': 'Vietnam', '967': 'Yemen', '263': 'Zimbabwe',
-};
 function getCountryName(phone) {
     const digits = phone.replace(/\D/g, '').replace(/^0+/, '');
     for (const len of [4, 3, 2, 1]) {
         const prefix = digits.slice(0, len);
-        if (COUNTRY_NAMES[prefix])
-            return COUNTRY_NAMES[prefix];
+        if (exports.COUNTRY_NAMES_MAP[prefix])
+            return exports.COUNTRY_NAMES_MAP[prefix];
     }
     return 'Unknown';
 }
@@ -318,63 +292,53 @@ async function deductWalletForTemplate(params) {
             const wallet = await tx.wallet.findUnique({
                 where: { organizationId },
             });
-            // Wallet nahi hai → Skip (Meta khud charge karega)
             if (!wallet) {
-                return {
-                    deducted: false,
-                    walletUsed: false,
-                    amount: 0,
-                    reason: 'No wallet found - Meta will charge directly',
-                };
+                return { deducted: false, walletUsed: false, amount: 0,
+                    reason: 'No wallet - Meta charges directly' };
             }
-            // Flagged wallet → Skip
             if (wallet.flagged) {
-                return {
-                    deducted: false,
-                    walletUsed: false,
-                    amount: 0,
-                    reason: 'Wallet is flagged',
-                };
+                return { deducted: false, walletUsed: false, amount: 0,
+                    reason: 'Wallet flagged' };
             }
-            // ── 1. Get Template Category (from DB if not provided) ─────────────────
+            if (!wallet.isActive) {
+                return { deducted: false, walletUsed: false, amount: 0,
+                    reason: 'Wallet inactive' };
+            }
             let category = templateCategory;
             if (!category) {
-                const template = await tx.template.findFirst({
+                const tpl = await tx.template.findFirst({
                     where: { organizationId, name: templateName },
                     select: { category: true },
                 });
-                category = template?.category || 'MARKETING';
+                category = tpl?.category || 'MARKETING';
             }
-            // ── 2. Calculate Country-wise Rate ─────────────────────────────────────
             const rateRupees = getRateForCategory(category, recipientPhone, templateLanguage);
             const amountPaise = Math.round(rateRupees * 100);
             const countryName = templateLanguage && exports.LANGUAGE_TO_PREFIX[templateLanguage]
-                ? (COUNTRY_NAMES[exports.LANGUAGE_TO_PREFIX[templateLanguage]] || getCountryName(recipientPhone))
+                ? (exports.COUNTRY_NAMES_MAP[exports.LANGUAGE_TO_PREFIX[templateLanguage]] || getCountryName(recipientPhone))
                 : getCountryName(recipientPhone);
-            // ── 3. Check Available Balance ─────────────────────────────────────────
-            const availablePaise = wallet.balancePaise +
-                (wallet.creditEnabled
-                    ? wallet.creditLimitPaise - wallet.creditUsedPaise
-                    : 0);
+            const creditHeadroom = wallet.creditEnabled
+                ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+                : 0;
+            const availablePaise = wallet.balancePaise + creditHeadroom;
             const availableRupees = availablePaise / 100;
             if (availablePaise < amountPaise || availableRupees <= 20) {
                 await triggerLowBalanceAlert(wallet);
-                const reason = availableRupees <= 20
-                    ? `Wallet balance very low (₹${availableRupees.toFixed(2)}). Minimum ₹20.00 required.`
-                    : `Insufficient wallet balance (₹${availableRupees.toFixed(2)} available, ₹${rateRupees} needed)`;
                 return {
                     deducted: false,
                     walletUsed: false,
                     amount: rateRupees,
-                    reason,
+                    reason: availableRupees <= 20
+                        ? `Balance too low (₹${availableRupees.toFixed(2)}). Min ₹20 required.`
+                        : `Insufficient balance (₹${availableRupees.toFixed(2)} < ₹${rateRupees})`,
                 };
             }
-            // ── 4. Deduct Balance ──────────────────────────────────────────────────
             const balanceBeforePaise = wallet.balancePaise;
             let newBalancePaise;
-            let creditDeductedPaise = 0;
+            let creditDeductedPaise;
             if (wallet.balancePaise >= amountPaise) {
                 newBalancePaise = wallet.balancePaise - amountPaise;
+                creditDeductedPaise = 0;
             }
             else {
                 creditDeductedPaise = amountPaise - wallet.balancePaise;
@@ -386,7 +350,6 @@ async function deductWalletForTemplate(params) {
                 : campaignId
                     ? `Campaign charge - ${categoryLabel} [${countryName}] (${templateName}) → ${recipientPhone}`
                     : `Template charge - ${categoryLabel} [${countryName}] (${templateName}) → ${recipientPhone}`;
-            // Update wallet balance
             await tx.wallet.update({
                 where: { id: wallet.id },
                 data: {
@@ -396,7 +359,6 @@ async function deductWalletForTemplate(params) {
                     lastTransactionAt: new Date(),
                 },
             });
-            // Create transaction record
             await tx.walletTransaction.create({
                 data: {
                     walletId: wallet.id,
@@ -409,7 +371,7 @@ async function deductWalletForTemplate(params) {
                     metaChargeId: waMessageId,
                     metaService: 'template_message',
                     note: automationId
-                        ? `Automation trigger: ${automationName || automationId}`
+                        ? `Automation: ${automationName || automationId}`
                         : campaignName
                             ? `Campaign: ${campaignName}`
                             : campaignId
@@ -417,41 +379,32 @@ async function deductWalletForTemplate(params) {
                                 : undefined,
                 },
             });
-            // ── 5. Check Low Balance After Deduction ───────────────────────────────
             if (newBalancePaise < wallet.lowThresholdPaise) {
-                const updatedWallet = { ...wallet, balancePaise: newBalancePaise };
-                await triggerLowBalanceAlert(updatedWallet);
+                const updated = { ...wallet, balancePaise: newBalancePaise };
+                await triggerLowBalanceAlert(updated);
             }
-            console.log(`💳 Wallet deducted: ₹${rateRupees} (${categoryLabel}) [${countryName}] for ${templateName} → ${recipientPhone}`);
-            return {
-                deducted: true,
-                walletUsed: true,
-                amount: rateRupees,
-            };
+            return { deducted: true, walletUsed: true, amount: rateRupees };
+        }, {
+            // ✅ FIX Bug2: Add timeout to prevent hanging transactions
+            timeout: 10000,
         });
     }
     catch (error) {
-        // Silent fail - don't block message sending if wallet deduction fails
         console.error('❌ Wallet deduction error (non-blocking):', error.message);
-        return {
-            deducted: false,
-            walletUsed: false,
-            amount: 0,
-            reason: `Deduction error: ${error.message}`,
-        };
+        return { deducted: false, walletUsed: false, amount: 0,
+            reason: `Error: ${error.message}` };
     }
 }
 // ─── Bulk Pre-check for Campaign ──────────────────────────────────────────────
 // NOTE: Campaign bulk deduction uses average of recipient countries
 // For pre-check we use the flat rate estimate (safe upper bound check)
 async function deductWalletForCampaign(params) {
-    const { organizationId, templateName, templateCategory, templateLanguage, totalRecipients, campaignId, recipientPhones } = params;
+    const { organizationId, templateName, templateCategory, templateLanguage, totalRecipients, campaignId, recipientPhones, } = params;
     const wallet = await database_1.default.wallet.findUnique({
         where: { organizationId },
     });
-    // Wallet record hi nahi → Proceed (Meta charges directly)
+    // No wallet → Meta charges directly
     if (!wallet) {
-        console.log(`💳 [deductWalletForCampaign] No wallet found for org: ${organizationId} → skipping`);
         return {
             canProceed: true,
             estimatedCost: 0,
@@ -461,9 +414,8 @@ async function deductWalletForCampaign(params) {
             rateUsed: 0,
         };
     }
-    // Wallet flagged → Skip
+    // Flagged wallet → Skip deduction
     if (wallet.flagged) {
-        console.log(`💳 [deductWalletForCampaign] Wallet is FLAGGED for org: ${organizationId} → skipping`);
         return {
             canProceed: true,
             estimatedCost: 0,
@@ -473,10 +425,19 @@ async function deductWalletForCampaign(params) {
             rateUsed: 0,
         };
     }
-    // NOTE: We intentionally do NOT check wallet.isActive here.
-    // If a wallet record exists and is not flagged, we charge it.
-    // isActive is just a UI/access flag; the deduction logic should always run
-    // so that campaign costs are tracked regardless of UI state.
+    // ✅ FIX Bug1: isActive check added
+    // Inactive wallet = no charges, but also no block
+    if (!wallet.isActive) {
+        console.log(`💳 [deductWalletForCampaign] Wallet inactive for org: ${organizationId} → skipping`);
+        return {
+            canProceed: true,
+            estimatedCost: 0,
+            availableBalance: 0,
+            shortfall: 0,
+            walletActive: false,
+            rateUsed: 0,
+        };
+    }
     // Get template category
     let category = templateCategory;
     if (!category) {
@@ -486,43 +447,41 @@ async function deductWalletForCampaign(params) {
         });
         category = template?.category || 'MARKETING';
     }
-    // ── Compute effective rate ─────────────────────────────────────────────────
+    // Compute rate
     let rateRupees;
-    // 1. If language is provided, use it for the whole campaign estimate
     if (templateLanguage && exports.LANGUAGE_TO_PREFIX[templateLanguage]) {
         rateRupees = getRateForCategory(category, undefined, templateLanguage);
     }
-    // 2. Otherwise, if we have sample phones, use them
-    else if (recipientPhones && recipientPhones.length > 0) {
-        const totalRate = recipientPhones.reduce((sum, phone) => {
-            return sum + getRateForCategory(category, phone);
-        }, 0);
-        rateRupees = totalRate / recipientPhones.length;
+    else if (recipientPhones?.length) {
+        const total = recipientPhones.reduce((sum, p) => sum + getRateForCategory(category, p), 0);
+        rateRupees = total / recipientPhones.length;
     }
-    // 3. Fallback to India rate
     else {
         rateRupees = getRateForCategory(category);
     }
     const estimatedCostRupees = rateRupees * totalRecipients;
     const estimatedCostPaise = Math.round(estimatedCostRupees * 100);
-    const availablePaise = wallet.balancePaise +
-        (wallet.creditEnabled
-            ? wallet.creditLimitPaise - wallet.creditUsedPaise
-            : 0);
+    const creditHeadroom = wallet.creditEnabled
+        ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+        : 0;
+    const availablePaise = wallet.balancePaise + creditHeadroom;
     const availableRupees = availablePaise / 100;
     const shortfallPaise = Math.max(0, estimatedCostPaise - availablePaise);
     const shortfallRupees = shortfallPaise / 100;
-    // Hard block only when balance is ≤ ₹20
-    const hasMinimumBalance = availableRupees > 20;
+    const hasMinBalance = availableRupees > 20;
+    const canProceed = availablePaise >= estimatedCostPaise && hasMinBalance;
     console.log(`💳 [deductWalletForCampaign] org=${organizationId} ` +
-        `available=₹${availableRupees.toFixed(2)} estimatedCost=₹${estimatedCostRupees.toFixed(2)} ` +
-        `rate=₹${rateRupees.toFixed(4)} recipients=${totalRecipients}`);
+        `available=₹${availableRupees.toFixed(2)} ` +
+        `estimated=₹${estimatedCostRupees.toFixed(2)} ` +
+        `rate=₹${rateRupees.toFixed(4)} ` +
+        `recipients=${totalRecipients} ` +
+        `canProceed=${canProceed}`);
     return {
-        canProceed: availablePaise >= estimatedCostPaise && hasMinimumBalance,
+        canProceed,
         estimatedCost: estimatedCostRupees,
         availableBalance: availableRupees,
         shortfall: shortfallRupees,
-        walletActive: true, // ← wallet exists → always true (we'll deduct what we can)
+        walletActive: true,
         rateUsed: rateRupees,
     };
 }

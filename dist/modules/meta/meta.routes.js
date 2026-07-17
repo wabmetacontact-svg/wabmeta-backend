@@ -1,18 +1,53 @@
 "use strict";
 // 📁 src/modules/meta/meta.routes.ts - COMPLETE FINAL VERSION
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const crypto_1 = __importDefault(require("crypto"));
 const meta_controller_1 = require("./meta.controller");
+const redis_1 = require("../../config/redis");
+const redis = (0, redis_1.getRedis)();
 const auth_1 = require("../../middleware/auth");
 const meta_service_1 = require("./meta.service");
 const response_1 = require("../../utils/response");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
 const connectionLock_1 = require("../../middleware/connectionLock");
-const client_1 = require("@prisma/client");
 const config_1 = require("../../config");
 const router = (0, express_1.Router)();
 // ============================================
@@ -40,158 +75,173 @@ router.get('/webhook', (req, res) => {
         res.sendStatus(403);
     }
 });
+const verifyMetaSignature = (req) => {
+    const signature = req.headers['x-hub-signature-256'];
+    if (!signature)
+        return false;
+    const appSecret = config_1.config.meta.appSecret;
+    if (!appSecret)
+        return false;
+    const rawBody = req.rawBody;
+    if (!rawBody)
+        return false;
+    try {
+        const expectedSig = `sha256=${crypto_1.default
+            .createHmac('sha256', appSecret)
+            .update(rawBody)
+            .digest('hex')}`;
+        const sigBuffer = Buffer.from(signature);
+        const expectedBuffer = Buffer.from(expectedSig);
+        if (sigBuffer.length !== expectedBuffer.length) {
+            return false;
+        }
+        return crypto_1.default.timingSafeEqual(sigBuffer, expectedBuffer);
+    }
+    catch {
+        return false;
+    }
+};
 /**
  * POST /webhook - Handle incoming webhook events
  */
-router.post('/webhook', async (req, res) => {
+router.post('/webhook', (req, res, next) => {
+    if (!verifyMetaSignature(req)) {
+        console.error('❌ Invalid webhook signature');
+        return res.sendStatus(403);
+    }
+    next();
+}, async (req, res) => {
+    // ✅ STEP 1: Pehle 200 do (Meta requirement - 20 sec timeout)
+    res.sendStatus(200);
     try {
         const body = req.body;
-        console.log('\n📨 ========== WEBHOOK RECEIVED ==========');
-        console.log(JSON.stringify(body, null, 2));
-        // Acknowledge receipt immediately (Meta requirement)
-        res.sendStatus(200);
         const entry = body?.entry;
-        if (!Array.isArray(entry) || entry.length === 0) {
-            console.warn('⚠️ Invalid webhook payload - no entries');
+        if (!Array.isArray(entry) || entry.length === 0)
             return;
-        }
         for (const item of entry) {
-            const changes = item.changes || [];
-            for (const change of changes) {
-                const field = change.field;
+            for (const change of (item.changes || [])) {
                 const value = change.value;
-                // ✅ HANDLE MESSAGE STATUS UPDATES
-                if (field === 'messages' && value.statuses && Array.isArray(value.statuses)) {
+                const field = change.field;
+                // ✅ STEP 2: Message status updates
+                if (field === 'messages' && value?.statuses) {
                     for (const statusUpdate of value.statuses) {
-                        console.log('📦 WA STATUS UPDATE:', {
-                            id: statusUpdate.id,
-                            status: statusUpdate.status,
-                            recipient_id: statusUpdate.recipient_id,
-                            timestamp: statusUpdate.timestamp,
-                            errors: statusUpdate.errors,
-                        });
-                        try {
-                            let dbStatus = client_1.MessageStatus.SENT;
-                            let deliveredAt;
-                            let readAt;
-                            let failedAt;
-                            const metaStatus = statusUpdate.status;
-                            const timestamp = new Date(Number(statusUpdate.timestamp) * 1000);
-                            switch (metaStatus) {
-                                case 'sent':
-                                    dbStatus = client_1.MessageStatus.SENT;
-                                    break;
-                                case 'delivered':
-                                    dbStatus = client_1.MessageStatus.DELIVERED;
-                                    deliveredAt = timestamp;
-                                    break;
-                                case 'read':
-                                    dbStatus = client_1.MessageStatus.READ;
-                                    readAt = timestamp;
-                                    break;
-                                case 'failed':
-                                    dbStatus = client_1.MessageStatus.FAILED;
-                                    failedAt = timestamp;
-                                    break;
-                                default:
-                                    console.warn(`⚠️ Unknown status: ${metaStatus}`);
-                            }
-                            const failureReason = statusUpdate.errors?.[0]?.message || null;
-                            const updateData = {
-                                status: dbStatus,
-                            };
-                            if (deliveredAt)
-                                updateData.deliveredAt = deliveredAt;
-                            if (readAt)
-                                updateData.readAt = readAt;
-                            if (failedAt)
-                                updateData.failedAt = failedAt;
-                            if (failureReason)
-                                updateData.failureReason = failureReason;
-                            // Update Message
-                            const updated = await database_1.default.message.updateMany({
-                                where: {
-                                    OR: [
-                                        { wamId: statusUpdate.id },
-                                        { waMessageId: statusUpdate.id },
-                                    ],
-                                },
-                                data: updateData,
-                            });
-                            if (updated.count > 0) {
-                                console.log(`✅ Updated ${updated.count} message(s) to status: ${dbStatus}`);
-                                // Update CampaignContact
-                                await database_1.default.campaignContact.updateMany({
-                                    where: { waMessageId: statusUpdate.id },
-                                    data: {
-                                        status: dbStatus,
-                                        deliveredAt,
-                                        readAt,
-                                        failedAt,
-                                        failureReason,
-                                    },
-                                });
-                            }
-                            else {
-                                console.warn(`⚠️ No message found with ID: ${statusUpdate.id}`);
-                            }
+                        // ✅ Idempotency check
+                        const dedupKey = `webhook:status:${statusUpdate.id}:${statusUpdate.status}`;
+                        const alreadyProcessed = await redis.get(dedupKey);
+                        if (alreadyProcessed) {
+                            console.log(`⚠️ Duplicate webhook skipped: ${statusUpdate.id}`);
+                            continue;
                         }
-                        catch (dbError) {
-                            console.error('❌ DB update error:', dbError.message);
-                        }
+                        await redis.set(dedupKey, '1', 'EX', 86400);
+                        await processStatusUpdate(statusUpdate);
                     }
                 }
-                // ✅ HANDLE INCOMING MESSAGES
-                if (field === 'messages' && value.messages && Array.isArray(value.messages)) {
+                // ✅ STEP 3: Incoming messages
+                if (field === 'messages' && value?.messages) {
                     for (const message of value.messages) {
-                        console.log('📩 INCOMING MESSAGE:', {
-                            id: message.id,
-                            from: message.from,
-                            type: message.type,
-                            timestamp: message.timestamp,
-                        });
-                        // TODO: Process incoming message
+                        const dedupKey = `webhook:msg:${message.id}`;
+                        const exists = await redis.get(dedupKey);
+                        if (exists) {
+                            console.log(`⚠️ Duplicate message skipped: ${message.id}`);
+                            continue;
+                        }
+                        await redis.set(dedupKey, '1', 'EX', 86400);
+                        await processIncomingMessage(message, value.metadata);
                     }
                 }
-                // ✅ HANDLE TEMPLATE STATUS UPDATES
+                // ✅ STEP 4: Template status
                 if (field === 'message_template_status_update') {
-                    console.log('📋 TEMPLATE STATUS UPDATE:', {
-                        messageTemplateId: value.message_template_id,
-                        messageTemplateName: value.message_template_name,
-                        event: value.event,
-                        reason: value.reason,
-                    });
-                    try {
-                        const metaTemplateId = value.message_template_id?.toString();
-                        if (metaTemplateId) {
-                            let templateStatus = 'PENDING';
-                            if (value.event === 'APPROVED')
-                                templateStatus = 'APPROVED';
-                            if (value.event === 'REJECTED')
-                                templateStatus = 'REJECTED';
-                            await database_1.default.template.updateMany({
-                                where: { metaTemplateId },
-                                data: {
-                                    status: templateStatus,
-                                    rejectionReason: value.reason || null,
-                                },
-                            });
-                            console.log(`✅ Template ${metaTemplateId} updated to ${templateStatus}`);
-                        }
-                    }
-                    catch (templateError) {
-                        console.error('❌ Template update error:', templateError.message);
-                    }
+                    await processTemplateUpdate(value);
                 }
             }
         }
-        console.log('📨 ========== WEBHOOK PROCESSED ==========\n');
     }
     catch (error) {
         console.error('❌ Webhook processing error:', error);
-        res.sendStatus(200);
+        // Already sent 200, so just log
     }
 });
+// ✅ Extract processors as separate functions
+async function processStatusUpdate(statusUpdate) {
+    const metaStatus = statusUpdate.status;
+    const timestamp = new Date(Number(statusUpdate.timestamp) * 1000);
+    const statusMap = {
+        sent: { status: 'SENT' },
+        delivered: { status: 'DELIVERED', deliveredAt: timestamp },
+        read: { status: 'READ', readAt: timestamp },
+        failed: {
+            status: 'FAILED',
+            failedAt: timestamp,
+            failureReason: statusUpdate.errors?.[0]?.message || null
+        }
+    };
+    const updateData = statusMap[metaStatus];
+    if (!updateData)
+        return;
+    const updated = await database_1.default.message.updateMany({
+        where: {
+            OR: [
+                { wamId: statusUpdate.id },
+                { waMessageId: statusUpdate.id }
+            ]
+        },
+        data: updateData
+    });
+    if (updated.count > 0) {
+        // Campaign contact update
+        await database_1.default.campaignContact.updateMany({
+            where: { waMessageId: statusUpdate.id },
+            data: updateData
+        });
+        // ✅ Socket emit for real-time UI update
+        try {
+            const { webhookEvents } = await Promise.resolve().then(() => __importStar(require('../webhooks/webhook.service')));
+            webhookEvents.emit('messageStatusUpdated', {
+                waMessageId: statusUpdate.id,
+                status: updateData.status,
+                deliveredAt: updateData.deliveredAt,
+                readAt: updateData.readAt,
+                failedAt: updateData.failedAt,
+            });
+        }
+        catch (e) {
+            console.warn('⚠️ Failed to emit messageStatusUpdated socket event:', e);
+        }
+        console.log(`✅ Status updated: ${statusUpdate.id} → ${updateData.status}`);
+    }
+}
+async function processIncomingMessage(message, metadata) {
+    console.log('📩 INCOMING MESSAGE:', {
+        id: message.id,
+        from: message.from,
+        type: message.type,
+        timestamp: message.timestamp,
+    });
+    // TODO: Process incoming message
+}
+async function processTemplateUpdate(value) {
+    try {
+        const metaTemplateId = value.message_template_id?.toString();
+        if (metaTemplateId) {
+            let templateStatus = 'PENDING';
+            if (value.event === 'APPROVED')
+                templateStatus = 'APPROVED';
+            if (value.event === 'REJECTED')
+                templateStatus = 'REJECTED';
+            await database_1.default.template.updateMany({
+                where: { metaTemplateId },
+                data: {
+                    status: templateStatus,
+                    rejectionReason: value.reason || null,
+                },
+            });
+            console.log(`✅ Template ${metaTemplateId} updated to ${templateStatus}`);
+        }
+    }
+    catch (templateError) {
+        console.error('❌ Template update error:', templateError.message);
+    }
+}
 // ============================================
 // ============================================
 // PUBLIC OAUTH CALLBACKS
@@ -245,7 +295,11 @@ router.post('/connect', auth_1.authenticate, connectionLock_1.checkConnectionLoc
         );
         if (result.success) {
             console.log('✅ FB.login connection successful');
-            return (0, response_1.sendSuccess)(res, result.account, 'WhatsApp connected successfully');
+            return (0, response_1.sendSuccess)(res, {
+                account: result.account,
+                warning: result.warning,
+                message: result.message,
+            }, 'WhatsApp connected successfully');
         }
         else {
             console.error('❌ FB.login connection failed:', result.error);

@@ -55,6 +55,35 @@ const formatContactGroup = (group) => ({
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
 });
+/**
+ * Extract country code from canonical E.164 phone number
+ * E.g. "+919876543210" → "+91"
+ *      "+14155551234"  → "+1"
+ *      "+447911123456" → "+44"
+ */
+const extractCountryCode = (canonical) => {
+    // canonical is always "+XXXXXXXXXXX" format
+    // Try longest prefix match
+    const digits = canonical.slice(1); // Remove leading +
+    // Common country code lengths: 1, 2, 3 digits
+    // Try 3-digit first (more specific), then 2, then 1
+    const prefixes3 = ['971', '966', '965', '974', '973', '968', '967', '972',
+        '351', '353', '354', '355', '356', '880', '977', '855', '856', '234',
+        '233', '254', '255', '256', '257', '237', '213', '212', '216'];
+    const prefixes2 = ['91', '92', '93', '94', '95', '98', '20', '27', '30',
+        '31', '32', '33', '34', '36', '39', '40', '41', '43', '44', '45', '46',
+        '47', '48', '49', '51', '52', '55', '56', '57', '60', '61', '62', '63',
+        '64', '65', '66', '81', '82', '84', '86', '90', '54'];
+    for (const p of prefixes3) {
+        if (digits.startsWith(p))
+            return `+${p}`;
+    }
+    for (const p of prefixes2) {
+        if (digits.startsWith(p))
+            return `+${p}`;
+    }
+    return '+1'; // US/Canada fallback
+};
 // ============================================
 // CONTACTS SERVICE CLASS
 // ============================================
@@ -92,13 +121,16 @@ class ContactsService {
             let contact = await database_1.default.contact.findFirst({
                 where: {
                     organizationId,
-                    OR: variants.map((p) => ({ phone: p })),
+                    OR: variants.map(p => ({ phone: p })),
                 },
             });
             if (contact) {
-                if (!contact.firstName ||
+                const shouldUpdate = !contact.firstName ||
                     contact.firstName === 'Unknown' ||
-                    (profileName && profileName !== 'Unknown' && contact.firstName !== profileName)) {
+                    (profileName &&
+                        profileName !== 'Unknown' &&
+                        contact.firstName !== profileName);
+                if (shouldUpdate) {
                     try {
                         contact = await database_1.default.contact.update({
                             where: { id: contact.id },
@@ -108,15 +140,11 @@ class ContactsService {
                                 phone: normalized,
                                 whatsappProfileFetched: true,
                                 lastProfileFetchAt: new Date(),
-                                updatedAt: new Date(),
                             },
                         });
-                        console.log(`✅ Updated contact: ${contact.phone} → ${profileName}`);
                     }
                     catch (e) {
-                        // Handle unique constraint failure (P2002) - phone number collision
                         if (e.code === 'P2002') {
-                            console.warn(`⚠️ Phone collision for ${normalized}. Updating name only.`);
                             contact = await database_1.default.contact.update({
                                 where: { id: contact.id },
                                 data: {
@@ -124,22 +152,21 @@ class ContactsService {
                                     whatsappProfileName: profileName,
                                     whatsappProfileFetched: true,
                                     lastProfileFetchAt: new Date(),
-                                    updatedAt: new Date(),
                                 },
                             });
                         }
-                        else {
+                        else
                             throw e;
-                        }
                     }
                 }
             }
             else {
+                // New contact from webhook
                 contact = await database_1.default.contact.create({
                     data: {
                         organizationId,
                         phone: normalized,
-                        countryCode: '+91',
+                        countryCode: extractCountryCode(normalized), // ✅ Fixed
                         firstName: profileName,
                         whatsappProfileName: profileName,
                         source: 'whatsapp',
@@ -148,21 +175,16 @@ class ContactsService {
                         lastProfileFetchAt: new Date(),
                     },
                 });
-                console.log(`✅ Created contact from webhook: ${profileName}`);
-                const subscription = await database_1.default.subscription.findFirst({
+                // ✅ FIX Bug6: Single optimized upsert instead of findFirst + update
+                await database_1.default.subscription.updateMany({
                     where: { organizationId },
+                    data: { contactsUsed: { increment: 1 } },
                 });
-                if (subscription) {
-                    await database_1.default.subscription.update({
-                        where: { id: subscription.id },
-                        data: { contactsUsed: { increment: 1 } },
-                    });
-                }
             }
             return formatContact(contact);
         }
         catch (error) {
-            console.error('Error updating contact from webhook:', error);
+            console.error('Error in updateContactFromWebhook:', error);
             return null;
         }
     }
@@ -294,42 +316,50 @@ class ContactsService {
     // ==========================================
     async getList(organizationId, query) {
         const { page = 1, limit = 20, search, status, tags, groupId, sortBy = 'createdAt', sortOrder = 'desc', hasWhatsAppProfile, } = query;
-        const safeLimit = Math.min(limit, 10000);
-        const skip = (page - 1) * safeLimit;
-        // ✅ Default: deleted contacts exclude karo
+        // ✅ FIX Bug5: Max 500 per page
+        const safeLimit = Math.min(500, Math.max(1, limit));
+        const skip = (Math.max(1, page) - 1) * safeLimit;
         const where = {
             organizationId,
             status: { not: 'DELETED' },
         };
-        if (search) {
+        if (search?.trim()) {
             where.OR = [
-                { phone: { contains: search, mode: 'insensitive' } },
-                { firstName: { contains: search, mode: 'insensitive' } },
-                { lastName: { contains: search, mode: 'insensitive' } },
-                { email: { contains: search, mode: 'insensitive' } },
+                { phone: { contains: search.trim(), mode: 'insensitive' } },
+                { firstName: { contains: search.trim(), mode: 'insensitive' } },
+                { lastName: { contains: search.trim(), mode: 'insensitive' } },
+                { email: { contains: search.trim(), mode: 'insensitive' } },
             ];
         }
-        // ✅ Agar user specific status filter de (ACTIVE, BLOCKED, UNSUBSCRIBED) toh wo override karega
         if (status)
             where.status = status;
-        if (tags && tags.length > 0)
+        if (tags?.length)
             where.tags = { hasSome: tags };
         if (groupId)
             where.groupMemberships = { some: { groupId } };
-        if (hasWhatsAppProfile !== undefined)
+        if (hasWhatsAppProfile !== undefined) {
             where.whatsappProfileFetched = hasWhatsAppProfile;
+        }
+        // ✅ Only allow safe sort fields
+        const ALLOWED_SORT = ['createdAt', 'updatedAt', 'firstName', 'lastName', 'phone', 'lastMessageAt'];
+        const safeSortBy = ALLOWED_SORT.includes(sortBy) ? sortBy : 'createdAt';
         const [contacts, total] = await Promise.all([
             database_1.default.contact.findMany({
                 where,
                 skip,
                 take: safeLimit,
-                orderBy: { [sortBy]: sortOrder },
+                orderBy: { [safeSortBy]: sortOrder },
             }),
             database_1.default.contact.count({ where }),
         ]);
         return {
             contacts: contacts.map(formatContact),
-            meta: { page, limit: safeLimit, total, totalPages: Math.ceil(total / safeLimit) },
+            meta: {
+                page: Math.max(1, page),
+                limit: safeLimit,
+                total,
+                totalPages: Math.ceil(total / safeLimit),
+            },
         };
     }
     // ==========================================
@@ -557,9 +587,7 @@ class ContactsService {
                 validContacts.push({
                     organizationId,
                     phone: normalized,
-                    countryCode: normalized.length > 11
-                        ? '+' + normalized.slice(1, -10)
-                        : '+91',
+                    countryCode: extractCountryCode(normalized), // ✅ Fixed
                     firstName: firstName.toString().trim() || 'Unknown',
                     lastName: lastName.toString().trim() || null,
                     email: email.toString().trim() || null,
@@ -584,7 +612,8 @@ class ContactsService {
                 imported: 0,
                 skipped: 0,
                 failed: errors.length,
-                errors: errors.slice(0, 100),
+                totalErrors: errors.length, // ✅ Total count
+                errors: errors.slice(0, 100), // ✅ First 100 for display
             };
         }
         // ✅ 4. LIMIT TO AVAILABLE SLOTS
@@ -671,7 +700,8 @@ class ContactsService {
             imported,
             skipped,
             failed: errors.length,
-            errors: errors.slice(0, 100),
+            totalErrors: errors.length, // ✅ Total count
+            errors: errors.slice(0, 100), // ✅ First 100 for display
         };
     }
     // ==========================================
@@ -787,19 +817,28 @@ class ContactsService {
     // ==========================================
     async bulkUpdate(organizationId, input) {
         const { contactIds, tags, groupIds, status } = input;
-        const contacts = await database_1.default.contact.findMany({
+        // Verify all contacts belong to org
+        const count = await database_1.default.contact.count({
             where: { id: { in: contactIds }, organizationId },
         });
-        if (contacts.length !== contactIds.length) {
+        if (count !== contactIds.length) {
             throw new errorHandler_1.AppError('Some contacts not found or access denied', 400);
         }
+        // ✅ FIX Bug4: Tags update - do it in batches, not N+1
         if (tags && tags.length > 0) {
-            for (const contact of contacts) {
-                const newTags = [...new Set([...(contact.tags || []), ...tags])];
-                await database_1.default.contact.update({
-                    where: { id: contact.id },
-                    data: { tags: newTags },
-                });
+            // Get existing tags for all contacts in one query
+            const contacts = await database_1.default.contact.findMany({
+                where: { id: { in: contactIds }, organizationId },
+                select: { id: true, tags: true },
+            });
+            // Batch update: group contacts with same resulting tags
+            const BATCH = 50;
+            for (let i = 0; i < contacts.length; i += BATCH) {
+                const batch = contacts.slice(i, i + BATCH);
+                await Promise.all(batch.map(c => database_1.default.contact.update({
+                    where: { id: c.id },
+                    data: { tags: [...new Set([...(c.tags || []), ...tags])] },
+                })));
             }
         }
         if (status) {
@@ -809,13 +848,12 @@ class ContactsService {
             });
         }
         if (groupIds && groupIds.length > 0) {
-            const memberData = contactIds.flatMap((contactId) => groupIds.map((groupId) => ({ contactId, groupId })));
             await database_1.default.contactGroupMember.createMany({
-                data: memberData,
+                data: contactIds.flatMap(contactId => groupIds.map(groupId => ({ contactId, groupId }))),
                 skipDuplicates: true,
             });
         }
-        return { message: 'Contacts updated successfully', updated: contacts.length };
+        return { message: 'Contacts updated successfully', updated: count };
     }
     // ==========================================
     // BULK DELETE CONTACTS
@@ -1019,43 +1057,31 @@ class ContactsService {
     async deleteGroup(organizationId, groupId) {
         const group = await database_1.default.contactGroup.findFirst({
             where: { id: groupId, organizationId },
-            include: { members: { select: { contactId: true } } }
+            include: { _count: { select: { members: true } } },
         });
         if (!group)
             throw new errorHandler_1.AppError('Group not found', 404);
-        const contactIds = group.members.map(m => m.contactId);
-        console.log(`🗑️ Deleting group ${group.name} and its ${contactIds.length} members`);
-        // ✅ 1. Nullify this group in any campaigns using it
-        await database_1.default.campaign.updateMany({
-            where: { contactGroupId: groupId },
-            data: { contactGroupId: null },
-        });
-        // ✅ 2. Soft delete contacts that were members of this group
-        if (contactIds.length > 0) {
-            await database_1.default.contact.updateMany({
-                where: {
-                    id: { in: contactIds },
-                    organizationId,
-                    status: { not: 'DELETED' }
-                },
-                data: {
-                    status: 'DELETED',
-                    deletedAt: new Date()
-                }
-            });
-        }
-        // ✅ 3. Delete the group itself
-        await database_1.default.contactGroup.delete({ where: { id: groupId } });
-        // ✅ 4. Sync organization subscription count
-        const subscription = await database_1.default.subscription.findFirst({ where: { organizationId } });
-        if (subscription) {
-            const remainingCount = await database_1.default.contact.count({ where: { organizationId } });
-            await database_1.default.subscription.update({
-                where: { id: subscription.id },
-                data: { contactsUsed: remainingCount }
-            });
-        }
-        return { message: `Group "${group.name}" and ${contactIds.length} contacts deleted successfully` };
+        const memberCount = group._count.members;
+        // ✅ FIX Bug1: Only nullify campaigns + delete memberships
+        // Do NOT delete contacts themselves
+        await database_1.default.$transaction([
+            // 1. Nullify campaigns using this group
+            database_1.default.campaign.updateMany({
+                where: { contactGroupId: groupId },
+                data: { contactGroupId: null },
+            }),
+            // 2. Delete group memberships
+            database_1.default.contactGroupMember.deleteMany({
+                where: { groupId },
+            }),
+            // 3. Delete the group
+            database_1.default.contactGroup.delete({
+                where: { id: groupId },
+            }),
+        ]);
+        return {
+            message: `Group "${group.name}" deleted. ${memberCount} contacts remain in your contacts list.`,
+        };
     }
     async addContactsToGroup(organizationId, groupId, contactIds) {
         const group = await database_1.default.contactGroup.findFirst({

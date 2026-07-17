@@ -33,7 +33,12 @@ declare class MetaApiClient {
      * Caller MUST pass a random, per-account PIN (see generatePhonePin()) and
      * persist it encrypted so it can be reused on future re-registrations.
      */
-    registerPhoneNumber(phoneNumberId: string, accessToken: string, pin: string): Promise<boolean>;
+    registerPhone(phoneNumberId: string, pin: string, accessToken: string): Promise<{
+        success: boolean;
+        alreadyRegistered?: boolean;
+        error?: string;
+        requiresAction?: boolean;
+    }>;
     extractProfileFromWebhook(webhookData: any): {
         waId: string;
         profileName: string;

@@ -27,6 +27,8 @@ export declare class ContactsController {
     simpleBulkPaste(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     csvUpload(req: AuthRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     getImportStats(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
+    getAudienceCount(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
+    searchContacts(req: AuthRequest, res: Response, next: NextFunction): Promise<void>;
 }
 export declare const contactsController: ContactsController;
 //# sourceMappingURL=contacts.controller.d.ts.map

@@ -317,24 +317,66 @@ class MetaApiClient {
      * Caller MUST pass a random, per-account PIN (see generatePhonePin()) and
      * persist it encrypted so it can be reused on future re-registrations.
      */
-    async registerPhoneNumber(phoneNumberId, accessToken, pin) {
+    async registerPhone(phoneNumberId, pin, accessToken) {
         try {
-            console.log(`[Meta API] Registering phone number ${phoneNumberId}...`);
-            if (!pin || !/^\d{6}$/.test(pin)) {
-                throw new Error('registerPhoneNumber requires a 6-digit numeric PIN');
-            }
-            const response = await this.client.post(`${phoneNumberId}/register`, { messaging_product: 'whatsapp', pin }, { headers: { Authorization: `Bearer ${accessToken}` } });
-            console.log('[Meta API] ✅ Phone number registered');
-            return response.data.success === true;
+            await this.client.post(`${phoneNumberId}/register`, {
+                messaging_product: 'whatsapp',
+                pin,
+            }, {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+            return { success: true };
         }
-        catch (error) {
-            const code = error.response?.data?.error?.code;
-            if (code === 10 || code === 133005 || code === 133006) {
-                console.log('[Meta API] ℹ️ Phone already registered / PIN set — skipping (non-fatal)');
-                return true;
+        catch (err) {
+            const errorData = err.response?.data?.error || {};
+            const code = errorData.code;
+            const subcode = errorData.error_subcode;
+            const message = errorData.message || err.message;
+            console.error('[Meta API] Register error:', {
+                code, subcode, message, phoneNumberId,
+            });
+            // ✅ Already registered - OK
+            if (code === 133005 ||
+                code === 133006 ||
+                message?.toLowerCase().includes('already registered')) {
+                return { success: true, alreadyRegistered: true };
             }
-            console.warn('[Meta API] ⚠️ Register failed (non-fatal):', error.response?.data?.error?.message);
-            return false;
+            // ✅ 2FA PIN issue
+            if (code === 100 &&
+                (message?.toLowerCase().includes('pin') ||
+                    subcode === 2388006)) {
+                return {
+                    success: false,
+                    error: '2FA PIN required or incorrect',
+                    requiresAction: true,
+                };
+            }
+            // ✅ Payment method missing
+            if (code === 133008 || message?.includes('payment')) {
+                return {
+                    success: false,
+                    error: 'Payment method not added in Meta Business Manager',
+                    requiresAction: true,
+                };
+            }
+            // ✅ Number pending verification
+            if (code === 133006 ||
+                message?.toLowerCase().includes('not verified') ||
+                message?.toLowerCase().includes('pending verification')) {
+                return {
+                    success: false,
+                    error: 'Phone number verification pending in Meta Business Manager',
+                    requiresAction: true,
+                };
+            }
+            // Generic failure
+            return {
+                success: false,
+                error: message,
+            };
         }
     }
     // ============================================

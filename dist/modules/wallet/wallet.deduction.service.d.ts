@@ -32,7 +32,6 @@ export declare function deductWalletForCampaign(params: {
     templateLanguage?: string;
     totalRecipients: number;
     campaignId: string;
-    /** Optional: sample of recipient phones to compute weighted average rate */
     recipientPhones?: string[];
 }): Promise<{
     canProceed: boolean;

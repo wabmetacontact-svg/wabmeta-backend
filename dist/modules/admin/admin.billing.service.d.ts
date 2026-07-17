@@ -17,8 +17,8 @@ export declare class AdminBillingService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                isActive: boolean;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -44,7 +44,6 @@ export declare class AdminBillingService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -53,6 +52,7 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         };
         plan: {
             name: string;
@@ -60,8 +60,8 @@ export declare class AdminBillingService {
             id: string;
             createdAt: Date;
             updatedAt: Date;
-            isActive: boolean;
             slug: string;
+            isActive: boolean;
             description: string | null;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -125,8 +125,8 @@ export declare class AdminBillingService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                isActive: boolean;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -152,7 +152,6 @@ export declare class AdminBillingService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -161,6 +160,7 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         };
         previousEndDate: Date;
         newEndDate: Date;
@@ -203,8 +203,8 @@ export declare class AdminBillingService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                isActive: boolean;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -230,7 +230,6 @@ export declare class AdminBillingService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -239,6 +238,7 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         };
         message: string;
     }>;
@@ -288,8 +288,8 @@ export declare class AdminBillingService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                isActive: boolean;
                 slug: string;
+                isActive: boolean;
                 description: string | null;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
@@ -314,7 +314,6 @@ export declare class AdminBillingService {
             createdAt: Date;
             updatedAt: Date;
             messagesUsed: number;
-            planId: string;
             billingCycle: string;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
@@ -323,6 +322,7 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
+            planId: string;
         }[];
         meta: {
             page: number;

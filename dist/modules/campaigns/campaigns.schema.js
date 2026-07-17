@@ -14,10 +14,7 @@ const audienceFilterSchema = zod_1.z.object({
     createdBefore: zod_1.z.string().datetime().optional(),
     hasMessaged: zod_1.z.boolean().optional(),
 }).optional();
-const variableMappingSchema = zod_1.z.record(zod_1.z.object({
-    type: zod_1.z.enum(['field', 'static']),
-    value: zod_1.z.string().min(1),
-})).optional();
+const variableMappingSchema = zod_1.z.record(zod_1.z.string()).optional();
 // ============================================
 // REQUEST SCHEMAS
 // ============================================

@@ -37,16 +37,7 @@ export declare const createCampaignSchema: z.ZodObject<{
             hasMessaged?: boolean | undefined;
         }>>;
         scheduledAt: z.ZodOptional<z.ZodString>;
-        variableMapping: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
-            type: z.ZodEnum<["field", "static"]>;
-            value: z.ZodString;
-        }, "strip", z.ZodTypeAny, {
-            type: "field" | "static";
-            value: string;
-        }, {
-            type: "field" | "static";
-            value: string;
-        }>>>;
+        variableMapping: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, "strip", z.ZodTypeAny, {
         name: string;
         whatsappAccountId: string;
@@ -66,10 +57,7 @@ export declare const createCampaignSchema: z.ZodObject<{
             phone: string;
             customData?: Record<string, any> | undefined;
         }[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     }, {
         name: string;
         whatsappAccountId: string;
@@ -89,10 +77,7 @@ export declare const createCampaignSchema: z.ZodObject<{
             phone: string;
             customData?: Record<string, any> | undefined;
         }[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     }>, {
         name: string;
         whatsappAccountId: string;
@@ -112,10 +97,7 @@ export declare const createCampaignSchema: z.ZodObject<{
             phone: string;
             customData?: Record<string, any> | undefined;
         }[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     }, {
         name: string;
         whatsappAccountId: string;
@@ -135,10 +117,7 @@ export declare const createCampaignSchema: z.ZodObject<{
             phone: string;
             customData?: Record<string, any> | undefined;
         }[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
@@ -160,10 +139,7 @@ export declare const createCampaignSchema: z.ZodObject<{
             phone: string;
             customData?: Record<string, any> | undefined;
         }[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     };
 }, {
     body: {
@@ -185,10 +161,7 @@ export declare const createCampaignSchema: z.ZodObject<{
             phone: string;
             customData?: Record<string, any> | undefined;
         }[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     };
 }>;
 export declare const updateCampaignSchema: z.ZodObject<{
@@ -225,16 +198,7 @@ export declare const updateCampaignSchema: z.ZodObject<{
             hasMessaged?: boolean | undefined;
         }>>;
         scheduledAt: z.ZodNullable<z.ZodOptional<z.ZodString>>;
-        variableMapping: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
-            type: z.ZodEnum<["field", "static"]>;
-            value: z.ZodString;
-        }, "strip", z.ZodTypeAny, {
-            type: "field" | "static";
-            value: string;
-        }, {
-            type: "field" | "static";
-            value: string;
-        }>>>;
+        variableMapping: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
         scheduledAt?: string | null | undefined;
@@ -249,10 +213,7 @@ export declare const updateCampaignSchema: z.ZodObject<{
             hasMessaged?: boolean | undefined;
         } | undefined;
         contactIds?: string[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     }, {
         name?: string | undefined;
         scheduledAt?: string | null | undefined;
@@ -267,10 +228,7 @@ export declare const updateCampaignSchema: z.ZodObject<{
             hasMessaged?: boolean | undefined;
         } | undefined;
         contactIds?: string[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
@@ -287,10 +245,7 @@ export declare const updateCampaignSchema: z.ZodObject<{
             hasMessaged?: boolean | undefined;
         } | undefined;
         contactIds?: string[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     };
     params: {
         id: string;
@@ -310,10 +265,7 @@ export declare const updateCampaignSchema: z.ZodObject<{
             hasMessaged?: boolean | undefined;
         } | undefined;
         contactIds?: string[] | undefined;
-        variableMapping?: Record<string, {
-            type: "field" | "static";
-            value: string;
-        }> | undefined;
+        variableMapping?: Record<string, string> | undefined;
     };
     params: {
         id: string;
@@ -336,37 +288,37 @@ export declare const getCampaignsSchema: z.ZodObject<{
         sortBy: z.ZodDefault<z.ZodOptional<z.ZodEnum<["createdAt", "name", "scheduledAt", "sentCount"]>>>;
         sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<["asc", "desc"]>>>;
     }, "strip", z.ZodTypeAny, {
-        limit: number;
         page: number;
+        limit: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
-        sortOrder: "desc" | "asc";
+        sortOrder: "asc" | "desc";
         search?: string | undefined;
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
     }, {
         search?: string | undefined;
-        limit?: string | undefined;
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
         page?: string | undefined;
+        limit?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
-        sortOrder?: "desc" | "asc" | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        limit: number;
         page: number;
+        limit: number;
         sortBy: "name" | "scheduledAt" | "createdAt" | "sentCount";
-        sortOrder: "desc" | "asc";
+        sortOrder: "asc" | "desc";
         search?: string | undefined;
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
     };
 }, {
     query: {
         search?: string | undefined;
-        limit?: string | undefined;
         status?: "COMPLETED" | "DRAFT" | "PAUSED" | "FAILED" | "SCHEDULED" | "RUNNING" | "CANCELLED" | undefined;
         page?: string | undefined;
+        limit?: string | undefined;
         sortBy?: "name" | "scheduledAt" | "createdAt" | "sentCount" | undefined;
-        sortOrder?: "desc" | "asc" | undefined;
+        sortOrder?: "asc" | "desc" | undefined;
     };
 }>;
 export declare const getCampaignByIdSchema: z.ZodObject<{
@@ -423,18 +375,18 @@ export declare const getCampaignContactsSchema: z.ZodObject<{
             QUEUED: "QUEUED";
         }>>;
     }, "strip", z.ZodTypeAny, {
-        limit: number;
         page: number;
+        limit: number;
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
     }, {
-        limit?: string | undefined;
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
         page?: string | undefined;
+        limit?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
-        limit: number;
         page: number;
+        limit: number;
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
     };
     params: {
@@ -442,9 +394,9 @@ export declare const getCampaignContactsSchema: z.ZodObject<{
     };
 }, {
     query: {
-        limit?: string | undefined;
         status?: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "QUEUED" | undefined;
         page?: string | undefined;
+        limit?: string | undefined;
     };
     params: {
         id: string;

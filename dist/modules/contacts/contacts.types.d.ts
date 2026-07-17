@@ -112,6 +112,7 @@ export interface ImportContactsResponse {
     imported: number;
     skipped: number;
     failed: number;
+    totalErrors?: number;
     errors: {
         row?: number;
         phone?: string;

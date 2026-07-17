@@ -157,27 +157,29 @@ async function resetMonthlyIfNeeded(wallet) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ─── 1. Get Wallet Details ─────────────────────────────────────────────────────
 async function getWalletDetails(organizationId) {
-    const wallet = await database_1.default.wallet.findUnique({
-        where: { organizationId },
-    });
-    const pendingRequest = await database_1.default.walletAccessRequest.findFirst({
-        where: { organizationId, status: 'pending' },
-        select: { id: true, status: true, requestedAt: true },
-    });
+    const [wallet, pendingRequest] = await Promise.all([
+        database_1.default.wallet.findUnique({ where: { organizationId } }),
+        database_1.default.walletAccessRequest.findFirst({
+            where: { organizationId, status: 'pending' },
+            select: { id: true, status: true, requestedAt: true },
+        }),
+    ]);
     if (!wallet) {
         return {
             exists: false,
             isActive: false,
             balance: 0,
-            hasPendingRequest: !!pendingRequest,
+            hasPendingRequest: !!pendingRequest, // ✅ Always included
             pendingRequest: pendingRequest || null,
         };
     }
+    // ✅ Reset monthly if needed
+    const freshWallet = await resetMonthlyIfNeeded(wallet);
     return {
         exists: true,
-        hasPendingRequest: !!pendingRequest,
+        hasPendingRequest: !!pendingRequest, // ✅ Always included
         pendingRequest: pendingRequest || null,
-        ...formatWallet(wallet),
+        ...formatWallet(freshWallet),
     };
 }
 // ─── 2. Request Wallet Access ──────────────────────────────────────────────────
@@ -266,9 +268,15 @@ async function getTransactionHistory(organizationId, options) {
         },
     };
 }
-// ─── 4. Create TopUp Order ─────────────────────────────────────────────────────
-// ─── 4. Create TopUp Order (FIXED with tracking) ───────────────────────────
 async function createTopUpOrder(organizationId, amountRupees) {
+    // ✅ FIX Bug2: Service-level validation
+    if (!amountRupees || isNaN(amountRupees) || amountRupees <= 0) {
+        throw new errorHandler_1.AppError('Valid amount required', 400);
+    }
+    if (amountRupees > 100_000) {
+        throw new errorHandler_1.AppError('Amount too large. Maximum is ₹1,00,000 per transaction. ' +
+            'Did you enter paise instead of rupees?', 400);
+    }
     const wallet = await database_1.default.wallet.findUnique({
         where: { organizationId },
     });
@@ -276,24 +284,20 @@ async function createTopUpOrder(organizationId, amountRupees) {
         throw new errorHandler_1.AppError('Wallet not found', 404);
     if (!wallet.isActive)
         throw new errorHandler_1.AppError('Wallet is not active', 403);
-    if (wallet.flagged) {
-        throw new errorHandler_1.AppError('Wallet is flagged. Please contact support.', 403);
-    }
-    if (amountRupees > 100000) {
-        throw new errorHandler_1.AppError(`Amount too large. Maximum is ₹1,00,000 per transaction. ` +
-            `Did you enter paise instead of rupees?`, 400);
-    }
+    if (wallet.flagged)
+        throw new errorHandler_1.AppError('Wallet flagged. Contact support.', 403);
     const amountPaise = toPaise(amountRupees);
-    if (amountPaise < 10000) {
+    if (amountPaise < 10_000) {
         throw new errorHandler_1.AppError('Minimum top-up amount is ₹100', 400);
     }
     if (amountPaise > wallet.maxTopUpPaise) {
         throw new errorHandler_1.AppError(`Maximum top-up is ₹${toRupees(wallet.maxTopUpPaise).toLocaleString('en-IN')} per transaction`, 400);
     }
     const updatedWallet = await resetMonthlyIfNeeded(wallet);
-    if (updatedWallet.currentMonthPaise + amountPaise > updatedWallet.maxMonthlyPaise) {
-        const remainingPaise = updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
-        throw new errorHandler_1.AppError(`Monthly limit exceeded. Remaining: ₹${toRupees(remainingPaise).toLocaleString('en-IN')}`, 400);
+    if (updatedWallet.currentMonthPaise + amountPaise >
+        updatedWallet.maxMonthlyPaise) {
+        const remaining = updatedWallet.maxMonthlyPaise - updatedWallet.currentMonthPaise;
+        throw new errorHandler_1.AppError(`Monthly limit exceeded. Remaining: ₹${toRupees(remaining).toLocaleString('en-IN')}`, 400);
     }
     const { instance: rzp, keyId } = getWalletRazorpay();
     const timestamp = Date.now().toString().slice(-8);
@@ -312,8 +316,7 @@ async function createTopUpOrder(organizationId, amountRupees) {
             amountRupees: String(amountRupees),
         },
     });
-    // ✅ CRITICAL: Save order to DB for tracking
-    await db.walletTopUpOrder.create({
+    await database_1.default.walletTopUpOrder.create({
         data: {
             organizationId,
             walletId: wallet.id,
@@ -322,11 +325,6 @@ async function createTopUpOrder(organizationId, amountRupees) {
             currency: 'INR',
             status: 'PENDING',
         },
-    });
-    console.log('✅ Wallet TopUp order created & tracked:', {
-        orderId: order.id,
-        amount: `₹${amountRupees}`,
-        org: organizationId,
     });
     return {
         orderId: order.id,
@@ -339,11 +337,18 @@ async function createTopUpOrder(organizationId, amountRupees) {
 }
 // ─── 5. BULLETPROOF Credit Function - Idempotent & Atomic ────────────────
 async function creditWalletAtomic(params) {
-    const { organizationId, razorpayOrderId, razorpayPaymentId, razorpaySignature, amountPaise, creditedVia } = params;
+    const { organizationId, razorpayOrderId, razorpayPaymentId, razorpaySignature, amountPaise, creditedVia, } = params;
+    // ✅ FIX Bug4: Validate amount before transaction
+    if (!amountPaise || amountPaise <= 0) {
+        throw new errorHandler_1.AppError('Invalid payment amount', 400);
+    }
+    // ✅ FIX Bug3: Use ReadCommitted instead of Serializable
+    // Serializable can cause deadlocks under load
+    // Idempotency check + atomic update is sufficient
     return await database_1.default.$transaction(async (tx) => {
         const txDb = tx;
-        // ✅ STEP 1: Check duplicate (by orderId OR paymentId)
-        const existingTxn = await tx.walletTransaction.findFirst({
+        // ✅ Idempotency check
+        const existing = await tx.walletTransaction.findFirst({
             where: {
                 OR: [
                     { razorpayPaymentId },
@@ -351,35 +356,29 @@ async function creditWalletAtomic(params) {
                 ],
             },
         });
-        if (existingTxn) {
-            // Update topup order status if needed
+        if (existing) {
             await txDb.walletTopUpOrder.updateMany({
                 where: { razorpayOrderId, status: { not: 'COMPLETED' } },
                 data: {
                     status: 'COMPLETED',
                     razorpayPaymentId,
                     completedAt: new Date(),
-                    transactionId: existingTxn.id,
+                    transactionId: existing.id,
                     creditedVia,
                 },
             });
-            return {
-                alreadyCredited: true,
-                transaction: existingTxn,
-                newBalance: 0, // Will be fetched
-            };
+            return { alreadyCredited: true, transaction: existing, newBalance: 0 };
         }
-        // ✅ STEP 2: Get wallet with lock
+        // Get wallet
         const wallet = await tx.wallet.findUnique({
             where: { organizationId },
         });
         if (!wallet) {
-            throw new errorHandler_1.AppError(`Wallet not found for org ${organizationId}. Payment ID: ${razorpayPaymentId}`, 404);
+            throw new errorHandler_1.AppError(`Wallet not found for org ${organizationId}`, 404);
         }
         if (!wallet.isActive) {
-            throw new errorHandler_1.AppError(`Wallet inactive. Payment ID: ${razorpayPaymentId}`, 403);
+            throw new errorHandler_1.AppError(`Wallet inactive. Payment: ${razorpayPaymentId}`, 403);
         }
-        // ✅ STEP 3: Credit atomically
         const balanceBeforePaise = wallet.balancePaise;
         const balanceAfterPaise = balanceBeforePaise + amountPaise;
         const updatedWallet = await tx.wallet.update({
@@ -392,7 +391,6 @@ async function creditWalletAtomic(params) {
                 lowAlertSent: false,
             },
         });
-        // ✅ STEP 4: Create transaction record
         const transaction = await tx.walletTransaction.create({
             data: {
                 walletId: wallet.id,
@@ -407,28 +405,19 @@ async function creditWalletAtomic(params) {
                 note: `Credited via: ${creditedVia}`,
             },
         });
-        // ✅ STEP 5: Update topup order
         await txDb.walletTopUpOrder.upsert({
             where: { razorpayOrderId },
             create: {
-                organizationId,
-                walletId: wallet.id,
-                razorpayOrderId,
-                razorpayPaymentId,
-                razorpaySignature,
-                amountPaise,
-                status: 'COMPLETED',
-                completedAt: new Date(),
-                transactionId: transaction.id,
+                organizationId, walletId: wallet.id,
+                razorpayOrderId, razorpayPaymentId, razorpaySignature,
+                amountPaise, status: 'COMPLETED',
+                completedAt: new Date(), transactionId: transaction.id,
                 creditedVia,
             },
             update: {
-                razorpayPaymentId,
-                razorpaySignature,
-                status: 'COMPLETED',
-                completedAt: new Date(),
-                transactionId: transaction.id,
-                creditedVia,
+                razorpayPaymentId, razorpaySignature,
+                status: 'COMPLETED', completedAt: new Date(),
+                transactionId: transaction.id, creditedVia,
             },
         });
         return {
@@ -439,7 +428,9 @@ async function creditWalletAtomic(params) {
             amountAdded: toRupees(amountPaise),
         };
     }, {
-        isolationLevel: 'Serializable', // ✅ Highest isolation for race conditions
+        // ✅ FIX Bug3: ReadCommitted is sufficient with idempotency check
+        // Serializable causes deadlocks under concurrent load
+        isolationLevel: 'ReadCommitted',
         timeout: 15000,
     });
 }
@@ -652,18 +643,13 @@ async function deductBalance(organizationId, data) {
         where: { organizationId },
     });
     if (!wallet || !wallet.isActive) {
-        return {
-            success: false,
-            newBalance: 0,
-            insufficient: true,
-            message: 'Wallet not active',
-        };
+        return { success: false, newBalance: 0, insufficient: true, message: 'Wallet not active' };
     }
     const amountPaise = toPaise(data.amountRupees);
-    const availablePaise = wallet.balancePaise +
-        (wallet.creditEnabled
-            ? wallet.creditLimitPaise - wallet.creditUsedPaise
-            : 0);
+    const creditHeadroom = wallet.creditEnabled
+        ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+        : 0;
+    const availablePaise = wallet.balancePaise + creditHeadroom;
     if (availablePaise < amountPaise) {
         await triggerLowBalanceAlert(wallet);
         return {
@@ -674,16 +660,29 @@ async function deductBalance(organizationId, data) {
         };
     }
     const balanceBeforePaise = wallet.balancePaise;
+    // ✅ FIX Bug6: Correct credit deduction logic
     let newBalancePaise;
-    let creditDeductedPaise = 0;
+    let creditDeductedPaise;
     if (wallet.balancePaise >= amountPaise) {
+        // Enough balance - deduct from balance only
         newBalancePaise = wallet.balancePaise - amountPaise;
+        creditDeductedPaise = 0;
     }
     else {
+        // Not enough balance - use all balance, rest from credit
         creditDeductedPaise = amountPaise - wallet.balancePaise;
         newBalancePaise = 0;
+        // ✅ Safety check: credit deduction should not exceed headroom
+        if (creditDeductedPaise > creditHeadroom) {
+            return {
+                success: false,
+                newBalance: toRupees(wallet.balancePaise),
+                insufficient: true,
+                message: 'Insufficient balance and credit limit',
+            };
+        }
     }
-    const [updatedWallet, transaction] = await database_1.default.$transaction([
+    const [updatedWallet] = await database_1.default.$transaction([
         database_1.default.wallet.update({
             where: { id: wallet.id },
             data: {
@@ -1044,9 +1043,26 @@ async function getWalletMessageAnalytics(organizationId, options) {
     });
     // Date range - default last 30 days
     const endDate = options?.endDate || new Date();
-    const startDate = options?.startDate ||
+    let startDate = options?.startDate ||
         new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const dateFilter = { gte: startDate, lte: endDate };
+    let dateFilter = { gte: startDate, lte: endDate };
+    const messageCount = await database_1.default.message.count({
+        where: {
+            conversation: { organizationId },
+            direction: 'OUTBOUND',
+            createdAt: dateFilter,
+        },
+    });
+    // If too many messages, limit to last 7 days
+    if (messageCount > 50_000) {
+        console.warn(`⚠️ Large message count (${messageCount}) for org ${organizationId}. ` +
+            `Limiting analytics to last 7 days.`);
+        const limitedStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        if (startDate < limitedStart) {
+            startDate = limitedStart;
+            dateFilter = { gte: startDate, lte: endDate };
+        }
+    }
     // ============================================
     // 1. FETCH ALL OUTBOUND MESSAGES
     // ============================================

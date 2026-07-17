@@ -144,8 +144,6 @@ async function bootstrap() {
             console.log(`   🔐 Encryption  : ${encryptionValid ? 'ENABLED ✓' : 'DISABLED ✗'}`);
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
             console.log('');
-            // ✅ Start template media pre-warm job
-            (0, scheduler_service_1.startTemplateMediaPreWarmJob)();
         });
         setupGracefulShutdown(server);
         setupErrorHandlers();

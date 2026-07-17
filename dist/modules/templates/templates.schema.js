@@ -1,7 +1,7 @@
 "use strict";
 // src/modules/templates/templates.schema.ts
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTemplatesQuerySchema = exports.syncTemplatesSchema = exports.previewTemplateSchema = exports.submitTemplateSchema = exports.duplicateTemplateSchema = exports.deleteTemplateSchema = exports.getTemplateByIdSchema = exports.updateTemplateSchema = exports.createTemplateSchema = void 0;
+exports.uploadToMetaSchema = exports.getTemplatesQuerySchema = exports.syncTemplatesSchema = exports.previewTemplateSchema = exports.submitTemplateSchema = exports.duplicateTemplateSchema = exports.deleteTemplateSchema = exports.getTemplateByIdSchema = exports.updateTemplateSchema = exports.createTemplateSchema = void 0;
 const zod_1 = require("zod");
 // ============================================
 // CREATE TEMPLATE
@@ -151,5 +151,16 @@ exports.getTemplatesQuerySchema = zod_1.z.object({
         sortOrder: zod_1.z.enum(['asc', 'desc']).optional(),
         whatsappAccountId: zod_1.z.string().optional(),
     }).optional(),
+});
+// ============================================
+// UPLOAD TO META
+// ============================================
+exports.uploadToMetaSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        cloudinaryUrl: zod_1.z.string().url('Invalid cloudinaryUrl'),
+        mimeType: zod_1.z.string().optional(),
+        filename: zod_1.z.string().optional(),
+        whatsappAccountId: zod_1.z.string().optional(),
+    }),
 });
 //# sourceMappingURL=templates.schema.js.map

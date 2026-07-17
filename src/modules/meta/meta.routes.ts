@@ -1,7 +1,11 @@
 // 📁 src/modules/meta/meta.routes.ts - COMPLETE FINAL VERSION
 
-import { Router } from 'express';
+import { Router, Request } from 'express';
+import crypto from 'crypto';
 import { metaController } from './meta.controller';
+import { getRedis } from '../../config/redis';
+
+const redis = getRedis();
 import { authenticate } from '../../middleware/auth';
 import { metaService } from './meta.service';
 import { sendSuccess } from '../../utils/response';
@@ -42,171 +46,189 @@ router.get('/webhook', (req, res) => {
   }
 });
 
+const verifyMetaSignature = (req: Request): boolean => {
+  const signature = req.headers['x-hub-signature-256'] as string;
+  if (!signature) return false;
+
+  const appSecret = config.meta.appSecret;
+  if (!appSecret) return false;
+
+  const rawBody = (req as any).rawBody;
+  if (!rawBody) return false;
+
+  try {
+    const expectedSig = `sha256=${crypto
+      .createHmac('sha256', appSecret)
+      .update(rawBody)
+      .digest('hex')}`;
+
+    const sigBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expectedSig);
+
+    if (sigBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
+  } catch {
+    return false;
+  }
+};
+
 /**
  * POST /webhook - Handle incoming webhook events
  */
-router.post('/webhook', async (req, res) => {
+router.post('/webhook', (req, res, next) => {
+  if (!verifyMetaSignature(req)) {
+    console.error('❌ Invalid webhook signature');
+    return res.sendStatus(403);
+  }
+  next();
+}, async (req, res) => {
+  // ✅ STEP 1: Pehle 200 do (Meta requirement - 20 sec timeout)
+  res.sendStatus(200);
+
   try {
     const body = req.body;
-
-    console.log('\n📨 ========== WEBHOOK RECEIVED ==========');
-    console.log(JSON.stringify(body, null, 2));
-
-    // Acknowledge receipt immediately (Meta requirement)
-    res.sendStatus(200);
-
     const entry = body?.entry;
-
-    if (!Array.isArray(entry) || entry.length === 0) {
-      console.warn('⚠️ Invalid webhook payload - no entries');
-      return;
-    }
+    if (!Array.isArray(entry) || entry.length === 0) return;
 
     for (const item of entry) {
-      const changes = item.changes || [];
-
-      for (const change of changes) {
-        const field = change.field;
+      for (const change of (item.changes || [])) {
         const value = change.value;
+        const field = change.field;
 
-        // ✅ HANDLE MESSAGE STATUS UPDATES
-        if (field === 'messages' && value.statuses && Array.isArray(value.statuses)) {
+        // ✅ STEP 2: Message status updates
+        if (field === 'messages' && value?.statuses) {
           for (const statusUpdate of value.statuses) {
-            console.log('📦 WA STATUS UPDATE:', {
-              id: statusUpdate.id,
-              status: statusUpdate.status,
-              recipient_id: statusUpdate.recipient_id,
-              timestamp: statusUpdate.timestamp,
-              errors: statusUpdate.errors,
-            });
-
-            try {
-              let dbStatus: MessageStatus = MessageStatus.SENT;
-              let deliveredAt: Date | undefined;
-              let readAt: Date | undefined;
-              let failedAt: Date | undefined;
-
-              const metaStatus = statusUpdate.status;
-              const timestamp = new Date(Number(statusUpdate.timestamp) * 1000);
-
-              switch (metaStatus) {
-                case 'sent':
-                  dbStatus = MessageStatus.SENT;
-                  break;
-                case 'delivered':
-                  dbStatus = MessageStatus.DELIVERED;
-                  deliveredAt = timestamp;
-                  break;
-                case 'read':
-                  dbStatus = MessageStatus.READ;
-                  readAt = timestamp;
-                  break;
-                case 'failed':
-                  dbStatus = MessageStatus.FAILED;
-                  failedAt = timestamp;
-                  break;
-                default:
-                  console.warn(`⚠️ Unknown status: ${metaStatus}`);
-              }
-
-              const failureReason = statusUpdate.errors?.[0]?.message || null;
-
-              const updateData: any = {
-                status: dbStatus,
-              };
-
-              if (deliveredAt) updateData.deliveredAt = deliveredAt;
-              if (readAt) updateData.readAt = readAt;
-              if (failedAt) updateData.failedAt = failedAt;
-              if (failureReason) updateData.failureReason = failureReason;
-
-              // Update Message
-              const updated = await prisma.message.updateMany({
-                where: {
-                  OR: [
-                    { wamId: statusUpdate.id },
-                    { waMessageId: statusUpdate.id },
-                  ],
-                },
-                data: updateData,
-              });
-
-              if (updated.count > 0) {
-                console.log(`✅ Updated ${updated.count} message(s) to status: ${dbStatus}`);
-
-                // Update CampaignContact
-                await prisma.campaignContact.updateMany({
-                  where: { waMessageId: statusUpdate.id },
-                  data: {
-                    status: dbStatus,
-                    deliveredAt,
-                    readAt,
-                    failedAt,
-                    failureReason,
-                  },
-                });
-              } else {
-                console.warn(`⚠️ No message found with ID: ${statusUpdate.id}`);
-              }
-            } catch (dbError: any) {
-              console.error('❌ DB update error:', dbError.message);
+            // ✅ Idempotency check
+            const dedupKey = `webhook:status:${statusUpdate.id}:${statusUpdate.status}`;
+            const alreadyProcessed = await redis.get(dedupKey);
+            
+            if (alreadyProcessed) {
+              console.log(`⚠️ Duplicate webhook skipped: ${statusUpdate.id}`);
+              continue;
             }
+            await redis.set(dedupKey, '1', 'EX', 86400);
+
+            await processStatusUpdate(statusUpdate);
           }
         }
 
-        // ✅ HANDLE INCOMING MESSAGES
-        if (field === 'messages' && value.messages && Array.isArray(value.messages)) {
+        // ✅ STEP 3: Incoming messages
+        if (field === 'messages' && value?.messages) {
           for (const message of value.messages) {
-            console.log('📩 INCOMING MESSAGE:', {
-              id: message.id,
-              from: message.from,
-              type: message.type,
-              timestamp: message.timestamp,
-            });
+            const dedupKey = `webhook:msg:${message.id}`;
+            const exists = await redis.get(dedupKey);
+            
+            if (exists) {
+              console.log(`⚠️ Duplicate message skipped: ${message.id}`);
+              continue;
+            }
+            await redis.set(dedupKey, '1', 'EX', 86400);
 
-            // TODO: Process incoming message
+            await processIncomingMessage(message, value.metadata);
           }
         }
 
-        // ✅ HANDLE TEMPLATE STATUS UPDATES
+        // ✅ STEP 4: Template status
         if (field === 'message_template_status_update') {
-          console.log('📋 TEMPLATE STATUS UPDATE:', {
-            messageTemplateId: value.message_template_id,
-            messageTemplateName: value.message_template_name,
-            event: value.event,
-            reason: value.reason,
-          });
-
-          try {
-            const metaTemplateId = value.message_template_id?.toString();
-            if (metaTemplateId) {
-              let templateStatus = 'PENDING';
-              if (value.event === 'APPROVED') templateStatus = 'APPROVED';
-              if (value.event === 'REJECTED') templateStatus = 'REJECTED';
-
-              await prisma.template.updateMany({
-                where: { metaTemplateId },
-                data: {
-                  status: templateStatus as any,
-                  rejectionReason: value.reason || null,
-                },
-              });
-
-              console.log(`✅ Template ${metaTemplateId} updated to ${templateStatus}`);
-            }
-          } catch (templateError: any) {
-            console.error('❌ Template update error:', templateError.message);
-          }
+          await processTemplateUpdate(value);
         }
       }
     }
-
-    console.log('📨 ========== WEBHOOK PROCESSED ==========\n');
   } catch (error: any) {
     console.error('❌ Webhook processing error:', error);
-    res.sendStatus(200);
+    // Already sent 200, so just log
   }
 });
+
+// ✅ Extract processors as separate functions
+async function processStatusUpdate(statusUpdate: any) {
+  const metaStatus = statusUpdate.status;
+  const timestamp = new Date(Number(statusUpdate.timestamp) * 1000);
+
+  const statusMap: Record<string, any> = {
+    sent: { status: 'SENT' },
+    delivered: { status: 'DELIVERED', deliveredAt: timestamp },
+    read: { status: 'READ', readAt: timestamp },
+    failed: { 
+      status: 'FAILED', 
+      failedAt: timestamp,
+      failureReason: statusUpdate.errors?.[0]?.message || null
+    }
+  };
+
+  const updateData = statusMap[metaStatus];
+  if (!updateData) return;
+
+  const updated = await prisma.message.updateMany({
+    where: {
+      OR: [
+        { wamId: statusUpdate.id },
+        { waMessageId: statusUpdate.id }
+      ]
+    },
+    data: updateData
+  });
+
+  if (updated.count > 0) {
+    // Campaign contact update
+    await prisma.campaignContact.updateMany({
+      where: { waMessageId: statusUpdate.id },
+      data: updateData
+    });
+
+    // ✅ Socket emit for real-time UI update
+    try {
+      const { webhookEvents } = await import('../webhooks/webhook.service');
+      webhookEvents.emit('messageStatusUpdated', {
+        waMessageId: statusUpdate.id,
+        status: updateData.status,
+        deliveredAt: updateData.deliveredAt,
+        readAt: updateData.readAt,
+        failedAt: updateData.failedAt,
+      });
+    } catch (e) {
+      console.warn('⚠️ Failed to emit messageStatusUpdated socket event:', e);
+    }
+
+    console.log(`✅ Status updated: ${statusUpdate.id} → ${updateData.status}`);
+  }
+}
+
+async function processIncomingMessage(message: any, metadata: any) {
+  console.log('📩 INCOMING MESSAGE:', {
+    id: message.id,
+    from: message.from,
+    type: message.type,
+    timestamp: message.timestamp,
+  });
+  // TODO: Process incoming message
+}
+
+async function processTemplateUpdate(value: any) {
+  try {
+    const metaTemplateId = value.message_template_id?.toString();
+    if (metaTemplateId) {
+      let templateStatus = 'PENDING';
+      if (value.event === 'APPROVED') templateStatus = 'APPROVED';
+      if (value.event === 'REJECTED') templateStatus = 'REJECTED';
+
+      await prisma.template.updateMany({
+        where: { metaTemplateId },
+        data: {
+          status: templateStatus as any,
+          rejectionReason: value.reason || null,
+        },
+      });
+
+      console.log(`✅ Template ${metaTemplateId} updated to ${templateStatus}`);
+    }
+  } catch (templateError: any) {
+    console.error('❌ Template update error:', templateError.message);
+  }
+}
 
 // ============================================
 // ============================================

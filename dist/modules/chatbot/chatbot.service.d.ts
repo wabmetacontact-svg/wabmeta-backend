@@ -11,9 +11,9 @@ export declare class ChatbotService {
             organizationId: string;
             id: string;
             status: import(".prisma/client").$Enums.ChatbotStatus;
-            isDefault: boolean;
             createdAt: Date;
             updatedAt: Date;
+            isDefault: boolean;
             description: string | null;
             flowData: import("@prisma/client/runtime/library").JsonValue;
             triggerKeywords: string[];
@@ -30,9 +30,9 @@ export declare class ChatbotService {
         organizationId: string;
         id: string;
         status: import(".prisma/client").$Enums.ChatbotStatus;
-        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
+        isDefault: boolean;
         description: string | null;
         flowData: import("@prisma/client/runtime/library").JsonValue;
         triggerKeywords: string[];
@@ -53,9 +53,9 @@ export declare class ChatbotService {
         organizationId: string;
         id: string;
         status: import(".prisma/client").$Enums.ChatbotStatus;
-        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
+        isDefault: boolean;
         description: string | null;
         flowData: import("@prisma/client/runtime/library").JsonValue;
         triggerKeywords: string[];
@@ -77,9 +77,9 @@ export declare class ChatbotService {
         organizationId: string;
         id: string;
         status: import(".prisma/client").$Enums.ChatbotStatus;
-        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
+        isDefault: boolean;
         description: string | null;
         flowData: import("@prisma/client/runtime/library").JsonValue;
         triggerKeywords: string[];
@@ -95,9 +95,9 @@ export declare class ChatbotService {
         organizationId: string;
         id: string;
         status: import(".prisma/client").$Enums.ChatbotStatus;
-        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
+        isDefault: boolean;
         description: string | null;
         flowData: import("@prisma/client/runtime/library").JsonValue;
         triggerKeywords: string[];
@@ -110,9 +110,9 @@ export declare class ChatbotService {
         organizationId: string;
         id: string;
         status: import(".prisma/client").$Enums.ChatbotStatus;
-        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
+        isDefault: boolean;
         description: string | null;
         flowData: import("@prisma/client/runtime/library").JsonValue;
         triggerKeywords: string[];
@@ -125,9 +125,9 @@ export declare class ChatbotService {
         organizationId: string;
         id: string;
         status: import(".prisma/client").$Enums.ChatbotStatus;
-        isDefault: boolean;
         createdAt: Date;
         updatedAt: Date;
+        isDefault: boolean;
         description: string | null;
         flowData: import("@prisma/client/runtime/library").JsonValue;
         triggerKeywords: string[];

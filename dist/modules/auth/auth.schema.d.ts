@@ -107,32 +107,32 @@ export declare const resetPasswordSchema: z.ZodObject<{
         password: z.ZodString;
         confirmPassword: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        token: string;
         password: string;
+        token: string;
         confirmPassword: string;
     }, {
-        token: string;
         password: string;
+        token: string;
         confirmPassword: string;
     }>, {
-        token: string;
         password: string;
+        token: string;
         confirmPassword: string;
     }, {
-        token: string;
         password: string;
+        token: string;
         confirmPassword: string;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
-        token: string;
         password: string;
+        token: string;
         confirmPassword: string;
     };
 }, {
     body: {
-        token: string;
         password: string;
+        token: string;
         confirmPassword: string;
     };
 }>;

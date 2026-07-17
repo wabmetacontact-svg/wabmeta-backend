@@ -16,6 +16,7 @@ export declare class WebhookService {
         profileName?: string;
         error?: string;
     }>;
+    private handleTemplateStatusUpdate;
     private handleTemplateUpdate;
     private processIncomingMessage;
     private runAutomations;

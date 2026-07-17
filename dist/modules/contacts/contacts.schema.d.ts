@@ -69,19 +69,19 @@ export declare const updateContactSchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         email?: string | undefined;
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
         customFields?: Record<string, any> | undefined;
     }, {
         email?: unknown;
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: unknown;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
         customFields?: Record<string, any> | undefined;
     }>;
@@ -89,10 +89,10 @@ export declare const updateContactSchema: z.ZodObject<{
     body: {
         email?: string | undefined;
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: string | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
         customFields?: Record<string, any> | undefined;
     };
@@ -100,10 +100,10 @@ export declare const updateContactSchema: z.ZodObject<{
     body: {
         email?: unknown;
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
         phone?: unknown;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
         customFields?: Record<string, any> | undefined;
     };
@@ -208,26 +208,26 @@ export declare const bulkUpdateSchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     }, {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     };
 }, {
     body: {
         contactIds: string[];
         tags?: string[] | undefined;
-        status?: "DELETED" | "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | undefined;
+        status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         groupIds?: string[] | undefined;
     };
 }>;
