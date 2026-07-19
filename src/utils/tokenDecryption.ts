@@ -1,13 +1,8 @@
 // src/utils/tokenDecryption.ts
-// ✅ NEW FILE — single source of truth for account+token retrieval with auto-heal.
-// Fixes: whatsapp.service.ts and meta.service.ts had two divergent copies of this
-// logic. whatsapp.service.ts (used by ALL message sending) did NOT auto-heal
-// plain-text tokens, did NOT mark broken accounts as DISCONNECTED — so message
-// sending would silently fail while the dashboard showed "Connected".
-
 import { WhatsAppAccount, WhatsAppAccountStatus } from '@prisma/client';
 import prisma from '../config/database';
-import { encrypt, safeDecryptStrict, isMetaToken, maskToken } from './encryption';
+import { encrypt, safeDecryptStrict, isMetaToken } from './encryption';
+import { authLog } from './logger';
 
 export interface AccountWithToken {
     account: WhatsAppAccount;
@@ -16,16 +11,6 @@ export interface AccountWithToken {
 
 /**
  * Fetch a WhatsApp account and return its DECRYPTED access token.
- *
- * Behavior:
- *   1. If token in DB is already plain-text (unencrypted, legacy accounts),
- *      auto-encrypts it in-place and returns the plain-text version.
- *   2. If token cannot be decrypted (encryption key mismatch / corruption),
- *      marks the account as DISCONNECTED and clears the token, then returns null.
- *   3. If account is not connected, returns null.
- *
- * Callers get a consistent contract: either a working token, or null (with the
- * DB updated so the UI shows the correct status).
  */
 export async function getAccountWithDecryptedToken(
     accountId: string
@@ -35,27 +20,27 @@ export async function getAccountWithDecryptedToken(
     });
 
     if (!account) {
-        console.error(`❌ Account not found: ${accountId}`);
+        authLog.error('Account not found', null, { accountId });
         return null;
     }
 
     if (account.status !== WhatsAppAccountStatus.CONNECTED) {
-        console.error(`❌ Account not connected: ${accountId}, status: ${account.status}`);
+        authLog.warn('Account not connected', { accountId, status: account.status });
         return null;
     }
 
     if (!account.accessToken) {
-        console.error(`❌ No access token for account: ${accountId}`);
+        authLog.error('No access token for account', null, { accountId });
         return null;
     }
 
-    console.log(`🔐 Retrieving token for account ${accountId}...`);
+    authLog.debug('Retrieving token for account', { accountId });
 
     let decryptedToken = safeDecryptStrict(account.accessToken);
 
     // ✅ AUTO-HEAL: legacy plain-text token → encrypt and save
     if (!decryptedToken && isMetaToken(account.accessToken)) {
-        console.log(`🔄 Auto-healing: plain-text token detected, encrypting now (${accountId})`);
+        authLog.info('Auto-healing: plain-text token detected, encrypting now', { accountId });
         try {
             const encryptedToken = encrypt(account.accessToken);
             await prisma.whatsAppAccount.update({
@@ -63,17 +48,18 @@ export async function getAccountWithDecryptedToken(
                 data: { accessToken: encryptedToken },
             });
             decryptedToken = account.accessToken;
-            console.log(`✅ Token encrypted and persisted`);
+            authLog.info('Token encrypted and persisted', { accountId });
         } catch (err: any) {
-            console.error(`❌ Auto-heal encryption failed:`, err.message);
+            authLog.error('Auto-heal encryption failed', err, { accountId });
         }
     }
 
     // ✅ If still no valid token, mark account disconnected so the UI reflects reality
     if (!decryptedToken) {
-        console.error(`❌ Failed to decrypt token for ${accountId} — marking as DISCONNECTED`);
-        console.error(`   Likely causes: ENCRYPTION_KEY changed, or DB corruption`);
-        console.error(`   ✅ User must reconnect their WhatsApp account`);
+        authLog.error('Failed to decrypt token — marking as DISCONNECTED', null, {
+            accountId,
+            cause: 'Likely ENCRYPTION_KEY changed, or DB corruption',
+        });
 
         await prisma.whatsAppAccount
             .update({
@@ -84,11 +70,11 @@ export async function getAccountWithDecryptedToken(
                     tokenExpiresAt: null,
                 },
             })
-            .catch((e) => console.error('Failed to mark account disconnected:', e));
+            .catch((e) => authLog.error('Failed to mark account disconnected', e, { accountId }));
 
         return null;
     }
 
-    console.log(`✅ Token ready: ${maskToken(decryptedToken)}`);
+    authLog.debug('Token ready', { accountId });
     return { account, accessToken: decryptedToken };
 }

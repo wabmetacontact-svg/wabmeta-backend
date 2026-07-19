@@ -1,9 +1,4 @@
-// src/server.ts - FINAL FIXED VERSION
-// ✅ FIX 1: Pre-warm REMOVED from startBackgroundJobs()
-//    Ab sirf scheduler.service.ts (daily 3 AM cron) handle karta hai
-//    Pehle: server.ts + scheduler = DOUBLE run on every deploy
-// ✅ FIX 2: Cleaner startup logs
-
+// src/server.ts - CLEAN STARTUP
 import http from 'http';
 import app from './app';
 import { config } from './config';
@@ -12,6 +7,7 @@ import { initializeSocket } from './socket';
 import { validateEncryptionKey } from './utils/encryption';
 import { initializeScheduler } from './services/scheduler.service';
 import { walletReconciliationService } from './modules/wallet/wallet.reconciliation.service';
+import logger, { cronLog, socketLog } from './utils/logger';
 
 let webhookService: any = null;
 
@@ -19,43 +15,60 @@ async function loadOptionalServices() {
   try {
     const webhookModule = await import('./modules/webhooks/webhook.service');
     webhookService = webhookModule.webhookService;
-    console.log('✅ Webhook service loaded');
-  } catch (error) {
-    console.log('ℹ️  Webhook service not available');
+    logger.info('Webhook service loaded');
+  } catch {
+    logger.warn('Webhook service not available');
   }
 }
 
-// ============================================
-// BOOTSTRAP
-// ============================================
+// ─── Startup Banner ──────────────────────────────────────
+function printBanner() {
+  const line = '━'.repeat(50);
+  console.log('');
+  console.log(`\x1b[36m${line}\x1b[0m`);
+  console.log(`\x1b[36m\x1b[1m  🚀 WABMETA API SERVER\x1b[0m`);
+  console.log(`\x1b[36m${line}\x1b[0m`);
+  console.log('');
+}
+
+function printReady(port: number, encryption: boolean) {
+  const line = '━'.repeat(50);
+  console.log('');
+  console.log(`\x1b[32m${line}\x1b[0m`);
+  console.log(`\x1b[32m\x1b[1m  ✅ SERVER READY\x1b[0m`);
+  console.log(`\x1b[32m${line}\x1b[0m`);
+  console.log(`     📡  Port         : \x1b[36m${port}\x1b[0m`);
+  console.log(`     🌍  Environment  : \x1b[36m${config.app.env}\x1b[0m`);
+  console.log(`     🔐  Encryption   : ${encryption ? '\x1b[32m✓ enabled\x1b[0m' : '\x1b[31m✗ disabled\x1b[0m'}`);
+  console.log(`     🕐  Started at   : \x1b[36m${new Date().toISOString()}\x1b[0m`);
+  console.log(`\x1b[32m${line}\x1b[0m`);
+  console.log('');
+}
+
+// ─── Bootstrap ───────────────────────────────────────────
 async function bootstrap() {
   try {
-    console.log('');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🚀 WABMETA API SERVER STARTING...');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    printBanner();
 
     // Step 1: Encryption
-    console.log('🔐 Validating encryption...');
     const encryptionValid = validateEncryptionKey();
     if (!encryptionValid) {
       if (config.app.isProduction) {
-        console.error('❌ ENCRYPTION_KEY required in production. Exiting.');
+        logger.error('ENCRYPTION_KEY required in production');
         process.exit(1);
-      } else {
-        console.warn('⚠️  No encryption key - development mode only!');
       }
+      logger.warn('No encryption key - development mode only');
     } else {
-      console.log('✅ Encryption key validated');
+      logger.info('Encryption validated');
     }
 
     // Step 2: Database
-    console.log('📦 Testing database connection...');
     try {
+      const start = Date.now();
       await prisma.$queryRaw`SELECT 1`;
-      console.log('✅ Database connected');
-    } catch (dbError) {
-      console.error('❌ Database connection failed:', dbError);
+      logger.info('Database connected', { duration: Date.now() - start });
+    } catch (dbError: any) {
+      logger.error('Database connection failed', dbError);
       process.exit(1);
     }
 
@@ -66,109 +79,86 @@ async function bootstrap() {
     const server = http.createServer(app);
 
     // Step 5: Socket.io
-    console.log('🔌 Initializing Socket.io...');
     initializeSocket(server);
-    console.log('✅ Socket.io initialized');
+    socketLog.info('Socket.io initialized');
 
-    // ✅ Start wallet reconciliation cron
+    // Step 6: Wallet reconciliation
     walletReconciliationService.startCron();
+    cronLog.info('Wallet reconciliation cron started');
 
-    // Step 6: Scheduler
-    // ✅ NOTE: Pre-warm is handled by scheduler (daily 3 AM cron)
-    // DO NOT add pre-warm here - it will cause double execution
-    console.log('⏰ Starting scheduler...');
+    // Step 7: Scheduler
     initializeScheduler();
-    console.log('✅ Scheduler started');
+    cronLog.info('Scheduler started');
 
-    // Step 7: Campaign processor
-    console.log('📅 Starting campaign processor...');
+    // Step 8: Campaign processor
     startCampaignProcessor();
-    console.log('✅ Campaign processor started');
+    cronLog.info('Campaign processor started');
 
-    // Step 8: Background jobs (infra only - NO pre-warm here)
+    // Step 9: Background jobs
     startBackgroundJobs();
 
-    // Step 9: Campaign recovery
+    // Step 10: Campaign recovery
     try {
       const { campaignRecoveryService } = await import(
         './modules/campaigns/campaigns.recovery.service'
       );
       await campaignRecoveryService.initialize();
-      console.log('✅ Campaign recovery initialized');
-    } catch (error) {
-      console.warn('⚠️  Campaign recovery init failed:', error);
+      cronLog.info('Campaign recovery initialized');
+    } catch (error: any) {
+      logger.warn('Campaign recovery init failed', { error: error.message });
     }
 
-    // Step 10: Redis
+    // Step 11: Redis
     try {
       const { initRedis } = await import('./config/redis');
       initRedis();
-    } catch (error) {
-      console.warn('⚠️  Redis init failed:', error);
+    } catch (error: any) {
+      logger.warn('Redis init failed', { error: error.message });
     }
 
-    // Step 11: Listen
+    // Step 12: Listen
     const PORT = config.port || 5000;
     server.listen(PORT, () => {
-      console.log('');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('🚀 SERVER IS RUNNING!');
-      console.log(`   📡 Port        : ${PORT}`);
-      console.log(`   🌍 Environment : ${config.app.env}`);
-      console.log(
-        `   🔐 Encryption  : ${encryptionValid ? 'ENABLED ✓' : 'DISABLED ✗'}`
-      );
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('');
-
-
+      printReady(PORT, encryptionValid);
     });
 
     setupGracefulShutdown(server);
     setupErrorHandlers();
-  } catch (error) {
-    console.error('❌ FAILED TO START SERVER:', error);
+
+  } catch (error: any) {
+    logger.error('Server startup failed', error);
     process.exit(1);
   }
 }
 
-// ============================================
-// ============================================
-// ✅ NEW: Cron Priority System
-// High priority queries always get connection
-// Low priority skipped during pool pressure
-// ============================================
-
+// ─── Pool Pressure System ────────────────────────────────
 let poolPressureCount = 0;
 const POOL_PRESSURE_THRESHOLD = 3;
 let inPoolPressureMode = false;
 
-// Track pool pressure
 function reportPoolError() {
   poolPressureCount++;
+
   if (poolPressureCount >= POOL_PRESSURE_THRESHOLD && !inPoolPressureMode) {
     inPoolPressureMode = true;
-    console.warn('🚨 Pool pressure detected - throttling low-priority crons');
-    
-    // Auto-recover after 5 min
+    logger.warn('Pool pressure detected - throttling crons', {
+      threshold: POOL_PRESSURE_THRESHOLD,
+    });
+
     setTimeout(() => {
       inPoolPressureMode = false;
-      poolPressureCount = 0;
-      console.log('✅ Pool pressure cleared - crons resumed');
+      poolPressureCount  = 0;
+      logger.info('Pool pressure cleared - crons resumed');
     }, 5 * 60 * 1000);
   }
 }
 
-// ============================================
-// ✅ CAMPAIGN PROCESSOR - PRIORITY: HIGH
-// ============================================
+// ─── Campaign Processor ──────────────────────────────────
 let campaignProcessorRunning = false;
 
 function startCampaignProcessor() {
-  // First run after 60 sec
   setTimeout(() => {
     runCampaignProcessor();
-    // Then every 90 seconds (was 60)
     setInterval(runCampaignProcessor, 90 * 1000);
   }, 60 * 1000);
 }
@@ -181,7 +171,7 @@ async function runCampaignProcessor() {
     await processScheduledCampaigns();
   } catch (error: any) {
     if (error?.code === 'P2024') reportPoolError();
-    console.error('❌ Campaign processor error:', error?.message);
+    cronLog.error('Campaign processor error', error);
   } finally {
     campaignProcessorRunning = false;
   }
@@ -193,16 +183,9 @@ async function processScheduledCampaigns() {
 
   try {
     scheduledCampaigns = await prisma.campaign.findMany({
-      where: {
-        status: 'SCHEDULED',
-        scheduledAt: { lte: now },
-      },
-      select: {
-        id: true,
-        organizationId: true,
-        name: true,
-      },
-      take: 5, // ✅ Reduced from 10
+      where:  { status: 'SCHEDULED', scheduledAt: { lte: now } },
+      select: { id: true, organizationId: true, name: true },
+      take:   5,
     });
   } catch (error: any) {
     if (error?.code === 'P2024') {
@@ -214,28 +197,27 @@ async function processScheduledCampaigns() {
 
   if (scheduledCampaigns.length === 0) return;
 
-  console.log(`📅 Processing ${scheduledCampaigns.length} scheduled campaigns`);
+  cronLog.info('Processing scheduled campaigns', {
+    count: scheduledCampaigns.length,
+  });
 
   const { campaignsService } = await import('./modules/campaigns/campaigns.service');
 
   for (const campaign of scheduledCampaigns) {
     try {
       await campaignsService.start(campaign.organizationId, campaign.id);
-      // ✅ 2 second gap between campaigns
       await new Promise(r => setTimeout(r, 2000));
     } catch (error: any) {
-      console.error(`❌ Campaign ${campaign.id}:`, error.message);
+      cronLog.error('Campaign start failed', error, {
+        campaignId: campaign.id,
+      });
     }
   }
 }
 
-// ============================================
-// ✅ BACKGROUND JOBS - PRIORITY: LOW
-// Skip during pool pressure
-// ============================================
-
+// ─── Background Jobs ─────────────────────────────────────
 function startBackgroundJobs() {
-  // ✅ 1. Health check - Every 15 min (was 10)
+  // Health check
   setInterval(async () => {
     if (inPoolPressureMode) return;
     try {
@@ -245,11 +227,11 @@ function startBackgroundJobs() {
     }
   }, 15 * 60 * 1000);
 
-  // ✅ 2. Window expiry - Every 15 min (was 10)
+  // Window expiry
   if (webhookService?.expireConversationWindows) {
     setInterval(async () => {
       if (inPoolPressureMode) {
-        console.log('⏭️ Window expiry skipped: pool pressure');
+        cronLog.debug('Window expiry skipped - pool pressure');
         return;
       }
       try {
@@ -260,7 +242,7 @@ function startBackgroundJobs() {
     }, 15 * 60 * 1000);
   }
 
-  // ✅ 3. Message limit reset - Every 2 hours (was 1)
+  // Message limit reset
   if (webhookService?.resetDailyMessageLimits) {
     setInterval(async () => {
       if (inPoolPressureMode) return;
@@ -272,41 +254,41 @@ function startBackgroundJobs() {
     }, 2 * 60 * 60 * 1000);
   }
 
-  console.log('✅ Background jobs started (with pool pressure protection)');
+  cronLog.info('Background jobs started');
 }
 
-// ============================================
-// GRACEFUL SHUTDOWN
-// ============================================
+// ─── Graceful Shutdown ───────────────────────────────────
 function setupGracefulShutdown(server: http.Server) {
   const shutdown = async (signal: string) => {
-    console.log(`\n🔄 ${signal} received. Shutting down...`);
+    logger.info(`${signal} received - shutting down`);
+
     server.close(async () => {
-      console.log('✅ HTTP server closed');
+      logger.info('HTTP server closed');
+
       try {
         await prisma.$disconnect();
-        console.log('✅ Database disconnected');
-      } catch (err) {
-        console.error('⚠️  Shutdown error:', err);
+        logger.info('Database disconnected');
+      } catch (err: any) {
+        logger.error('Shutdown error', err);
       }
+
       process.exit(0);
     });
+
     setTimeout(() => {
-      console.error('⚠️  Force exiting');
+      logger.warn('Force exiting after 10s timeout');
       process.exit(1);
-    }, 10000);
+    }, 10_000);
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
 }
 
-// ============================================
-// ERROR HANDLERS
-// ============================================
+// ─── Error Handlers ──────────────────────────────────────
 function setupErrorHandlers() {
   process.on('uncaughtException', (error) => {
-    console.error('❌ UNCAUGHT EXCEPTION:', error);
+    logger.error('Uncaught exception', error);
   });
 
   process.on('unhandledRejection', (reason: any) => {
@@ -318,11 +300,13 @@ function setupErrorHandlers() {
       'ECONNREFUSED',
       'enableOfflineQueue',
     ];
+
     if (ignorable.some((i) => msg.includes(i))) {
-      console.warn(`⚠️  Handled rejection: ${msg}`);
+      logger.warn('Handled rejection', { message: msg });
       return;
     }
-    console.error('❌ UNHANDLED REJECTION:', msg);
+
+    logger.error('Unhandled rejection', new Error(msg));
   });
 }
 

@@ -4,21 +4,21 @@ export declare const adminLoginSchema: z.ZodObject<{
         email: z.ZodString;
         password: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        email: string;
         password: string;
+        email: string;
     }, {
-        email: string;
         password: string;
+        email: string;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
-        email: string;
         password: string;
+        email: string;
     };
 }, {
     body: {
-        email: string;
         password: string;
+        email: string;
     };
 }>;
 export declare const createAdminSchema: z.ZodObject<{
@@ -29,27 +29,27 @@ export declare const createAdminSchema: z.ZodObject<{
         role: z.ZodDefault<z.ZodOptional<z.ZodEnum<["admin", "super_admin"]>>>;
     }, "strip", z.ZodTypeAny, {
         name: string;
-        email: string;
         password: string;
+        email: string;
         role: "admin" | "super_admin";
     }, {
         name: string;
-        email: string;
         password: string;
+        email: string;
         role?: "admin" | "super_admin" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         name: string;
-        email: string;
         password: string;
+        email: string;
         role: "admin" | "super_admin";
     };
 }, {
     body: {
         name: string;
-        email: string;
         password: string;
+        email: string;
         role?: "admin" | "super_admin" | undefined;
     };
 }>;
@@ -172,23 +172,23 @@ export declare const updateUserSchema: z.ZodObject<{
         status: z.ZodOptional<z.ZodEnum<["ACTIVE", "INACTIVE", "SUSPENDED", "PENDING_VERIFICATION"]>>;
         emailVerified: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
+        phone?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        phone?: string | undefined;
         status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     }, {
+        phone?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        phone?: string | undefined;
         status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
+        phone?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        phone?: string | undefined;
         status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     };
@@ -197,9 +197,9 @@ export declare const updateUserSchema: z.ZodObject<{
     };
 }, {
     body: {
+        phone?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        phone?: string | undefined;
         status?: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING_VERIFICATION" | undefined;
         emailVerified?: boolean | undefined;
     };

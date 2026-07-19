@@ -52,6 +52,7 @@ const uuid_1 = require("uuid");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
 const redis_1 = require("../../config/redis");
+const logger_1 = require("../../utils/logger");
 async function extractStoredPin(webhookSecretEncrypted) {
     if (!webhookSecretEncrypted)
         return null;
@@ -116,9 +117,10 @@ class MetaService {
             ].join(','),
         });
         const url = `${baseUrl}?${params.toString()}`;
-        console.log('📱 Generated OAuth URL');
-        console.log('   App ID:', config_1.config.meta.appId);
-        console.log('   Config ID:', config_1.config.meta.configId);
+        logger_1.metaLog.info('Generated OAuth URL', {
+            appId: config_1.config.meta.appId,
+            configId: config_1.config.meta.configId,
+        });
         return url;
     }
     getEmbeddedSignupConfig() {
@@ -148,11 +150,12 @@ class MetaService {
     // ============================================
     async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress, embeddedSignup = false, sessionWabaId, sessionPhoneNumberId) {
         try {
-            console.log('\n🔄 ========== META CONNECTION START ==========');
-            console.log('   Organization ID:', organizationId);
-            console.log('   Embedded Signup:', embeddedSignup);
-            console.log('   Session WABA ID:', sessionWabaId || '(will lookup from token)');
-            console.log('   Session Phone ID:', sessionPhoneNumberId || '(will lookup from WABA)');
+            logger_1.metaLog.info('Meta connection start', {
+                organizationId,
+                embeddedSignup,
+                sessionWabaId,
+                sessionPhoneNumberId,
+            });
             // STEP 1: Get Access Token
             onProgress?.({
                 step: 'TOKEN_EXCHANGE',
@@ -161,28 +164,28 @@ class MetaService {
             });
             let accessToken;
             if ((0, encryption_1.isMetaToken)(codeOrToken)) {
-                console.log('✅ Using provided access token');
+                logger_1.metaLog.debug('Using provided access token');
                 accessToken = codeOrToken;
             }
             else {
-                console.log('🔄 Exchanging code for token...');
+                logger_1.metaLog.info('Exchanging code for token');
                 const tokenResponse = await meta_api_1.metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
                 accessToken = tokenResponse.accessToken;
-                console.log('✅ Short-lived token obtained');
+                logger_1.metaLog.debug('Short-lived token obtained');
             }
             try {
-                console.log('🔄 Getting long-lived token...');
+                logger_1.metaLog.info('Getting long-lived token');
                 const longLivedTokenResponse = await meta_api_1.metaApi.getLongLivedToken(accessToken);
                 accessToken = longLivedTokenResponse.accessToken;
-                console.log('✅ Long-lived token obtained');
+                logger_1.metaLog.debug('Long-lived token obtained');
             }
             catch (error) {
-                console.log('⚠️ Using short-lived token');
+                logger_1.metaLog.warn('Using short-lived token fallback');
             }
             if (!(0, encryption_1.isMetaToken)(accessToken)) {
                 throw new errorHandler_1.AppError('Invalid access token format received', 500);
             }
-            console.log('✅ Final token:', (0, encryption_1.maskToken)(accessToken));
+            logger_1.metaLog.debug('Final token exchange complete');
             onProgress?.({
                 step: 'TOKEN_EXCHANGE',
                 status: 'completed',
@@ -198,19 +201,19 @@ class MetaService {
             if (!debugInfo.data.is_valid) {
                 throw new errorHandler_1.AppError('Access token is invalid or expired', 401);
             }
-            console.log('🔍 Token is valid');
+            logger_1.metaLog.debug('Token is valid');
             let wabaId = sessionWabaId || null;
             let businessId = null;
             if (wabaId) {
-                console.log('✅ Using WABA ID from session info (most reliable):', wabaId);
+                logger_1.metaLog.info('Using WABA ID from session info', { wabaId });
             }
             else {
                 const granularScopes = debugInfo.data.granular_scopes || [];
-                console.log('🔍 Granular scopes:', JSON.stringify(granularScopes));
+                logger_1.metaLog.debug('Granular scopes retrieved', { granularScopes });
                 for (const scope of granularScopes) {
                     if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
                         wabaId = scope.target_ids[0];
-                        console.log('✅ Found WABA ID from granular scopes:', wabaId);
+                        logger_1.metaLog.info('Found WABA ID from granular scopes', { wabaId });
                         break;
                     }
                     if (scope.scope === 'business_management' && scope.target_ids?.length) {
@@ -218,17 +221,17 @@ class MetaService {
                     }
                 }
                 if (!wabaId) {
-                    console.log('⚠️ WABA not in granular scopes, trying business API fallback...');
+                    logger_1.metaLog.warn('WABA not in granular scopes, trying business API fallback');
                     try {
                         const wabas = await meta_api_1.metaApi.getSharedWABAs(accessToken);
                         if (wabas.length > 0) {
                             wabaId = wabas[0].id;
                             businessId = wabas[0].owner_business_info?.id || businessId;
-                            console.log('✅ Found WABA from business API:', wabaId);
+                            logger_1.metaLog.info('Found WABA from business API', { wabaId });
                         }
                     }
                     catch (wabaErr) {
-                        console.warn('⚠️ Business API fallback failed (expected for Embedded Signup tokens):', wabaErr.message);
+                        logger_1.metaLog.warn('Business API fallback failed', { error: wabaErr.message });
                     }
                 }
             }
@@ -245,14 +248,14 @@ class MetaService {
             let wabaDetails = { id: wabaId, name: 'WhatsApp Business Account' };
             try {
                 wabaDetails = await meta_api_1.metaApi.getWABADetails(wabaId, accessToken);
-                console.log('✅ WABA Details:', {
+                logger_1.metaLog.info('WABA Details fetched', {
                     id: wabaDetails.id,
                     name: wabaDetails.name,
                 });
             }
             catch (detailErr) {
-                console.warn('⚠️ Could not get full WABA details (non-fatal):', detailErr.message);
-                console.log('💡 Continuing with minimal WABA info: id=', wabaId);
+                logger_1.metaLog.warn('Could not get full WABA details (non-fatal)', { error: detailErr.message });
+                logger_1.metaLog.info('Continuing with minimal WABA info', { wabaId });
             }
             onProgress?.({
                 step: 'FETCHING_WABA',
@@ -268,7 +271,7 @@ class MetaService {
             });
             let phoneNumbers;
             if (sessionPhoneNumberId) {
-                console.log('📥 Fetching specific phone by session ID:', sessionPhoneNumberId);
+                logger_1.metaLog.info('Fetching specific phone by session ID', { sessionPhoneNumberId });
                 try {
                     const specificPhone = await meta_api_1.metaApi.getPhoneNumberDetails(sessionPhoneNumberId, accessToken);
                     phoneNumbers = [{
@@ -283,10 +286,10 @@ class MetaService {
                             throughput: null,
                             status: null,
                         }];
-                    console.log('✅ Got phone from session ID:', specificPhone.displayPhoneNumber);
+                    logger_1.metaLog.info('Got phone from session ID', { displayPhoneNumber: specificPhone.displayPhoneNumber });
                 }
                 catch (phoneErr) {
-                    console.warn('⚠️ Could not get phone by session ID, falling back to WABA list:', phoneErr.message);
+                    logger_1.metaLog.warn('Could not get phone by session ID, falling back to WABA list', { error: phoneErr.message });
                     phoneNumbers = await meta_api_1.metaApi.getPhoneNumbers(wabaId, accessToken);
                 }
             }
@@ -297,7 +300,7 @@ class MetaService {
                 throw new errorHandler_1.AppError('No phone numbers found', 404);
             }
             const primaryPhone = phoneNumbers[0];
-            console.log('✅ Primary Phone:', primaryPhone.displayPhoneNumber);
+            logger_1.metaLog.info('Selected Primary Phone', { displayPhoneNumber: primaryPhone.displayPhoneNumber });
             onProgress?.({
                 step: 'FETCHING_PHONE',
                 status: 'completed',
@@ -313,10 +316,10 @@ class MetaService {
             });
             try {
                 await meta_api_1.metaApi.subscribeToWebhooks(wabaId, accessToken);
-                console.log('✅ Webhooks subscribed');
+                logger_1.metaLog.info('Webhooks subscribed');
             }
             catch (webhookError) {
-                console.warn('⚠️ Webhook subscription failed:', webhookError.message);
+                logger_1.metaLog.warn('Webhook subscription failed', { error: webhookError.message });
             }
             onProgress?.({
                 step: 'SUBSCRIBE_WEBHOOK',
@@ -340,27 +343,23 @@ class MetaService {
                 });
                 const reusedPin = await extractStoredPin(existingRecord?.webhookSecret ?? null);
                 phonePin = reusedPin || (0, meta_api_1.generatePhonePin)();
-                console.log(`[Meta Service] Using ${reusedPin ? 'existing' : 'new'} PIN for phone ${primaryPhone.id}`);
-                console.log(`[Meta Service] Registering phone ${primaryPhone.id}...`);
+                logger_1.metaLog.info('Registering phone pin', {
+                    phoneNumberId: primaryPhone.id,
+                    pinType: reusedPin ? 'reused' : 'generated',
+                });
                 const registerResult = await meta_api_1.metaApi.registerPhone(primaryPhone.id, phonePin, accessToken);
                 // ✅ FIX: Only log success if actually successful
                 if (registerResult.success) {
-                    if (registerResult.alreadyRegistered) {
-                        console.log(`ℹ️ Phone ${primaryPhone.id} already registered`);
-                    }
-                    else {
-                        console.log(`✅ Phone ${primaryPhone.id} newly registered`);
-                    }
+                    logger_1.metaLog.info('Phone registration result', {
+                        phoneNumberId: primaryPhone.id,
+                        alreadyRegistered: registerResult.alreadyRegistered,
+                    });
                 }
                 else {
-                    // ❌ Registration failed - CRITICAL warning
-                    console.error(`❌ PHONE REGISTRATION FAILED for ${primaryPhone.id}\n` +
-                        `   Messages will NOT work until this is fixed.\n` +
-                        `   Common causes:\n` +
-                        `   1. 2FA PIN mismatch\n` +
-                        `   2. Number pending verification\n` +
-                        `   3. Number already registered elsewhere\n` +
-                        `   4. Payment method missing in Meta Business Manager\n`);
+                    logger_1.metaLog.error('Phone registration failed', null, {
+                        phoneNumberId: primaryPhone.id,
+                        cause: '2FA PIN mismatch, pending verification, already registered elsewhere, or payment method missing',
+                    });
                     registrationWarning = 'PHONE_NOT_REGISTERED';
                     registrationMessage =
                         'Phone number connected but registration failed. ' +
@@ -368,7 +367,7 @@ class MetaService {
                 }
             }
             catch (registerError) {
-                console.warn('⚠️ Phone number registration failed:', registerError.message);
+                logger_1.metaLog.error('Phone number registration failed', registerError, { phoneNumberId: primaryPhone.id });
                 phonePin = (0, meta_api_1.generatePhonePin)(); // ensure we still stashe a value to persist
                 registrationWarning = 'PHONE_NOT_REGISTERED';
                 registrationMessage =
@@ -397,13 +396,13 @@ class MetaService {
                 throw new errorHandler_1.AppError(`Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
                     `Please disconnect it first before connecting a new one.`, 400);
             }
-            console.log('🔐 Encrypting token...');
+            logger_1.metaLog.debug('Encrypting access token', { phoneNumberId: primaryPhone.id });
             const encryptedToken = (0, encryption_1.encrypt)(accessToken);
             const verifyDecrypt = (0, encryption_1.safeDecryptStrict)(encryptedToken);
             if (verifyDecrypt !== accessToken) {
                 throw new errorHandler_1.AppError('Token encryption verification failed', 500);
             }
-            console.log('✅ Encryption verified');
+            logger_1.metaLog.debug('Encryption verified', { phoneNumberId: primaryPhone.id });
             const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
             const cleanPhoneNumber = primaryPhone.displayPhoneNumber.replace(/\D/g, '');
             // ✅ Persist the PIN encrypted alongside the webhook verify token so we can
@@ -419,9 +418,11 @@ class MetaService {
                 });
                 if (existingByPhone) {
                     const isSameOrg = existingByPhone.organizationId === organizationId;
-                    console.log(isSameOrg
-                        ? '🔄 Reactivating existing account (same org)'
-                        : `🔄 Transferring phone to new org (was: ${existingByPhone.organizationId})`);
+                    logger_1.metaLog.info('Reactivating or transferring existing account', {
+                        isSameOrg,
+                        previousOrgId: existingByPhone.organizationId,
+                        newOrgId: organizationId,
+                    });
                     const hasDefault = await database_1.default.whatsAppAccount.findFirst({
                         where: {
                             organizationId,
@@ -450,10 +451,10 @@ class MetaService {
                             webhookSecret: encryptedWebhookSecret,
                         },
                     });
-                    console.log('✅ Account updated successfully');
+                    logger_1.metaLog.info('Account updated successfully', { organizationId });
                 }
                 else {
-                    console.log('🔄 Creating new WhatsApp account');
+                    logger_1.metaLog.info('Creating new WhatsApp account', { organizationId });
                     const accountCount = await database_1.default.whatsAppAccount.count({ where: { organizationId } });
                     savedAccount = await database_1.default.whatsAppAccount.create({
                         data: {
@@ -475,12 +476,12 @@ class MetaService {
                             messagingLimit: primaryPhone.messagingLimitTier,
                         },
                     });
-                    console.log('✅ New account created');
+                    logger_1.metaLog.info('New account created successfully', { organizationId });
                 }
             }
             catch (dbError) {
                 if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
-                    console.warn('⚠️ Unique constraint hit despite findUnique miss — doing force update');
+                    logger_1.metaLog.warn('Unique constraint hit, doing force update', { organizationId, phoneNumberId: primaryPhone.id });
                     const forceExisting = await database_1.default.whatsAppAccount.findFirst({
                         where: { phoneNumberId: primaryPhone.id },
                     });
@@ -505,7 +506,7 @@ class MetaService {
                                 webhookSecret: encryptedWebhookSecret,
                             },
                         });
-                        console.log('✅ Force-updated existing account');
+                        logger_1.metaLog.info('Force-updated existing account successfully', { organizationId });
                     }
                     else {
                         throw dbError;
@@ -518,7 +519,7 @@ class MetaService {
             // STEP 5.5: MetaConnection & PhoneNumbers
             let savedMetaConnection = null;
             try {
-                console.log('🔄 Saving MetaConnection...');
+                logger_1.metaLog.debug('Saving MetaConnection', { organizationId });
                 savedMetaConnection = await database_1.default.metaConnection.upsert({
                     where: { organizationId },
                     update: {
@@ -536,14 +537,14 @@ class MetaService {
                         status: 'CONNECTED',
                     },
                 });
-                console.log('✅ MetaConnection saved:', savedMetaConnection.id);
+                logger_1.metaLog.info('MetaConnection saved', { connectionId: savedMetaConnection.id });
             }
             catch (e) {
-                console.warn('⚠️ MetaConnection save failed:', e.message);
+                logger_1.metaLog.error('MetaConnection save failed', e, { organizationId });
             }
             try {
                 if (savedMetaConnection) {
-                    console.log('🔄 Saving PhoneNumbers...');
+                    logger_1.metaLog.debug('Saving phone numbers to database', { organizationId });
                     for (const phone of phoneNumbers) {
                         await database_1.default.phoneNumber.upsert({
                             where: { phoneNumberId: phone.id },
@@ -566,11 +567,11 @@ class MetaService {
                             },
                         });
                     }
-                    console.log('✅ PhoneNumbers saved');
+                    logger_1.metaLog.info('Phone numbers saved successfully', { organizationId });
                 }
             }
             catch (e) {
-                console.warn('⚠️ PhoneNumber save failed:', e.message);
+                logger_1.metaLog.error('PhoneNumber save failed', e, { organizationId });
             }
             onProgress?.({
                 step: 'COMPLETED',
@@ -578,9 +579,9 @@ class MetaService {
                 message: 'WhatsApp account connected!',
             });
             this.syncTemplatesBackground(savedAccount.id, wabaId, accessToken).catch((err) => {
-                console.error('Background template sync failed:', err);
+                logger_1.metaLog.error('Background template sync failed', err, { accountId: savedAccount.id });
             });
-            console.log('🔄 ========== META CONNECTION END ==========\n');
+            logger_1.metaLog.info('Meta connection finished');
             return {
                 success: true,
                 account: this.sanitizeAccount(savedAccount),
@@ -589,7 +590,7 @@ class MetaService {
             };
         }
         catch (error) {
-            console.error('❌ Meta connection error:', error);
+            logger_1.metaLog.error('Meta connection error', error, { organizationId });
             onProgress?.({
                 step: 'COMPLETED',
                 status: 'error',
@@ -696,7 +697,7 @@ class MetaService {
             });
         }
         catch (e) {
-            console.warn('⚠️ Failed to emit accountDisconnected socket event:', e);
+            logger_1.metaLog.warn('Failed to emit accountDisconnected socket event', { error: e.message });
         }
         return { success: true, message: 'Account disconnected successfully' };
     }
@@ -719,7 +720,7 @@ class MetaService {
             where: { id: accountId },
             data: { isDefault: true },
         });
-        console.log(`✅ Default account: ${accountId}`);
+        logger_1.metaLog.info('Default account set', { accountId, organizationId });
         return { success: true, message: 'Default account updated' };
     }
     async refreshAccountHealth(accountId, organizationId) {

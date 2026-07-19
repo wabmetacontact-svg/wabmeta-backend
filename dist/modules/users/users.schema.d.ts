@@ -6,28 +6,28 @@ export declare const updateProfileSchema: z.ZodObject<{
         phone: z.ZodNullable<z.ZodOptional<z.ZodString>>;
         avatar: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     }, "strip", z.ZodTypeAny, {
+        phone?: string | null | undefined;
         firstName?: string | undefined;
         lastName?: string | null | undefined;
-        phone?: string | null | undefined;
         avatar?: string | null | undefined;
     }, {
+        phone?: string | null | undefined;
         firstName?: string | undefined;
         lastName?: string | null | undefined;
-        phone?: string | null | undefined;
         avatar?: string | null | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
+        phone?: string | null | undefined;
         firstName?: string | undefined;
         lastName?: string | null | undefined;
-        phone?: string | null | undefined;
         avatar?: string | null | undefined;
     };
 }, {
     body: {
+        phone?: string | null | undefined;
         firstName?: string | undefined;
         lastName?: string | null | undefined;
-        phone?: string | null | undefined;
         avatar?: string | null | undefined;
     };
 }>;

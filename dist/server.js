@@ -1,9 +1,4 @@
 "use strict";
-// src/server.ts - FINAL FIXED VERSION
-// ✅ FIX 1: Pre-warm REMOVED from startBackgroundJobs()
-//    Ab sirf scheduler.service.ts (daily 3 AM cron) handle karta hai
-//    Pehle: server.ts + scheduler = DOUBLE run on every deploy
-// ✅ FIX 2: Cleaner startup logs
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -41,6 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+// src/server.ts - CLEAN STARTUP
 const http_1 = __importDefault(require("http"));
 const app_1 = __importDefault(require("./app"));
 const config_1 = require("./config");
@@ -49,49 +45,64 @@ const socket_1 = require("./socket");
 const encryption_1 = require("./utils/encryption");
 const scheduler_service_1 = require("./services/scheduler.service");
 const wallet_reconciliation_service_1 = require("./modules/wallet/wallet.reconciliation.service");
+const logger_1 = __importStar(require("./utils/logger"));
 let webhookService = null;
 async function loadOptionalServices() {
     try {
         const webhookModule = await Promise.resolve().then(() => __importStar(require('./modules/webhooks/webhook.service')));
         webhookService = webhookModule.webhookService;
-        console.log('✅ Webhook service loaded');
+        logger_1.default.info('Webhook service loaded');
     }
-    catch (error) {
-        console.log('ℹ️  Webhook service not available');
+    catch {
+        logger_1.default.warn('Webhook service not available');
     }
 }
-// ============================================
-// BOOTSTRAP
-// ============================================
+// ─── Startup Banner ──────────────────────────────────────
+function printBanner() {
+    const line = '━'.repeat(50);
+    console.log('');
+    console.log(`\x1b[36m${line}\x1b[0m`);
+    console.log(`\x1b[36m\x1b[1m  🚀 WABMETA API SERVER\x1b[0m`);
+    console.log(`\x1b[36m${line}\x1b[0m`);
+    console.log('');
+}
+function printReady(port, encryption) {
+    const line = '━'.repeat(50);
+    console.log('');
+    console.log(`\x1b[32m${line}\x1b[0m`);
+    console.log(`\x1b[32m\x1b[1m  ✅ SERVER READY\x1b[0m`);
+    console.log(`\x1b[32m${line}\x1b[0m`);
+    console.log(`     📡  Port         : \x1b[36m${port}\x1b[0m`);
+    console.log(`     🌍  Environment  : \x1b[36m${config_1.config.app.env}\x1b[0m`);
+    console.log(`     🔐  Encryption   : ${encryption ? '\x1b[32m✓ enabled\x1b[0m' : '\x1b[31m✗ disabled\x1b[0m'}`);
+    console.log(`     🕐  Started at   : \x1b[36m${new Date().toISOString()}\x1b[0m`);
+    console.log(`\x1b[32m${line}\x1b[0m`);
+    console.log('');
+}
+// ─── Bootstrap ───────────────────────────────────────────
 async function bootstrap() {
     try {
-        console.log('');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('🚀 WABMETA API SERVER STARTING...');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        printBanner();
         // Step 1: Encryption
-        console.log('🔐 Validating encryption...');
         const encryptionValid = (0, encryption_1.validateEncryptionKey)();
         if (!encryptionValid) {
             if (config_1.config.app.isProduction) {
-                console.error('❌ ENCRYPTION_KEY required in production. Exiting.');
+                logger_1.default.error('ENCRYPTION_KEY required in production');
                 process.exit(1);
             }
-            else {
-                console.warn('⚠️  No encryption key - development mode only!');
-            }
+            logger_1.default.warn('No encryption key - development mode only');
         }
         else {
-            console.log('✅ Encryption key validated');
+            logger_1.default.info('Encryption validated');
         }
         // Step 2: Database
-        console.log('📦 Testing database connection...');
         try {
+            const start = Date.now();
             await database_1.default.$queryRaw `SELECT 1`;
-            console.log('✅ Database connected');
+            logger_1.default.info('Database connected', { duration: Date.now() - start });
         }
         catch (dbError) {
-            console.error('❌ Database connection failed:', dbError);
+            logger_1.default.error('Database connection failed', dbError);
             process.exit(1);
         }
         // Step 3: Optional services
@@ -99,92 +110,72 @@ async function bootstrap() {
         // Step 4: HTTP Server
         const server = http_1.default.createServer(app_1.default);
         // Step 5: Socket.io
-        console.log('🔌 Initializing Socket.io...');
         (0, socket_1.initializeSocket)(server);
-        console.log('✅ Socket.io initialized');
-        // ✅ Start wallet reconciliation cron
+        logger_1.socketLog.info('Socket.io initialized');
+        // Step 6: Wallet reconciliation
         wallet_reconciliation_service_1.walletReconciliationService.startCron();
-        // Step 6: Scheduler
-        // ✅ NOTE: Pre-warm is handled by scheduler (daily 3 AM cron)
-        // DO NOT add pre-warm here - it will cause double execution
-        console.log('⏰ Starting scheduler...');
+        logger_1.cronLog.info('Wallet reconciliation cron started');
+        // Step 7: Scheduler
         (0, scheduler_service_1.initializeScheduler)();
-        console.log('✅ Scheduler started');
-        // Step 7: Campaign processor
-        console.log('📅 Starting campaign processor...');
+        logger_1.cronLog.info('Scheduler started');
+        // Step 8: Campaign processor
         startCampaignProcessor();
-        console.log('✅ Campaign processor started');
-        // Step 8: Background jobs (infra only - NO pre-warm here)
+        logger_1.cronLog.info('Campaign processor started');
+        // Step 9: Background jobs
         startBackgroundJobs();
-        // Step 9: Campaign recovery
+        // Step 10: Campaign recovery
         try {
             const { campaignRecoveryService } = await Promise.resolve().then(() => __importStar(require('./modules/campaigns/campaigns.recovery.service')));
             await campaignRecoveryService.initialize();
-            console.log('✅ Campaign recovery initialized');
+            logger_1.cronLog.info('Campaign recovery initialized');
         }
         catch (error) {
-            console.warn('⚠️  Campaign recovery init failed:', error);
+            logger_1.default.warn('Campaign recovery init failed', { error: error.message });
         }
-        // Step 10: Redis
+        // Step 11: Redis
         try {
             const { initRedis } = await Promise.resolve().then(() => __importStar(require('./config/redis')));
             initRedis();
         }
         catch (error) {
-            console.warn('⚠️  Redis init failed:', error);
+            logger_1.default.warn('Redis init failed', { error: error.message });
         }
-        // Step 11: Listen
+        // Step 12: Listen
         const PORT = config_1.config.port || 5000;
         server.listen(PORT, () => {
-            console.log('');
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            console.log('🚀 SERVER IS RUNNING!');
-            console.log(`   📡 Port        : ${PORT}`);
-            console.log(`   🌍 Environment : ${config_1.config.app.env}`);
-            console.log(`   🔐 Encryption  : ${encryptionValid ? 'ENABLED ✓' : 'DISABLED ✗'}`);
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            console.log('');
+            printReady(PORT, encryptionValid);
         });
         setupGracefulShutdown(server);
         setupErrorHandlers();
     }
     catch (error) {
-        console.error('❌ FAILED TO START SERVER:', error);
+        logger_1.default.error('Server startup failed', error);
         process.exit(1);
     }
 }
-// ============================================
-// ============================================
-// ✅ NEW: Cron Priority System
-// High priority queries always get connection
-// Low priority skipped during pool pressure
-// ============================================
+// ─── Pool Pressure System ────────────────────────────────
 let poolPressureCount = 0;
 const POOL_PRESSURE_THRESHOLD = 3;
 let inPoolPressureMode = false;
-// Track pool pressure
 function reportPoolError() {
     poolPressureCount++;
     if (poolPressureCount >= POOL_PRESSURE_THRESHOLD && !inPoolPressureMode) {
         inPoolPressureMode = true;
-        console.warn('🚨 Pool pressure detected - throttling low-priority crons');
-        // Auto-recover after 5 min
+        logger_1.default.warn('Pool pressure detected - throttling crons', {
+            threshold: POOL_PRESSURE_THRESHOLD,
+        });
         setTimeout(() => {
             inPoolPressureMode = false;
             poolPressureCount = 0;
-            console.log('✅ Pool pressure cleared - crons resumed');
+            logger_1.default.info('Pool pressure cleared - crons resumed');
         }, 5 * 60 * 1000);
     }
 }
-// ============================================
-// ✅ CAMPAIGN PROCESSOR - PRIORITY: HIGH
-// ============================================
+// ─── Campaign Processor ──────────────────────────────────
 let campaignProcessorRunning = false;
 function startCampaignProcessor() {
-    // First run after 60 sec
     setTimeout(() => {
         runCampaignProcessor();
-        // Then every 90 seconds (was 60)
         setInterval(runCampaignProcessor, 90 * 1000);
     }, 60 * 1000);
 }
@@ -198,7 +189,7 @@ async function runCampaignProcessor() {
     catch (error) {
         if (error?.code === 'P2024')
             reportPoolError();
-        console.error('❌ Campaign processor error:', error?.message);
+        logger_1.cronLog.error('Campaign processor error', error);
     }
     finally {
         campaignProcessorRunning = false;
@@ -209,16 +200,9 @@ async function processScheduledCampaigns() {
     let scheduledCampaigns = [];
     try {
         scheduledCampaigns = await database_1.default.campaign.findMany({
-            where: {
-                status: 'SCHEDULED',
-                scheduledAt: { lte: now },
-            },
-            select: {
-                id: true,
-                organizationId: true,
-                name: true,
-            },
-            take: 5, // ✅ Reduced from 10
+            where: { status: 'SCHEDULED', scheduledAt: { lte: now } },
+            select: { id: true, organizationId: true, name: true },
+            take: 5,
         });
     }
     catch (error) {
@@ -230,25 +214,25 @@ async function processScheduledCampaigns() {
     }
     if (scheduledCampaigns.length === 0)
         return;
-    console.log(`📅 Processing ${scheduledCampaigns.length} scheduled campaigns`);
+    logger_1.cronLog.info('Processing scheduled campaigns', {
+        count: scheduledCampaigns.length,
+    });
     const { campaignsService } = await Promise.resolve().then(() => __importStar(require('./modules/campaigns/campaigns.service')));
     for (const campaign of scheduledCampaigns) {
         try {
             await campaignsService.start(campaign.organizationId, campaign.id);
-            // ✅ 2 second gap between campaigns
             await new Promise(r => setTimeout(r, 2000));
         }
         catch (error) {
-            console.error(`❌ Campaign ${campaign.id}:`, error.message);
+            logger_1.cronLog.error('Campaign start failed', error, {
+                campaignId: campaign.id,
+            });
         }
     }
 }
-// ============================================
-// ✅ BACKGROUND JOBS - PRIORITY: LOW
-// Skip during pool pressure
-// ============================================
+// ─── Background Jobs ─────────────────────────────────────
 function startBackgroundJobs() {
-    // ✅ 1. Health check - Every 15 min (was 10)
+    // Health check
     setInterval(async () => {
         if (inPoolPressureMode)
             return;
@@ -260,11 +244,11 @@ function startBackgroundJobs() {
                 reportPoolError();
         }
     }, 15 * 60 * 1000);
-    // ✅ 2. Window expiry - Every 15 min (was 10)
+    // Window expiry
     if (webhookService?.expireConversationWindows) {
         setInterval(async () => {
             if (inPoolPressureMode) {
-                console.log('⏭️ Window expiry skipped: pool pressure');
+                logger_1.cronLog.debug('Window expiry skipped - pool pressure');
                 return;
             }
             try {
@@ -276,7 +260,7 @@ function startBackgroundJobs() {
             }
         }, 15 * 60 * 1000);
     }
-    // ✅ 3. Message limit reset - Every 2 hours (was 1)
+    // Message limit reset
     if (webhookService?.resetDailyMessageLimits) {
         setInterval(async () => {
             if (inPoolPressureMode)
@@ -290,39 +274,35 @@ function startBackgroundJobs() {
             }
         }, 2 * 60 * 60 * 1000);
     }
-    console.log('✅ Background jobs started (with pool pressure protection)');
+    logger_1.cronLog.info('Background jobs started');
 }
-// ============================================
-// GRACEFUL SHUTDOWN
-// ============================================
+// ─── Graceful Shutdown ───────────────────────────────────
 function setupGracefulShutdown(server) {
     const shutdown = async (signal) => {
-        console.log(`\n🔄 ${signal} received. Shutting down...`);
+        logger_1.default.info(`${signal} received - shutting down`);
         server.close(async () => {
-            console.log('✅ HTTP server closed');
+            logger_1.default.info('HTTP server closed');
             try {
                 await database_1.default.$disconnect();
-                console.log('✅ Database disconnected');
+                logger_1.default.info('Database disconnected');
             }
             catch (err) {
-                console.error('⚠️  Shutdown error:', err);
+                logger_1.default.error('Shutdown error', err);
             }
             process.exit(0);
         });
         setTimeout(() => {
-            console.error('⚠️  Force exiting');
+            logger_1.default.warn('Force exiting after 10s timeout');
             process.exit(1);
-        }, 10000);
+        }, 10_000);
     };
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
 }
-// ============================================
-// ERROR HANDLERS
-// ============================================
+// ─── Error Handlers ──────────────────────────────────────
 function setupErrorHandlers() {
     process.on('uncaughtException', (error) => {
-        console.error('❌ UNCAUGHT EXCEPTION:', error);
+        logger_1.default.error('Uncaught exception', error);
     });
     process.on('unhandledRejection', (reason) => {
         const msg = reason?.message || String(reason);
@@ -334,10 +314,10 @@ function setupErrorHandlers() {
             'enableOfflineQueue',
         ];
         if (ignorable.some((i) => msg.includes(i))) {
-            console.warn(`⚠️  Handled rejection: ${msg}`);
+            logger_1.default.warn('Handled rejection', { message: msg });
             return;
         }
-        console.error('❌ UNHANDLED REJECTION:', msg);
+        logger_1.default.error('Unhandled rejection', new Error(msg));
     });
 }
 bootstrap();

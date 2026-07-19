@@ -7,7 +7,6 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import fs from 'fs';
@@ -142,19 +141,15 @@ app.use(cookieParser());
 
 // ============================================
 // LOGGING
-// ✅ FIX: Root path, health, webhooks skip karo
 // ============================================
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev'));
-}
-
+// Skip health checks, root, and webhooks
 app.use((req: Request, res: Response, next: NextFunction) => {
-  const skipExact = ['/'];
-  const skipPrefix = ['/health', '/api/health', '/api/webhooks'];
+  const skipPaths = ['/', '/health', '/api/health'];
+  const skipPrefixes = ['/api/webhooks', '/uploads'];
 
   if (
-    skipExact.includes(req.path) ||
-    skipPrefix.some((p) => req.path.startsWith(p))
+    skipPaths.includes(req.path) ||
+    skipPrefixes.some(p => req.path.startsWith(p))
   ) {
     return next();
   }

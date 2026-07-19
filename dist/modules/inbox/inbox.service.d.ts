@@ -17,13 +17,13 @@ export declare class InboxService {
      */
     getConversationById(organizationId: string, conversationId: string): Promise<{
         contact: {
-            email: string | null;
             organizationId: string;
-            tags: string[];
+            phone: string;
+            email: string | null;
             id: string;
+            tags: string[];
             firstName: string | null;
             lastName: string | null;
-            phone: string;
             avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
@@ -66,9 +66,9 @@ export declare class InboxService {
     getMessages(organizationId: string, conversationId: string, query?: any): Promise<{
         messages: {
             timestamp: Date;
+            id: string;
             type: import(".prisma/client").$Enums.MessageType;
             waMessageId: string | null;
-            id: string;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
@@ -278,13 +278,13 @@ export declare class InboxService {
         messages: ({
             conversation: {
                 contact: {
-                    email: string | null;
                     organizationId: string;
-                    tags: string[];
+                    phone: string;
+                    email: string | null;
                     id: string;
+                    tags: string[];
                     firstName: string | null;
                     lastName: string | null;
-                    phone: string;
                     avatar: string | null;
                     status: import(".prisma/client").$Enums.ContactStatus;
                     createdAt: Date;
@@ -322,9 +322,9 @@ export declare class InboxService {
                 labels: string[];
             };
         } & {
+            id: string;
             type: import(".prisma/client").$Enums.MessageType;
             waMessageId: string | null;
-            id: string;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
@@ -417,13 +417,13 @@ export declare class InboxService {
      */
     getOrCreateConversation(organizationId: string, contactId: string): Promise<{
         contact: {
-            email: string | null;
             organizationId: string;
-            tags: string[];
+            phone: string;
+            email: string | null;
             id: string;
+            tags: string[];
             firstName: string | null;
             lastName: string | null;
-            phone: string;
             avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
@@ -472,9 +472,9 @@ export declare class InboxService {
      * Send template message
      */
     sendTemplateMessage(organizationId: string, conversationId: string, templateName: string, language: string, params: any[], bodyText: string): Promise<{
+        id: string;
         type: import(".prisma/client").$Enums.MessageType;
         waMessageId: string | null;
-        id: string;
         status: import(".prisma/client").$Enums.MessageStatus;
         createdAt: Date;
         updatedAt: Date;
@@ -508,9 +508,9 @@ export declare class InboxService {
         messageId: string;
     }>;
     editMessage(organizationId: string, conversationId: string, messageId: string, newContent: string): Promise<{
+        id: string;
         type: import(".prisma/client").$Enums.MessageType;
         waMessageId: string | null;
-        id: string;
         status: import(".prisma/client").$Enums.MessageStatus;
         createdAt: Date;
         updatedAt: Date;

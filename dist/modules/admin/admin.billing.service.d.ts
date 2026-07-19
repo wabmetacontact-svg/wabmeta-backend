@@ -13,8 +13,8 @@ export declare class AdminBillingService {
         subscription: {
             plan: {
                 name: string;
-                type: import(".prisma/client").$Enums.PlanType;
                 id: string;
+                type: import(".prisma/client").$Enums.PlanType;
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;
@@ -56,8 +56,8 @@ export declare class AdminBillingService {
         };
         plan: {
             name: string;
-            type: import(".prisma/client").$Enums.PlanType;
             id: string;
+            type: import(".prisma/client").$Enums.PlanType;
             createdAt: Date;
             updatedAt: Date;
             slug: string;
@@ -121,8 +121,8 @@ export declare class AdminBillingService {
             };
             plan: {
                 name: string;
-                type: import(".prisma/client").$Enums.PlanType;
                 id: string;
+                type: import(".prisma/client").$Enums.PlanType;
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;
@@ -199,8 +199,8 @@ export declare class AdminBillingService {
             };
             plan: {
                 name: string;
-                type: import(".prisma/client").$Enums.PlanType;
                 id: string;
+                type: import(".prisma/client").$Enums.PlanType;
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;
@@ -284,8 +284,8 @@ export declare class AdminBillingService {
             };
             plan: {
                 name: string;
-                type: import(".prisma/client").$Enums.PlanType;
                 id: string;
+                type: import(".prisma/client").$Enums.PlanType;
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;
@@ -349,8 +349,8 @@ export declare class AdminBillingService {
             userId: string | null;
             organizationId: string | null;
             id: string;
-            createdAt: Date;
             userAgent: string | null;
+            createdAt: Date;
             ipAddress: string | null;
             metadata: import("@prisma/client/runtime/library").JsonValue;
             action: import(".prisma/client").$Enums.ActivityAction | null;

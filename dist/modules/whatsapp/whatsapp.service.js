@@ -50,6 +50,7 @@ const meta_api_1 = require("../meta/meta.api");
 const tokenDecryption_1 = require("../../utils/tokenDecryption"); // ✅ FIX: shared helper
 const database_1 = __importDefault(require("../../config/database"));
 const wallet_deduction_service_1 = require("../wallet/wallet.deduction.service");
+const logger_1 = require("../../utils/logger");
 // ============================================
 // WHATSAPP SERVICE CLASS
 // ============================================
@@ -1168,11 +1169,11 @@ class WhatsAppService {
     // ============================================
     async syncAccountQuality(accountId) {
         try {
-            console.log(`🔄 Syncing quality for account: ${accountId}`);
+            logger_1.whatsappLog.info('Quality sync started', { accountId });
             const { account, accessToken } = await this.getAccountWithToken(accountId);
             // ✅ Fresh data from Meta
             const phoneInfo = await meta_api_1.metaApi.getPhoneNumberInfo(account.phoneNumberId, accessToken);
-            console.log(`📊 Meta returned:`, {
+            logger_1.whatsappLog.info('Meta returned sync data', {
                 quality_rating: phoneInfo?.quality_rating,
                 messaging_limit_tier: phoneInfo?.messaging_limit_tier,
                 code_verification_status: phoneInfo?.code_verification_status,

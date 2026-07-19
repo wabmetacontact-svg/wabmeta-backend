@@ -6,6 +6,7 @@
 
 import prisma from '../../config/database';
 import { config } from '../../config';
+import { authLog } from '../../utils/logger';
 import { hashPassword, comparePassword } from '../../utils/password';
 import {
   generateAccessToken,
@@ -678,7 +679,7 @@ export class AuthService {
       html: tpl.html,
     });
 
-    console.log(`📧 Signup OTP sent to: ${normalizedEmail}`);
+    authLog.info('Signup OTP sent', { email: normalizedEmail });
 
     return {
       message: 'Account created! Please check your email for verification OTP.',
@@ -692,7 +693,7 @@ export class AuthService {
   // ────────────────────────────────────────────
   async login(input: LoginInput): Promise<AuthResponse> {
     const normalizedEmail = input.email.trim().toLowerCase();
-    console.log(`🔐 Login attempt: ${normalizedEmail}`);
+    authLog.info('Login attempt', { email: normalizedEmail });
 
     // ── Step 1: User fetch with explicit error handling ──
     let user: any;
@@ -765,7 +766,7 @@ export class AuthService {
     }
 
     if (!isValid) {
-      console.log(`❌ Wrong password for: ${normalizedEmail}`);
+      authLog.warn('Wrong password during login', { email: normalizedEmail });
       throw new AppError('Invalid email or password', 401);
     }
 
@@ -773,7 +774,7 @@ export class AuthService {
     let organization = await getDefaultOrg(user.id);
 
     if (!organization) {
-      console.log('⚠️  No org found, auto-creating...');
+      authLog.info('No organization found during login, auto-creating');
       const orgName = `${user.firstName || 'User'}'s Workspace`;
       organization = await prisma.$transaction((tx) =>
         createOrgWithPlan(tx, user.id, orgName)
@@ -800,7 +801,7 @@ export class AuthService {
       organization?.id
     );
 
-    console.log(`✅ Login successful: ${normalizedEmail}`);
+    authLog.info('Login successful', { email: normalizedEmail });
 
     return {
       user: formatUser(user),
@@ -849,12 +850,10 @@ export class AuthService {
         config.platform.whatsapp.welcomeTemplate,
         [user.firstName]
       );
-      console.log(
-        `📱 Welcome WhatsApp sent → ${user.phone}`
-      );
+      authLog.info('Welcome WhatsApp sent during email verification', { phone: user.phone });
     }
 
-    console.log(`✅ Email verified: ${user.email}`);
+    authLog.info('Email verified', { email: user.email });
 
     return {
       message: 'Email verified successfully! Welcome to WabMeta 🎉',
@@ -997,7 +996,7 @@ export class AuthService {
       html: tpl.html,
     });
 
-    console.log(`📧 OTP resent to: ${normalizedEmail}`);
+    authLog.info('OTP resent', { email: normalizedEmail });
 
     return { message: 'OTP sent to your email' };
   }
@@ -1062,7 +1061,7 @@ export class AuthService {
         subject: '🎉 Welcome to WabMeta!',
         html: emailTemplates.welcome(user.firstName).html,
       });
-      console.log(`📧 Welcome email sent → ${normalizedEmail}`);
+      authLog.info('Welcome email sent', { email: normalizedEmail });
 
       if (user.phone) {
         sendWhatsAppTemplate(
@@ -1070,12 +1069,12 @@ export class AuthService {
           config.platform.whatsapp.welcomeTemplate,
           [user.firstName]
         );
-        console.log(`📱 Welcome WhatsApp sent → ${user.phone}`);
+        authLog.info('Welcome WhatsApp sent during activation', { phone: user.phone });
       } else {
-        console.log(`ℹ️ No phone on file - WhatsApp welcome skipped`);
+        authLog.info('WhatsApp welcome skipped - no phone on file');
       }
 
-      console.log(`✅ Account activated: ${normalizedEmail}`);
+      authLog.info('Account activated', { email: normalizedEmail });
     }
 
     const updatedUser = await prisma.user.findUnique({

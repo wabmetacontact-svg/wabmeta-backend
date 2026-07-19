@@ -2,63 +2,63 @@ import { z } from 'zod';
 export declare const registerSchema: z.ZodObject<{
     body: z.ZodEffects<z.ZodObject<{
         email: z.ZodString;
-        password: z.ZodString;
+        password: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, string, string>;
         confirmPassword: z.ZodString;
         firstName: z.ZodString;
         lastName: z.ZodUnion<[z.ZodOptional<z.ZodString>, z.ZodLiteral<"">]>;
         phone: z.ZodUnion<[z.ZodOptional<z.ZodString>, z.ZodLiteral<"">]>;
         organizationName: z.ZodUnion<[z.ZodOptional<z.ZodString>, z.ZodLiteral<"">]>;
     }, "strip", z.ZodTypeAny, {
-        email: string;
         password: string;
+        email: string;
         firstName: string;
         confirmPassword: string;
-        lastName?: string | undefined;
         phone?: string | undefined;
+        lastName?: string | undefined;
         organizationName?: string | undefined;
     }, {
-        email: string;
         password: string;
+        email: string;
         firstName: string;
         confirmPassword: string;
-        lastName?: string | undefined;
         phone?: string | undefined;
+        lastName?: string | undefined;
         organizationName?: string | undefined;
     }>, {
-        email: string;
         password: string;
+        email: string;
         firstName: string;
         confirmPassword: string;
-        lastName?: string | undefined;
         phone?: string | undefined;
+        lastName?: string | undefined;
         organizationName?: string | undefined;
     }, {
-        email: string;
         password: string;
+        email: string;
         firstName: string;
         confirmPassword: string;
-        lastName?: string | undefined;
         phone?: string | undefined;
+        lastName?: string | undefined;
         organizationName?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
-        email: string;
         password: string;
+        email: string;
         firstName: string;
         confirmPassword: string;
-        lastName?: string | undefined;
         phone?: string | undefined;
+        lastName?: string | undefined;
         organizationName?: string | undefined;
     };
 }, {
     body: {
-        email: string;
         password: string;
+        email: string;
         firstName: string;
         confirmPassword: string;
-        lastName?: string | undefined;
         phone?: string | undefined;
+        lastName?: string | undefined;
         organizationName?: string | undefined;
     };
 }>;
@@ -67,21 +67,21 @@ export declare const loginSchema: z.ZodObject<{
         email: z.ZodString;
         password: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        email: string;
         password: string;
+        email: string;
     }, {
-        email: string;
         password: string;
+        email: string;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
-        email: string;
         password: string;
+        email: string;
     };
 }, {
     body: {
-        email: string;
         password: string;
+        email: string;
     };
 }>;
 export declare const forgotPasswordSchema: z.ZodObject<{
@@ -104,7 +104,7 @@ export declare const forgotPasswordSchema: z.ZodObject<{
 export declare const resetPasswordSchema: z.ZodObject<{
     body: z.ZodEffects<z.ZodObject<{
         token: z.ZodString;
-        password: z.ZodString;
+        password: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, string, string>;
         confirmPassword: z.ZodString;
     }, "strip", z.ZodTypeAny, {
         password: string;
@@ -158,21 +158,21 @@ export declare const verifyOTPSchema: z.ZodObject<{
         email: z.ZodString;
         otp: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        email: string;
         otp: string;
+        email: string;
     }, {
-        email: string;
         otp: string;
+        email: string;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
-        email: string;
         otp: string;
+        email: string;
     };
 }, {
     body: {
-        email: string;
         otp: string;
+        email: string;
     };
 }>;
 export declare const resendOTPSchema: z.ZodObject<{
@@ -229,7 +229,7 @@ export declare const googleAuthSchema: z.ZodObject<{
 export declare const changePasswordSchema: z.ZodObject<{
     body: z.ZodEffects<z.ZodEffects<z.ZodObject<{
         currentPassword: z.ZodString;
-        newPassword: z.ZodString;
+        newPassword: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, string, string>;
         confirmPassword: z.ZodString;
     }, "strip", z.ZodTypeAny, {
         currentPassword: string;

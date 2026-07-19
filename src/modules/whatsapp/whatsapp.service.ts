@@ -22,6 +22,7 @@ import {
   deductWalletForTemplate,
   getRateForCategory,
 } from '../wallet/wallet.deduction.service';
+import { whatsappLog } from '../../utils/logger';
 
 // ============================================
 // INTERFACES
@@ -1491,7 +1492,7 @@ private buildTemplateComponents(
     error?: string;
   }> {
     try {
-      console.log(`🔄 Syncing quality for account: ${accountId}`);
+      whatsappLog.info('Quality sync started', { accountId });
 
       const { account, accessToken } = await this.getAccountWithToken(accountId);
 
@@ -1501,7 +1502,7 @@ private buildTemplateComponents(
         accessToken
       );
 
-      console.log(`📊 Meta returned:`, {
+      whatsappLog.info('Meta returned sync data', {
         quality_rating: phoneInfo?.quality_rating,
         messaging_limit_tier: phoneInfo?.messaging_limit_tier,
         code_verification_status: phoneInfo?.code_verification_status,

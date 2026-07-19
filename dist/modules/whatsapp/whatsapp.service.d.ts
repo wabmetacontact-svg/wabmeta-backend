@@ -61,9 +61,9 @@ declare class WhatsAppService {
         message: {
             tempId: string | undefined;
             clientMsgId: string | undefined;
+            id: string;
             type: import(".prisma/client").$Enums.MessageType;
             waMessageId: string | null;
-            id: string;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
@@ -106,9 +106,9 @@ declare class WhatsAppService {
         message: {
             tempId: string | undefined;
             clientMsgId: string | undefined;
+            id: string;
             type: import(".prisma/client").$Enums.MessageType;
             waMessageId: string | null;
-            id: string;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
@@ -144,9 +144,9 @@ declare class WhatsAppService {
         message: {
             tempId: string | undefined;
             clientMsgId: string | undefined;
+            id: string;
             type: import(".prisma/client").$Enums.MessageType;
             waMessageId: string | null;
-            id: string;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
@@ -204,14 +204,14 @@ declare class WhatsAppService {
         reason?: undefined;
     }>;
     getDefaultAccount(organizationId: string): Promise<{
-        phoneNumber: string;
         organizationId: string;
+        accessToken: string | null;
         id: string;
+        phoneNumber: string;
         status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
         createdAt: Date;
         updatedAt: Date;
         phoneNumberId: string;
-        accessToken: string | null;
         wabaId: string;
         displayName: string;
         qualityRating: string | null;

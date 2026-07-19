@@ -13,12 +13,38 @@ const emailSchema = zod_1.z
     .toLowerCase()
     .trim()
     .max(255, 'Email is too long');
-// ✅ Updated: Added special character requirement
 const passwordSchema = zod_1.z
     .string()
     .min(8, 'Password must be at least 8 characters')
-    .max(100, 'Password is too long')
-    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])/, 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&#)');
+    .max(128, 'Password too long (max 128 characters)')
+    .refine((pwd) => {
+    // Password strength scoring
+    let score = 0;
+    if (/[a-z]/.test(pwd))
+        score++; // lowercase
+    if (/[A-Z]/.test(pwd))
+        score++; // uppercase
+    if (/\d/.test(pwd))
+        score++; // number
+    if (/[^a-zA-Z0-9]/.test(pwd))
+        score++; // special char
+    if (pwd.length >= 12)
+        score++; // bonus for length
+    // Require at least 3 of these
+    return score >= 3;
+}, {
+    message: 'Password must contain at least 3 of: uppercase letter, ' +
+        'lowercase letter, number, special character. ' +
+        'Longer passwords are stronger!',
+})
+    .refine((pwd) => {
+    // Reject common weak passwords
+    const common = [
+        'password', 'password123', '12345678', 'qwerty123',
+        'admin123', 'welcome1', 'letmein123',
+    ];
+    return !common.includes(pwd.toLowerCase());
+}, { message: 'This password is too common. Please choose a stronger one.' });
 const nameSchema = zod_1.z
     .string()
     .min(2, 'Name must be at least 2 characters')

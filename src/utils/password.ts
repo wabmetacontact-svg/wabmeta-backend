@@ -1,20 +1,19 @@
 // src/utils/password.ts - FIXED
-// ✅ FIX 1: SALT_ROUNDS 12→10 (Render free tier pe 12 = too slow)
-// ✅ FIX 2: comparePassword timeout protection added
-// ✅ FIX 3: Hash validation before compare (corrupt hash se crash nahi hoga)
-
 import bcrypt from 'bcryptjs';
 
-// ✅ 10 rounds = still secure + 4x faster than 12 on slow CPU
-// 12 rounds = ~2500ms on Render free, 10 rounds = ~400ms
-const SALT_ROUNDS = 10;
+// ✅ 12 rounds - OWASP recommended for 2024/2025
+const SALT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
+const BCRYPT_TIMEOUT_MS = 10_000; // 10 seconds
 
-// ✅ Max time bcrypt ko denge
-const BCRYPT_TIMEOUT_MS = 8000; // 8 seconds
+// ✅ Dummy hash for timing-safe login (matches 12 rounds)
+const DUMMY_HASH = '$2b$12$dummy.hash.for.timing.attack.prevention.only.notreal';
 
 export const hashPassword = async (password: string): Promise<string> => {
   if (!password || typeof password !== 'string') {
     throw new Error('Password must be a non-empty string');
+  }
+  if (password.length > 128) {
+    throw new Error('Password too long (max 128 chars)');
   }
   return bcrypt.hash(password, SALT_ROUNDS);
 };
@@ -23,44 +22,49 @@ export const comparePassword = async (
   password: string,
   hash: string
 ): Promise<boolean> => {
-  // ✅ Guard: Dono values honi chahiye
   if (!password || !hash) {
-    console.warn('⚠️  comparePassword: empty password or hash');
     return false;
   }
 
-  // ✅ Guard: Valid bcrypt hash format check ($2a$ or $2b$)
-  if (!hash.startsWith('$2a$') && !hash.startsWith('$2b$')) {
-    console.error('❌ comparePassword: Invalid hash format detected');
+  // Validate hash format
+  if (!hash.startsWith('$2a$') && !hash.startsWith('$2b$') && !hash.startsWith('$2y$')) {
+    console.error('❌ Invalid hash format');
     return false;
   }
 
-  // ✅ Timeout wrapper - agar bcrypt hang ho jaye toh false return karo
+  // Timeout wrapper
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      console.error('❌ bcrypt.compare timed out after', BCRYPT_TIMEOUT_MS, 'ms');
+      console.error(`❌ bcrypt timeout after ${BCRYPT_TIMEOUT_MS}ms`);
       resolve(false);
     }, BCRYPT_TIMEOUT_MS);
 
-    bcrypt
-      .compare(password, hash)
-      .then((result) => {
+    bcrypt.compare(password, hash)
+      .then(result => {
         clearTimeout(timer);
         resolve(result);
       })
-      .catch((err) => {
+      .catch(err => {
         clearTimeout(timer);
-        console.error('❌ bcrypt.compare error:', err.message);
+        console.error('❌ bcrypt error:', err.message);
         resolve(false);
       });
   });
 };
 
-// ✅ Utility: Check if rehash needed (old 12-round hashes)
+/**
+ * ✅ NEW: Timing-safe dummy compare for non-existent users
+ * Prevents user enumeration attacks
+ */
+export const dummyComparePassword = async (password: string): Promise<false> => {
+  await comparePassword(password, DUMMY_HASH);
+  return false;
+};
+
 export const needsRehash = (hash: string): boolean => {
   try {
     const rounds = bcrypt.getRounds(hash);
-    return rounds !== SALT_ROUNDS;
+    return rounds < SALT_ROUNDS;
   } catch {
     return false;
   }

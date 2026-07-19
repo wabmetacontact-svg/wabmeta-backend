@@ -229,8 +229,8 @@ class AuthController {
             if (refreshToken) {
                 await auth_service_1.authService.logout(refreshToken);
             }
-            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)());
-            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)());
+            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)(true));
+            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, null, 'Logged out successfully');
         }
         catch (error) {
@@ -244,8 +244,8 @@ class AuthController {
         try {
             const userId = req.user.id;
             const result = await auth_service_1.authService.logoutAll(userId);
-            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)());
-            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)());
+            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)(true));
+            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -275,8 +275,8 @@ class AuthController {
             const result = await auth_service_1.authService.changePassword(userId, currentPassword, newPassword);
             // ✅ FIX: clear BOTH cookies (access token was still valid for up to 15m/7d
             // before the tokenVersion fix — now also clear accessToken cookie for safety)
-            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)());
-            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)());
+            res.clearCookie('refreshToken', (0, cookies_1.getClearCookieOptions)(true));
+            res.clearCookie('accessToken', (0, cookies_1.getClearCookieOptions)(false));
             return (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {

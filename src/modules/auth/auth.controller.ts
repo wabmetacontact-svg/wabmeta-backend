@@ -295,8 +295,8 @@ export class AuthController {
         await authService.logout(refreshToken);
       }
 
-      res.clearCookie('refreshToken', getClearCookieOptions());
-      res.clearCookie('accessToken', getClearCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions(true));
+      res.clearCookie('accessToken', getClearCookieOptions(false));
 
       return sendSuccess(res, null, 'Logged out successfully');
     } catch (error) {
@@ -312,8 +312,8 @@ export class AuthController {
       const userId = req.user!.id;
       const result = await authService.logoutAll(userId);
 
-      res.clearCookie('refreshToken', getClearCookieOptions());
-      res.clearCookie('accessToken', getClearCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions(true));
+      res.clearCookie('accessToken', getClearCookieOptions(false));
 
       return sendSuccess(res, result, result.message);
     } catch (error) {
@@ -353,8 +353,8 @@ export class AuthController {
 
       // ✅ FIX: clear BOTH cookies (access token was still valid for up to 15m/7d
       // before the tokenVersion fix — now also clear accessToken cookie for safety)
-      res.clearCookie('refreshToken', getClearCookieOptions());
-      res.clearCookie('accessToken', getClearCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions(true));
+      res.clearCookie('accessToken', getClearCookieOptions(false));
 
       return sendSuccess(res, result, result.message);
     } catch (error) {

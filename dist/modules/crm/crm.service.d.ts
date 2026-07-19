@@ -135,11 +135,11 @@ export declare class CRMService {
     }): Promise<{
         leads: ({
             contact: {
+                phone: string;
                 email: string | null;
                 id: string;
                 firstName: string | null;
                 lastName: string | null;
-                phone: string;
                 avatar: string | null;
                 whatsappProfileName: string | null;
             } | null;
@@ -159,11 +159,11 @@ export declare class CRMService {
             } | null;
         } & {
             organizationId: string;
+            value: Prisma.Decimal | null;
             id: string;
             status: import(".prisma/client").$Enums.LeadStatus;
             createdAt: Date;
             updatedAt: Date;
-            value: Prisma.Decimal | null;
             source: string | null;
             campaignId: string | null;
             currency: string;
@@ -200,11 +200,11 @@ export declare class CRMService {
     }): Promise<{
         leads: ({
             contact: {
+                phone: string;
                 email: string | null;
                 id: string;
                 firstName: string | null;
                 lastName: string | null;
-                phone: string;
                 avatar: string | null;
                 whatsappProfileName: string | null;
             } | null;
@@ -223,11 +223,11 @@ export declare class CRMService {
             } | null;
         } & {
             organizationId: string;
+            value: Prisma.Decimal | null;
             id: string;
             status: import(".prisma/client").$Enums.LeadStatus;
             createdAt: Date;
             updatedAt: Date;
-            value: Prisma.Decimal | null;
             source: string | null;
             campaignId: string | null;
             currency: string;
@@ -253,11 +253,11 @@ export declare class CRMService {
         grouped: {
             hot: ({
                 contact: {
+                    phone: string;
                     email: string | null;
                     id: string;
                     firstName: string | null;
                     lastName: string | null;
-                    phone: string;
                     avatar: string | null;
                     whatsappProfileName: string | null;
                 } | null;
@@ -276,11 +276,11 @@ export declare class CRMService {
                 } | null;
             } & {
                 organizationId: string;
+                value: Prisma.Decimal | null;
                 id: string;
                 status: import(".prisma/client").$Enums.LeadStatus;
                 createdAt: Date;
                 updatedAt: Date;
-                value: Prisma.Decimal | null;
                 source: string | null;
                 campaignId: string | null;
                 currency: string;
@@ -305,11 +305,11 @@ export declare class CRMService {
             })[];
             warm: ({
                 contact: {
+                    phone: string;
                     email: string | null;
                     id: string;
                     firstName: string | null;
                     lastName: string | null;
-                    phone: string;
                     avatar: string | null;
                     whatsappProfileName: string | null;
                 } | null;
@@ -328,11 +328,11 @@ export declare class CRMService {
                 } | null;
             } & {
                 organizationId: string;
+                value: Prisma.Decimal | null;
                 id: string;
                 status: import(".prisma/client").$Enums.LeadStatus;
                 createdAt: Date;
                 updatedAt: Date;
-                value: Prisma.Decimal | null;
                 source: string | null;
                 campaignId: string | null;
                 currency: string;
@@ -357,11 +357,11 @@ export declare class CRMService {
             })[];
             cold: ({
                 contact: {
+                    phone: string;
                     email: string | null;
                     id: string;
                     firstName: string | null;
                     lastName: string | null;
-                    phone: string;
                     avatar: string | null;
                     whatsappProfileName: string | null;
                 } | null;
@@ -380,11 +380,11 @@ export declare class CRMService {
                 } | null;
             } & {
                 organizationId: string;
+                value: Prisma.Decimal | null;
                 id: string;
                 status: import(".prisma/client").$Enums.LeadStatus;
                 createdAt: Date;
                 updatedAt: Date;
-                value: Prisma.Decimal | null;
                 source: string | null;
                 campaignId: string | null;
                 currency: string;
@@ -417,13 +417,13 @@ export declare class CRMService {
     }>;
     getLeadById(organizationId: string, leadId: string): Promise<{
         contact: {
-            email: string | null;
             organizationId: string;
-            tags: string[];
+            phone: string;
+            email: string | null;
             id: string;
+            tags: string[];
             firstName: string | null;
             lastName: string | null;
-            phone: string;
             avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
@@ -473,9 +473,9 @@ export declare class CRMService {
             isPinned: boolean;
         }[];
         activities: {
-            type: import(".prisma/client").$Enums.ActivityType;
             userId: string | null;
             id: string;
+            type: import(".prisma/client").$Enums.ActivityType;
             createdAt: Date;
             description: string | null;
             title: string;
@@ -509,11 +509,11 @@ export declare class CRMService {
         } | null;
     } & {
         organizationId: string;
+        value: Prisma.Decimal | null;
         id: string;
         status: import(".prisma/client").$Enums.LeadStatus;
         createdAt: Date;
         updatedAt: Date;
-        value: Prisma.Decimal | null;
         source: string | null;
         campaignId: string | null;
         currency: string;
@@ -551,13 +551,13 @@ export declare class CRMService {
         city?: string;
     }): Promise<{
         contact: {
-            email: string | null;
             organizationId: string;
-            tags: string[];
+            phone: string;
+            email: string | null;
             id: string;
+            tags: string[];
             firstName: string | null;
             lastName: string | null;
-            phone: string;
             avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
@@ -598,11 +598,11 @@ export declare class CRMService {
         } | null;
     } & {
         organizationId: string;
+        value: Prisma.Decimal | null;
         id: string;
         status: import(".prisma/client").$Enums.LeadStatus;
         createdAt: Date;
         updatedAt: Date;
-        value: Prisma.Decimal | null;
         source: string | null;
         campaignId: string | null;
         currency: string;
@@ -639,13 +639,13 @@ export declare class CRMService {
         city?: string;
     }): Promise<{
         contact: {
-            email: string | null;
             organizationId: string;
-            tags: string[];
+            phone: string;
+            email: string | null;
             id: string;
+            tags: string[];
             firstName: string | null;
             lastName: string | null;
-            phone: string;
             avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
@@ -686,11 +686,11 @@ export declare class CRMService {
         } | null;
     } & {
         organizationId: string;
+        value: Prisma.Decimal | null;
         id: string;
         status: import(".prisma/client").$Enums.LeadStatus;
         createdAt: Date;
         updatedAt: Date;
-        value: Prisma.Decimal | null;
         source: string | null;
         campaignId: string | null;
         currency: string;

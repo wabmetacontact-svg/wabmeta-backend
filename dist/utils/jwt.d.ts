@@ -2,14 +2,16 @@ export interface TokenPayload {
     userId: string;
     email: string;
     organizationId?: string;
-    tokenVersion?: number;
-    type?: 'access' | 'refresh';
+    tokenVersion: number;
+    type: 'access' | 'refresh';
+    iat?: number;
+    exp?: number;
 }
-export declare const generateAccessToken: (payload: Omit<TokenPayload, "type">) => string;
-export declare const generateRefreshToken: (payload: Omit<TokenPayload, "type">) => string;
+export declare const generateAccessToken: (payload: Omit<TokenPayload, "type" | "iat" | "exp">) => string;
+export declare const generateRefreshToken: (payload: Omit<TokenPayload, "type" | "iat" | "exp">) => string;
 export declare const verifyAccessToken: (token: string) => TokenPayload;
 export declare const verifyRefreshToken: (token: string) => TokenPayload;
-export declare const generateTokens: (payload: Omit<TokenPayload, "type">) => {
+export declare const generateTokens: (payload: Omit<TokenPayload, "type" | "iat" | "exp">) => {
     accessToken: string;
     refreshToken: string;
 };
@@ -19,11 +21,11 @@ export declare const getTokenExpiry: (expiryString: string) => Date;
 export declare const isTokenExpired: (token: string) => boolean;
 export declare const getTokenRemainingTime: (token: string) => number;
 declare const _default: {
-    generateAccessToken: (payload: Omit<TokenPayload, "type">) => string;
-    generateRefreshToken: (payload: Omit<TokenPayload, "type">) => string;
+    generateAccessToken: (payload: Omit<TokenPayload, "type" | "iat" | "exp">) => string;
+    generateRefreshToken: (payload: Omit<TokenPayload, "type" | "iat" | "exp">) => string;
     verifyAccessToken: (token: string) => TokenPayload;
     verifyRefreshToken: (token: string) => TokenPayload;
-    generateTokens: (payload: Omit<TokenPayload, "type">) => {
+    generateTokens: (payload: Omit<TokenPayload, "type" | "iat" | "exp">) => {
         accessToken: string;
         refreshToken: string;
     };

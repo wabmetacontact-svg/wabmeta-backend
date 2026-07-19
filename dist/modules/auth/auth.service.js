@@ -11,6 +11,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.authService = exports.AuthService = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const config_1 = require("../../config");
+const logger_1 = require("../../utils/logger");
 const password_1 = require("../../utils/password");
 const jwt_1 = require("../../utils/jwt");
 const email_resend_1 = require("../../utils/email.resend");
@@ -476,7 +477,7 @@ class AuthService {
             subject: tpl.subject,
             html: tpl.html,
         });
-        console.log(`📧 Signup OTP sent to: ${normalizedEmail}`);
+        logger_1.authLog.info('Signup OTP sent', { email: normalizedEmail });
         return {
             message: 'Account created! Please check your email for verification OTP.',
             email: normalizedEmail,
@@ -488,7 +489,7 @@ class AuthService {
     // ────────────────────────────────────────────
     async login(input) {
         const normalizedEmail = input.email.trim().toLowerCase();
-        console.log(`🔐 Login attempt: ${normalizedEmail}`);
+        logger_1.authLog.info('Login attempt', { email: normalizedEmail });
         // ── Step 1: User fetch with explicit error handling ──
         let user;
         try {
@@ -545,13 +546,13 @@ class AuthService {
             throw new errorHandler_1.AppError('Login error. Please try again.', 500);
         }
         if (!isValid) {
-            console.log(`❌ Wrong password for: ${normalizedEmail}`);
+            logger_1.authLog.warn('Wrong password during login', { email: normalizedEmail });
             throw new errorHandler_1.AppError('Invalid email or password', 401);
         }
         // ── Step 6: Get/create organization ─────────────────
         let organization = await getDefaultOrg(user.id);
         if (!organization) {
-            console.log('⚠️  No org found, auto-creating...');
+            logger_1.authLog.info('No organization found during login, auto-creating');
             const orgName = `${user.firstName || 'User'}'s Workspace`;
             organization = await database_1.default.$transaction((tx) => createOrgWithPlan(tx, user.id, orgName));
         }
@@ -569,7 +570,7 @@ class AuthService {
         });
         // ── Step 8: Generate tokens ──────────────────────────
         const tokens = await generateTokenPair(user.id, user.email, organization?.id);
-        console.log(`✅ Login successful: ${normalizedEmail}`);
+        logger_1.authLog.info('Login successful', { email: normalizedEmail });
         return {
             user: formatUser(user),
             tokens,
@@ -605,9 +606,9 @@ class AuthService {
         });
         if (user.phone) {
             sendWhatsAppTemplate(user.phone, config_1.config.platform.whatsapp.welcomeTemplate, [user.firstName]);
-            console.log(`📱 Welcome WhatsApp sent → ${user.phone}`);
+            logger_1.authLog.info('Welcome WhatsApp sent during email verification', { phone: user.phone });
         }
-        console.log(`✅ Email verified: ${user.email}`);
+        logger_1.authLog.info('Email verified', { email: user.email });
         return {
             message: 'Email verified successfully! Welcome to WabMeta 🎉',
         };
@@ -720,7 +721,7 @@ class AuthService {
             subject: tpl.subject,
             html: tpl.html,
         });
-        console.log(`📧 OTP resent to: ${normalizedEmail}`);
+        logger_1.authLog.info('OTP resent', { email: normalizedEmail });
         return { message: 'OTP sent to your email' };
     }
     // ────────────────────────────────────────────
@@ -766,15 +767,15 @@ class AuthService {
                 subject: '🎉 Welcome to WabMeta!',
                 html: email_resend_1.emailTemplates.welcome(user.firstName).html,
             });
-            console.log(`📧 Welcome email sent → ${normalizedEmail}`);
+            logger_1.authLog.info('Welcome email sent', { email: normalizedEmail });
             if (user.phone) {
                 sendWhatsAppTemplate(user.phone, config_1.config.platform.whatsapp.welcomeTemplate, [user.firstName]);
-                console.log(`📱 Welcome WhatsApp sent → ${user.phone}`);
+                logger_1.authLog.info('Welcome WhatsApp sent during activation', { phone: user.phone });
             }
             else {
-                console.log(`ℹ️ No phone on file - WhatsApp welcome skipped`);
+                logger_1.authLog.info('WhatsApp welcome skipped - no phone on file');
             }
-            console.log(`✅ Account activated: ${normalizedEmail}`);
+            logger_1.authLog.info('Account activated', { email: normalizedEmail });
         }
         const updatedUser = await database_1.default.user.findUnique({
             where: { id: user.id },

@@ -50,8 +50,8 @@ declare class BillingService {
     } | {
         plan: {
             name: string;
-            type: import(".prisma/client").$Enums.PlanType;
             id: string;
+            type: import(".prisma/client").$Enums.PlanType;
             createdAt: Date;
             updatedAt: Date;
             slug: string;
@@ -117,8 +117,8 @@ declare class BillingService {
         yearlyPrice: number;
         features: import("@prisma/client/runtime/library").JsonArray;
         name: string;
-        type: import(".prisma/client").$Enums.PlanType;
         id: string;
+        type: import(".prisma/client").$Enums.PlanType;
         createdAt: Date;
         updatedAt: Date;
         slug: string;
@@ -201,8 +201,8 @@ declare class BillingService {
         };
         plan: {
             name: string;
-            type: import(".prisma/client").$Enums.PlanType;
             id: string;
+            type: import(".prisma/client").$Enums.PlanType;
             createdAt: Date;
             updatedAt: Date;
             slug: string;
@@ -299,8 +299,8 @@ declare class BillingService {
         subscription: {
             plan: {
                 name: string;
-                type: import(".prisma/client").$Enums.PlanType;
                 id: string;
+                type: import(".prisma/client").$Enums.PlanType;
                 createdAt: Date;
                 updatedAt: Date;
                 slug: string;

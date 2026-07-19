@@ -1,21 +1,17 @@
 "use strict";
-// src/utils/jwt.ts
-// ✅ FIXED: generateAccessToken was using config.jwt.expiresIn (7d) instead of
-// config.jwt.accessExpiresIn (15m) — access tokens were living 7 days instead of 15 minutes.
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTokenRemainingTime = exports.isTokenExpired = exports.getTokenExpiry = exports.parseExpiryTime = exports.decodeToken = exports.generateTokens = exports.verifyRefreshToken = exports.verifyAccessToken = exports.generateRefreshToken = exports.generateAccessToken = void 0;
+// src/utils/jwt.ts - FIXED
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const config_1 = require("../config");
-// Helper to get expiry in seconds
+// ─── Helper: Parse expiry ────────────────────────────────
 const getExpirySeconds = (expiryString) => {
     const match = expiryString.match(/^(\d+)([smhdw])$/);
-    if (!match) {
-        // Default to 7 days in seconds
+    if (!match)
         return 7 * 24 * 60 * 60;
-    }
     const value = parseInt(match[1], 10);
     const unit = match[2];
     switch (unit) {
@@ -27,46 +23,63 @@ const getExpirySeconds = (expiryString) => {
         default: return 7 * 24 * 60 * 60;
     }
 };
-// Generate Access Token
+// ─── Generate Access Token ──────────────────────────────
 const generateAccessToken = (payload) => {
     const secret = config_1.config.jwt.secret;
     const options = {
-        // ✅ FIX: use accessExpiresIn (15m), NOT expiresIn (7d)
         expiresIn: getExpirySeconds(config_1.config.jwt.accessExpiresIn),
+        issuer: 'wabmeta', // ✅ Add issuer
+        audience: 'wabmeta-users', // ✅ Add audience
     };
-    return jsonwebtoken_1.default.sign({ tokenVersion: 0, ...payload, type: 'access' }, secret, options);
+    return jsonwebtoken_1.default.sign({ ...payload, type: 'access' }, secret, options);
 };
 exports.generateAccessToken = generateAccessToken;
-// Generate Refresh Token
+// ─── Generate Refresh Token ─────────────────────────────
 const generateRefreshToken = (payload) => {
     const secret = config_1.config.jwt.refreshSecret;
     const options = {
         expiresIn: getExpirySeconds(config_1.config.jwt.refreshExpiresIn),
+        issuer: 'wabmeta',
+        audience: 'wabmeta-refresh',
     };
-    return jsonwebtoken_1.default.sign({ tokenVersion: 0, ...payload, type: 'refresh' }, secret, options);
+    return jsonwebtoken_1.default.sign({ ...payload, type: 'refresh' }, secret, options);
 };
 exports.generateRefreshToken = generateRefreshToken;
-// Verify Access Token
+// ─── Verify Access Token (with type check) ──────────────
 const verifyAccessToken = (token) => {
     const secret = config_1.config.jwt.secret;
-    return jsonwebtoken_1.default.verify(token, secret);
+    const payload = jsonwebtoken_1.default.verify(token, secret, {
+        issuer: 'wabmeta',
+        audience: 'wabmeta-users',
+    });
+    // ✅ CRITICAL: Verify token type
+    if (payload.type !== 'access') {
+        throw new Error('Invalid token type - expected access token');
+    }
+    return payload;
 };
 exports.verifyAccessToken = verifyAccessToken;
-// Verify Refresh Token
+// ─── Verify Refresh Token (with type check) ─────────────
 const verifyRefreshToken = (token) => {
     const secret = config_1.config.jwt.refreshSecret;
-    return jsonwebtoken_1.default.verify(token, secret);
+    const payload = jsonwebtoken_1.default.verify(token, secret, {
+        issuer: 'wabmeta',
+        audience: 'wabmeta-refresh',
+    });
+    // ✅ CRITICAL: Verify token type
+    if (payload.type !== 'refresh') {
+        throw new Error('Invalid token type - expected refresh token');
+    }
+    return payload;
 };
 exports.verifyRefreshToken = verifyRefreshToken;
-// Generate both tokens
-const generateTokens = (payload) => {
-    return {
-        accessToken: (0, exports.generateAccessToken)(payload),
-        refreshToken: (0, exports.generateRefreshToken)(payload),
-    };
-};
+// ─── Generate both tokens ───────────────────────────────
+const generateTokens = (payload) => ({
+    accessToken: (0, exports.generateAccessToken)(payload),
+    refreshToken: (0, exports.generateRefreshToken)(payload),
+});
 exports.generateTokens = generateTokens;
-// Decode token without verification (for debugging)
+// ─── Decode without verify (debugging only) ─────────────
 const decodeToken = (token) => {
     try {
         return jsonwebtoken_1.default.decode(token);
@@ -76,22 +89,17 @@ const decodeToken = (token) => {
     }
 };
 exports.decodeToken = decodeToken;
-// Parse expiry time string to milliseconds
-const parseExpiryTime = (expiryString) => {
-    return getExpirySeconds(expiryString) * 1000;
-};
+// ─── Parse expiry to ms ─────────────────────────────────
+const parseExpiryTime = (expiryString) => getExpirySeconds(expiryString) * 1000;
 exports.parseExpiryTime = parseExpiryTime;
-// Get expiry date from expiry string
-const getTokenExpiry = (expiryString) => {
-    const ms = (0, exports.parseExpiryTime)(expiryString);
-    return new Date(Date.now() + ms);
-};
+// ─── Get expiry Date ────────────────────────────────────
+const getTokenExpiry = (expiryString) => new Date(Date.now() + (0, exports.parseExpiryTime)(expiryString));
 exports.getTokenExpiry = getTokenExpiry;
-// Check if token is expired
+// ─── Check expiry ───────────────────────────────────────
 const isTokenExpired = (token) => {
     try {
         const decoded = jsonwebtoken_1.default.decode(token);
-        if (!decoded || !decoded.exp)
+        if (!decoded?.exp)
             return true;
         return Date.now() >= decoded.exp * 1000;
     }
@@ -100,14 +108,13 @@ const isTokenExpired = (token) => {
     }
 };
 exports.isTokenExpired = isTokenExpired;
-// Get remaining time in milliseconds
+// ─── Get remaining time ─────────────────────────────────
 const getTokenRemainingTime = (token) => {
     try {
         const decoded = jsonwebtoken_1.default.decode(token);
-        if (!decoded || !decoded.exp)
+        if (!decoded?.exp)
             return 0;
-        const remaining = decoded.exp * 1000 - Date.now();
-        return remaining > 0 ? remaining : 0;
+        return Math.max(0, decoded.exp * 1000 - Date.now());
     }
     catch {
         return 0;

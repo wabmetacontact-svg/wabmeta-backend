@@ -9,6 +9,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
 import { config } from '../../config';
+import { metaLog } from '../../utils/logger';
 import {
   TokenExchangeResponse,
   DebugTokenResponse,
@@ -47,47 +48,71 @@ class MetaApiClient {
       (reqConfig) => {
         const url = reqConfig.url || '';
         const method = reqConfig.method?.toUpperCase() || 'GET';
-        console.log(`[Meta API] ${method} ${url}`);
+        
+        // Save start time to compute duration in response
+        (reqConfig as any).metadata = { startTime: Date.now() };
+
+        metaLog.debug('API request', { method, url });
         return reqConfig;
       },
       (error) => {
-        console.error('[Meta API] Request setup error:', error.message);
+        metaLog.error('API request setup error', error);
         return Promise.reject(error);
       }
     );
 
     this.client.interceptors.response.use(
       (response) => {
-        console.log(`[Meta API] ✅ Response: ${response.status}`);
+        const url = response.config.url || '';
+        const method = response.config.method?.toUpperCase() || 'GET';
+        const startTime = (response.config as any).metadata?.startTime;
+        const duration = startTime ? Date.now() - startTime : undefined;
+
+        metaLog.info('API response', {
+          method,
+          url,
+          status: response.status,
+          duration,
+        });
         return response;
       },
       (error: AxiosError<MetaApiError>) => {
+        const url = error.config?.url || '';
+        const method = error.config?.method?.toUpperCase() || 'GET';
+        const startTime = (error.config as any)?.metadata?.startTime;
+        const duration = startTime ? Date.now() - startTime : undefined;
+
         const metaError = error.response?.data?.error;
 
         const isRestricted = metaError?.code === 100 && metaError?.error_subcode === 33;
         const isSmbRestriction = metaError?.code === 100 && metaError?.message?.includes('SMB');
         const isHandledError = isRestricted || isSmbRestriction;
 
+        const errorContext: any = {
+          method,
+          url,
+          status: error.response?.status,
+          duration,
+        };
+
         if (metaError) {
+          errorContext.metaCode = metaError.code;
+          errorContext.metaSubcode = metaError.error_subcode;
+          errorContext.fbtraceId = metaError.fbtrace_id;
+
           if (isHandledError) {
-            console.warn(`[Meta API] ℹ️  Note: ${metaError.message}`);
+            metaLog.warn(`API handled note: ${metaError.message}`, errorContext);
           } else {
-            console.error('[Meta API] ❌ Error:', {
-              message: metaError.message,
-              code: metaError.code,
-              subcode: metaError.error_subcode,
-              type: metaError.type,
-              fbtrace_id: metaError.fbtrace_id,
-            });
+            metaLog.error(`API error: ${metaError.message}`, null, errorContext);
           }
         } else {
-          console.error('[Meta API] ❌ Error:', error.message);
+          metaLog.error(`API connection error: ${error.message}`, error, errorContext);
         }
         return Promise.reject(error);
       }
     );
 
-    console.log(`✅ Meta API Client initialized (${this.graphVersion})`);
+    metaLog.info('Meta API Client initialized', { version: this.graphVersion });
   }
 
   // ============================================

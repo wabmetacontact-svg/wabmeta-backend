@@ -1,8 +1,6 @@
-// src/config/database.ts - RENDER PAID PLAN OPTIMIZED
-// ✅ 2GB RAM = Higher connection pool
-// ✅ Always-on = No cold start issues
-
+// src/config/database.ts - IMPROVED LOGGING
 import { PrismaClient } from '@prisma/client';
+import { dbLog } from '../utils/logger';
 
 const createPrismaClient = () => {
   let dbUrl = process.env.DATABASE_URL;
@@ -16,25 +14,23 @@ const createPrismaClient = () => {
     dbUrl.includes('?') ? dbUrl.split('?')[1] : ''
   );
 
-  const isPooler =
-    dbUrl.includes('.pooler.supabase.com') ||
-    dbUrl.includes('pooler') ||
-    dbUrl.includes('pgbouncer');
-
-  const isNeon = dbUrl.includes('neon.tech');
+  const isPooler = dbUrl.includes('.pooler.supabase.com') ||
+                   dbUrl.includes('pooler') ||
+                   dbUrl.includes('pgbouncer');
+  const isNeon   = dbUrl.includes('neon.tech');
 
   if (isPooler) {
     existingParams.set('pgbouncer', 'true');
     existingParams.set('prepared_statements', 'false');
-    console.log('🔧 DB Mode: Supabase PgBouncer');
+    dbLog.info('Database mode configured', { mode: 'Supabase PgBouncer' });
   }
 
   if (isNeon) {
     existingParams.set('sslmode', 'require');
-    console.log('🔧 DB Mode: Neon');
+    dbLog.info('Database mode configured', { mode: 'Neon' });
   }
 
-  // ✅ PAID PLAN SETTINGS (2GB RAM, 1 CPU)
+  // Paid plan settings
   existingParams.set('connection_limit', '20');
   existingParams.set('pool_timeout', '30');
   existingParams.set('connect_timeout', '20');
@@ -44,22 +40,39 @@ const createPrismaClient = () => {
   const finalUrl = `${baseUrl}?${existingParams.toString()}`;
 
   const client = new PrismaClient({
-    log: process.env.NODE_ENV === 'development' 
-      ? ['error', 'warn'] 
-      : ['error'],
+    log: [
+      { level: 'error', emit: 'event' },
+      { level: 'warn',  emit: 'event' },
+    ],
     datasources: { db: { url: finalUrl } },
     errorFormat: 'minimal',
   });
 
-  console.log('✅ Prisma configured (RENDER PAID PLAN):');
-  console.log(`   connection_limit : 20`);
-  console.log(`   pool_timeout     : 30s`);
-  console.log(`   statement_timeout: 30s`);
+  // ✅ Structured error logging
+  (client as any).$on('error', (e: any) => {
+    dbLog.error('Prisma error', new Error(e.message), {
+      target: e.target,
+    });
+  });
+
+  (client as any).$on('warn', (e: any) => {
+    dbLog.warn('Prisma warning', {
+      message: e.message,
+      target: e.target,
+    });
+  });
+
+  dbLog.info('Prisma configured', {
+    connectionLimit:  20,
+    poolTimeout:      '30s',
+    statementTimeout: '30s',
+    plan:             'RENDER_PAID',
+  });
 
   return client;
 };
 
-// ✅ Singleton pattern
+// Singleton
 declare global {
   // eslint-disable-next-line no-var
   var __prisma: PrismaClient | undefined;
@@ -71,21 +84,15 @@ if (process.env.NODE_ENV !== 'production') {
   globalThis.__prisma = prisma;
 }
 
-// ✅ Graceful shutdown
+// Graceful shutdown
 const gracefulShutdown = async () => {
-  console.log('🔌 Closing Prisma connections...');
+  dbLog.info('Closing Prisma connections');
   await prisma.$disconnect();
-  console.log('✅ Prisma disconnected');
+  dbLog.info('Prisma disconnected');
 };
 
 process.on('beforeExit', gracefulShutdown);
-process.on('SIGINT', async () => {
-  await gracefulShutdown();
-  process.exit(0);
-});
-process.on('SIGTERM', async () => {
-  await gracefulShutdown();
-  process.exit(0);
-});
+process.on('SIGINT',  async () => { await gracefulShutdown(); process.exit(0); });
+process.on('SIGTERM', async () => { await gracefulShutdown(); process.exit(0); });
 
 export default prisma;

@@ -4,8 +4,8 @@ export declare const webpushService: {
      */
     saveSubscription(userId: string, subscription: any): Promise<{
         userId: string;
-        auth: string;
         id: string;
+        auth: string;
         createdAt: Date;
         endpoint: string;
         p256dh: string;

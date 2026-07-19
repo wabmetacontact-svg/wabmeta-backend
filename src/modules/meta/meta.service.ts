@@ -23,6 +23,7 @@ import { AppError } from '../../middleware/errorHandler';
 
 import prisma from '../../config/database';
 import { getRedis } from '../../config/redis';
+import { metaLog } from '../../utils/logger';
 
 async function extractStoredPin(
   webhookSecretEncrypted: string | null
@@ -99,9 +100,10 @@ export class MetaService {
 
     const url = `${baseUrl}?${params.toString()}`;
 
-    console.log('📱 Generated OAuth URL');
-    console.log('   App ID:', config.meta.appId);
-    console.log('   Config ID:', config.meta.configId);
+    metaLog.info('Generated OAuth URL', {
+      appId: config.meta.appId,
+      configId: config.meta.configId,
+    });
 
     return url;
   }
@@ -148,11 +150,12 @@ export class MetaService {
     sessionPhoneNumberId?: string
   ): Promise<{ success: boolean; account?: any; error?: string }> {
     try {
-      console.log('\n🔄 ========== META CONNECTION START ==========');
-      console.log('   Organization ID:', organizationId);
-      console.log('   Embedded Signup:', embeddedSignup);
-      console.log('   Session WABA ID:', sessionWabaId || '(will lookup from token)');
-      console.log('   Session Phone ID:', sessionPhoneNumberId || '(will lookup from WABA)');
+      metaLog.info('Meta connection start', {
+        organizationId,
+        embeddedSignup,
+        sessionWabaId,
+        sessionPhoneNumberId,
+      });
 
       // STEP 1: Get Access Token
       onProgress?.({
@@ -164,29 +167,29 @@ export class MetaService {
       let accessToken: string;
 
       if (isMetaToken(codeOrToken)) {
-        console.log('✅ Using provided access token');
+        metaLog.debug('Using provided access token');
         accessToken = codeOrToken;
       } else {
-        console.log('🔄 Exchanging code for token...');
+        metaLog.info('Exchanging code for token');
         const tokenResponse = await metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
         accessToken = tokenResponse.accessToken;
-        console.log('✅ Short-lived token obtained');
+        metaLog.debug('Short-lived token obtained');
       }
 
       try {
-        console.log('🔄 Getting long-lived token...');
+        metaLog.info('Getting long-lived token');
         const longLivedTokenResponse = await metaApi.getLongLivedToken(accessToken);
         accessToken = longLivedTokenResponse.accessToken;
-        console.log('✅ Long-lived token obtained');
+        metaLog.debug('Long-lived token obtained');
       } catch (error) {
-        console.log('⚠️ Using short-lived token');
+        metaLog.warn('Using short-lived token fallback');
       }
 
       if (!isMetaToken(accessToken)) {
         throw new AppError('Invalid access token format received', 500);
       }
 
-      console.log('✅ Final token:', maskToken(accessToken));
+      metaLog.debug('Final token exchange complete');
 
       onProgress?.({
         step: 'TOKEN_EXCHANGE',
@@ -207,21 +210,21 @@ export class MetaService {
         throw new AppError('Access token is invalid or expired', 401);
       }
 
-      console.log('🔍 Token is valid');
+      metaLog.debug('Token is valid');
 
       let wabaId: string | null = sessionWabaId || null;
       let businessId: string | null = null;
 
       if (wabaId) {
-        console.log('✅ Using WABA ID from session info (most reliable):', wabaId);
+        metaLog.info('Using WABA ID from session info', { wabaId });
       } else {
         const granularScopes = debugInfo.data.granular_scopes || [];
-        console.log('🔍 Granular scopes:', JSON.stringify(granularScopes));
+        metaLog.debug('Granular scopes retrieved', { granularScopes });
 
         for (const scope of granularScopes) {
           if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
             wabaId = scope.target_ids[0];
-            console.log('✅ Found WABA ID from granular scopes:', wabaId);
+            metaLog.info('Found WABA ID from granular scopes', { wabaId });
             break;
           }
           if (scope.scope === 'business_management' && scope.target_ids?.length) {
@@ -230,16 +233,16 @@ export class MetaService {
         }
 
         if (!wabaId) {
-          console.log('⚠️ WABA not in granular scopes, trying business API fallback...');
+          metaLog.warn('WABA not in granular scopes, trying business API fallback');
           try {
             const wabas = await metaApi.getSharedWABAs(accessToken);
             if (wabas.length > 0) {
               wabaId = wabas[0].id;
               businessId = wabas[0].owner_business_info?.id || businessId;
-              console.log('✅ Found WABA from business API:', wabaId);
+              metaLog.info('Found WABA from business API', { wabaId });
             }
           } catch (wabaErr: any) {
-            console.warn('⚠️ Business API fallback failed (expected for Embedded Signup tokens):', wabaErr.message);
+            metaLog.warn('Business API fallback failed', { error: wabaErr.message });
           }
         }
       }
@@ -261,13 +264,13 @@ export class MetaService {
       let wabaDetails: any = { id: wabaId, name: 'WhatsApp Business Account' };
       try {
         wabaDetails = await metaApi.getWABADetails(wabaId, accessToken);
-        console.log('✅ WABA Details:', {
+        metaLog.info('WABA Details fetched', {
           id: wabaDetails.id,
           name: wabaDetails.name,
         });
       } catch (detailErr: any) {
-        console.warn('⚠️ Could not get full WABA details (non-fatal):', detailErr.message);
-        console.log('💡 Continuing with minimal WABA info: id=', wabaId);
+        metaLog.warn('Could not get full WABA details (non-fatal)', { error: detailErr.message });
+        metaLog.info('Continuing with minimal WABA info', { wabaId });
       }
 
       onProgress?.({
@@ -287,7 +290,7 @@ export class MetaService {
       let phoneNumbers;
 
       if (sessionPhoneNumberId) {
-        console.log('📥 Fetching specific phone by session ID:', sessionPhoneNumberId);
+        metaLog.info('Fetching specific phone by session ID', { sessionPhoneNumberId });
         try {
           const specificPhone = await metaApi.getPhoneNumberDetails(sessionPhoneNumberId, accessToken);
           phoneNumbers = [{
@@ -302,9 +305,9 @@ export class MetaService {
             throughput: null,
             status: null,
           }];
-          console.log('✅ Got phone from session ID:', specificPhone.displayPhoneNumber);
+          metaLog.info('Got phone from session ID', { displayPhoneNumber: specificPhone.displayPhoneNumber });
         } catch (phoneErr: any) {
-          console.warn('⚠️ Could not get phone by session ID, falling back to WABA list:', phoneErr.message);
+          metaLog.warn('Could not get phone by session ID, falling back to WABA list', { error: phoneErr.message });
           phoneNumbers = await metaApi.getPhoneNumbers(wabaId, accessToken);
         }
       } else {
@@ -316,7 +319,7 @@ export class MetaService {
       }
 
       const primaryPhone = phoneNumbers[0];
-      console.log('✅ Primary Phone:', primaryPhone.displayPhoneNumber);
+      metaLog.info('Selected Primary Phone', { displayPhoneNumber: primaryPhone.displayPhoneNumber });
 
       onProgress?.({
         step: 'FETCHING_PHONE',
@@ -336,9 +339,9 @@ export class MetaService {
 
       try {
         await metaApi.subscribeToWebhooks(wabaId, accessToken);
-        console.log('✅ Webhooks subscribed');
+        metaLog.info('Webhooks subscribed');
       } catch (webhookError: any) {
-        console.warn('⚠️ Webhook subscription failed:', webhookError.message);
+        metaLog.warn('Webhook subscription failed', { error: webhookError.message });
       }
 
       onProgress?.({
@@ -368,9 +371,10 @@ export class MetaService {
         const reusedPin = await extractStoredPin(existingRecord?.webhookSecret ?? null);
 
         phonePin = reusedPin || generatePhonePin();
-        console.log(`[Meta Service] Using ${reusedPin ? 'existing' : 'new'} PIN for phone ${primaryPhone.id}`);
-
-        console.log(`[Meta Service] Registering phone ${primaryPhone.id}...`);
+        metaLog.info('Registering phone pin', {
+          phoneNumberId: primaryPhone.id,
+          pinType: reusedPin ? 'reused' : 'generated',
+        });
 
         const registerResult = await metaApi.registerPhone(
           primaryPhone.id,
@@ -380,22 +384,15 @@ export class MetaService {
 
         // ✅ FIX: Only log success if actually successful
         if (registerResult.success) {
-          if (registerResult.alreadyRegistered) {
-            console.log(`ℹ️ Phone ${primaryPhone.id} already registered`);
-          } else {
-            console.log(`✅ Phone ${primaryPhone.id} newly registered`);
-          }
+          metaLog.info('Phone registration result', {
+            phoneNumberId: primaryPhone.id,
+            alreadyRegistered: registerResult.alreadyRegistered,
+          });
         } else {
-          // ❌ Registration failed - CRITICAL warning
-          console.error(
-            `❌ PHONE REGISTRATION FAILED for ${primaryPhone.id}\n` +
-            `   Messages will NOT work until this is fixed.\n` +
-            `   Common causes:\n` +
-            `   1. 2FA PIN mismatch\n` +
-            `   2. Number pending verification\n` +
-            `   3. Number already registered elsewhere\n` +
-            `   4. Payment method missing in Meta Business Manager\n`
-          );
+          metaLog.error('Phone registration failed', null, {
+            phoneNumberId: primaryPhone.id,
+            cause: '2FA PIN mismatch, pending verification, already registered elsewhere, or payment method missing',
+          });
 
           registrationWarning = 'PHONE_NOT_REGISTERED';
           registrationMessage =
@@ -403,7 +400,7 @@ export class MetaService {
             'Please verify phone number in Meta Business Manager first.';
         }
       } catch (registerError: any) {
-        console.warn('⚠️ Phone number registration failed:', registerError.message);
+        metaLog.error('Phone number registration failed', registerError, { phoneNumberId: primaryPhone.id });
         phonePin = generatePhonePin(); // ensure we still stashe a value to persist
         registrationWarning = 'PHONE_NOT_REGISTERED';
         registrationMessage =
@@ -440,13 +437,13 @@ export class MetaService {
         );
       }
 
-      console.log('🔐 Encrypting token...');
+      metaLog.debug('Encrypting access token', { phoneNumberId: primaryPhone.id });
       const encryptedToken = encrypt(accessToken);
       const verifyDecrypt = safeDecryptStrict(encryptedToken);
       if (verifyDecrypt !== accessToken) {
         throw new AppError('Token encryption verification failed', 500);
       }
-      console.log('✅ Encryption verified');
+      metaLog.debug('Encryption verified', { phoneNumberId: primaryPhone.id });
 
       const tokenExpiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
       const cleanPhoneNumber = primaryPhone.displayPhoneNumber.replace(/\D/g, '');
@@ -466,10 +463,11 @@ export class MetaService {
 
         if (existingByPhone) {
           const isSameOrg = existingByPhone.organizationId === organizationId;
-          console.log(isSameOrg
-            ? '🔄 Reactivating existing account (same org)'
-            : `🔄 Transferring phone to new org (was: ${existingByPhone.organizationId})`
-          );
+          metaLog.info('Reactivating or transferring existing account', {
+            isSameOrg,
+            previousOrgId: existingByPhone.organizationId,
+            newOrgId: organizationId,
+          });
 
           const hasDefault = await prisma.whatsAppAccount.findFirst({
             where: {
@@ -501,9 +499,9 @@ export class MetaService {
             } as any,
           });
 
-          console.log('✅ Account updated successfully');
+          metaLog.info('Account updated successfully', { organizationId });
         } else {
-          console.log('🔄 Creating new WhatsApp account');
+          metaLog.info('Creating new WhatsApp account', { organizationId });
           const accountCount = await prisma.whatsAppAccount.count({ where: { organizationId } });
 
           savedAccount = await prisma.whatsAppAccount.create({
@@ -527,11 +525,11 @@ export class MetaService {
             } as any,
           });
 
-          console.log('✅ New account created');
+          metaLog.info('New account created successfully', { organizationId });
         }
       } catch (dbError: any) {
         if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
-          console.warn('⚠️ Unique constraint hit despite findUnique miss — doing force update');
+          metaLog.warn('Unique constraint hit, doing force update', { organizationId, phoneNumberId: primaryPhone.id });
           const forceExisting = await prisma.whatsAppAccount.findFirst({
             where: { phoneNumberId: primaryPhone.id },
           });
@@ -556,7 +554,7 @@ export class MetaService {
                 webhookSecret: encryptedWebhookSecret,
               } as any,
             });
-            console.log('✅ Force-updated existing account');
+            metaLog.info('Force-updated existing account successfully', { organizationId });
           } else {
             throw dbError;
           }
@@ -568,7 +566,7 @@ export class MetaService {
       // STEP 5.5: MetaConnection & PhoneNumbers
       let savedMetaConnection = null;
       try {
-        console.log('🔄 Saving MetaConnection...');
+        metaLog.debug('Saving MetaConnection', { organizationId });
         savedMetaConnection = await (prisma as any).metaConnection.upsert({
           where: { organizationId },
           update: {
@@ -586,14 +584,14 @@ export class MetaService {
             status: 'CONNECTED',
           },
         });
-        console.log('✅ MetaConnection saved:', savedMetaConnection.id);
+        metaLog.info('MetaConnection saved', { connectionId: savedMetaConnection.id });
       } catch (e: any) {
-        console.warn('⚠️ MetaConnection save failed:', e.message);
+        metaLog.error('MetaConnection save failed', e, { organizationId });
       }
 
       try {
         if (savedMetaConnection) {
-          console.log('🔄 Saving PhoneNumbers...');
+          metaLog.debug('Saving phone numbers to database', { organizationId });
           for (const phone of phoneNumbers) {
             await (prisma as any).phoneNumber.upsert({
               where: { phoneNumberId: phone.id },
@@ -616,10 +614,10 @@ export class MetaService {
               },
             });
           }
-          console.log('✅ PhoneNumbers saved');
+          metaLog.info('Phone numbers saved successfully', { organizationId });
         }
       } catch (e: any) {
-        console.warn('⚠️ PhoneNumber save failed:', e.message);
+        metaLog.error('PhoneNumber save failed', e, { organizationId });
       }
 
       onProgress?.({
@@ -629,10 +627,10 @@ export class MetaService {
       });
 
       this.syncTemplatesBackground(savedAccount.id, wabaId, accessToken).catch((err) => {
-        console.error('Background template sync failed:', err);
+        metaLog.error('Background template sync failed', err, { accountId: savedAccount.id });
       });
 
-      console.log('🔄 ========== META CONNECTION END ==========\n');
+      metaLog.info('Meta connection finished');
 
       return {
         success: true,
@@ -641,7 +639,7 @@ export class MetaService {
         message: registrationMessage,
       } as any;
     } catch (error: any) {
-      console.error('❌ Meta connection error:', error);
+      metaLog.error('Meta connection error', error, { organizationId });
 
       onProgress?.({
         step: 'COMPLETED',
@@ -764,8 +762,8 @@ export class MetaService {
         organizationId,
         accountId,
       });
-    } catch (e) {
-      console.warn('⚠️ Failed to emit accountDisconnected socket event:', e);
+    } catch (e: any) {
+      metaLog.warn('Failed to emit accountDisconnected socket event', { error: e.message });
     }
 
     return { success: true, message: 'Account disconnected successfully' };
@@ -794,7 +792,7 @@ export class MetaService {
       data: { isDefault: true },
     });
 
-    console.log(`✅ Default account: ${accountId}`);
+    metaLog.info('Default account set', { accountId, organizationId });
 
     return { success: true, message: 'Default account updated' };
   }

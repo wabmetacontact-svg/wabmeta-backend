@@ -15,6 +15,7 @@ exports.generatePhonePin = generatePhonePin;
 const axios_1 = __importDefault(require("axios"));
 const crypto_1 = __importDefault(require("crypto"));
 const config_1 = require("../../config");
+const logger_1 = require("../../utils/logger");
 /**
  * ✅ NEW: Generate a cryptographically random 6-digit PIN for
  * WhatsApp two-step verification. Each account gets its own PIN.
@@ -39,40 +40,58 @@ class MetaApiClient {
         this.client.interceptors.request.use((reqConfig) => {
             const url = reqConfig.url || '';
             const method = reqConfig.method?.toUpperCase() || 'GET';
-            console.log(`[Meta API] ${method} ${url}`);
+            // Save start time to compute duration in response
+            reqConfig.metadata = { startTime: Date.now() };
+            logger_1.metaLog.debug('API request', { method, url });
             return reqConfig;
         }, (error) => {
-            console.error('[Meta API] Request setup error:', error.message);
+            logger_1.metaLog.error('API request setup error', error);
             return Promise.reject(error);
         });
         this.client.interceptors.response.use((response) => {
-            console.log(`[Meta API] ✅ Response: ${response.status}`);
+            const url = response.config.url || '';
+            const method = response.config.method?.toUpperCase() || 'GET';
+            const startTime = response.config.metadata?.startTime;
+            const duration = startTime ? Date.now() - startTime : undefined;
+            logger_1.metaLog.info('API response', {
+                method,
+                url,
+                status: response.status,
+                duration,
+            });
             return response;
         }, (error) => {
+            const url = error.config?.url || '';
+            const method = error.config?.method?.toUpperCase() || 'GET';
+            const startTime = error.config?.metadata?.startTime;
+            const duration = startTime ? Date.now() - startTime : undefined;
             const metaError = error.response?.data?.error;
             const isRestricted = metaError?.code === 100 && metaError?.error_subcode === 33;
             const isSmbRestriction = metaError?.code === 100 && metaError?.message?.includes('SMB');
             const isHandledError = isRestricted || isSmbRestriction;
+            const errorContext = {
+                method,
+                url,
+                status: error.response?.status,
+                duration,
+            };
             if (metaError) {
+                errorContext.metaCode = metaError.code;
+                errorContext.metaSubcode = metaError.error_subcode;
+                errorContext.fbtraceId = metaError.fbtrace_id;
                 if (isHandledError) {
-                    console.warn(`[Meta API] ℹ️  Note: ${metaError.message}`);
+                    logger_1.metaLog.warn(`API handled note: ${metaError.message}`, errorContext);
                 }
                 else {
-                    console.error('[Meta API] ❌ Error:', {
-                        message: metaError.message,
-                        code: metaError.code,
-                        subcode: metaError.error_subcode,
-                        type: metaError.type,
-                        fbtrace_id: metaError.fbtrace_id,
-                    });
+                    logger_1.metaLog.error(`API error: ${metaError.message}`, null, errorContext);
                 }
             }
             else {
-                console.error('[Meta API] ❌ Error:', error.message);
+                logger_1.metaLog.error(`API connection error: ${error.message}`, error, errorContext);
             }
             return Promise.reject(error);
         });
-        console.log(`✅ Meta API Client initialized (${this.graphVersion})`);
+        logger_1.metaLog.info('Meta API Client initialized', { version: this.graphVersion });
     }
     // ============================================
     // TOKEN MANAGEMENT
