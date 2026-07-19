@@ -3,6 +3,7 @@ import { whatsappService } from '../whatsapp/whatsapp.service';
 import { automationService } from './automation.service';
 import { AutomationTrigger } from '@prisma/client';
 import { deductWalletForTemplate } from '../wallet/wallet.deduction.service';
+import { automationLog } from '../../utils/logger';
 
 interface AutomationAction {
   id: string;
@@ -46,45 +47,27 @@ class AutomationEngine {
   // ✅ TRIGGER: UNKNOWN MESSAGE
   // ==========================================
   async triggerUnknownMessage(context: TriggerContext): Promise<void> {
-    console.log(`🤖 [UNKNOWN_MESSAGE] Triggered for org: ${context.organizationId}, phone: ${context.phone}`);
+    if (!context.phone) return;
 
-    if (!context.phone) {
-      console.warn(`⚠️ [UNKNOWN_MESSAGE] No phone in context`);
-      return;
-    }
+    automationLog.debug('Checking UNKNOWN_MESSAGE triggers', {
+      orgId: context.organizationId,
+    });
 
     try {
       const automations = await automationService.getActiveByTrigger(
-        context.organizationId,
-        'UNKNOWN_MESSAGE'
+        context.organizationId, 'UNKNOWN_MESSAGE'
       );
 
-      if (automations.length === 0) {
-        console.log(`ℹ️ [UNKNOWN_MESSAGE] No active automations for this org`);
-        return;
-      }
+      if (automations.length === 0) return;
 
-      console.log(`🤖 [UNKNOWN_MESSAGE] Found ${automations.length} automation(s)`);
-
-      // ✅ Check if contact ALREADY existed BEFORE this message
-      // (Different from just "exists" - we check if they existed before now)
       const contactExistedBefore = await this.contactExistedBefore(
-        context.organizationId,
-        context.phone
+        context.organizationId, context.phone
       );
-
-      console.log(`🔍 [UNKNOWN_MESSAGE] Contact existed before: ${contactExistedBefore}`);
 
       for (const automation of automations) {
         try {
-          // ✅ Skip if contact existed BEFORE and excludeExisting is ON
-          if (automation.excludeExisting && contactExistedBefore) {
-            console.log(`⏭️ [UNKNOWN_MESSAGE] Skipping ${automation.name}: contact exists`);
-            continue;
-          }
+          if (automation.excludeExisting && contactExistedBefore) continue;
 
-          // ✅ Cooldown check - prevent spam if same unknown number messages multiple times
-          // Only trigger once per contact per automation per 24 hours
           if (context.contactId) {
             const recentRun = await prisma.automationSequence.findFirst({
               where: {
@@ -93,34 +76,32 @@ class AutomationEngine {
                 createdAt: { gt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
               },
             });
-
-            if (recentRun) {
-              console.log(`⏭️ [UNKNOWN_MESSAGE] Skipping ${automation.name}: already ran in last 24h`);
-              continue;
-            }
+            if (recentRun) continue;
           }
 
-          // Group check (if applicable)
           if (context.contactId && automation.targetGroupIds?.length > 0) {
             const inGroup = await this.isContactInTargetGroups(
               context.contactId,
               automation.targetGroupIds
             );
-            if (!inGroup) {
-              console.log(`⏭️ [UNKNOWN_MESSAGE] Not in target groups: ${automation.name}`);
-              continue;
-            }
+            if (!inGroup) continue;
           }
 
-          console.log(`🚀 [UNKNOWN_MESSAGE] Executing: ${automation.name}`);
+          automationLog.info('Unknown message automation triggered', {
+            name: automation.name,
+            id: automation.id,
+          });
+
           await this.executeSequence(automation.id, automation.actions, context);
         } catch (err: any) {
-          console.error(`❌ [UNKNOWN_MESSAGE] Failed ${automation.id}:`, err.message);
+          automationLog.error('Unknown message automation failed', err, {
+            automationId: automation.id,
+          });
         }
       }
     } catch (error: any) {
       if (error?.code !== 'P2024') {
-        console.error('🤖 [UNKNOWN_MESSAGE] Error:', error);
+        automationLog.error('Unknown message trigger error', error);
       }
     }
   }
@@ -158,52 +139,48 @@ class AutomationEngine {
   async triggerKeyword(context: TriggerContext): Promise<boolean> {
     if (!context.message) return false;
 
-    console.log(`🤖 [AUTOMATION] Checking KEYWORD triggers for: "${context.message}"`);
+    automationLog.debug('Checking KEYWORD triggers', {
+      orgId: context.organizationId,
+      message: context.message.substring(0, 30),
+    });
 
     try {
       const automations = await automationService.getActiveByTrigger(
-        context.organizationId,
-        'KEYWORD'
+        context.organizationId, 'KEYWORD'
       );
 
       let triggered = false;
 
       for (const automation of automations) {
-        // ✅ Check target groups first
         if (context.contactId && automation.targetGroupIds?.length > 0) {
-          const inTargetGroup = await this.isContactInTargetGroups(
-            context.contactId,
-            automation.targetGroupIds
+          const inGroup = await this.isContactInTargetGroups(
+            context.contactId, automation.targetGroupIds
           );
-          if (!inTargetGroup) {
-            console.log(`⏭️ Contact not in target groups. Skipping: ${automation.name}`);
-            continue;
-          }
+          if (!inGroup) continue;
         }
 
         const keywords: string[] = (automation.triggerConfig as any)?.keywords || [];
         const exactMatch = (automation.triggerConfig as any)?.exactMatch || false;
-
         const messageL = context.message.toLowerCase().trim();
 
         const matched = keywords.some((keyword) => {
           const keywordL = keyword.toLowerCase().trim();
-          if (exactMatch) {
-            return messageL === keywordL;
-          }
-          return messageL.includes(keywordL);
+          return exactMatch ? messageL === keywordL : messageL.includes(keywordL);
         });
 
         if (matched) {
-          console.log(`🤖 Keyword matched! Executing automation: ${automation.name}`);
+          automationLog.info('Keyword automation triggered', {
+            name: automation.name,
+            id: automation.id,
+          });
           await this.executeSequence(automation.id, automation.actions as any, context);
           triggered = true;
         }
       }
 
       return triggered;
-    } catch (error) {
-      console.error('🤖 KEYWORD automation error:', error);
+    } catch (error: any) {
+      automationLog.error('Keyword trigger error', error);
       return false;
     }
   }

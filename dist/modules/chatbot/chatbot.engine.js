@@ -42,6 +42,7 @@ exports.chatbotEngine = exports.ChatbotEngine = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const whatsapp_service_1 = require("../whatsapp/whatsapp.service");
 const ai_service_1 = require("./ai.service");
+const logger_1 = require("../../utils/logger");
 // ============================================
 // REDIS SESSION MANAGER - ioredis compatible
 // ============================================
@@ -67,7 +68,7 @@ class RedisSessionManager {
             return JSON.parse(data);
         }
         catch (error) {
-            console.error('❌ Redis GET error:', error);
+            logger_1.chatbotLog.error('Redis GET error', error);
             return null;
         }
     }
@@ -82,7 +83,7 @@ class RedisSessionManager {
             await redis.setex(`${this.PREFIX}${key}`, this.TTL, JSON.stringify(session));
         }
         catch (error) {
-            console.error('❌ Redis SET error:', error);
+            logger_1.chatbotLog.error('Redis SET error', error);
         }
     }
     // ── Delete Session ───────────────────────────
@@ -94,7 +95,7 @@ class RedisSessionManager {
             await redis.del(`${this.PREFIX}${key}`);
         }
         catch (error) {
-            console.error('❌ Redis DEL error:', error);
+            logger_1.chatbotLog.error('Redis DEL error', error);
         }
     }
     // ── Acquire Distributed Lock ─────────────────
@@ -110,7 +111,7 @@ class RedisSessionManager {
             return result === 'OK';
         }
         catch (error) {
-            console.error('❌ Redis LOCK error:', error);
+            logger_1.chatbotLog.error('Redis LOCK error', error);
             return true; // Fail open
         }
     }
@@ -123,7 +124,7 @@ class RedisSessionManager {
             await redis.del(`${this.LOCK_PREFIX}${key}`);
         }
         catch (error) {
-            console.error('❌ Redis UNLOCK error:', error);
+            logger_1.chatbotLog.error('Redis UNLOCK error', error);
         }
     }
     // ── Extend TTL ───────────────────────────────
@@ -150,62 +151,63 @@ class ChatbotEngine {
     async processMessage(conversationId, organizationId, messageContent, senderPhone, isNewConversation, rawMessage) {
         const sessionKey = `${organizationId}:${conversationId}`;
         const cleanMessage = (messageContent || '').trim();
-        console.log(`\n🤖 ═══════ CHATBOT ENGINE ═══════`);
-        console.log(`   Msg    : "${cleanMessage}"`);
-        console.log(`   New    : ${isNewConversation}`);
-        // ✅ FIXED: Lock with retry instead of silent drop
+        const startTime = Date.now();
+        logger_1.chatbotLog.debug('Processing message', {
+            orgId: organizationId,
+            convId: conversationId,
+            isNew: isNewConversation,
+            msgLength: cleanMessage.length,
+        });
+        // Lock acquire
         let lockAcquired = false;
         let lockRetries = 3;
         while (!lockAcquired && lockRetries > 0) {
             lockAcquired = await sessionManager.acquireLock(sessionKey);
             if (!lockAcquired) {
                 lockRetries--;
-                if (lockRetries > 0) {
-                    await this.sleep(500); // Wait and retry
-                    console.log(`🔒 Lock retry... (${lockRetries} left)`);
-                }
+                if (lockRetries > 0)
+                    await this.sleep(500);
             }
         }
         if (!lockAcquired) {
-            console.log(`🔒 Could not acquire lock after retries, skipping`);
+            logger_1.chatbotLog.warn('Could not acquire lock', { sessionKey });
             return;
         }
         try {
             let session = await sessionManager.get(sessionKey);
-            console.log(`   Session: ${session
-                ? `FOUND (node: ${session.currentNodeId}, AI: ${session.aiNodeActive})`
-                : 'NEW'}`);
-            // ✅ FIXED: isNewConversation check improved
-            // If existing session exists and AI is active - NEVER reset
+            // ✅ Debug only
+            if (session) {
+                logger_1.chatbotLog.debug('Session found', {
+                    node: session.currentNodeId,
+                    aiActive: session.aiNodeActive,
+                });
+            }
             const shouldReset = isNewConversation &&
-                !session?.aiNodeActive && // AI not active
-                !session?.waitingForInput; // Not waiting for any input
-            let chatbot = await this.findMatchingChatbot(organizationId, cleanMessage, isNewConversation || !session, // New if no session
-            session?.chatbotId);
-            // Stale session cleanup
+                !session?.aiNodeActive &&
+                !session?.waitingForInput;
+            let chatbot = await this.findMatchingChatbot(organizationId, cleanMessage, isNewConversation || !session, session?.chatbotId);
             if (!chatbot && session && !session.aiNodeActive) {
-                console.log(`⚠️ Stale session, clearing...`);
+                logger_1.chatbotLog.debug('Clearing stale session', { sessionKey });
                 await sessionManager.delete(sessionKey);
                 session = null;
                 chatbot = await this.findMatchingChatbot(organizationId, cleanMessage, true, undefined);
             }
-            // ✅ AI active session - use same chatbot
             if (!chatbot && session?.aiNodeActive) {
                 chatbot = await database_1.default.chatbot.findFirst({
                     where: {
                         id: session.chatbotId,
                         organizationId,
-                        status: 'ACTIVE'
-                    }
+                        status: 'ACTIVE',
+                    },
                 });
             }
             if (!chatbot) {
-                console.log(`🤖 No active chatbot found`);
+                logger_1.chatbotLog.debug('No matching chatbot');
                 return;
             }
             const flowData = chatbot.flowData;
             if (!flowData?.nodes?.length) {
-                console.log(`🤖 Empty flow`);
+                logger_1.chatbotLog.warn('Chatbot has empty flow', { chatbotId: chatbot.id });
                 return;
             }
             const account = await database_1.default.whatsAppAccount.findFirst({
@@ -213,21 +215,19 @@ class ChatbotEngine {
                 orderBy: { isDefault: 'desc' },
             });
             if (!account) {
-                console.error(`❌ No connected WhatsApp account`);
+                logger_1.chatbotLog.error('No connected WhatsApp account', null, { organizationId });
                 return;
             }
-            // ✅ FIXED: Session decision logic
+            // Create or continue session
             if (!session || shouldReset) {
-                // Need to create new session
                 session = await this.createNewSession(chatbot, organizationId, conversationId, senderPhone, cleanMessage, flowData, account, sessionKey, chatbot.welcomeMessage || '', rawMessage);
                 if (!session)
                     return;
             }
             else {
-                // Continue existing session
                 session = await this.handleExistingSession(session, cleanMessage, flowData, organizationId, conversationId, senderPhone, account, sessionKey, chatbot);
             }
-            // ✅ AUTO INTEREST DETECTION ON ALL USER MESSAGES
+            // Interest detection
             const currentScore = Number(session.variables['leadScore'] || 0);
             const detection = this.detectInterestFromInput(cleanMessage, currentScore);
             if (detection.isInterested) {
@@ -235,17 +235,16 @@ class ChatbotEngine {
                 session.variables['leadScore'] = newScore;
                 session.variables['userInterested'] = true;
                 session.variables['interestReason'] = detection.reason;
-                console.log(`🎯 Interest detected from input text! Score: ${newScore}`);
-                this.autoCreateInterestedLead(session).catch(e => console.error('Auto lead creation error:', e));
+                logger_1.chatbotLog.info('Interest detected', {
+                    score: newScore,
+                    reason: detection.reason,
+                });
+                this.autoCreateInterestedLead(session).catch(e => logger_1.chatbotLog.error('Auto lead creation failed', e));
             }
             else if (detection.scoreBoost > 0) {
-                const newScore = Math.min(100, currentScore + detection.scoreBoost);
-                session.variables['leadScore'] = newScore;
-                console.log(`📊 Engagement score updated: ${newScore}`);
+                session.variables['leadScore'] = Math.min(100, currentScore + detection.scoreBoost);
             }
-            // Save session
             await sessionManager.set(sessionKey, session);
-            // Execute flow
             if (!session.waitingForInput) {
                 await this.executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, chatbot.fallbackMessage || '');
             }
@@ -262,7 +261,7 @@ class ChatbotEngine {
     // CREATE NEW SESSION
     // ==========================================
     async createNewSession(chatbot, organizationId, conversationId, senderPhone, message, flowData, account, sessionKey, welcomeMessage, rawMessage) {
-        console.log(`🆕 Creating new session for: ${chatbot.name}`);
+        logger_1.chatbotLog.info('Creating new session', { chatbotName: chatbot.name });
         // Send welcome message
         if (welcomeMessage) {
             await this.sendText(account, senderPhone, welcomeMessage, conversationId, organizationId);
@@ -271,12 +270,12 @@ class ChatbotEngine {
         // Find start node
         const startNode = flowData.nodes.find(n => n.type === 'start');
         if (!startNode) {
-            console.error(`❌ No start node found`);
+            logger_1.chatbotLog.error('No start node found in flow', null, { chatbotId: chatbot.id });
             return null;
         }
         const firstNodeId = this.getNextNodeId(startNode.id, flowData);
         if (!firstNodeId) {
-            console.error(`❌ Start node not connected`);
+            logger_1.chatbotLog.error('Start node not connected in flow', null, { chatbotId: chatbot.id });
             return null;
         }
         const session = {
@@ -312,9 +311,11 @@ class ChatbotEngine {
     // HANDLE EXISTING SESSION - FIXED
     // ==========================================
     async handleExistingSession(session, input, flowData, organizationId, conversationId, senderPhone, account, sessionKey, chatbot) {
-        console.log(`🔄 Resuming session at: ${session.currentNodeId}`);
-        console.log(`   AI Active: ${session.aiNodeActive}`);
-        console.log(`   Waiting: ${session.waitingForInput}`);
+        logger_1.chatbotLog.debug('Resuming session', {
+            currentNodeId: session.currentNodeId,
+            aiActive: session.aiNodeActive,
+            waiting: session.waitingForInput,
+        });
         session.messageCount++;
         // ✅ ALWAYS store input - NEVER lose it
         session.variables['previousInput'] = session.variables['lastInput'] || '';
@@ -323,7 +324,7 @@ class ChatbotEngine {
         // ✅ CASE 1: AI Node Active - Direct AI processing
         // Perform this check FIRST - before waitingForInput
         if (session.aiNodeActive) {
-            console.log(`🤖 AI mode active - routing to AI node directly`);
+            logger_1.chatbotLog.debug('AI mode active, routing directly');
             session.waitingForInput = false;
             // currentNodeId will remain on the AI node
             return session;
@@ -336,7 +337,7 @@ class ChatbotEngine {
         // ✅ CASE 3: Not waiting, not AI - check for new keyword
         const newChatbot = await this.findMatchingChatbot(organizationId, input, false, undefined);
         if (newChatbot && newChatbot.id !== session.chatbotId) {
-            console.log(`🔀 New chatbot keyword matched: ${newChatbot.name}`);
+            logger_1.chatbotLog.info('New chatbot keyword matched', { newChatbotName: newChatbot.name });
             await sessionManager.delete(sessionKey);
             // ✅ Recursive call - create new session
             await this.processMessage(conversationId, organizationId, input, senderPhone, true);
@@ -356,12 +357,14 @@ class ChatbotEngine {
     async processUserInput(session, input, flowData) {
         const currentNode = flowData.nodes.find(n => n.id === session.currentNodeId);
         if (!currentNode) {
-            console.warn(`⚠️ Node not found: ${session.currentNodeId}`);
+            logger_1.chatbotLog.warn('Node not found when processing input', { nodeId: session.currentNodeId });
             session.waitingForInput = false;
             return session;
         }
-        console.log(`🎯 Processing input for node type: [${currentNode.type}]`);
-        console.log(`   Input: "${input.substring(0, 50)}"`);
+        logger_1.chatbotLog.debug('Processing input for node', {
+            type: currentNode.type,
+            inputPreview: input.substring(0, 50),
+        });
         switch (currentNode.type) {
             case 'button': {
                 session = this.matchButtonInput(session, input, currentNode, flowData);
@@ -382,7 +385,7 @@ class ChatbotEngine {
                     const nextId = this.getNextNodeId(currentNode.id, flowData);
                     if (nextId) {
                         session.currentNodeId = nextId;
-                        console.log(`➡️ Message node → next: ${nextId}`);
+                        logger_1.chatbotLog.debug('Message node transition', { nextId });
                     }
                     session.waitingForInput = false;
                 }
@@ -393,7 +396,7 @@ class ChatbotEngine {
                 // Just set waitingForInput = false, AI will execute
                 session.waitingForInput = false;
                 session.aiNodeActive = true;
-                console.log(`🤖 AI node: input ready for processing`);
+                logger_1.chatbotLog.debug('AI node ready for input');
                 break;
             }
             default: {
@@ -474,12 +477,12 @@ class ChatbotEngine {
         try {
             // Already lead bana chuka hai toh skip
             if (session.variables['leadCreated']) {
-                console.log(`⏭️ Lead already created, skipping auto-create`);
+                logger_1.chatbotLog.debug('Lead already created, skipping auto-create');
                 return;
             }
             const contact = await this.findContact(session.organizationId, session.senderPhone);
             if (!contact) {
-                console.warn('⚠️ Auto lead: contact not found');
+                logger_1.chatbotLog.warn('Auto lead creation skipped: contact not found', { senderPhone: session.senderPhone });
                 return;
             }
             const { crmService } = await Promise.resolve().then(() => __importStar(require('../crm/crm.service')));
@@ -514,11 +517,14 @@ class ChatbotEngine {
             session.variables['leadCreated'] = true;
             session.variables['leadId'] = result.lead.id;
             session.variables['leadAction'] = result.action;
-            console.log(`🎯 Auto Lead ${result.action}: ${result.lead.id} ` +
-                `(score: ${session.variables['leadScore']})`);
+            logger_1.chatbotLog.info('Auto Lead processed', {
+                action: result.action,
+                leadId: result.lead.id,
+                score: session.variables['leadScore'],
+            });
         }
         catch (error) {
-            console.error('❌ autoCreateInterestedLead failed:', error);
+            logger_1.chatbotLog.error('autoCreateInterestedLead failed', error);
         }
     }
     // ==========================================
@@ -547,7 +553,7 @@ class ChatbotEngine {
             }
         }
         if (matchedButton) {
-            console.log(`✅ Button matched: "${matchedButton.text}"`);
+            logger_1.chatbotLog.info('Button matched', { buttonText: matchedButton.text });
             session.variables['selectedButton'] = matchedButton.text;
             session.variables['selectedButtonId'] = matchedButton.id;
             // ✅ AUTO INTEREST DETECTION
@@ -559,9 +565,9 @@ class ChatbotEngine {
             if (detection.isInterested) {
                 session.variables['userInterested'] = true;
                 session.variables['interestReason'] = detection.reason;
-                console.log(`🎯 Interest detected! Score: ${currentScore} → ${newScore}`);
+                logger_1.chatbotLog.info('Interest detected from button', { currentScore, newScore });
                 // ✅ Auto trigger lead creation (non-blocking)
-                this.autoCreateInterestedLead(session).catch(e => console.error('Auto lead creation error:', e));
+                this.autoCreateInterestedLead(session).catch(e => logger_1.chatbotLog.error('Auto lead creation error', e));
             }
             else if (detection.scoreBoost > 0) {
                 console.log(`📊 Engagement score: ${currentScore} → ${newScore}`);
@@ -570,18 +576,18 @@ class ChatbotEngine {
             const edge = this.findButtonEdge(node.id, matchedButton, input, flowData);
             if (edge) {
                 session.currentNodeId = edge.target;
-                console.log(`➡️ Moving to: ${edge.target}`);
+                logger_1.chatbotLog.debug('Moving to next node from button', { targetNodeId: edge.target });
             }
             else {
                 const anyEdge = flowData.edges.find(e => e.source === node.id);
                 if (anyEdge) {
                     session.currentNodeId = anyEdge.target;
-                    console.log(`➡️ Fallback edge: ${anyEdge.target}`);
+                    logger_1.chatbotLog.debug('Fallback edge followed from button', { targetNodeId: anyEdge.target });
                 }
             }
         }
         else {
-            console.log(`❌ No button matched for: "${input}"`);
+            logger_1.chatbotLog.info('No button matched', { input });
         }
         session.waitingForInput = false;
         return session;
@@ -617,7 +623,7 @@ class ChatbotEngine {
             }
         }
         if (matchedRow) {
-            console.log(`✅ List matched: "${matchedRow.title}"`);
+            logger_1.chatbotLog.info('List item matched', { rowTitle: matchedRow.title });
             session.variables['selectedOption'] = matchedRow.title;
             session.variables['selectedOptionId'] = matchedRow.id;
             // ✅ AUTO INTEREST DETECTION
@@ -628,8 +634,8 @@ class ChatbotEngine {
             if (detection.isInterested) {
                 session.variables['userInterested'] = true;
                 session.variables['interestReason'] = detection.reason;
-                console.log(`🎯 Interest detected from list! Score: ${newScore}`);
-                this.autoCreateInterestedLead(session).catch(e => console.error('Auto lead creation error:', e));
+                logger_1.chatbotLog.info('Interest detected from list selection', { score: newScore });
+                this.autoCreateInterestedLead(session).catch(e => logger_1.chatbotLog.error('Auto lead creation error', e));
             }
             const edge = this.findListEdge(node.id, matchedRow, input, flowData);
             if (edge) {
@@ -648,21 +654,23 @@ class ChatbotEngine {
     // EXECUTE FLOW - Main Loop
     // ==========================================
     async executeFlow(session, flowData, account, conversationId, organizationId, senderPhone, sessionKey, fallbackMessage, depth = 0) {
-        // ✅ Infinite loop protection
         if (depth > 30) {
-            console.error(`🔴 Max depth reached - infinite loop protection`);
+            logger_1.chatbotLog.error('Max flow depth reached', null, { sessionKey });
             return;
         }
         const node = flowData.nodes.find(n => n.id === session.currentNodeId);
         if (!node) {
-            console.log(`⚠️ Node not found: ${session.currentNodeId}`);
+            logger_1.chatbotLog.warn('Node not found', { nodeId: session.currentNodeId });
             if (fallbackMessage) {
                 await this.sendText(account, senderPhone, fallbackMessage, conversationId, organizationId);
             }
             await sessionManager.delete(sessionKey);
             return;
         }
-        console.log(`▶️ Executing [${node.type}] id:${node.id} depth:${depth}`);
+        logger_1.chatbotLog.debug('Executing node', {
+            type: node.type,
+            depth,
+        });
         switch (node.type) {
             // ──────────────────────────────────────
             case 'start': {

@@ -13,6 +13,7 @@ import prisma from '../../config/database';
 import { contactsService } from '../contacts/contacts.service';
 import { EventEmitter } from 'events';
 import { MessageType, MessageStatus } from '@prisma/client';
+import { webhookLog, campaignLog } from '../../utils/logger';
 import { chatbotEngine } from '../chatbot/chatbot.engine';
 import { inboxMediaService } from '../inbox/inbox.media';
 import { automationEngine } from '../automation/automation.engine';
@@ -278,13 +279,17 @@ export class WebhookService {
         return await this.handleInstagramEvent(payload);
       }
 
-      const value = this.extractValue(payload);
-      const field =
-        payload?.entry?.[0]?.changes?.[0]?.field || 'unknown';
+      const value         = this.extractValue(payload);
+      const field         = payload?.entry?.[0]?.changes?.[0]?.field || 'unknown';
       const phoneNumberId = value?.metadata?.phone_number_id;
 
-      // ✅ Single clean log
-      console.log('📨 Webhook field:', field);
+      // ✅ Clean single log with context
+      webhookLog.debug('Webhook received', {
+        field,
+        phoneNumberId,
+        hasMessages: !!value?.messages?.length,
+        hasStatuses: !!value?.statuses?.length,
+      });
 
       switch (field) {
         case 'history':
@@ -871,54 +876,66 @@ export class WebhookService {
   ) {
     try {
       const waMessageId = String(statusObj?.id || '');
-      const st = String(statusObj?.status || '').toLowerCase();
-      const ts = Number(statusObj?.timestamp || Date.now() / 1000);
-      const statusTime = new Date(ts * 1000);
+      const st          = String(statusObj?.status || '').toLowerCase();
+      const ts          = Number(statusObj?.timestamp || Date.now() / 1000);
+      const statusTime  = new Date(ts * 1000);
 
-      if (!waMessageId) {
-        console.warn('⚠️ No waMessageId in status update');
-        return;
-      }
+      if (!waMessageId) return;
 
-      console.log(`📬 Processing status update: ${waMessageId} -> ${st}`);
+      // ✅ Clean log - short ID
+      webhookLog.debug('Status update', {
+        wamid: waMessageId,
+        status: st,
+      });
 
       let newStatus: MessageStatus = 'SENT';
-      if (st === 'sent') newStatus = 'SENT';
+      if (st === 'sent')      newStatus = 'SENT';
       if (st === 'delivered') newStatus = 'DELIVERED';
-      if (st === 'read') newStatus = 'READ';
-      if (st === 'failed') newStatus = 'FAILED';
+      if (st === 'read')      newStatus = 'READ';
+      if (st === 'failed')    newStatus = 'FAILED';
 
-      const failureReason = st === 'failed' ? (statusObj?.errors?.[0]?.message || 'Unknown error') : undefined;
+      const failureReason = st === 'failed'
+        ? (statusObj?.errors?.[0]?.message || 'Unknown error')
+        : undefined;
 
-      await this.updateCampaignContactStatus(waMessageId, newStatus, statusTime, failureReason);
+      // Update campaign contact
+      await this.updateCampaignContactStatus(
+        waMessageId, newStatus, statusTime, failureReason
+      );
 
+      // ✅ FIX: Query with ALL possible field names
       const message = await prisma.message.findFirst({
         where: {
           OR: [
             { waMessageId },
             { wamId: waMessageId },
+            { whatsappMessageId: waMessageId },  // ✅ ADD THIS
           ],
         },
         include: {
           conversation: {
             select: {
-              id: true,
-              contactId: true,
-              organizationId: true,
+              id:              true,
+              contactId:       true,
+              organizationId:  true,
             },
           },
         },
       });
 
       if (message) {
-        await this.updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId);
+        await this.updateChatMessageStatus(
+          message, newStatus, statusTime, statusObj, organizationId
+        );
       } else {
-        this.retryUpdateChatMessageStatusInBackground(waMessageId, newStatus, statusTime, statusObj, organizationId)
-          .catch(() => { });
+        // ✅ FIX: Better retry (silent if truly missing)
+        this.retryUpdateChatMessageStatusInBackground(
+          waMessageId, newStatus, statusTime, statusObj, organizationId
+        ).catch(() => {});
       }
 
-    } catch (e) {
-      console.error('processStatusUpdate error:', e);
+    } catch (e: any) {
+      webhookLog.error('processStatusUpdate error', e);
     }
   }
 
@@ -969,21 +986,24 @@ export class WebhookService {
   }
 
   private async retryUpdateChatMessageStatusInBackground(
-    waMessageId: string,
-    newStatus: MessageStatus,
-    statusTime: Date,
-    statusObj: any,
-    organizationId: string
+    waMessageId:      string,
+    newStatus:        MessageStatus,
+    statusTime:       Date,
+    statusObj:        any,
+    organizationId:   string
   ) {
-    let retries = 3;
-    while (retries > 0) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    // ✅ Exponential backoff - total 20 seconds
+    const retryDelays = [500, 1000, 2000, 3000, 5000, 8000];
+
+    for (const delay of retryDelays) {
+      await new Promise(r => setTimeout(r, delay));
 
       const message = await prisma.message.findFirst({
         where: {
           OR: [
             { waMessageId },
             { wamId: waMessageId },
+            { whatsappMessageId: waMessageId },  // ✅ Include all
           ],
         },
         include: {
@@ -998,12 +1018,22 @@ export class WebhookService {
       });
 
       if (message) {
-        await this.updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId);
+        await this.updateChatMessageStatus(
+          message, newStatus, statusTime, statusObj, organizationId
+        );
         return;
       }
-      retries--;
     }
-    console.log(`⚠️ Message still not found for waMessageId: ${waMessageId} after background retries`);
+
+    // ✅ Only log if it's actually a problem (not warning-spam)
+    // Most likely: message from before webhook was setup OR different org
+    // Silent by default - only warn in debug mode
+    if (process.env.LOG_LEVEL === 'debug') {
+      webhookLog.debug('Message not found after retries', {
+        wamid: waMessageId,
+        status: newStatus,
+      });
+    }
   }
 
   // ============================================

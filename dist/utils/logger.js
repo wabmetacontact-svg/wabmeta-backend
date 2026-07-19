@@ -1,18 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cronLog = exports.metaLog = exports.cacheLog = exports.dbLog = exports.socketLog = exports.webhookLog = exports.campaignLog = exports.whatsappLog = exports.walletLog = exports.authLog = exports.logger = void 0;
-// src/utils/logger.ts - PRODUCTION READY
+exports.inboxLog = exports.automationLog = exports.chatbotLog = exports.cronLog = exports.metaLog = exports.cacheLog = exports.dbLog = exports.socketLog = exports.webhookLog = exports.campaignLog = exports.whatsappLog = exports.walletLog = exports.authLog = exports.logger = void 0;
+// src/utils/logger.ts - ENTERPRISE VERSION
 const config_1 = require("../config");
 // ─── Constants ───────────────────────────────────────────
 const LOG_LEVELS = {
     error: 0, warn: 1, info: 2, http: 3, debug: 4,
 };
 const LEVEL_COLORS = {
-    error: '\x1b[31m', // red
-    warn: '\x1b[33m', // yellow
-    info: '\x1b[36m', // cyan
-    http: '\x1b[35m', // magenta
-    debug: '\x1b[90m', // gray
+    error: '\x1b[31m',
+    warn: '\x1b[33m',
+    info: '\x1b[36m',
+    http: '\x1b[35m',
+    debug: '\x1b[90m',
 };
 const CATEGORY_COLORS = {
     SYSTEM: '\x1b[35m', AUTH: '\x1b[34m',
@@ -20,15 +20,17 @@ const CATEGORY_COLORS = {
     CAMPAIGN: '\x1b[33m', WEBHOOK: '\x1b[95m',
     SOCKET: '\x1b[94m', DB: '\x1b[90m',
     CACHE: '\x1b[92m', 'META-API': '\x1b[96m',
+    CHATBOT: '\x1b[93m', AUTOMATION: '\x1b[97m',
+    INBOX: '\x1b[35m',
 };
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
 const DIM = '\x1b[2m';
 // ─── Sensitive Data Masking ──────────────────────────────
 const SENSITIVE_KEYS = [
-    'password', 'token', 'accessToken', 'refreshToken',
-    'secret', 'apiKey', 'authorization', 'cookie',
-    'pin', 'otp', 'creditCard', 'cvv',
+    'password', 'token', 'accesstoken', 'refreshtoken',
+    'secret', 'apikey', 'authorization', 'cookie',
+    'pin', 'otp', 'creditcard', 'cvv',
 ];
 const maskValue = (value, showChars = 4) => {
     if (!value || value.length <= showChars * 2)
@@ -51,19 +53,27 @@ const maskEmail = (email) => {
         return `${user[0]}***@${domain}`;
     return `${user.slice(0, 2)}***@${domain}`;
 };
+const maskWamid = (id) => {
+    if (!id || id.length < 20)
+        return id;
+    const clean = id.replace('wamid.', '');
+    return `wamid.${clean.slice(0, 8)}...${clean.slice(-6)}`;
+};
 const sanitize = (obj, depth = 0) => {
     if (depth > 5)
         return '[Nested Too Deep]';
     if (obj === null || obj === undefined)
         return obj;
-    // String masking
     if (typeof obj === 'string') {
-        // Mask JWT tokens
+        // JWT tokens
         if (/^eyJ[A-Za-z0-9-_=]+\.eyJ/.test(obj))
             return maskValue(obj);
-        // Mask Meta tokens
-        if (obj.startsWith('EAA'))
+        // Meta tokens
+        if (obj.startsWith('EAA') && obj.length > 30)
             return maskValue(obj);
+        // wamid
+        if (obj.startsWith('wamid.'))
+            return maskWamid(obj);
         return obj;
     }
     if (Array.isArray(obj)) {
@@ -73,13 +83,16 @@ const sanitize = (obj, depth = 0) => {
         const clean = {};
         for (const [key, value] of Object.entries(obj)) {
             const lowerKey = key.toLowerCase();
-            // Sensitive keys
-            if (SENSITIVE_KEYS.some(sk => lowerKey.includes(sk.toLowerCase()))) {
+            if (SENSITIVE_KEYS.some(sk => lowerKey.includes(sk))) {
                 clean[key] = typeof value === 'string' ? maskValue(value) : '***';
                 continue;
             }
-            // Auto-detect and mask
-            if (lowerKey === 'phone' || lowerKey === 'phonenumber' || lowerKey.includes('mobile')) {
+            if (lowerKey === 'phone' ||
+                lowerKey === 'phonenumber' ||
+                lowerKey === 'senderphone' ||
+                lowerKey === 'recipient' ||
+                lowerKey === 'recipientphone' ||
+                lowerKey.includes('mobile')) {
                 clean[key] = typeof value === 'string' ? maskPhone(value) : value;
                 continue;
             }
@@ -87,24 +100,25 @@ const sanitize = (obj, depth = 0) => {
                 clean[key] = maskEmail(value);
                 continue;
             }
-            // Recursive
+            if ((lowerKey === 'wamid' || lowerKey === 'wamessageid' ||
+                lowerKey === 'whatsappmessageid') &&
+                typeof value === 'string') {
+                clean[key] = maskWamid(value);
+                continue;
+            }
             clean[key] = sanitize(value, depth + 1);
         }
         return clean;
     }
     return obj;
 };
-// ─── ID Shortener (for logs readability) ────────────────
+// ─── ID Shortener ─────────────────────────────────────────
 const shortId = (id) => {
     if (!id || id.length < 12)
         return id;
     return `${id.slice(0, 6)}..${id.slice(-4)}`;
 };
-// ─── Formatters ──────────────────────────────────────────
-/**
- * Pretty format for development
- * [14:32:11] INFO  [WHATSAPP] Message sent { phoneNumber: '91****96', duration: '245ms' }
- */
+// ─── Pretty Formatter ─────────────────────────────────────
 const formatPretty = (level, category, message, context) => {
     const now = new Date();
     const time = now.toLocaleTimeString('en-US', {
@@ -117,9 +131,8 @@ const formatPretty = (level, category, message, context) => {
     const timestamp = `${DIM}[${time}.${ms}]${RESET}`;
     const levelStr = `${LEVEL_COLORS[level]}${BOLD}${level.toUpperCase().padEnd(5)}${RESET}`;
     const catColor = CATEGORY_COLORS[category] || '\x1b[37m';
-    const catStr = `${catColor}[${category.padEnd(8)}]${RESET}`;
+    const catStr = `${catColor}[${category.padEnd(10)}]${RESET}`;
     let output = `${timestamp} ${levelStr} ${catStr} ${message}`;
-    // Add context inline
     if (context && Object.keys(context).length > 0) {
         const cleanCtx = sanitize(context);
         const parts = [];
@@ -128,16 +141,24 @@ const formatPretty = (level, category, message, context) => {
                 continue;
             let displayValue;
             if (typeof value === 'object') {
-                displayValue = JSON.stringify(value);
+                try {
+                    displayValue = JSON.stringify(value).substring(0, 100);
+                }
+                catch {
+                    displayValue = '[complex object]';
+                }
             }
-            else if (typeof value === 'string' && key.toLowerCase().includes('id')) {
+            else if (typeof value === 'string' && key.toLowerCase().endsWith('id') && value.length > 12) {
                 displayValue = shortId(value);
             }
             else if (key === 'duration' && typeof value === 'number') {
                 displayValue = `${value}ms`;
             }
+            else if (key === 'error' && typeof value === 'string') {
+                displayValue = value.substring(0, 80);
+            }
             else {
-                displayValue = String(value);
+                displayValue = String(value).substring(0, 100);
             }
             parts.push(`${DIM}${key}${RESET}=${displayValue}`);
         }
@@ -147,9 +168,7 @@ const formatPretty = (level, category, message, context) => {
     }
     return output;
 };
-/**
- * JSON format for production (easier to parse in log tools)
- */
+// ─── JSON Formatter (Production) ──────────────────────────
 const formatJSON = (level, category, message, context) => {
     const entry = {
         ts: new Date().toISOString(),
@@ -169,12 +188,10 @@ class Logger {
     useJSON;
     constructor() {
         this.isProduction = config_1.config.app.isProduction;
-        // Log level from env or defaults
         const envLevel = (process.env.LOG_LEVEL || '').toLowerCase();
         const defaultLevel = this.isProduction ? 'info' : 'debug';
         const level = LOG_LEVELS[envLevel] !== undefined ? envLevel : defaultLevel;
         this.currentLevel = LOG_LEVELS[level];
-        // Format based on env
         this.useJSON = process.env.LOG_FORMAT === 'json' || this.isProduction;
     }
     shouldLog(level) {
@@ -186,7 +203,6 @@ class Logger {
         const output = this.useJSON
             ? formatJSON(level, category, message, context)
             : formatPretty(level, category, message, context);
-        // Send to appropriate stream
         if (level === 'error') {
             console.error(output);
         }
@@ -197,14 +213,13 @@ class Logger {
             console.log(output);
         }
     }
-    // ─── Public API ─────────────────────────────────────────
     error(message, error, context) {
         const ctx = { ...context };
         if (error) {
             if (error instanceof Error) {
                 ctx.error = error.message;
                 if (!this.isProduction)
-                    ctx.stack = error.stack;
+                    ctx.stack = error.stack?.split('\n')[1];
             }
             else {
                 ctx.error = String(error);
@@ -224,10 +239,22 @@ class Logger {
     http(message, context) {
         this.write('http', 'HTTP', message, context);
     }
-    // ─── Category-specific methods ──────────────────────────
     category(cat) {
         return {
-            error: (msg, error, ctx) => this.write('error', cat, msg, { ...ctx, error: error?.message || error }),
+            error: (msg, error, ctx) => {
+                const context = { ...ctx };
+                if (error) {
+                    if (error instanceof Error) {
+                        context.error = error.message;
+                        if (!this.isProduction)
+                            context.stack = error.stack?.split('\n')[1];
+                    }
+                    else {
+                        context.error = String(error);
+                    }
+                }
+                this.write('error', cat, msg, context);
+            },
             warn: (msg, ctx) => this.write('warn', cat, msg, ctx),
             info: (msg, ctx) => this.write('info', cat, msg, ctx),
             debug: (msg, ctx) => this.write('debug', cat, msg, ctx),
@@ -235,9 +262,9 @@ class Logger {
         };
     }
 }
-// ─── Singleton export ───────────────────────────────────
+// ─── Singleton ───────────────────────────────────────────
 exports.logger = new Logger();
-// ─── Convenience category loggers ───────────────────────
+// ─── Category loggers ────────────────────────────────────
 exports.authLog = exports.logger.category('AUTH');
 exports.walletLog = exports.logger.category('WALLET');
 exports.whatsappLog = exports.logger.category('WHATSAPP');
@@ -248,5 +275,8 @@ exports.dbLog = exports.logger.category('DB');
 exports.cacheLog = exports.logger.category('CACHE');
 exports.metaLog = exports.logger.category('META-API');
 exports.cronLog = exports.logger.category('CRON');
+exports.chatbotLog = exports.logger.category('CHATBOT');
+exports.automationLog = exports.logger.category('AUTOMATION');
+exports.inboxLog = exports.logger.category('INBOX');
 exports.default = exports.logger;
 //# sourceMappingURL=logger.js.map

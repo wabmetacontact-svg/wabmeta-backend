@@ -1,5 +1,5 @@
 export type LogLevel = 'error' | 'warn' | 'info' | 'http' | 'debug';
-export type LogCategory = 'SYSTEM' | 'AUTH' | 'WALLET' | 'WHATSAPP' | 'CAMPAIGN' | 'WEBHOOK' | 'SOCKET' | 'DB' | 'CACHE' | 'META-API' | 'TEMPLATE' | 'CONTACT' | 'BILLING' | 'CRON' | 'HTTP';
+export type LogCategory = 'SYSTEM' | 'AUTH' | 'WALLET' | 'WHATSAPP' | 'CAMPAIGN' | 'WEBHOOK' | 'SOCKET' | 'DB' | 'CACHE' | 'META-API' | 'TEMPLATE' | 'CONTACT' | 'BILLING' | 'CRON' | 'HTTP' | 'CHATBOT' | 'AUTOMATION' | 'INBOX';
 interface LogContext {
     requestId?: string;
     userId?: string;
@@ -92,6 +92,27 @@ export declare const metaLog: {
     http: (msg: string, ctx?: LogContext) => void;
 };
 export declare const cronLog: {
+    error: (msg: string, error?: any, ctx?: LogContext) => void;
+    warn: (msg: string, ctx?: LogContext) => void;
+    info: (msg: string, ctx?: LogContext) => void;
+    debug: (msg: string, ctx?: LogContext) => void;
+    http: (msg: string, ctx?: LogContext) => void;
+};
+export declare const chatbotLog: {
+    error: (msg: string, error?: any, ctx?: LogContext) => void;
+    warn: (msg: string, ctx?: LogContext) => void;
+    info: (msg: string, ctx?: LogContext) => void;
+    debug: (msg: string, ctx?: LogContext) => void;
+    http: (msg: string, ctx?: LogContext) => void;
+};
+export declare const automationLog: {
+    error: (msg: string, error?: any, ctx?: LogContext) => void;
+    warn: (msg: string, ctx?: LogContext) => void;
+    info: (msg: string, ctx?: LogContext) => void;
+    debug: (msg: string, ctx?: LogContext) => void;
+    http: (msg: string, ctx?: LogContext) => void;
+};
+export declare const inboxLog: {
     error: (msg: string, error?: any, ctx?: LogContext) => void;
     warn: (msg: string, ctx?: LogContext) => void;
     info: (msg: string, ctx?: LogContext) => void;

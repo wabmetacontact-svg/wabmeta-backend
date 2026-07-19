@@ -676,13 +676,13 @@ export declare class AdminService {
         message: string;
         account: {
             organizationId: string;
-            accessToken: string | null;
             id: string;
             phoneNumber: string;
             status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
             createdAt: Date;
             updatedAt: Date;
             phoneNumberId: string;
+            accessToken: string | null;
             wabaId: string;
             displayName: string;
             qualityRating: string | null;

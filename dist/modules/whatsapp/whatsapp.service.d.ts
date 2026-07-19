@@ -205,13 +205,13 @@ declare class WhatsAppService {
     }>;
     getDefaultAccount(organizationId: string): Promise<{
         organizationId: string;
-        accessToken: string | null;
         id: string;
         phoneNumber: string;
         status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
         createdAt: Date;
         updatedAt: Date;
         phoneNumberId: string;
+        accessToken: string | null;
         wabaId: string;
         displayName: string;
         qualityRating: string | null;

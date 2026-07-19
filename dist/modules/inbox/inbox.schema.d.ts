@@ -182,6 +182,7 @@ export declare const sendMessageSchema: z.ZodObject<{
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -190,13 +191,13 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         }, {
             type: "button" | "list";
             buttons?: {
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -205,7 +206,6 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         }>>;
     }, "strip", z.ZodTypeAny, {
         type: "text" | "image" | "video" | "document" | "audio" | "location" | "interactive";
@@ -216,6 +216,7 @@ export declare const sendMessageSchema: z.ZodObject<{
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -224,7 +225,6 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         } | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
@@ -239,6 +239,7 @@ export declare const sendMessageSchema: z.ZodObject<{
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -247,7 +248,6 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         } | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
@@ -262,6 +262,7 @@ export declare const sendMessageSchema: z.ZodObject<{
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -270,7 +271,6 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         } | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
@@ -285,6 +285,7 @@ export declare const sendMessageSchema: z.ZodObject<{
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -293,7 +294,6 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         } | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
@@ -310,6 +310,7 @@ export declare const sendMessageSchema: z.ZodObject<{
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -318,7 +319,6 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         } | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;
@@ -338,6 +338,7 @@ export declare const sendMessageSchema: z.ZodObject<{
                 id: string;
                 title: string;
             }[] | undefined;
+            buttonText?: string | undefined;
             sections?: {
                 rows: {
                     id: string;
@@ -346,7 +347,6 @@ export declare const sendMessageSchema: z.ZodObject<{
                 }[];
                 title?: string | undefined;
             }[] | undefined;
-            buttonText?: string | undefined;
         } | undefined;
         content?: string | undefined;
         mediaUrl?: string | undefined;

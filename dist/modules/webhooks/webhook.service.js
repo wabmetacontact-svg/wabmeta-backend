@@ -50,6 +50,7 @@ exports.webhookService = exports.WebhookService = exports.webhookEvents = void 0
 const database_1 = __importDefault(require("../../config/database"));
 const contacts_service_1 = require("../contacts/contacts.service");
 const events_1 = require("events");
+const logger_1 = require("../../utils/logger");
 const chatbot_engine_1 = require("../chatbot/chatbot.engine");
 const automation_engine_1 = require("../automation/automation.engine");
 const phone_1 = require("../../utils/phone");
@@ -283,8 +284,13 @@ class WebhookService {
             const value = this.extractValue(payload);
             const field = payload?.entry?.[0]?.changes?.[0]?.field || 'unknown';
             const phoneNumberId = value?.metadata?.phone_number_id;
-            // ✅ Single clean log
-            console.log('📨 Webhook field:', field);
+            // ✅ Clean single log with context
+            logger_1.webhookLog.debug('Webhook received', {
+                field,
+                phoneNumberId,
+                hasMessages: !!value?.messages?.length,
+                hasStatuses: !!value?.statuses?.length,
+            });
             switch (field) {
                 case 'history':
                     await this.handleHistorySync(payload, value);
@@ -799,11 +805,13 @@ class WebhookService {
             const st = String(statusObj?.status || '').toLowerCase();
             const ts = Number(statusObj?.timestamp || Date.now() / 1000);
             const statusTime = new Date(ts * 1000);
-            if (!waMessageId) {
-                console.warn('⚠️ No waMessageId in status update');
+            if (!waMessageId)
                 return;
-            }
-            console.log(`📬 Processing status update: ${waMessageId} -> ${st}`);
+            // ✅ Clean log - short ID
+            logger_1.webhookLog.debug('Status update', {
+                wamid: waMessageId,
+                status: st,
+            });
             let newStatus = 'SENT';
             if (st === 'sent')
                 newStatus = 'SENT';
@@ -813,13 +821,18 @@ class WebhookService {
                 newStatus = 'READ';
             if (st === 'failed')
                 newStatus = 'FAILED';
-            const failureReason = st === 'failed' ? (statusObj?.errors?.[0]?.message || 'Unknown error') : undefined;
+            const failureReason = st === 'failed'
+                ? (statusObj?.errors?.[0]?.message || 'Unknown error')
+                : undefined;
+            // Update campaign contact
             await this.updateCampaignContactStatus(waMessageId, newStatus, statusTime, failureReason);
+            // ✅ FIX: Query with ALL possible field names
             const message = await database_1.default.message.findFirst({
                 where: {
                     OR: [
                         { waMessageId },
                         { wamId: waMessageId },
+                        { whatsappMessageId: waMessageId }, // ✅ ADD THIS
                     ],
                 },
                 include: {
@@ -836,12 +849,12 @@ class WebhookService {
                 await this.updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId);
             }
             else {
-                this.retryUpdateChatMessageStatusInBackground(waMessageId, newStatus, statusTime, statusObj, organizationId)
-                    .catch(() => { });
+                // ✅ FIX: Better retry (silent if truly missing)
+                this.retryUpdateChatMessageStatusInBackground(waMessageId, newStatus, statusTime, statusObj, organizationId).catch(() => { });
             }
         }
         catch (e) {
-            console.error('processStatusUpdate error:', e);
+            logger_1.webhookLog.error('processStatusUpdate error', e);
         }
     }
     async updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId) {
@@ -880,14 +893,16 @@ class WebhookService {
         });
     }
     async retryUpdateChatMessageStatusInBackground(waMessageId, newStatus, statusTime, statusObj, organizationId) {
-        let retries = 3;
-        while (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+        // ✅ Exponential backoff - total 20 seconds
+        const retryDelays = [500, 1000, 2000, 3000, 5000, 8000];
+        for (const delay of retryDelays) {
+            await new Promise(r => setTimeout(r, delay));
             const message = await database_1.default.message.findFirst({
                 where: {
                     OR: [
                         { waMessageId },
                         { wamId: waMessageId },
+                        { whatsappMessageId: waMessageId }, // ✅ Include all
                     ],
                 },
                 include: {
@@ -904,9 +919,16 @@ class WebhookService {
                 await this.updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId);
                 return;
             }
-            retries--;
         }
-        console.log(`⚠️ Message still not found for waMessageId: ${waMessageId} after background retries`);
+        // ✅ Only log if it's actually a problem (not warning-spam)
+        // Most likely: message from before webhook was setup OR different org
+        // Silent by default - only warn in debug mode
+        if (process.env.LOG_LEVEL === 'debug') {
+            logger_1.webhookLog.debug('Message not found after retries', {
+                wamid: waMessageId,
+                status: newStatus,
+            });
+        }
     }
     // ============================================
     // ✅ FIXED: Campaign contact status sync — idempotent refund
