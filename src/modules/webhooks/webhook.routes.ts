@@ -60,9 +60,9 @@ function verifyMetaSignature(req: Request): boolean {
 // GET /api/webhooks/meta - Verification
 // ============================================
 router.get('/meta', (req: Request, res: Response) => {
-  const mode      = req.query['hub.mode']         as string;
-  const token     = req.query['hub.verify_token'] as string;
-  const challenge = req.query['hub.challenge']    as string;
+  const mode = req.query['hub.mode'] as string;
+  const token = req.query['hub.verify_token'] as string;
+  const challenge = req.query['hub.challenge'] as string;
 
   const VERIFY_TOKEN =
     config.meta?.webhookVerifyToken ||
@@ -123,9 +123,9 @@ router.post('/meta', (req: Request, res: Response) => {
 // GET /api/webhooks/instagram - Verification
 // ============================================
 router.get('/instagram', (req: Request, res: Response) => {
-  const mode      = req.query['hub.mode']         as string;
-  const token     = req.query['hub.verify_token'] as string;
-  const challenge = req.query['hub.challenge']    as string;
+  const mode = req.query['hub.mode'] as string;
+  const token = req.query['hub.verify_token'] as string;
+  const challenge = req.query['hub.challenge'] as string;
 
   const VERIFY_TOKEN =
     config.meta?.webhookVerifyToken ||
@@ -164,9 +164,9 @@ router.post('/instagram', (req: Request, res: Response) => {
 // LEGACY & TEST ROUTES
 // ============================================
 router.get('/verify', (req: Request, res: Response) => {
-  const mode      = req.query['hub.mode']         as string;
-  const token     = req.query['hub.verify_token'] as string;
-  const challenge = req.query['hub.challenge']    as string;
+  const mode = req.query['hub.mode'] as string;
+  const token = req.query['hub.verify_token'] as string;
+  const challenge = req.query['hub.challenge'] as string;
 
   const result = webhookService.verifyWebhook(mode, token, challenge);
   if (result) return res.status(200).send(result);

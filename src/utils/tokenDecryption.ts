@@ -1,80 +1,87 @@
-// src/utils/tokenDecryption.ts
+// src/utils/tokenDecryption.ts - COMPLETE REPLACE
+
 import { WhatsAppAccount, WhatsAppAccountStatus } from '@prisma/client';
 import prisma from '../config/database';
-import { encrypt, safeDecryptStrict, isMetaToken } from './encryption';
+import { encrypt, safeDecrypt, isMetaToken, isEncrypted } from './encryption';
 import { authLog } from './logger';
 
 export interface AccountWithToken {
-    account: WhatsAppAccount;
-    accessToken: string;
+  account: WhatsAppAccount;
+  accessToken: string;
 }
 
-/**
- * Fetch a WhatsApp account and return its DECRYPTED access token.
- */
 export async function getAccountWithDecryptedToken(
-    accountId: string
+  accountId: string
 ): Promise<AccountWithToken | null> {
-    const account = await prisma.whatsAppAccount.findUnique({
+  const account = await prisma.whatsAppAccount.findUnique({
+    where: { id: accountId },
+  });
+
+  if (!account) {
+    authLog.error('Account not found', null, { accountId });
+    return null;
+  }
+
+  if (account.status !== WhatsAppAccountStatus.CONNECTED) {
+    return null;
+  }
+
+  if (!account.accessToken) {
+    authLog.error('No access token', null, { accountId });
+    return null;
+  }
+
+  let finalToken: string | null = null;
+
+  // ✅ Case 1: Token already plain Meta token (legacy)
+  if (isMetaToken(account.accessToken)) {
+    authLog.warn('Plain token detected - encrypting now', { accountId });
+    try {
+      const encrypted = encrypt(account.accessToken);
+      await prisma.whatsAppAccount.update({
         where: { id: accountId },
+        data:  { accessToken: encrypted },
+      });
+    } catch {}
+    finalToken = account.accessToken;
+  }
+  
+  // ✅ Case 2: Token encrypted - decrypt karo
+  else if (isEncrypted(account.accessToken)) {
+    const decrypted = safeDecrypt(account.accessToken);
+    
+    if (decrypted && isMetaToken(decrypted)) {
+      finalToken = decrypted;
+    } else {
+      authLog.error('Decryption produced invalid token', null, { 
+        accountId,
+        decryptedPrefix: decrypted?.substring(0, 20),
+      });
+    }
+  }
+  
+  // ✅ Case 3: Something else - broken
+  else {
+    authLog.error('Token format unrecognized', null, {
+      accountId,
+      tokenPrefix: account.accessToken.substring(0, 30),
+      tokenLength: account.accessToken.length,
     });
+  }
 
-    if (!account) {
-        authLog.error('Account not found', null, { accountId });
-        return null;
-    }
+  // ✅ Token invalid - mark disconnected
+  if (!finalToken) {
+    await prisma.whatsAppAccount.update({
+      where: { id: accountId },
+      data: {
+        status:         WhatsAppAccountStatus.DISCONNECTED,
+        accessToken:    null,
+        tokenExpiresAt: null,
+      },
+    }).catch(() => {});
+    
+    return null;
+  }
 
-    if (account.status !== WhatsAppAccountStatus.CONNECTED) {
-        authLog.warn('Account not connected', { accountId, status: account.status });
-        return null;
-    }
-
-    if (!account.accessToken) {
-        authLog.error('No access token for account', null, { accountId });
-        return null;
-    }
-
-    authLog.debug('Retrieving token for account', { accountId });
-
-    let decryptedToken = safeDecryptStrict(account.accessToken);
-
-    // ✅ AUTO-HEAL: legacy plain-text token → encrypt and save
-    if (!decryptedToken && isMetaToken(account.accessToken)) {
-        authLog.info('Auto-healing: plain-text token detected, encrypting now', { accountId });
-        try {
-            const encryptedToken = encrypt(account.accessToken);
-            await prisma.whatsAppAccount.update({
-                where: { id: accountId },
-                data: { accessToken: encryptedToken },
-            });
-            decryptedToken = account.accessToken;
-            authLog.info('Token encrypted and persisted', { accountId });
-        } catch (err: any) {
-            authLog.error('Auto-heal encryption failed', err, { accountId });
-        }
-    }
-
-    // ✅ If still no valid token, mark account disconnected so the UI reflects reality
-    if (!decryptedToken) {
-        authLog.error('Failed to decrypt token — marking as DISCONNECTED', null, {
-            accountId,
-            cause: 'Likely ENCRYPTION_KEY changed, or DB corruption',
-        });
-
-        await prisma.whatsAppAccount
-            .update({
-                where: { id: accountId },
-                data: {
-                    status: WhatsAppAccountStatus.DISCONNECTED,
-                    accessToken: null,
-                    tokenExpiresAt: null,
-                },
-            })
-            .catch((e) => authLog.error('Failed to mark account disconnected', e, { accountId }));
-
-        return null;
-    }
-
-    authLog.debug('Token ready', { accountId });
-    return { account, accessToken: decryptedToken };
+  return { account, accessToken: finalToken };
 }

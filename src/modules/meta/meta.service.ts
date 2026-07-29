@@ -350,68 +350,85 @@ export class MetaService {
         message: 'Webhooks configured',
       });
 
-      // STEP 4.5: Register Phone Number for Cloud API
+      // ============================================
+      // STEP 4.5: Register Phone (FIXED - decrypted token use karo)
+      // ============================================
       onProgress?.({
         step: 'REGISTER_PHONE',
         status: 'in_progress',
-        message: 'Registering phone number to Cloud API...',
+        message: 'Registering phone to Cloud API...',
       });
 
-      // ─── Register phone (with proper error handling) ─────────
       let phonePin: string;
       let registrationWarning: string | undefined;
       let registrationMessage: string | undefined;
 
       try {
         const existingRecord = await prisma.whatsAppAccount.findUnique({
-          where: { phoneNumberId: primaryPhone.id },
+          where:  { phoneNumberId: primaryPhone.id },
           select: { webhookSecret: true },
         });
 
         const reusedPin = await extractStoredPin(existingRecord?.webhookSecret ?? null);
-
         phonePin = reusedPin || generatePhonePin();
-        metaLog.info('Registering phone pin', {
+
+        // ✅ CRITICAL FIX: accessToken already DECRYPTED hai yahan
+        // Kyunki abhi Meta se fresh aaya hai, encrypt nahi hua abhi
+        // Direct wahi use karo
+        
+        metaLog.info('Registering phone with fresh token', {
           phoneNumberId: primaryPhone.id,
-          pinType: reusedPin ? 'reused' : 'generated',
+          tokenPrefix:   accessToken.substring(0, 10),
+          tokenLength:   accessToken.length,
+          isMetaFormat:  accessToken.startsWith('EAA'),
         });
+
+        // ✅ Verify token format before sending
+        if (!accessToken.startsWith('EAA')) {
+          throw new Error(
+            `Invalid token format. Expected EAA... got: ${accessToken.substring(0, 15)}...`
+          );
+        }
 
         const registerResult = await metaApi.registerPhone(
           primaryPhone.id,
           phonePin,
-          accessToken
+          accessToken  // ✅ PLAIN token - encryption abhi hui hi nahi
         );
 
-        // ✅ FIX: Only log success if actually successful
-        if (registerResult.success) {
-          metaLog.info('Phone registration result', {
-            phoneNumberId: primaryPhone.id,
-            alreadyRegistered: registerResult.alreadyRegistered,
-          });
-        } else {
-          metaLog.error('Phone registration failed', null, {
-            phoneNumberId: primaryPhone.id,
-            cause: '2FA PIN mismatch, pending verification, already registered elsewhere, or payment method missing',
-          });
+        metaLog.info('Register result', {
+          phoneNumberId:     primaryPhone.id,
+          success:           registerResult.success,
+          alreadyRegistered: registerResult.alreadyRegistered,
+          error:             registerResult.error,
+        });
 
+        if (registerResult.success) {
+          metaLog.info('✅ Phone registered successfully to Cloud API');
+        } else {
           registrationWarning = 'PHONE_NOT_REGISTERED';
-          registrationMessage =
-            'Phone number connected but registration failed. ' +
-            'Please verify phone number in Meta Business Manager first.';
+          registrationMessage = registerResult.error || 
+            'Phone registration failed. Check Meta Business Manager.';
+          
+          metaLog.warn('⚠️ Phone registration failed', {
+            error: registerResult.error,
+          });
         }
       } catch (registerError: any) {
-        metaLog.error('Phone number registration failed', registerError, { phoneNumberId: primaryPhone.id });
-        phonePin = generatePhonePin(); // ensure we still stashe a value to persist
+        metaLog.error('Registration exception', registerError, { 
+          phoneNumberId: primaryPhone.id 
+        });
+        phonePin = generatePhonePin();
         registrationWarning = 'PHONE_NOT_REGISTERED';
-        registrationMessage =
-          'Phone number connected but registration failed. ' +
-          'Please verify phone number in Meta Business Manager first.';
+        registrationMessage = registerError.message;
       }
 
       onProgress?.({
         step: 'REGISTER_PHONE',
         status: 'completed',
-        message: 'Phone number registered',
+        message: registrationWarning 
+          ? '⚠️ Phone connected but registration incomplete' 
+          : '✅ Phone registered',
       });
 
       // STEP 5: Save to Database
