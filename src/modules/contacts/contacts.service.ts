@@ -140,8 +140,8 @@ export class ContactsService {
   // ==========================================
 
   async updateContactFromWebhook(
-    phone:          string,
-    profileName:    string,
+    phone: string,
+    profileName: string,
     organizationId: string
   ): Promise<ContactResponse | null> {
     try {
@@ -150,72 +150,123 @@ export class ContactsService {
 
       const variants = buildPhoneVariants(phone);
 
+      // ✅ STEP 1: Find existing (supports all phone variants)
       let contact = await prisma.contact.findFirst({
         where: {
           organizationId,
-          OR: variants.map(p => ({ phone: p })),
+          OR: variants.map((p) => ({ phone: p })),
         },
       });
 
       if (contact) {
-        const shouldUpdate =
+        // ✅ Update only if we have better name info
+        const hasGoodName = profileName && profileName !== 'Unknown';
+        const nameChanged = contact.firstName !== profileName;
+        const isUnknown =
           !contact.firstName ||
           contact.firstName === 'Unknown' ||
-          (profileName &&
-            profileName !== 'Unknown' &&
-            contact.firstName !== profileName);
+          contact.firstName === '';
 
-        if (shouldUpdate) {
+        if (hasGoodName && (nameChanged || isUnknown)) {
           try {
             contact = await prisma.contact.update({
               where: { id: contact.id },
               data: {
-                firstName:              profileName,
-                whatsappProfileName:    profileName,
-                phone:                  normalized,
+                firstName: profileName,
+                whatsappProfileName: profileName,
+                // ✅ Also normalize phone if it's in old format
+                ...(contact.phone !== normalized
+                  ? { phone: normalized }
+                  : {}),
                 whatsappProfileFetched: true,
-                lastProfileFetchAt:     new Date(),
+                lastProfileFetchAt: new Date(),
               },
             });
-          } catch (e: any) {
-            if (e.code === 'P2002') {
+          } catch (updateErr: any) {
+            if (updateErr.code === 'P2002') {
+              // ✅ Phone collision - update naam only
               contact = await prisma.contact.update({
                 where: { id: contact.id },
                 data: {
-                  firstName:              profileName,
-                  whatsappProfileName:    profileName,
+                  firstName: profileName,
+                  whatsappProfileName: profileName,
                   whatsappProfileFetched: true,
-                  lastProfileFetchAt:     new Date(),
+                  lastProfileFetchAt: new Date(),
                 },
               });
-            } else throw e;
+            } else {
+              throw updateErr;
+            }
           }
         }
-      } else {
-        // New contact from webhook
-        contact = await prisma.contact.create({
-          data: {
+
+        return formatContact(contact);
+      }
+
+      // ✅ STEP 2: New contact - upsert (race condition safe)
+      try {
+        contact = await prisma.contact.upsert({
+          where: {
+            // ✅ @@unique([organizationId, phone]) - schema mein confirmed
+            organizationId_phone: {
+              organizationId,
+              phone: normalized,
+            },
+          },
+          create: {
             organizationId,
-            phone:                  normalized,
-            countryCode:            extractCountryCode(normalized), // ✅ Fixed
-            firstName:              profileName,
-            whatsappProfileName:    profileName,
-            source:                 'whatsapp',
-            status:                 'ACTIVE',
-            whatsappProfileFetched: true,
-            lastProfileFetchAt:     new Date(),
+            phone: normalized,
+            countryCode: extractCountryCode(normalized),
+            firstName: profileName || 'Unknown',
+            whatsappProfileName: profileName || null,
+            source: 'whatsapp',
+            status: 'ACTIVE',
+            whatsappProfileFetched: !!(profileName && profileName !== 'Unknown'),
+            lastProfileFetchAt: new Date(),
+          },
+          update: {
+            // ✅ Race condition se aaya existing - naam update karo agar better hai
+            ...(profileName && profileName !== 'Unknown'
+              ? {
+                  firstName: profileName,
+                  whatsappProfileName: profileName,
+                  whatsappProfileFetched: true,
+                  lastProfileFetchAt: new Date(),
+                }
+              : {}),
           },
         });
 
-        // ✅ FIX Bug6: Single optimized upsert instead of findFirst + update
-        await prisma.subscription.updateMany({
-          where: { organizationId },
-          data:  { contactsUsed: { increment: 1 } },
-        });
+        // ✅ Naya contact tha?
+        const createdMsAgo = Date.now() - new Date(contact.createdAt).getTime();
+        if (createdMsAgo < 5000) {
+          // Async - non-blocking
+          prisma.subscription.updateMany({
+            where: { organizationId },
+            data: { contactsUsed: { increment: 1 } },
+          }).catch((e: any) =>
+            console.error('Subscription update error:', e.message)
+          );
+        }
+
+        return formatContact(contact);
+
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          // ✅ Race condition - find what was created
+          const fallback = await prisma.contact.findFirst({
+            where: {
+              organizationId,
+              OR: variants.map((p) => ({ phone: p })),
+            },
+          });
+          return fallback ? formatContact(fallback) : null;
+        }
+        throw error;
       }
 
-      return formatContact(contact);
     } catch (error) {
+      // ✅ Non-fatal - webhook continue karna chahiye
       console.error('Error in updateContactFromWebhook:', error);
       return null;
     }

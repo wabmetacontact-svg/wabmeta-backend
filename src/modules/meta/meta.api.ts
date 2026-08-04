@@ -971,24 +971,72 @@ class MetaApiClient {
     messageId: string,
     typing: boolean = false
   ): Promise<boolean> {
+
+    // ✅ VALIDATION LAYER - invalid IDs pe API call hi mat karo
+    // Ye hi 8x spam errors ka cause tha
+
+    // Check 1: Empty/null
+    if (!messageId || typeof messageId !== 'string' || messageId.trim() === '') {
+      return false; // Silent - happens often
+    }
+
+    // Check 2: Must be wamid format
+    // Valid: "wamid.HBgM..." 
+    // Invalid: "cmp5..." (DB cuid), null, undefined
+    if (!messageId.startsWith('wamid.')) {
+      return false; // Silent - DB ID hai, Meta ID nahi
+    }
+
+    // Check 3: Minimum length (wamid are long)
+    if (messageId.length < 30) {
+      return false;
+    }
+
+    // Check 4: Required params
+    if (!phoneNumberId || !accessToken) {
+      return false;
+    }
+
     const payload: any = {
       messaging_product: 'whatsapp',
       status: 'read',
       message_id: messageId,
     };
-    if (typing) payload.typing_indicator = { type: 'text' };
+
+    if (typing) {
+      payload.typing_indicator = { type: 'text' };
+    }
 
     try {
-      const response = await this.withRetry(
-        () => this.client.post(`/${phoneNumberId}/messages`, payload, {
+      const response = await this.client.post(
+        `/${phoneNumberId}/messages`,
+        payload,
+        {
           headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: 10000,
-        }),
-        { label: 'markMessageAsRead', maxRetries: 1 }
+          timeout: 8000, // ✅ Reduced from 10s - non-critical operation
+        }
       );
       return response.data.success === true;
+
     } catch (error: any) {
-      console.warn('[Meta API] markMessageAsRead failed (non-fatal):', error.message);
+      const metaErr = error?.response?.data?.error;
+      const code = metaErr?.code;
+
+      // ✅ Code 100 = Invalid parameter
+      // Ye most common hai - message already read ya ID wrong
+      // NO logging needed - ye expected hai
+      if (code === 100) return false;
+
+      // ✅ Code 131026 = Message too old
+      if (code === 131026) return false;
+
+      // ✅ Code 131047 = Re-engagement message restrictions
+      if (code === 131047) return false;
+
+      // ✅ Only log genuinely unexpected errors
+      console.warn(
+        `[Meta API] markMessageAsRead unexpected: code=${code ?? 'N/A'} msg=${messageId.substring(0, 20)}...`
+      );
       return false;
     }
   }

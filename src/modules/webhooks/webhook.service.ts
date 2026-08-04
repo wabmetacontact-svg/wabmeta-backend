@@ -111,6 +111,9 @@ export class WebhookService {
     return { content: `[${type}]`, mediaUrl: null };
   }
 
+  // ============================================
+  // ✅ FIX 1: findOrCreateContact - UPSERT
+  // ============================================
   private async findOrCreateContact(
     organizationId: string,
     phone: string
@@ -125,58 +128,150 @@ export class WebhookService {
 
     const variants = buildPhoneVariants(canonical);
 
-    let contact = await prisma.contact.findFirst({
+    // ✅ STEP 1: Fast path - findFirst with all variants
+    const existing = await prisma.contact.findFirst({
       where: {
         organizationId,
         OR: variants.map((p) => ({ phone: p })),
       },
     });
 
-    let wasNewlyCreated = false;
-
-    if (!contact) {
-      try {
-        const ccDigits = canonical.slice(1, -10);
-        const countryCode = `+${ccDigits}`;
-
-        contact = await prisma.contact.create({
-          data: {
-            organizationId,
-            phone: canonical,
-            countryCode,
-            firstName: 'Unknown',
-            status: 'ACTIVE',
-            source: 'WHATSAPP_INBOUND',
-          },
-        });
-        wasNewlyCreated = true;
-        console.log(`👤 New contact: ${canonical}`);
-
-      } catch (error: any) {
-        if (error.code === 'P2002') {
-          contact = await prisma.contact.findFirst({
-            where: {
-              organizationId,
-              OR: variants.map((p) => ({ phone: p })),
-            },
-          });
-          if (!contact) throw error;
-        } else {
-          throw error;
-        }
+    if (existing) {
+      // ✅ Migrate old format phones silently
+      if (existing.phone !== canonical) {
+        prisma.contact.update({
+          where: { id: existing.id },
+          data: { phone: canonical },
+        })
+        .then(() => console.log(`🔄 Phone migrated: ${existing.phone} → ${canonical}`))
+        .catch(() => {}); // Non-fatal
       }
-
-    } else if (contact.phone !== canonical) {
-      prisma.contact.update({
-        where: { id: contact.id },
-        data: { phone: canonical }
-      }).then(() => {
-        console.log(`🔄 Migrated: ${contact!.phone} → ${canonical}`);
-      }).catch(() => { });
-      contact.phone = canonical;
+      return { contact: existing, wasNewlyCreated: false };
     }
 
-    return { contact: contact!, wasNewlyCreated };
+    // ✅ STEP 2: Upsert - handles race condition automatically
+    try {
+      const ccDigits = canonical.slice(1, -10);
+      const countryCode = ccDigits ? `+${ccDigits}` : '+91';
+
+      const contact = await prisma.contact.upsert({
+        where: {
+          organizationId_phone: {
+            organizationId,
+            phone: canonical,
+          },
+        },
+        create: {
+          organizationId,
+          phone: canonical,
+          countryCode,
+          firstName: 'Unknown',
+          status: 'ACTIVE',
+          source: 'WHATSAPP_INBOUND',
+        },
+        update: {
+          // ✅ Contact already exists (race condition)
+          // Touch nothing - just return existing data
+        },
+      });
+
+      // ✅ createdAt recency check - naya hai ya existing (race condition se aaya)?
+      const createdMsAgo = Date.now() - new Date(contact.createdAt).getTime();
+      const wasNewlyCreated = createdMsAgo < 5000; // 5 second window
+
+      if (wasNewlyCreated) {
+        console.log(`👤 New contact created: ${canonical}`);
+        // ✅ Subscription update async - don't block webhook processing
+        prisma.subscription.updateMany({
+          where: { organizationId },
+          data: { contactsUsed: { increment: 1 } },
+        }).catch((e: any) => console.error('Subscription increment error:', e));
+      }
+
+      return { contact, wasNewlyCreated };
+
+    } catch (error: any) {
+      // ✅ P2002 = Race condition even after upsert
+      // (happens when variant phone exists, not canonical)
+      if (error.code === 'P2002') {
+        console.warn(`⚠️ P2002 race on contact ${canonical}, finding existing...`);
+
+        const fallback = await prisma.contact.findFirst({
+          where: {
+            organizationId,
+            OR: variants.map((p) => ({ phone: p })),
+          },
+        });
+
+        if (fallback) return { contact: fallback, wasNewlyCreated: false };
+      }
+
+      console.error('findOrCreateContact fatal error:', error);
+      throw error;
+    }
+  }
+
+  // ============================================
+  // ✅ FIX 2: findOrCreateConversation - NEW METHOD
+  // Schema check: Conversation has phoneNumberId (NOT whatsappAccountId)
+  // ============================================
+  private async findOrCreateConversation(
+    organizationId: string,
+    contactId: string,
+    phoneNumberId: string | null,
+    messageTime: Date
+  ): Promise<any> {
+
+    // ✅ UPSERT - race condition safe
+    try {
+      const conversation = await prisma.conversation.upsert({
+        where: {
+          // ✅ Uses @@unique([organizationId, contactId]) from schema
+          organizationId_contactId: {
+            organizationId,
+            contactId,
+          },
+        },
+        create: {
+          organizationId,
+          contactId,
+          ...(phoneNumberId ? { phoneNumberId } : {}),
+          isWindowOpen: true,
+          windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          unreadCount: 0,
+          isRead: false,
+          lastMessageAt: messageTime,
+        },
+        update: {
+          // ✅ Re-open 24hr window on new message
+          isWindowOpen: true,
+          windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          // unreadCount increment processIncomingMessage mein hoga
+        },
+      });
+
+      const createdMsAgo = Date.now() - new Date(conversation.createdAt).getTime();
+      const isNew = createdMsAgo < 5000;
+
+      if (isNew) {
+        console.log(`💬 New conversation: ${conversation.id}`);
+      }
+
+      return conversation;
+
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        // ✅ Race condition fallback
+        console.warn('⚠️ P2002 on conversation create, finding existing...');
+
+        const existing = await prisma.conversation.findFirst({
+          where: { organizationId, contactId },
+        });
+
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   // -----------------------------
@@ -511,35 +606,12 @@ export class WebhookService {
         waFrom
       );
 
-      let conversation = await prisma.conversation.findFirst({
-        where: { organizationId, contactId: contact.id },
-      });
-
-      if (!conversation) {
-        try {
-          conversation = await prisma.conversation.create({
-            data: {
-              organization: { connect: { id: organizationId } },
-              contact: { connect: { id: contact.id } },
-              isWindowOpen: true,
-              windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-              unreadCount: 0,
-              isRead: false,
-              lastMessageAt: messageTime,
-            },
-          });
-          console.log(`💬 New conversation: ${conversation.id}`);
-        } catch (err: any) {
-          if (err.code === 'P2002') {
-            conversation = await prisma.conversation.findFirst({
-              where: { organizationId, contactId: contact.id },
-            });
-            if (!conversation) throw err;
-          } else {
-            throw err;
-          }
-        }
-      }
+      let conversation = await this.findOrCreateConversation(
+        organizationId,
+        contact.id,
+        phoneNumberId, // ✅ WhatsApp account ka phoneNumberId
+        messageTime
+      );
 
       let content: string = '';
       let mediaUrl: string | null = null;

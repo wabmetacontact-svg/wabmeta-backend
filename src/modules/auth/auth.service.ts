@@ -28,6 +28,9 @@ import {
 import { OAuth2Client } from 'google-auth-library';
 import { getRedis } from '../../config/redis';
 import { whatsappApi } from '../whatsapp/whatsapp.api';
+import { welcomeService } from '../../services/welcome.service';
+
+const WABMETA_OWN_ORG_ID = process.env.WABMETA_OWN_ORG_ID || '';
 
 
 // ============================================
@@ -572,6 +575,21 @@ export class AuthService {
       [result.user.firstName]
     );
 
+    if (WABMETA_OWN_ORG_ID) {
+      setImmediate(() => {
+        welcomeService.saveNewUserAsContact(
+          {
+            id: result.user.id,
+            firstName: result.user.firstName,
+            lastName: result.user.lastName,
+            email: result.user.email,
+            phone: phoneE164,
+          },
+          WABMETA_OWN_ORG_ID
+        );
+      });
+    }
+
     sendEmailNonBlocking({
       to: normalizedEmail,
       subject: '🎉 Welcome to WabMeta!',
@@ -853,6 +871,21 @@ export class AuthService {
       authLog.info('Welcome WhatsApp sent during email verification', { phone: user.phone });
     }
 
+    if (WABMETA_OWN_ORG_ID && user.phone) {
+      setImmediate(() => {
+        welcomeService.saveNewUserAsContact(
+          {
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            phone: user.phone!,
+          },
+          WABMETA_OWN_ORG_ID
+        );
+      });
+    }
+
     authLog.info('Email verified', { email: user.email });
 
     return {
@@ -1072,6 +1105,21 @@ export class AuthService {
         authLog.info('Welcome WhatsApp sent during activation', { phone: user.phone });
       } else {
         authLog.info('WhatsApp welcome skipped - no phone on file');
+      }
+
+      if (WABMETA_OWN_ORG_ID && user.phone) {
+        setImmediate(() => {
+          welcomeService.saveNewUserAsContact(
+            {
+              id: user.id,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              email: user.email,
+              phone: user.phone!,
+            },
+            WABMETA_OWN_ORG_ID
+          );
+        });
       }
 
       authLog.info('Account activated', { email: normalizedEmail });
