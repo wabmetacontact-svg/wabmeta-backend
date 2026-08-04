@@ -46,6 +46,11 @@ const createPrismaClient = () => {
     ],
     datasources: { db: { url: finalUrl } },
     errorFormat: 'minimal',
+    // ✅ NEW: Increase default transaction timeouts
+    transactionOptions: {
+      maxWait:  10000,  // 10s max wait for a connection  
+      timeout:  30000,  // 30s transaction timeout (was 5s)
+    },
   });
 
   // ✅ Structured error logging

@@ -24,6 +24,15 @@ export const webhookEvents = new EventEmitter();
 webhookEvents.setMaxListeners(100);
 
 export class WebhookService {
+  private refundQueue: Array<{
+    waMessageId: string;
+    organizationId: string;
+    campaignId: string;
+    contactPhone: string;
+    template: any;
+  }> = [];
+  private refundProcessing = false;
+
   private accountCache = new Map<string, { data: any; expiresAt: number }>();
   private readonly CACHE_TTL = 5 * 60 * 1000;
 
@@ -1102,64 +1111,22 @@ export class WebhookService {
 
       console.log(`✅ Campaign contact ${campaignContact.id}: ${currentStatus} → ${newStatus}`);
 
-      // ✅ REFUND ON FAILURE (idempotent)
+      // ✅ REFUND ON FAILURE (queued)
       if (newStatus === 'FAILED' && currentStatus !== 'FAILED') {
         if (campaignContact.campaign?.template) {
-          try {
-            const template = campaignContact.campaign.template;
-            const { getRateForCategory } = await import('../wallet/wallet.deduction.service');
-            const rateRupees = getRateForCategory(
-              template.category || 'MARKETING',
-              campaignContact.contact?.phone || '',
-              template.language
-            );
-            const refundPaise = Math.round(rateRupees * 100);
+          // ✅ Queue mein daalo (parallel nahi)
+          this.refundQueue.push({
+            waMessageId,
+            organizationId: campaignContact.campaign.organizationId,
+            campaignId: campaignContact.campaign.id,
+            contactPhone: campaignContact.contact?.phone || '',
+            template: campaignContact.campaign.template,
+          });
 
-            if (refundPaise > 0) {
-              await prisma.$transaction(async (tx) => {
-                const existingRefund = await tx.walletTransaction.findFirst({
-                  where: {
-                    metaChargeId: waMessageId,
-                    metaService: 'template_message_refund',
-                  },
-                  select: { id: true },
-                });
-
-                if (existingRefund) return;
-
-                const wallet = await tx.wallet.findUnique({
-                  where: { organizationId: campaignContact.campaign.organizationId },
-                });
-                if (!wallet) return;
-
-                const balanceBefore = wallet.balancePaise;
-                const balanceAfter = balanceBefore + refundPaise;
-
-                await tx.wallet.update({
-                  where: { id: wallet.id },
-                  data: { balancePaise: balanceAfter },
-                });
-
-                await tx.walletTransaction.create({
-                  data: {
-                    walletId: wallet.id,
-                    type: 'credit',
-                    amountPaise: refundPaise,
-                    balanceBeforePaise: balanceBefore,
-                    balanceAfterPaise: balanceAfter,
-                    description: `Refund: Failed msg (${campaignContact.contact?.phone}) - ${template.name}`,
-                    status: 'completed',
-                    metaChargeId: waMessageId,
-                    metaService: 'template_message_refund',
-                    note: `Refund (Campaign: ${campaignContact.campaign.id})`,
-                  },
-                });
-                console.log(`💰 Refunded ₹${rateRupees.toFixed(2)} for failed msg to ${campaignContact.contact?.phone}`);
-              });
-            }
-          } catch (refundErr: any) {
-            console.error('❌ Refund error:', refundErr.message);
-          }
+          // ✅ Process queue (idempotent - safe to call multiple times)
+          this.processRefundQueue().catch(err => {
+            console.error('Queue processor error:', err);
+          });
         }
       }
 
@@ -1243,6 +1210,182 @@ export class WebhookService {
       }
     } catch (e) {
       console.error('updateCampaignContactStatus error:', e);
+    }
+  }
+
+  // ============================================
+  // ✅ Process refunds sequentially (not parallel)
+  // ============================================
+  private async processRefundQueue(): Promise<void> {
+    if (this.refundProcessing || this.refundQueue.length === 0) return;
+
+    this.refundProcessing = true;
+
+    while (this.refundQueue.length > 0) {
+      const item = this.refundQueue.shift()!;
+
+      try {
+        await this.processRefundWithRetry(
+          item.waMessageId,
+          item.organizationId,
+          item.campaignId,
+          item.contactPhone,
+          item.template,
+        );
+
+        // ✅ Small gap between refunds to avoid DB pressure
+        await new Promise(r => setTimeout(r, 100));
+      } catch (err: any) {
+        console.error('Refund queue item failed:', err.message);
+        await this.storeFailedRefund(
+          item.waMessageId,
+          item.organizationId,
+        );
+      }
+    }
+
+    this.refundProcessing = false;
+  }
+
+  // ============================================
+  // ✅ NEW METHOD: Refund with retry + timeout fix
+  // ============================================
+  private async processRefundWithRetry(
+    waMessageId: string,
+    organizationId: string,
+    campaignId: string,
+    contactPhone: string,
+    template: { name: string; category: string; language: string },
+    attempt: number = 1,
+  ): Promise<void> {
+    const MAX_ATTEMPTS = 3;
+    const RETRY_DELAY_MS = [1000, 3000, 5000]; // 1s, 3s, 5s
+
+    try {
+      const { getRateForCategory } = await import('../wallet/wallet.deduction.service');
+      const rateRupees = getRateForCategory(
+        template.category || 'MARKETING',
+        contactPhone,
+        template.language,
+      );
+      const refundPaise = Math.round(rateRupees * 100);
+
+      if (refundPaise <= 0) return;
+
+      // ✅ FIX: 30-second timeout (was 5s default)
+      await prisma.$transaction(
+        async (tx) => {
+          // Check for duplicate refund
+          const existingRefund = await tx.walletTransaction.findFirst({
+            where: {
+              metaChargeId: waMessageId,
+              metaService: 'template_message_refund',
+            },
+            select: { id: true },
+          });
+
+          if (existingRefund) {
+            console.log(`⏭️  Refund already exists for ${waMessageId}`);
+            return;
+          }
+
+          const wallet = await tx.wallet.findUnique({
+            where: { organizationId },
+          });
+
+          if (!wallet) {
+            throw new Error('Wallet not found');
+          }
+
+          const balanceBefore = wallet.balancePaise;
+          const balanceAfter = balanceBefore + refundPaise;
+
+          await tx.wallet.update({
+            where: { id: wallet.id },
+            data: { balancePaise: balanceAfter },
+          });
+
+          await tx.walletTransaction.create({
+            data: {
+              walletId: wallet.id,
+              type: 'credit',
+              amountPaise: refundPaise,
+              balanceBeforePaise: balanceBefore,
+              balanceAfterPaise: balanceAfter,
+              description: `Refund: Failed msg (${contactPhone}) - ${template.name}`,
+              status: 'completed',
+              metaChargeId: waMessageId,
+              metaService: 'template_message_refund',
+              note: `Refund (Campaign: ${campaignId})`,
+            },
+          });
+
+          console.log(`💰 Refunded ₹${rateRupees.toFixed(2)} to ${contactPhone}`);
+        },
+        {
+          maxWait:  10000,  // ✅ 10s wait for connection
+          timeout:  30000,  // ✅ 30s transaction timeout (was default 5s)
+          isolationLevel: 'ReadCommitted', // ✅ Reduce contention
+        },
+      );
+    } catch (err: any) {
+      const isTimeoutError = 
+        err.message?.includes('Transaction already closed') ||
+        err.message?.includes('timeout');
+
+      // ✅ Retry on timeout errors
+      if (isTimeoutError && attempt < MAX_ATTEMPTS) {
+        const delay = RETRY_DELAY_MS[attempt - 1];
+        console.warn(
+          `⚠️  Refund attempt ${attempt}/${MAX_ATTEMPTS} timed out, retrying in ${delay}ms...`,
+        );
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+
+        return this.processRefundWithRetry(
+          waMessageId,
+          organizationId,
+          campaignId,
+          contactPhone,
+          template,
+          attempt + 1,
+        );
+      }
+
+      // ✅ Final failure - throw so caller can store for manual retry
+      console.error(`❌ Refund failed after ${attempt} attempts:`, err.message);
+      throw err;
+    }
+  }
+
+  // ============================================
+  // ✅ NEW METHOD: Store failed refunds for manual/cron retry
+  // ============================================
+  private async storeFailedRefund(
+    waMessageId: string,
+    organizationId: string,
+  ): Promise<void> {
+    try {
+      // Option A: Store in webhook logs
+      await prisma.webhookLog.create({
+        data: {
+          organizationId,
+          source: 'refund_retry_queue',
+          eventType: 'FAILED_REFUND',
+          payload: {
+            waMessageId,
+            reason: 'Transaction timeout',
+            needsRetry: true,
+            createdAt: new Date().toISOString(),
+          },
+          status: 'FAILED',
+          errorMessage: 'Refund failed after 3 attempts - needs manual retry',
+        },
+      });
+
+      console.log(`📝 Stored failed refund for manual retry: ${waMessageId}`);
+    } catch (e) {
+      console.error('Failed to store failed refund:', e);
     }
   }
 
