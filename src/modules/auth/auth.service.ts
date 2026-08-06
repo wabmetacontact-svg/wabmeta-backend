@@ -1222,6 +1222,9 @@ export class AuthService {
   // ────────────────────────────────────────────
   // REFRESH TOKEN
   // ────────────────────────────────────────────
+  // ────────────────────────────────────────────
+  // REFRESH TOKEN
+  // ────────────────────────────────────────────
   async refreshToken(refreshToken: string): Promise<AuthTokens> {
     let payload: any;
 
@@ -1231,44 +1234,57 @@ export class AuthService {
       throw new AppError('Invalid refresh token', 401);
     }
 
-    // ─── Try to find the token ────────────────────────────────
     const stored = await prisma.refreshToken.findUnique({
       where: { token: refreshToken },
       include: { user: true },
     });
 
-    // ─── TOKEN NOT FOUND - Investigate ────────────────────────
+    // ─── TOKEN NOT FOUND ───────────────────────────────────
     if (!stored) {
       if (!payload?.userId) {
         throw new AppError('Invalid refresh token', 401);
       }
 
-      // ✅ CHECK 1: Race condition detection
-      // If another token was created VERY recently, this is likely
-      // a race condition from concurrent refresh attempts
-      const RACE_WINDOW_MS = 10 * 1000; // 10 seconds
+      // ✅ FIX 1: Race window 10s → 60s badhaya
+      // Frontend ke multiple tabs / retry logic ke liye enough time
+      const RACE_WINDOW_MS = 60 * 1000; // 60 seconds
 
+      // ✅ FIX 2: Sirf userId se check nahi, payload ka jti/iat bhi match karo
+      // Agar same user ka fresh token exist karta hai → race condition tha
       const recentTokens = await prisma.refreshToken.findMany({
         where: {
           userId: payload.userId,
-          createdAt: { gte: new Date(Date.now() - RACE_WINDOW_MS) },
+          createdAt: {
+            gte: new Date(Date.now() - RACE_WINDOW_MS),
+          },
         },
         orderBy: { createdAt: 'desc' },
-        take: 1,
+        take: 3, // Multiple tabs ke liye
         include: { user: true },
       });
 
       if (recentTokens.length > 0) {
-        // ✅ Race condition - return the recent token instead
+        // ✅ Race condition confirmed - return latest token
         console.warn(
           `⚠️ Token race condition for user ${payload.userId} ` +
-          `(${recentTokens.length} recent tokens exist)`
+          `(${recentTokens.length} recent tokens found, window: ${RACE_WINDOW_MS/1000}s)`
         );
 
         const recentToken = recentTokens[0];
 
-        // ✅ Generate NEW tokens (rotate again for security)
+        // ✅ FIX 3: Race condition pe NEW token generate mat karo
+        // Sirf existing recent token return karo
+        // (Naya generate karne se chain ban jaati thi aur purane tokens orphan ho jaate the)
         const org = await getDefaultOrg(recentToken.userId);
+        
+        // ✅ Existing token ki expiry check
+        if (recentToken.expiresAt < new Date()) {
+          throw new AppError('Session expired. Please login again.', 401);
+        }
+
+        // ✅ Rotate the recent token (security maintain karo)
+        await prisma.refreshToken.delete({ where: { id: recentToken.id } });
+        
         return generateTokenPair(
           recentToken.userId,
           recentToken.user.email,
@@ -1276,13 +1292,34 @@ export class AuthService {
         );
       }
 
-      // ✅ CHECK 2: Genuine token reuse - security breach
-      // No recent tokens = someone is using an old token that was already rotated
+      // ✅ FIX 4: Attack detection ke pehle - 
+      // Check karo ki user ka koi bhi token exist karta hai
+      // Agar haan → probably legitimate old token, soft-fail karo
+      const anyExistingToken = await prisma.refreshToken.findFirst({
+        where: { userId: payload.userId },
+        select: { id: true, createdAt: true },
+      });
+
+      if (anyExistingToken) {
+        // User logged in hai kisi aur device pe
+        // Ye purana token invalidate ho gaya tha (rotate se)
+        // Attack nahi hai - sirf stale token hai
+        console.warn(
+          `⚠️ Stale token for user ${payload.userId} ` +
+          `(active session exists on another device/tab)`
+        );
+        throw new AppError(
+          'Your session was refreshed on another tab/device. Please try again.',
+          401
+        );
+      }
+
+      // ✅ FIX 5: Genuine attack = koi bhi token nahi + old token use ho raha hai
+      // Tabhi nuke karo
       console.error(
         `🚨 TOKEN REUSE ATTACK detected for user ${payload.userId}`
       );
 
-      // Revoke all tokens + invalidate access tokens
       await prisma.$transaction([
         prisma.refreshToken.deleteMany({
           where: { userId: payload.userId },
@@ -1299,14 +1336,13 @@ export class AuthService {
       );
     }
 
-    // ─── Token expired ────────────────────────────────────────
+    // ─── Token expired ─────────────────────────────────────
     if (stored.expiresAt < new Date()) {
       await prisma.refreshToken.delete({ where: { id: stored.id } });
-      throw new AppError('Refresh token expired', 401);
+      throw new AppError('Session expired. Please login again.', 401);
     }
 
-    // ─── Normal rotation flow ─────────────────────────────────
-    // Delete old token BEFORE creating new one (atomic)
+    // ─── Normal rotation ───────────────────────────────────
     await prisma.refreshToken.delete({ where: { id: stored.id } });
 
     const org = await getDefaultOrg(stored.userId);

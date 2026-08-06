@@ -117,6 +117,31 @@ const fetchUser = async (
   }
 };
 
+// ─── Redis lock helper ─────────────────────────────────
+const acquireRefreshLock = async (userId: string): Promise<boolean> => {
+  try {
+    const redis = getRedis();
+    if (!redis) return true; // Redis nahi hai toh allow karo
+
+    const lockKey = `refresh:lock:${userId}`;
+    // NX = only set if not exists, EX = 15 second TTL
+    const result = await redis.set(lockKey, '1', 'EX', 15, 'NX');
+    return result === 'OK'; // OK = lock mila, null = already locked
+  } catch {
+    return true; // Redis error pe allow karo
+  }
+};
+
+const releaseRefreshLock = async (userId: string): Promise<void> => {
+  try {
+    const redis = getRedis();
+    if (!redis) return;
+    await redis.del(`refresh:lock:${userId}`);
+  } catch {
+    // Silent
+  }
+};
+
 // ============================================
 // MAIN AUTH MIDDLEWARE
 // ============================================
@@ -142,27 +167,90 @@ export const authenticate = async (
       token = req.query.token as string;
     }
 
-    // Auto-heal via refresh token
+    // ✅ FIXED Auto-heal - concurrent refresh prevention
     if (!token && req.cookies?.refreshToken) {
+      
+      // ✅ Pehle refresh token se userId nikalo (verify karo)
+      let refreshPayload: any = null;
       try {
-        console.log('🛡️ Auto-healing: Attempting token refresh...');
-        const newTokens = await authService.refreshToken(
-          req.cookies.refreshToken
-        );
+        const { verifyRefreshToken } = await import('../utils/jwt');
+        refreshPayload = verifyRefreshToken(req.cookies.refreshToken);
+      } catch {
+        // Invalid refresh token - aage badho
+      }
 
-        res.cookie('refreshToken', newTokens.refreshToken, getCookieOptions(true));
-        res.cookie('accessToken', newTokens.accessToken, getCookieOptions(false));
-        res.setHeader('x-new-access-token', newTokens.accessToken);
-        res.setHeader('x-token-refreshed', 'true');
-        res.setHeader(
-          'Access-Control-Expose-Headers',
-          'x-new-access-token, x-token-refreshed'
-        );
+      if (refreshPayload?.userId) {
+        // ✅ Lock check - kya same user ka refresh already chal raha hai?
+        const lockAcquired = await acquireRefreshLock(refreshPayload.userId);
 
-        token = newTokens.accessToken;
-        console.log('✅ Auto-healing: Session restored.');
-      } catch (refreshError) {
-        console.warn('❌ Auto-healing failed:', (refreshError as Error).message);
+        if (!lockAcquired) {
+          // ✅ Dusri request refresh kar rahi hai - wait karo aur retry karo
+          console.log(
+            `⏳ Refresh already in progress for user ${refreshPayload.userId}, waiting...`
+          );
+          
+          // 2 second wait karke naya accessToken cookie se lo
+          await new Promise(r => setTimeout(r, 2000));
+          token = req.cookies?.accessToken || '';
+
+          if (!token) {
+            // Ab bhi nahi mila - ek aur try
+            await new Promise(r => setTimeout(r, 1000));
+            token = req.cookies?.accessToken || '';
+          }
+        } else {
+          // ✅ Lock mila - refresh karo
+          try {
+            console.log('🛡️ Auto-healing: Attempting token refresh...');
+            const newTokens = await authService.refreshToken(
+              req.cookies.refreshToken
+            );
+
+            res.cookie('refreshToken', newTokens.refreshToken, getCookieOptions(true));
+            res.cookie('accessToken', newTokens.accessToken, getCookieOptions(false));
+            res.setHeader('x-new-access-token', newTokens.accessToken);
+            res.setHeader('x-token-refreshed', 'true');
+            res.setHeader(
+              'Access-Control-Expose-Headers',
+              'x-new-access-token, x-token-refreshed'
+            );
+
+            token = newTokens.accessToken;
+            console.log('✅ Auto-healing: Session restored.');
+          } catch (refreshError: any) {
+            console.warn(
+              '❌ Auto-healing failed:',
+              (refreshError as Error).message
+            );
+          } finally {
+            // ✅ Lock release karo (success ya failure dono mein)
+            await releaseRefreshLock(refreshPayload.userId);
+          }
+        }
+      } else {
+        // ✅ Refresh token invalid hai - normal auto-heal try karo
+        try {
+          console.log('🛡️ Auto-healing: Attempting token refresh...');
+          const newTokens = await authService.refreshToken(
+            req.cookies.refreshToken
+          );
+
+          res.cookie('refreshToken', newTokens.refreshToken, getCookieOptions(true));
+          res.cookie('accessToken', newTokens.accessToken, getCookieOptions(false));
+          res.setHeader('x-new-access-token', newTokens.accessToken);
+          res.setHeader('x-token-refreshed', 'true');
+          res.setHeader(
+            'Access-Control-Expose-Headers',
+            'x-new-access-token, x-token-refreshed'
+          );
+
+          token = newTokens.accessToken;
+        } catch (refreshError) {
+          console.warn(
+            '❌ Auto-healing failed:',
+            (refreshError as Error).message
+          );
+        }
       }
     }
 
