@@ -212,21 +212,48 @@ export class WebhookService {
   }
 
   // ============================================
-  // ✅ FIX 2: findOrCreateConversation - NEW METHOD
-  // Schema check: Conversation has phoneNumberId (NOT whatsappAccountId)
+  // ✅ FIXED: findOrCreateConversation
+  // Problem: phoneNumberId (Meta's string like "919923983062") 
+  // directly Conversation.phoneNumberId mein store ho raha tha
+  // lekin schema mein Conversation.phoneNumberId → PhoneNumber.id (UUID) hai
+  // Solution: PhoneNumber table se actual UUID dhundo, agar na mile toh null
   // ============================================
   private async findOrCreateConversation(
     organizationId: string,
     contactId: string,
-    phoneNumberId: string | null,
+    metaPhoneNumberId: string | null,  // Meta ka phoneNumberId string
     messageTime: Date
   ): Promise<any> {
 
-    // ✅ UPSERT - race condition safe
+    // ✅ STEP 1: Meta phoneNumberId se actual PhoneNumber.id (UUID) dhundo
+    let phoneNumberUUID: string | null = null;
+
+    if (metaPhoneNumberId) {
+      try {
+        const phoneRecord = await prisma.phoneNumber.findFirst({
+          where: { phoneNumberId: metaPhoneNumberId }, // Meta's string ID
+          select: { id: true }, // Hamara UUID chahiye
+        });
+
+        if (phoneRecord) {
+          phoneNumberUUID = phoneRecord.id; // ✅ Actual FK-valid UUID
+        } else {
+          // PhoneNumber table mein nahi mila - null rakho (field is optional)
+          console.warn(
+            `⚠️ PhoneNumber not found for metaPhoneNumberId: ${metaPhoneNumberId} ` +
+            `(org: ${organizationId}) - conversation will have null phoneNumberId`
+          );
+        }
+      } catch (e) {
+        console.error('PhoneNumber lookup error:', e);
+        // Fail silently - null phoneNumberId se conversation ban sakti hai
+      }
+    }
+
+    // ✅ STEP 2: Conversation upsert with valid UUID (or null)
     try {
       const conversation = await prisma.conversation.upsert({
         where: {
-          // ✅ Uses @@unique([organizationId, contactId]) from schema
           organizationId_contactId: {
             organizationId,
             contactId,
@@ -235,7 +262,8 @@ export class WebhookService {
         create: {
           organizationId,
           contactId,
-          ...(phoneNumberId ? { phoneNumberId } : {}),
+          // ✅ Only set if valid UUID found, otherwise null (field is optional in schema)
+          ...(phoneNumberUUID ? { phoneNumberId: phoneNumberUUID } : {}),
           isWindowOpen: true,
           windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
           unreadCount: 0,
@@ -243,33 +271,63 @@ export class WebhookService {
           lastMessageAt: messageTime,
         },
         update: {
-          // ✅ Re-open 24hr window on new message
           isWindowOpen: true,
           windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-          // unreadCount increment processIncomingMessage mein hoga
+          // ✅ Update phoneNumberId if we found it and it was null before
+          ...(phoneNumberUUID ? { phoneNumberId: phoneNumberUUID } : {}),
         },
       });
 
       const createdMsAgo = Date.now() - new Date(conversation.createdAt).getTime();
-      const isNew = createdMsAgo < 5000;
-
-      if (isNew) {
+      if (createdMsAgo < 5000) {
         console.log(`💬 New conversation: ${conversation.id}`);
       }
 
       return conversation;
 
     } catch (error: any) {
-      if (error.code === 'P2002') {
-        // ✅ Race condition fallback
-        console.warn('⚠️ P2002 on conversation create, finding existing...');
+      // ✅ P2003 - FK violation (safety net, should not happen now)
+      if (error.code === 'P2003') {
+        console.error(
+          `❌ P2003 FK violation on conversation create. ` +
+          `phoneNumberUUID used: ${phoneNumberUUID}, ` +
+          `metaPhoneNumberId: ${metaPhoneNumberId}. ` +
+          `Retrying without phoneNumberId...`
+        );
 
+        // ✅ Last resort: create without phoneNumberId
+        const conversation = await prisma.conversation.upsert({
+          where: {
+            organizationId_contactId: { organizationId, contactId },
+          },
+          create: {
+            organizationId,
+            contactId,
+            // NO phoneNumberId - avoid FK violation
+            isWindowOpen: true,
+            windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            unreadCount: 0,
+            isRead: false,
+            lastMessageAt: messageTime,
+          },
+          update: {
+            isWindowOpen: true,
+            windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          },
+        });
+
+        return conversation;
+      }
+
+      // ✅ P2002 - Race condition fallback
+      if (error.code === 'P2002') {
+        console.warn('⚠️ P2002 on conversation create, finding existing...');
         const existing = await prisma.conversation.findFirst({
           where: { organizationId, contactId },
         });
-
         if (existing) return existing;
       }
+
       throw error;
     }
   }
@@ -609,7 +667,7 @@ export class WebhookService {
       let conversation = await this.findOrCreateConversation(
         organizationId,
         contact.id,
-        phoneNumberId, // ✅ WhatsApp account ka phoneNumberId
+        phoneNumberId,  // ✅ Method internally converts this to UUID via PhoneNumber table
         messageTime
       );
 
