@@ -21,15 +21,32 @@ import {
 // ─── Constants ────────────────────────────────────────────────
 const SEND_CONFIG = {
   BATCH_SIZE: 500,
-  CONCURRENCY: 10,   // ✅ FIX Bug12: 20→10, safer for rate limits
+  
+  // ✅ FIX: Concurrency kam karo - Meta friendly
+  CONCURRENCY: 5,   // 10 → 5 (parallel requests)
+  
   FLUSH_EVERY: 50,
-  DELAY_BETWEEN_CHUNKS_MS: 200,  // ✅ ~50 msgs/sec (safer)
-  MAX_CONSECUTIVE_FAILURES: 15,
-  RATE_LIMIT_PAUSE_MS: 10_000,
-  MEDIA_TTL_MS: 25 * 24 * 60 * 60 * 1000, // 25 days
+  
+  // ✅ FIX: Delay badhao - safe rate
+  DELAY_BETWEEN_CHUNKS_MS: 500,  // 200 → 500ms
+  
+  // ✅ FIX: Rate limit hone pe zyada wait karo
+  MAX_CONSECUTIVE_FAILURES: 10,   // 15 → 10 (early detect)
+  RATE_LIMIT_PAUSE_MS: 30_000,    // 10s → 30s
+  
+  MEDIA_TTL_MS: 25 * 24 * 60 * 60 * 1000,
   MID_CAMPAIGN_CHECK_EVERY: 50,
   MIN_BALANCE_RUPEES: 20,
   MID_BALANCE_RUPEES: 5,
+  
+  // ✅ NEW: Tier-based limits
+  TIER_LIMITS: {
+    TIER_250:      { concurrency: 3, delayMs: 800 },   // Very safe
+    TIER_1K:       { concurrency: 5, delayMs: 500 },   // Safe
+    TIER_10K:      { concurrency: 10, delayMs: 200 },  // Normal
+    TIER_100K:     { concurrency: 15, delayMs: 100 },  // Fast
+    TIER_UNLIMITED:{ concurrency: 20, delayMs: 50 },   // Fastest
+  } as const,
 } as const;
 
 // ─── Pure Helpers ─────────────────────────────────────────────
@@ -378,39 +395,92 @@ export class CampaignsService {
     if (!me) return (error.message || 'Unknown error').substring(0, 500);
 
     const code = me.code;
+    const subcode = me.error_subcode;
     const details = me.error_data?.details || '';
+    const message = me.message || '';
 
+    // ✅ DEBUG: Log ORIGINAL Meta error (kya galat classify ho raha tha)
+    console.error('🔴 META RAW ERROR:', {
+      code,
+      subcode,
+      message: message.substring(0, 100),
+      details: details.substring(0, 100),
+    });
+
+    // ✅ FIX: Media errors
     if (code === 131053) {
       if (details.includes('No video stream'))
-        return 'Video corrupted - Re-encode with H.264 codec (HandBrake)';
+        return 'Video corrupted - Re-encode with H.264 codec';
       if (details.includes('403') || details.includes('Forbidden'))
         return 'Media URL inaccessible - Please re-upload media';
       if (details.includes('too large'))
         return 'Media file too large - Please compress';
-      return `Media error: ${details || me.message}`.substring(0, 500);
+      return `Media error: ${details || message}`.substring(0, 500);
     }
 
+    // ✅ FIX: SAHI error mapping (rate limit alag, template pause alag)
     const MAP: Record<number, string> = {
-      100: 'Invalid parameter - Template mismatch',
-      131030: 'Phone not on WhatsApp',
-      131026: 'Message undeliverable',
-      131048: 'Rate limit - please wait',
-      131021: 'Rate limit - please wait',
-      131056: 'Number restricted by Meta',
-      131042: 'Meta account payment issue - Update payment in Facebook Business Manager',
-      132000: 'Template parameters mismatch',
+      // ✅ Rate limit errors (NOT template pause!)
+      131048: 'Rate limit exceeded - Sending too fast (try slower)',
+      131021: 'Rate limit exceeded - Meta throttling',
+      80007:  'Message rate limit - Slow down sending',
+      4:      'API rate limit exceeded - Too many requests',
+      613:    'Calls to this API have exceeded rate limits',
+      
+      // ✅ Actual template issues
+      132015: 'Template PAUSED by Meta - Too many messages blocked',
+      132016: 'Template DISABLED by Meta - Policy violation',
       132001: 'Template not found or not approved',
+      132000: 'Template parameters mismatch',
       132005: 'Template hydration failed',
       132007: 'Template content policy violation',
       132012: 'Template format mismatch',
-      132015: 'Template PAUSED by Meta - Too many messages blocked',
-      132016: 'Template DISABLED by Meta - Policy violation',
-      190: 'Access token expired - Reconnect WhatsApp in Settings',
-      368: 'Sender temporarily restricted',
-      4: 'API rate limit exceeded',
-      80007: 'Rate limit for messages',
+      
+      // ✅ Recipient issues
+      131030: 'Phone not on WhatsApp',
+      131026: 'Message undeliverable to recipient',
+      131056: 'Number restricted by Meta',
+      131047: 'Re-engagement message - user hasn\'t opted in',
+      
+      // ✅ Account issues
+      131042: 'Meta account payment issue',
+      190:    'Access token expired - Reconnect WhatsApp',
+      368:    'Sender temporarily restricted',
+      100:    'Invalid parameter or missing permissions',
+      
+      // ✅ Business account issues
+      131051: 'Unsupported message type',
+      131052: 'Media download failed',
+      131057: 'Business account restricted',
     };
-    return (MAP[code] || `${me.message || 'Meta error'} (${code})`).substring(0, 500);
+    
+    // ✅ Priority 1: Known error codes
+    if (MAP[code]) {
+      return MAP[code].substring(0, 500);
+    }
+    
+    // ✅ Priority 2: Check subcode for specifics
+    if (subcode === 2494048) {
+      return 'Message failed to deliver';
+    }
+    
+    // ✅ Priority 3: Message content analysis (NO ASSUMPTIONS!)
+    const msgLower = message.toLowerCase();
+    
+    if (msgLower.includes('rate limit') || msgLower.includes('too many requests')) {
+      return `Rate limit exceeded (${code}): Slow down sending`;
+    }
+    
+    if (msgLower.includes('template') && msgLower.includes('paused')) {
+      return 'Template PAUSED by Meta';
+    }
+    
+    if (msgLower.includes('template') && msgLower.includes('not exist')) {
+      return 'Template not found';
+    }
+    
+    // ✅ FIX: Don't assume - return actual Meta error
+    return `[${code}] ${message}`.substring(0, 500);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1388,6 +1458,8 @@ export class CampaignsService {
     };
   }
 
+
+
   // ─────────────────────────────────────────────────────────────
   // PRIVATE: Media upload/cache
   // ─────────────────────────────────────────────────────────────
@@ -1602,6 +1674,15 @@ export class CampaignsService {
       let hasMore = true;
       let totalProcessed = 0;
       let lastProgressEmit = 0;
+      let rateLimitPauseUntil = 0; // ✅ NEW: Rate limit backoff tracker
+
+      // ✅ FIX: Get tier-based config
+      const tierName = (campaign.whatsappAccount.messagingLimit || 'TIER_250') as keyof typeof SEND_CONFIG.TIER_LIMITS;
+      const tierConfig = SEND_CONFIG.TIER_LIMITS[tierName] || SEND_CONFIG.TIER_LIMITS.TIER_250;
+      const CONCURRENCY = tierConfig.concurrency;
+      const DELAY_MS = tierConfig.delayMs;
+
+      console.log(`⚡ Rate config: Tier=${tierName}, Concurrency=${CONCURRENCY}, Delay=${DELAY_MS}ms`);
 
       let batchSent: { id: string; waMessageId: string; contactId: string; phone: string }[] = [];
       let batchFailed: { id: string; reason: string; contactId: string; phone: string }[] = [];
@@ -1614,6 +1695,14 @@ export class CampaignsService {
         });
         if (curr?.status !== 'RUNNING') break;
 
+        // ✅ NEW: Check if we're in rate limit backoff
+        if (rateLimitPauseUntil > Date.now()) {
+          const waitMs = rateLimitPauseUntil - Date.now();
+          console.log(`⏸️  Rate limit backoff: waiting ${(waitMs/1000).toFixed(1)}s`);
+          await new Promise(r => setTimeout(r, waitMs));
+          rateLimitPauseUntil = 0;
+        }
+
         const contacts = await prisma.campaignContact.findMany({
           where: { campaignId, status: 'PENDING' },
           include: { contact: true },
@@ -1623,7 +1712,8 @@ export class CampaignsService {
 
         if (contacts.length === 0) { hasMore = false; break; }
 
-        for (let i = 0; i < contacts.length; i += SEND_CONFIG.CONCURRENCY) {
+        // ✅ FIX: Use tier-based CONCURRENCY (not fixed)
+        for (let i = 0; i < contacts.length; i += CONCURRENCY) {
           // Periodic status check
           if (totalProcessed > 0 && totalProcessed % 300 === 0) {
             const chk = await prisma.campaign.findUnique({
@@ -1689,16 +1779,16 @@ export class CampaignsService {
 
           // Consecutive fail check
           if (consecutiveFails >= SEND_CONFIG.MAX_CONSECUTIVE_FAILURES) {
-            console.warn(`⚠️ ${consecutiveFails} consecutive failures - pausing 10s`);
+            console.warn(`⚠️ ${consecutiveFails} consecutive failures - pausing 30s`);
             campaignSocketService.emitCampaignError(organizationId, campaignId, {
-              message: `High failure rate. Auto-pausing 10s.`,
+              message: `High failure rate detected. Auto-pausing 30s to recover.`,
               code: 'HIGH_FAILURE_RATE',
             });
-            await new Promise(r => setTimeout(r, 10_000));
+            await new Promise(r => setTimeout(r, 30_000));
             consecutiveFails = 0;
           }
 
-          const chunk = contacts.slice(i, i + SEND_CONFIG.CONCURRENCY);
+          const chunk = contacts.slice(i, i + CONCURRENCY);
 
           // ── Send chunk in parallel ───────────────────────
           const results = await Promise.allSettled(
@@ -1707,14 +1797,14 @@ export class CampaignsService {
               if (!phone) return {
                 type: 'failed' as const, id: cc.id,
                 contactId: cc.contactId, phone: '',
-                reason: 'No phone number', metaCode: 0,
+                reason: 'No phone number', metaCode: 0, isRateLimit: false,
               };
 
               const clean = digitsOnly(phone);
               if (!clean || clean.length < 10) return {
                 type: 'failed' as const, id: cc.id,
                 contactId: cc.contactId, phone: clean,
-                reason: 'Invalid phone number (< 10 digits)', metaCode: 0,
+                reason: 'Invalid phone number (< 10 digits)', metaCode: 0, isRateLimit: false,
               };
 
               try {
@@ -1726,23 +1816,15 @@ export class CampaignsService {
                   ...headerMatches.map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10)),
                 );
 
-                // ✅ Get variableMapping from campaign
                 const campaignVariableMapping = (campaign as any).variableMapping || {};
 
-                const params = buildParamsFromContact(
-                  cc,
-                  maxIdx,
-                  campaignVariableMapping  // ✅ Pass mapping
-                );
+                const params = buildParamsFromContact(cc, maxIdx, campaignVariableMapping);
                 const variables: Record<string, string> = {};
                 for (let j = 0; j < params.length; j++) {
                   variables[String(j + 1)] = params[j];
                 }
 
-                // ✅ FIX Bug7: synchronous now
-                const payload = buildTemplateMessage(
-                  template, variables, cachedMediaId
-                );
+                const payload = buildTemplateMessage(template, variables, cachedMediaId);
 
                 const result = await metaApi.sendMessage(
                   phoneNumberId, accessToken, clean, payload
@@ -1751,15 +1833,25 @@ export class CampaignsService {
                 return {
                   type: 'sent' as const, id: cc.id,
                   contactId: cc.contactId, phone: clean,
-                  waMessageId: result.messageId, metaCode: 0,
+                  waMessageId: result.messageId, metaCode: 0, isRateLimit: false,
                 };
               } catch (err: any) {
-                const reason = this.extractFailureReason(err);
                 const metaCode = err.response?.data?.error?.code || 0;
+                const reason = this.extractFailureReason(err);
+                
+                // ✅ NEW: Detect rate limit specifically
+                const isRateLimit = 
+                  metaCode === 131048 || 
+                  metaCode === 131021 || 
+                  metaCode === 80007 ||
+                  metaCode === 4 ||
+                  metaCode === 613 ||
+                  reason.toLowerCase().includes('rate limit');
+                
                 return {
                   type: 'failed' as const, id: cc.id,
                   contactId: cc.contactId, phone: clean,
-                  reason, metaCode,
+                  reason, metaCode, isRateLimit,
                 };
               }
             })
@@ -1767,6 +1859,8 @@ export class CampaignsService {
 
           // ── Collect results ──────────────────────────────
           let chunkFailed = 0;
+          let chunkRateLimits = 0; // ✅ NEW: Track rate limit specifically
+          
           for (const r of results) {
             if (r.status === 'rejected') continue;
             const d = r.value;
@@ -1792,15 +1886,23 @@ export class CampaignsService {
               });
               chunkFailed++;
 
-              if (d.metaCode === 131048 || d.metaCode === 131021) {
-                await new Promise(r =>
-                  setTimeout(r, SEND_CONFIG.RATE_LIMIT_PAUSE_MS)
-                );
+              // ✅ FIX: Rate limit handling - PROPER backoff
+              if (d.isRateLimit) {
+                chunkRateLimits++;
+                
+                // Set global pause for next iteration
+                if (chunkRateLimits >= 2) {
+                  const pauseMs = Math.min(60_000, SEND_CONFIG.RATE_LIMIT_PAUSE_MS * chunkRateLimits);
+                  rateLimitPauseUntil = Date.now() + pauseMs;
+                  console.warn(`🛑 Multiple rate limits detected - pausing ${pauseMs/1000}s`);
+                }
               }
+              
               if (
                 d.reason.includes('ecosystem') ||
                 d.reason.includes('undeliverable') ||
-                d.reason.includes('restricted')
+                d.reason.includes('restricted') ||
+                d.isRateLimit
               ) {
                 consecutiveFails++;
               } else {
@@ -1811,26 +1913,39 @@ export class CampaignsService {
 
           totalProcessed += chunk.length;
 
+          // ✅ FIX: If chunk had rate limits, break to trigger pause
+          if (chunkRateLimits > 0 && rateLimitPauseUntil > Date.now()) {
+            console.log(`⏸️  Breaking chunk loop due to rate limit`);
+            
+            // Flush current batch first
+            if (batchSent.length > 0 || batchFailed.length > 0) {
+              await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
+              if (batchSent.length > 0) {
+                this.saveToInboxBulk(
+                  organizationId, campaignId, campaign.whatsappAccountId,
+                  template.id, template.name, campaign.name, template,
+                  batchSent.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
+                ).catch(() => { });
+              }
+              batchSent = [];
+              batchFailed = [];
+            }
+            break; // Break for loop, while loop will handle pause
+          }
+
           // Flush batch
           const batchTotal = batchSent.length + batchFailed.length;
-          const isLastChunk = i + SEND_CONFIG.CONCURRENCY >= contacts.length;
+          const isLastChunk = i + CONCURRENCY >= contacts.length;
 
           if (batchTotal >= SEND_CONFIG.FLUSH_EVERY || isLastChunk) {
-            await this.flushBatchResults(
-              campaignId, organizationId, batchSent, batchFailed
-            );
+            await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
 
-            // ✅ FIX Bug10: Save to inbox ONCE (bulk only, no individual)
             if (batchSent.length > 0) {
               const sentCopy = [...batchSent];
               this.saveToInboxBulk(
-                organizationId, campaignId,
-                campaign.whatsappAccountId,
+                organizationId, campaignId, campaign.whatsappAccountId,
                 template.id, template.name, campaign.name, template,
-                sentCopy.map(s => ({
-                  contactId: s.contactId,
-                  waMessageId: s.waMessageId,
-                }))
+                sentCopy.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
               ).catch(e => console.error('⚠️ Inbox save error:', e.message));
             }
 
@@ -1839,10 +1954,7 @@ export class CampaignsService {
           }
 
           // Emit progress
-          if (
-            totalProcessed - lastProgressEmit >= EMIT_EVERY ||
-            isLastChunk
-          ) {
+          if (totalProcessed - lastProgressEmit >= EMIT_EVERY || isLastChunk) {
             lastProgressEmit = totalProcessed;
             const counts = await this.getQuickCounts(campaignId);
             const cumSent = counts.sent + counts.delivered + counts.read;
@@ -1855,9 +1967,7 @@ export class CampaignsService {
               delivered: cumDel,
               read: counts.read,
               total: counts.total,
-              percentage: Math.min(100, Math.round(
-                (processed / Math.max(counts.total, 1)) * 100
-              )),
+              percentage: Math.min(100, Math.round((processed / Math.max(counts.total, 1)) * 100)),
               status: 'RUNNING',
             });
 
@@ -1871,10 +1981,18 @@ export class CampaignsService {
             });
           }
 
-          // Delay
-          const delay = chunkFailed > chunk.length / 2
-            ? 500
-            : SEND_CONFIG.DELAY_BETWEEN_CHUNKS_MS;
+          // ✅ FIX: Use tier-based delay + dynamic adjustment
+          let delay = DELAY_MS;
+          
+          if (chunkFailed > chunk.length * 0.5) {
+            // High failure rate - slow down
+            delay = DELAY_MS * 3;
+            console.warn(`⚠️ High failure rate in chunk, slowing to ${delay}ms`);
+          } else if (chunkFailed > 0) {
+            // Some failures - slight slowdown
+            delay = DELAY_MS * 1.5;
+          }
+          
           await new Promise(r => setTimeout(r, delay));
         }
       }
