@@ -1,4 +1,4 @@
-// src/utils/jwt.ts - FIXED
+// src/utils/jwt.ts - PRODUCTION FIX
 import jwt, { SignOptions, Secret } from 'jsonwebtoken';
 import { config } from '../config';
 
@@ -6,13 +6,12 @@ export interface TokenPayload {
   userId:          string;
   email:           string;
   organizationId?: string;
-  tokenVersion:    number;   // ✅ Required now (not optional)
+  tokenVersion:    number;
   type:            'access' | 'refresh';
   iat?:            number;
   exp?:            number;
 }
 
-// ─── Helper: Parse expiry ────────────────────────────────
 const getExpirySeconds = (expiryString: string): number => {
   const match = expiryString.match(/^(\d+)([smhdw])$/);
   if (!match) return 7 * 24 * 60 * 60;
@@ -30,69 +29,90 @@ const getExpirySeconds = (expiryString: string): number => {
   }
 };
 
-// ─── Generate Access Token ──────────────────────────────
 export const generateAccessToken = (
   payload: Omit<TokenPayload, 'type' | 'iat' | 'exp'>
 ): string => {
-  const secret: Secret = config.jwt.secret;
+  // ✅ FIX: JWT_ACCESS_SECRET use karo agar available ho
+  const secret: Secret = config.jwt.accessSecret || config.jwt.secret;
   const options: SignOptions = {
     expiresIn: getExpirySeconds(config.jwt.accessExpiresIn),
-    issuer:    'wabmeta',        // ✅ Add issuer
-    audience:  'wabmeta-users',  // ✅ Add audience
+    // ✅ NO issuer/audience - backward compatible
   };
-
   return jwt.sign({ ...payload, type: 'access' }, secret, options);
 };
 
-// ─── Generate Refresh Token ─────────────────────────────
 export const generateRefreshToken = (
   payload: Omit<TokenPayload, 'type' | 'iat' | 'exp'>
 ): string => {
-  const secret: Secret = config.jwt.refreshSecret;
+  const secret: Secret = config.jwt.refreshSecret || config.jwt.secret;
   const options: SignOptions = {
     expiresIn: getExpirySeconds(config.jwt.refreshExpiresIn),
-    issuer:    'wabmeta',
-    audience:  'wabmeta-refresh',
+    // ✅ NO issuer/audience - backward compatible
   };
-
   return jwt.sign({ ...payload, type: 'refresh' }, secret, options);
 };
 
-// ─── Verify Access Token (with type check) ──────────────
 export const verifyAccessToken = (token: string): TokenPayload => {
-  const secret: Secret = config.jwt.secret;
+  // ✅ FIX: Try multiple secrets for backward compatibility
+  const secrets = [
+    config.jwt.accessSecret,
+    config.jwt.secret,
+  ].filter(Boolean);
 
-  const payload = jwt.verify(token, secret, {
-    issuer:   'wabmeta',
-    audience: 'wabmeta-users',
-  }) as TokenPayload;
-
-  // ✅ CRITICAL: Verify token type
-  if (payload.type !== 'access') {
-    throw new Error('Invalid token type - expected access token');
+  let lastError: any;
+  
+  for (const secret of secrets) {
+    try {
+      // ✅ NO issuer/audience check - purane tokens ke saath compatible
+      const payload = jwt.verify(token, secret as Secret) as TokenPayload;
+      
+      if (payload.type && payload.type !== 'access') {
+        throw new Error('Invalid token type');
+      }
+      
+      return payload;
+    } catch (err: any) {
+      lastError = err;
+      // TokenExpiredError pe retry mat karo - ye actual expiry hai
+      if (err.name === 'TokenExpiredError') throw err;
+      // Agar secret mismatch hai toh next secret try karo
+      continue;
+    }
   }
-
-  return payload;
+  
+  throw lastError;
 };
 
-// ─── Verify Refresh Token (with type check) ─────────────
 export const verifyRefreshToken = (token: string): TokenPayload => {
-  const secret: Secret = config.jwt.refreshSecret;
+  const secrets = [
+    config.jwt.refreshSecret,
+    config.jwt.secret,
+  ].filter(Boolean);
 
-  const payload = jwt.verify(token, secret, {
-    issuer:   'wabmeta',
-    audience: 'wabmeta-refresh',
-  }) as TokenPayload;
-
-  // ✅ CRITICAL: Verify token type
-  if (payload.type !== 'refresh') {
-    throw new Error('Invalid token type - expected refresh token');
+  let lastError: any;
+  
+  for (const secret of secrets) {
+    try {
+      const payload = jwt.verify(token, secret as Secret) as TokenPayload;
+      
+      if (payload.type && payload.type !== 'refresh') {
+        // ✅ Purane tokens mein type field nahi tha - allow karo
+        if (payload.type !== undefined) {
+          throw new Error('Invalid token type');
+        }
+      }
+      
+      return payload;
+    } catch (err: any) {
+      lastError = err;
+      if (err.name === 'TokenExpiredError') throw err;
+      continue;
+    }
   }
-
-  return payload;
+  
+  throw lastError;
 };
 
-// ─── Generate both tokens ───────────────────────────────
 export const generateTokens = (
   payload: Omit<TokenPayload, 'type' | 'iat' | 'exp'>
 ) => ({
@@ -100,7 +120,6 @@ export const generateTokens = (
   refreshToken: generateRefreshToken(payload),
 });
 
-// ─── Decode without verify (debugging only) ─────────────
 export const decodeToken = (token: string): TokenPayload | null => {
   try {
     return jwt.decode(token) as TokenPayload;
@@ -109,15 +128,12 @@ export const decodeToken = (token: string): TokenPayload | null => {
   }
 };
 
-// ─── Parse expiry to ms ─────────────────────────────────
 export const parseExpiryTime = (expiryString: string): number =>
   getExpirySeconds(expiryString) * 1000;
 
-// ─── Get expiry Date ────────────────────────────────────
 export const getTokenExpiry = (expiryString: string): Date =>
   new Date(Date.now() + parseExpiryTime(expiryString));
 
-// ─── Check expiry ───────────────────────────────────────
 export const isTokenExpired = (token: string): boolean => {
   try {
     const decoded = jwt.decode(token) as { exp?: number };
@@ -128,7 +144,6 @@ export const isTokenExpired = (token: string): boolean => {
   }
 };
 
-// ─── Get remaining time ─────────────────────────────────
 export const getTokenRemainingTime = (token: string): number => {
   try {
     const decoded = jwt.decode(token) as { exp?: number };
