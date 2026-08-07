@@ -809,6 +809,58 @@ export class TemplatesService {
     console.log(`✅ Template created: ${template.id} (status: ${template.status})`);
 
     if (canSyncToMeta && waData) {
+      // ✅ FIX: WABA ID validate karo pehle
+      if (!waData.wabaId) {
+        console.error('❌ WABA ID missing - cannot submit template to Meta');
+        await prisma.template.update({
+          where: { id: template.id },
+          data: {
+            status: 'DRAFT' as TemplateStatus,
+            rejectionReason: 'WhatsApp Business Account not properly connected. Please reconnect.',
+          },
+        });
+        const latest = await prisma.template.findUnique({ where: { id: template.id } });
+        return formatTemplate(latest);
+      }
+
+      // ✅ FIX: WABA ID verify karo Meta pe
+      try {
+        const wabaVerifyUrl = `https://graph.facebook.com/v22.0/${waData.wabaId}`;
+        await axios.get(wabaVerifyUrl, {
+          params: { access_token: waData.accessToken, fields: 'id,name' },
+          timeout: 5000,
+        });
+      } catch (wabaErr: any) {
+        const errCode = wabaErr.response?.data?.error?.code;
+        const errSubcode = wabaErr.response?.data?.error?.error_subcode;
+
+        if (errCode === 100 && errSubcode === 33) {
+          console.error(`❌ WABA ${waData.wabaId} does not exist or no permissions`);
+          await prisma.template.update({
+            where: { id: template.id },
+            data: {
+              status: 'DRAFT' as TemplateStatus,
+              rejectionReason:
+                'WhatsApp Business Account (WABA) not found or permissions revoked. ' +
+                'Please reconnect your WhatsApp account in Settings.',
+            },
+          });
+
+          // ✅ Account ko disconnect mark karo
+          if (waData.account?.id) {
+            await prisma.whatsAppAccount.update({
+              where: { id: waData.account.id },
+              data: { status: 'DISCONNECTED' },
+            }).catch(() => {});
+          }
+
+          const latest = await prisma.template.findUnique({ where: { id: template.id } });
+          return formatTemplate(latest);
+        }
+        // Other errors - continue (non-fatal WABA check fail)
+        console.warn('⚠️ WABA verify failed (non-fatal):', wabaErr.message);
+      }
+
       try {
         const metaHeaderMediaId = (() => {
           if (!finalMetaId) return null;

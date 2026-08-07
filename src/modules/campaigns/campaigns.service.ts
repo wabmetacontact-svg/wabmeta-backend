@@ -806,6 +806,22 @@ export class CampaignsService {
       );
     }
 
+    // ✅ FIX: phoneNumberId validate karo
+    if (!campaign.whatsappAccount?.phoneNumberId) {
+      throw new AppError(
+        'WhatsApp account phoneNumberId missing. Please reconnect WhatsApp in Settings.',
+        400
+      );
+    }
+
+    // ✅ FIX: WABA ID validate karo
+    if (!campaign.whatsappAccount?.wabaId) {
+      throw new AppError(
+        'WhatsApp Business Account (WABA) ID missing. Please reconnect WhatsApp in Settings.',
+        400
+      );
+    }
+
     // ── Wallet pre-check ───────────────────────────────────
     const wallet = await prisma.wallet.findUnique({
       where: { organizationId },
@@ -1596,6 +1612,15 @@ export class CampaignsService {
 
       const { phoneNumberId, wabaId } = campaign.whatsappAccount;
       const template = campaign.template;
+
+      // ✅ FIX: phoneNumberId validate karo
+      if (!phoneNumberId) {
+        throw new Error(
+          `WhatsApp account ${campaign.whatsappAccountId} has no phoneNumberId. Please reconnect.`
+        );
+      }
+
+      console.log(`📱 Sending via phoneNumberId: ${phoneNumberId} (wabaId: ${wabaId})`);
 
       // ── Media pre-upload ──────────────────────────────────
       let cachedMediaId: string | null = null;
