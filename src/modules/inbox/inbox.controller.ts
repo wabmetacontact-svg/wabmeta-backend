@@ -667,7 +667,7 @@ export class InboxController {
   }
 
   // ==========================================
-  // ✅ NEW: PROXY WHATSAPP MEDIA
+  // ✅ ENHANCED: PROXY WHATSAPP MEDIA WITH CLOUDINARY FALLBACK
   // GET /inbox/media/:mediaId
   // ==========================================
   async getMedia(req: AuthRequest, res: Response, next: NextFunction) {
@@ -710,18 +710,15 @@ export class InboxController {
       }
 
       // ============================================
-      // ✅ HARDCODED ACCOUNT - Direct se token lo
-      // Only one account hai system mein
+      // ✅ NEW: SMART DB LOOKUP - Cloudinary check FIRST
       // ============================================
-      
-      // Step 1: Is mediaId se message ka account dhundo
-      let accessToken: string | null = null;
+      let messageRecord: any = null;
       let phoneNumberId: string | null = null;
+      let accessToken: string | null = null;
 
       if (/^\d+$/.test(idToFetch)) {
-        
-        // ✅ Message se directly account dhundo
-        const message = await prisma.message.findFirst({
+        // ✅ Message find karo - saath mein metadata bhi
+        messageRecord = await prisma.message.findFirst({
           where: {
             OR: [
               { mediaId: idToFetch },
@@ -730,17 +727,74 @@ export class InboxController {
           },
           select: {
             id: true,
+            mediaUrl: true,
+            mediaMimeType: true,
+            createdAt: true,
+            metadata: true,
             whatsappAccountId: true,
             conversationId: true,
           },
         });
 
-        console.log('🔍 Message found:', message?.id, '| AccountId:', message?.whatsappAccountId);
+        console.log('🔍 Message found:', messageRecord?.id, '| AccountId:', messageRecord?.whatsappAccountId);
 
-        // ✅ Specific account se token lo
-        if (message?.whatsappAccountId) {
+        // ============================================
+        // ✅ PRIORITY 1: Cloudinary URL exists in mediaUrl?
+        // ============================================
+        if (messageRecord?.mediaUrl && this.isCloudinaryUrl(messageRecord.mediaUrl)) {
+          console.log(`✅ Redirecting to Cloudinary: ${messageRecord.mediaUrl.substring(0, 60)}...`);
+          return res.redirect(302, messageRecord.mediaUrl);
+        }
+
+        // ============================================
+        // ✅ PRIORITY 2: Cloudinary URL in metadata?
+        // ============================================
+        const meta = (messageRecord?.metadata as any) || {};
+        if (meta.cloudinaryUrl && this.isCloudinaryUrl(meta.cloudinaryUrl)) {
+          console.log(`✅ Redirecting to Cloudinary (metadata): ${meta.cloudinaryUrl.substring(0, 60)}...`);
+          return res.redirect(302, meta.cloudinaryUrl);
+        }
+
+        // ============================================
+        // ✅ PRIORITY 3: Media already marked expired?
+        // ============================================
+        if (meta.mediaExpired === true) {
+          console.log(`⏭️ Media marked expired: ${messageRecord?.id}`);
+          return this.sendMediaPlaceholder(res, 'Media expired (>30 days old)');
+        }
+
+        // ============================================
+        // ✅ PRIORITY 4: Check age - >30 days old, skip Meta call
+        // ============================================
+        if (messageRecord?.createdAt) {
+          const ageMs = Date.now() - new Date(messageRecord.createdAt).getTime();
+          const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+          
+          if (ageMs > THIRTY_DAYS_MS) {
+            console.log(`⏰ Media >30 days old (${Math.floor(ageMs / (24*60*60*1000))} days) - skipping Meta call`);
+            
+            // Auto-mark as expired (non-blocking)
+            prisma.message.update({
+              where: { id: messageRecord.id },
+              data: {
+                metadata: {
+                  ...meta,
+                  mediaExpired: true,
+                  expiredCheckedAt: new Date().toISOString(),
+                } as any,
+              },
+            }).catch(() => {});
+
+            return this.sendMediaPlaceholder(res, 'Media expired (>30 days old)');
+          }
+        }
+
+        // ============================================
+        // ✅ PRIORITY 5: Get token for Meta fetch
+        // ============================================
+        if (messageRecord?.whatsappAccountId) {
           const account = await prisma.whatsAppAccount.findUnique({
-            where: { id: message.whatsappAccountId },
+            where: { id: messageRecord.whatsappAccountId },
             select: { 
               accessToken: true, 
               phoneNumberId: true,
@@ -756,8 +810,6 @@ export class InboxController {
                 accessToken = decrypted;
                 phoneNumberId = account.phoneNumberId;
                 console.log('✅ Token from message account:', account.id);
-                console.log('✅ PhoneNumberId:', phoneNumberId);
-                console.log('✅ Token preview:', decrypted.substring(0, 15) + '...');
               }
             } catch (decryptErr: any) {
               console.error('❌ Decrypt failed:', decryptErr.message);
@@ -765,80 +817,49 @@ export class InboxController {
           }
         }
 
-        // ✅ Fallback: Org ki koi bhi active account
+        // Fallback: Org's active account
         if (!accessToken) {
           const orgId = req.user?.organizationId 
-                     || (req.query.organizationId as string)
-                     || 'cmn1m8f7n0096kfj8dflnhoyv'; // Fallback hardcoded
+                     || (req.query.organizationId as string);
 
-          console.log('🔍 Fallback: searching accounts for org:', orgId);
+          if (orgId) {
+            const accounts = await prisma.whatsAppAccount.findMany({
+              where: { 
+                organizationId: orgId,
+                isActive: true,
+                status: 'CONNECTED',
+              },
+              select: { 
+                id: true,
+                accessToken: true, 
+                phoneNumberId: true,
+              },
+              orderBy: { updatedAt: 'desc' },
+            });
 
-          const accounts = await prisma.whatsAppAccount.findMany({
-            where: { 
-              organizationId: orgId,
-              isActive: true,
-              status: 'CONNECTED',
-            },
-            select: { 
-              id: true,
-              accessToken: true, 
-              phoneNumberId: true,
-            },
-            orderBy: { updatedAt: 'desc' },
-          });
-
-          console.log(`🔍 Found ${accounts.length} accounts`);
-
-          for (const acc of accounts) {
-            if (!acc.accessToken) continue;
-            
-            try {
-              const { safeDecryptStrict } = await import('../../utils/encryption');
-              const decrypted = safeDecryptStrict(acc.accessToken);
+            for (const acc of accounts) {
+              if (!acc.accessToken) continue;
               
-              console.log('🔑 Decrypted token preview:', decrypted?.substring(0, 15));
-              
-              if (decrypted && decrypted.length > 50) {
-                accessToken = decrypted;
-                phoneNumberId = acc.phoneNumberId;
-                console.log('✅ Using fallback account:', acc.id);
-                break;
+              try {
+                const { safeDecryptStrict } = await import('../../utils/encryption');
+                const decrypted = safeDecryptStrict(acc.accessToken);
+                
+                if (decrypted && decrypted.length > 50) {
+                  accessToken = decrypted;
+                  phoneNumberId = acc.phoneNumberId;
+                  console.log('✅ Using fallback account:', acc.id);
+                  break;
+                }
+              } catch (e: any) {
+                continue;
               }
-            } catch (e: any) {
-              console.error('❌ Decrypt error for account:', acc.id, e.message);
-              continue;
             }
-          }
-        }
-
-        // ✅ Last resort: MetaConnection
-        if (!accessToken) {
-          const orgId = req.user?.organizationId || 'cmn1m8f7n0096kfj8dflnhoyv';
-          
-          const metaConn = await prisma.metaConnection.findFirst({
-            where: { organizationId: orgId },
-            select: { accessToken: true },
-            orderBy: { updatedAt: 'desc' },
-          });
-
-          if (metaConn?.accessToken) {
-            try {
-              const { safeDecryptStrict } = await import('../../utils/encryption');
-              const decrypted = safeDecryptStrict(metaConn.accessToken);
-              if (decrypted && decrypted.length > 50) {
-                accessToken = decrypted;
-                console.log('✅ Using MetaConnection token');
-              }
-            } catch (e) {}
           }
         }
       }
 
-      console.log('🔐 Final token status:', accessToken ? `Found (${accessToken.substring(0, 10)}...)` : 'NOT FOUND');
-      console.log('📞 PhoneNumberId:', phoneNumberId);
-
       if (!accessToken) {
-        console.error('❌ No access token found after all attempts');
+        console.error('❌ No access token found');
         return this.sendMediaPlaceholder(res, 'Authentication failed');
       }
 
@@ -847,6 +868,7 @@ export class InboxController {
       // ============================================
       const version = 'v22.0';
       let downloadUrl: string | null = null;
+      let metaMimeType: string | null = null;
 
       if (/^\d+$/.test(idToFetch)) {
         console.log(`🔄 Calling Meta API: graph.facebook.com/${version}/${idToFetch}`);
@@ -855,9 +877,7 @@ export class InboxController {
           const metaRes = await axios.get(
             `https://graph.facebook.com/${version}/${idToFetch}`,
             {
-              headers: { 
-                Authorization: `Bearer ${accessToken}`,
-              },
+              headers: { Authorization: `Bearer ${accessToken}` },
               timeout: 15000,
             }
           );
@@ -869,6 +889,7 @@ export class InboxController {
           });
 
           downloadUrl = metaRes.data?.url;
+          metaMimeType = metaRes.data?.mime_type;
 
         } catch (e: any) {
           const errData = e.response?.data?.error;
@@ -877,21 +898,34 @@ export class InboxController {
             code: errData?.code,
             subcode: errData?.error_subcode,
             message: errData?.message,
-            tokenUsed: accessToken.substring(0, 20) + '...',
           });
 
-          // ✅ Subcode 33 = Media expired (>30 days) ya wrong token
+          // ✅ Subcode 33 = Media expired - MARK IN DB (permanent)
           if (errData?.error_subcode === 33) {
-            console.error('💡 DIAGNOSIS: Media ID invalid/expired OR wrong token');
-            console.error('💡 Token starts with:', accessToken.substring(0, 10));
-            console.error('💡 Expected EAA... token format');
+            console.warn(`⚠️ Media ${idToFetch} expired on Meta - marking permanently`);
+
+            if (messageRecord?.id) {
+              const existingMeta = (messageRecord.metadata as any) || {};
+              prisma.message.update({
+                where: { id: messageRecord.id },
+                data: {
+                  metadata: {
+                    ...existingMeta,
+                    mediaExpired: true,
+                    expiredAt: new Date().toISOString(),
+                    metaErrorCode: errData.code,
+                    metaErrorSubcode: errData.error_subcode,
+                  } as any,
+                },
+              }).catch(() => {});
+            }
+
+            return this.sendMediaPlaceholder(res, 'Media expired (>30 days old)');
           }
 
           return this.sendMediaPlaceholder(
             res, 
-            errData?.error_subcode === 33 
-              ? 'Media expired (>30 days old)' 
-              : errData?.message || 'Meta API error'
+            errData?.message || 'Meta API error'
           );
         }
 
@@ -905,44 +939,42 @@ export class InboxController {
       }
 
       // ============================================
-      // ✅ Stream media to client
+      // ✅ Download & Stream + BACKUP TO CLOUDINARY
       // ============================================
       console.log('📥 Downloading from CDN...');
 
+      // ✅ Download to buffer (needed for both streaming AND backup)
       const mediaRes = await axios.get(downloadUrl, {
-        headers: { 
-          Authorization: `Bearer ${accessToken}`,
-        },
-        responseType: 'stream',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        responseType: 'arraybuffer',  // ✅ Buffer instead of stream
         timeout: 30000,
-        maxContentLength: 50 * 1024 * 1024, // 50MB max
+        maxContentLength: 100 * 1024 * 1024, // 100MB max
       });
 
-      const contentType = mediaRes.headers['content-type'] || 'image/jpeg';
+      const buffer = Buffer.from(mediaRes.data);
+      const contentType = mediaRes.headers['content-type'] || metaMimeType || 'image/jpeg';
 
+      // ✅ Background: Backup to Cloudinary (non-blocking)
+      if (messageRecord?.id && buffer.length > 0) {
+        this.backupMediaAsync(
+          buffer,
+          contentType,
+          messageRecord.id,
+          messageRecord.conversationId
+        ).catch(err => {
+          console.error('Async backup error:', err.message);
+        });
+      }
+
+      // ✅ Stream response to client
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'private, max-age=3600');
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Content-Length', buffer.length.toString());
 
-      if (mediaRes.headers['content-length']) {
-        res.setHeader('Content-Length', mediaRes.headers['content-length']);
-      }
-
-      // Handle stream errors
-      req.on('close', () => {
-        mediaRes.data.destroy();
-      });
-
-      mediaRes.data.on('error', (err: any) => {
-        console.error('❌ Media stream error:', err.message);
-        if (!res.headersSent) {
-          res.status(500).end();
-        }
-      });
-
-      mediaRes.data.pipe(res);
-      console.log(`✅ Streaming ${contentType} to client`);
+      res.status(200).send(buffer);
+      console.log(`✅ Served ${contentType} (${(buffer.length / 1024).toFixed(1)} KB)`);
 
     } catch (error: any) {
       console.error('❌ getMedia fatal error:', {
@@ -950,6 +982,79 @@ export class InboxController {
         stack: error.stack?.split('\n')[1],
       });
       return this.sendMediaPlaceholder(res, error.message);
+    }
+  }
+
+  // ==========================================
+  // ✅ NEW HELPER: Check if URL is Cloudinary
+  // ==========================================
+  private isCloudinaryUrl(url: string | null | undefined): boolean {
+    if (!url) return false;
+    return url.includes('cloudinary.com') || url.includes('res.cloudinary');
+  }
+
+  // ==========================================
+  // ✅ NEW HELPER: Async backup to Cloudinary
+  // ==========================================
+  private async backupMediaAsync(
+    buffer: Buffer,
+    mimeType: string,
+    messageId: string,
+    conversationId?: string | null
+  ): Promise<void> {
+    try {
+      // Check message still exists and needs backup
+      const message = await prisma.message.findUnique({
+        where: { id: messageId },
+        select: {
+          mediaUrl: true,
+          metadata: true,
+          conversation: {
+            select: { organizationId: true }
+          }
+        }
+      });
+
+      if (!message) return;
+
+      // Already backed up?
+      if (message.mediaUrl && this.isCloudinaryUrl(message.mediaUrl)) return;
+
+      const meta = (message.metadata as any) || {};
+      if (meta.cloudinaryUrl) return;
+
+      const orgId = message.conversation?.organizationId;
+      if (!orgId) return;
+
+      // Import lazily
+      const { cloudinaryService } = await import('../../services/cloudinary.service');
+
+      const result = await cloudinaryService.uploadInboundMedia({
+        buffer,
+        mimeType,
+        organizationId: orgId,
+        messageId,
+      });
+
+      if (!result) return;
+
+      // ✅ Update message with permanent Cloudinary URL
+      await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          mediaUrl: result.url,
+          metadata: {
+            ...meta,
+            cloudinaryUrl: result.url,
+            cloudinaryPublicId: result.publicId,
+            backedUpAt: new Date().toISOString(),
+          } as any,
+        },
+      });
+
+      console.log(`☁️ Auto-backed up: ${messageId}`);
+    } catch (err: any) {
+      console.error(`Backup failed for ${messageId}:`, err.message);
     }
   }
 
@@ -975,6 +1080,7 @@ export class InboxController {
       `);
     }
   }
+
 
   // ==========================================
   // DELETE MESSAGE

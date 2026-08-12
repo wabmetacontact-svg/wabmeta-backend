@@ -291,6 +291,80 @@ export class CloudinaryService {
     }
   }
 
+  /**
+   * ✅ NEW: Upload inbound WhatsApp media for permanent storage
+   * Meta media expires after 30 days - we backup to Cloudinary
+   */
+  async uploadInboundMedia(params: {
+    buffer: Buffer;
+    mimeType: string;
+    organizationId: string;
+    messageId: string;
+  }): Promise<{
+    url: string;
+    publicId: string;
+    resourceType: string;
+    size: number;
+  } | null> {
+    if (!this.isConfigured()) {
+      console.warn('⚠️ Cloudinary not configured, skipping inbound backup');
+      return null;
+    }
+
+    const { buffer, mimeType, organizationId, messageId } = params;
+    const format = getFormatFromMime(mimeType);
+    const resourceType = getResourceType(mimeType);
+
+    return new Promise((resolve, reject) => {
+      const folder = `wabmeta-inbound/${organizationId}`;
+      const publicId = resourceType === 'raw'
+        ? `${messageId}.${format}`
+        : messageId;
+
+      const uploadOptions: any = {
+        folder,
+        resource_type: resourceType,
+        public_id: publicId,
+        overwrite: false,
+        unique_filename: false,
+        use_filename: false,
+        type: 'upload',
+        access_mode: 'public',
+        format: resourceType === 'raw' ? format : undefined,
+      };
+
+      const uploadStream = cloudinary.uploader.upload_stream(
+        uploadOptions,
+        (error, result) => {
+          if (error) {
+            console.error('❌ Inbound backup failed:', error.message);
+            return reject(error);
+          }
+
+          if (!result) {
+            return reject(new Error('No result from Cloudinary'));
+          }
+
+          let finalUrl = result.secure_url;
+          if (resourceType === 'raw' && !finalUrl.match(/\.[a-z0-9]{2,5}(\?|$)/i)) {
+            finalUrl = `${finalUrl}.${format}`;
+          }
+
+          console.log(`☁️ Inbound backup: ${result.public_id} (${(result.bytes / 1024).toFixed(1)} KB)`);
+
+          resolve({
+            url: finalUrl,
+            publicId: result.public_id,
+            resourceType: result.resource_type || resourceType,
+            size: result.bytes,
+          });
+        }
+      );
+
+      uploadStream.end(buffer);
+    });
+  }
+
   async deleteMedia(
     publicId: string,
     resourceType: 'image' | 'video' | 'raw' = 'image'

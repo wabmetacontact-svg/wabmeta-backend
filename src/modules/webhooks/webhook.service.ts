@@ -943,6 +943,20 @@ export class WebhookService {
         ).catch((e: any) => console.error('Chatbot error:', e));
       }
 
+      // ✅ Auto-backup inbound media to Cloudinary (fire-and-forget)
+      const MEDIA_TYPES_TO_BACKUP = ['image', 'video', 'audio', 'document', 'sticker'];
+      if (MEDIA_TYPES_TO_BACKUP.includes(typeRaw) && mediaId) {
+        this.backupInboundMediaAsync(
+          mediaId,
+          mediaMimeType || 'application/octet-stream',
+          organizationId,
+          savedMessage.id,
+          whatsappAccountId
+        ).catch(err => {
+          console.error('Async media backup error:', err.message);
+        });
+      }
+
       console.log(`✅ Inbound message processed: ${savedMessage.id}`);
 
     } catch (e) {
@@ -1821,6 +1835,100 @@ export class WebhookService {
 
     } catch (e) {
       console.error('handleCallWebhook error:', e);
+    }
+  }
+  // ============================================
+  // ✅ NEW: Auto-backup inbound media to Cloudinary
+  // Meta media 30 din baad expire hoti hai
+  // ============================================
+  private async backupInboundMediaAsync(
+    mediaId: string,
+    mimeType: string,
+    organizationId: string,
+    messageId: string,
+    whatsappAccountId: string
+  ): Promise<void> {
+    try {
+      // Small delay - let message save complete
+      await new Promise(r => setTimeout(r, 1000));
+
+      const axios = (await import('axios')).default;
+      const { safeDecryptStrict } = await import('../../utils/encryption');
+      const { config } = await import('../../config');
+
+      const account = await prisma.whatsAppAccount.findUnique({
+        where: { id: whatsappAccountId },
+        select: { accessToken: true }
+      });
+
+      if (!account?.accessToken) return;
+
+      const accessToken = safeDecryptStrict(account.accessToken);
+      if (!accessToken) return;
+
+      // Step 1: Get media URL from Meta
+      const version = config.meta?.graphApiVersion || 'v22.0';
+      const infoRes = await axios.get(
+        `https://graph.facebook.com/${version}/${mediaId}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 10000,
+        }
+      );
+
+      const mediaUrl = infoRes.data?.url;
+      const actualMime = infoRes.data?.mime_type || mimeType;
+
+      if (!mediaUrl) return;
+
+      // Step 2: Download from Meta CDN
+      const mediaRes = await axios.get(mediaUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        maxContentLength: 100 * 1024 * 1024,
+      });
+
+      const buffer = Buffer.from(mediaRes.data);
+      if (buffer.length === 0) return;
+
+      // Step 3: Upload to Cloudinary
+      const { cloudinaryService } = await import('../../services/cloudinary.service');
+      const result = await cloudinaryService.uploadInboundMedia({
+        buffer,
+        mimeType: actualMime,
+        organizationId,
+        messageId,
+      });
+
+      if (!result) return;
+
+      // Step 4: Update message with Cloudinary URL
+      const existingMsg = await prisma.message.findUnique({
+        where: { id: messageId },
+        select: { metadata: true }
+      });
+
+      const existingMeta = (existingMsg?.metadata as any) || {};
+
+      await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          mediaUrl: result.url,
+          metadata: {
+            ...existingMeta,
+            cloudinaryUrl: result.url,
+            cloudinaryPublicId: result.publicId,
+            backedUpAt: new Date().toISOString(),
+            originalMetaMediaId: mediaId,
+          } as any,
+        },
+      });
+
+      console.log(`☁️ Auto-backed up inbound media: ${messageId}`);
+    } catch (err: any) {
+      // Silently fail - media will backup on first user access
+      console.error(`Inbound backup failed for ${messageId}:`, err.message);
     }
   }
 }
