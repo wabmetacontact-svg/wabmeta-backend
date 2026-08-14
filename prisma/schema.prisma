@@ -409,6 +409,7 @@ model Campaign {
   whatsappAccountId String
   contactGroupId    String?
   audienceFilter    Json?
+  variableMapping   Json?
   status            CampaignStatus    @default(DRAFT)
   scheduledAt       DateTime?
   startedAt         DateTime?

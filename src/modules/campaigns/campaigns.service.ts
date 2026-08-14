@@ -25,7 +25,8 @@ const SEND_CONFIG = {
   // ✅ FIX: Concurrency kam karo - Meta friendly
   CONCURRENCY: 5,   // 10 → 5 (parallel requests)
   
-  FLUSH_EVERY: 50,
+  // ✅ FIX: Flush batch every 20 messages for faster UI updates
+  FLUSH_EVERY: 20,
   
   // ✅ FIX: Delay badhao - safe rate
   DELAY_BETWEEN_CHUNKS_MS: 500,  // 200 → 500ms
@@ -183,6 +184,7 @@ const formatCampaign = (campaign: any): any => {
     whatsappAccountPhone: campaign.whatsappAccount?.phoneNumber || '',
     contactGroupId: campaign.contactGroupId,
     contactGroupName: campaign.contactGroup?.name || null,
+    variableMapping: campaign.variableMapping || null,
     status: campaign.status,
     scheduledAt: campaign.scheduledAt,
     startedAt: campaign.startedAt,
@@ -606,6 +608,7 @@ export class CampaignsService {
           whatsappAccountId: waAccount.id,
           contactGroupId,
           audienceFilter: toJsonValue(audienceFilter),
+          variableMapping: toJsonValue(variableMapping) || Prisma.JsonNull,
           status: scheduledAt ? 'SCHEDULED' : 'DRAFT' as CampaignStatus,
           scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
           totalContacts: targetContacts.length,
@@ -706,9 +709,10 @@ export class CampaignsService {
         templateId: input.templateId,
         contactGroupId: input.contactGroupId,
         audienceFilter: toJsonValue(input.audienceFilter),
+        variableMapping: input.variableMapping !== undefined ? (toJsonValue(input.variableMapping) || Prisma.JsonNull) : undefined,
         scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
         status: input.scheduledAt ? 'SCHEDULED' : undefined,
-      },
+      } as any,
       include: { template: true, whatsappAccount: true },
     });
 
@@ -747,6 +751,7 @@ export class CampaignsService {
           whatsappAccountId: campaign.whatsappAccountId,
           contactGroupId: campaign.contactGroupId,
           audienceFilter: campaign.audienceFilter || Prisma.JsonNull,
+          variableMapping: (campaign as any).variableMapping || Prisma.JsonNull,
           status: 'DRAFT',
           totalContacts: campaign.totalContacts,
           createdById: (campaign as any).createdById,
@@ -2147,21 +2152,31 @@ export class CampaignsService {
 
     try {
       if (sent.length > 0) {
+        // ✅ FIX: Single bulk query instead of N individual queries
         await prisma.campaignContact.updateMany({
           where: { id: { in: sent.map(s => s.id) } },
-          data: { status: 'SENT', sentAt: now },
+          data: { 
+            status: 'SENT', 
+            sentAt: now,
+          },
         });
 
-        // Individual waMessageId (needed for webhook tracking)
-        await Promise.allSettled(
-          sent.map(s =>
-            prisma.campaignContact.update({
-              where: { id: s.id },
-              data: { waMessageId: s.waMessageId },
-            })
-          )
-        );
+        // ✅ FIX: waMessageId ke liye raw SQL use karo (bulk) - Webhook DELIVERED tracking
+        const validSent = sent.filter(s => s.id && s.waMessageId);
+        if (validSent.length > 0) {
+          const values = validSent.map(s => 
+            `('${s.id}', '${String(s.waMessageId).replace(/'/g, "''")}')`
+          ).join(',');
+          
+          await prisma.$executeRawUnsafe(`
+            UPDATE "CampaignContact" AS cc
+            SET "waMessageId" = v."waMessageId"
+            FROM (VALUES ${values}) AS v(id, "waMessageId")
+            WHERE cc.id = v.id::text
+          `);
+        }
 
+        // ✅ Socket emit
         sent.forEach(s => {
           campaignSocketService.emitContactStatus(organizationId, campaignId, {
             contactId: s.contactId,
@@ -2184,7 +2199,11 @@ export class CampaignsService {
           Array.from(groups.entries()).map(([reason, ids]) =>
             prisma.campaignContact.updateMany({
               where: { id: { in: ids } },
-              data: { status: 'FAILED', failureReason: reason, failedAt: now },
+              data: { 
+                status: 'FAILED', 
+                failureReason: reason, 
+                failedAt: now,
+              },
             })
           )
         );
@@ -2200,7 +2219,43 @@ export class CampaignsService {
       }
     } catch (e) {
       console.error('⚠️ flushBatchResults error:', e);
+      // ✅ Fallback: Individual updates agar bulk fail ho
+      await this.flushBatchResultsFallback(campaignId, organizationId, sent, failed, now);
     }
+  }
+
+  // ✅ Fallback method
+  private async flushBatchResultsFallback(
+    campaignId: string,
+    organizationId: string,
+    sent: any[],
+    failed: any[],
+    now: Date
+  ): Promise<void> {
+    console.warn('⚠️ Using fallback individual updates');
+    
+    await Promise.allSettled([
+      ...sent.map(s =>
+        prisma.campaignContact.update({
+          where: { id: s.id },
+          data: { 
+            status: 'SENT', 
+            sentAt: now,
+            waMessageId: s.waMessageId,
+          },
+        })
+      ),
+      ...failed.map(f =>
+        prisma.campaignContact.update({
+          where: { id: f.id },
+          data: { 
+            status: 'FAILED',
+            failureReason: (f.reason || '').substring(0, 500),
+            failedAt: now,
+          },
+        })
+      ),
+    ]);
   }
 
   // ─────────────────────────────────────────────────────────────
