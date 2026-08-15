@@ -651,7 +651,13 @@ router.delete('/organizations/:organizationId/disconnect', checkConnectionLock, 
 
     const result = await prisma.whatsAppAccount.updateMany({
       where: { organizationId },
-      data: { status: 'DISCONNECTED' },
+      data: {
+        status: 'DISCONNECTED',
+        accessToken: null,
+        tokenExpiresAt: null,
+        webhookSecret: null,
+        isDefault: false,
+      },
     });
 
     try {

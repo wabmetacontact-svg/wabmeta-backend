@@ -32,7 +32,7 @@ interface AuthRequest extends Request {
 export class MetaController {
 
   // ============================================
-  // GET ACCOUNTS (OLD METHOD - WHATSAPPACCOUNT ONLY)
+  // GET ACCOUNTS (WHATSAPPACCOUNT ONLY - SANITIZED)
   // ============================================
   async getAccounts(req: AuthRequest, res: Response, next: NextFunction) {
     try {
@@ -43,12 +43,9 @@ export class MetaController {
       }
 
       const orgIdString = Array.isArray(organizationId) ? organizationId[0] : organizationId;
-      console.log('📋 Fetching accounts (old method) for org:', orgIdString);
+      console.log('📋 Fetching sanitized accounts for org:', orgIdString);
 
-      const accounts = await prisma.whatsAppAccount.findMany({
-        where: { organizationId: orgIdString },
-        orderBy: { createdAt: 'desc' },
-      });
+      const accounts = await metaService.getAccounts(orgIdString);
 
       console.log('   Found accounts:', accounts.length);
 
@@ -59,7 +56,7 @@ export class MetaController {
   }
 
   // ============================================
-  // GET SINGLE ACCOUNT
+  // GET SINGLE ACCOUNT (SANITIZED)
   // ============================================
   async getAccount(req: AuthRequest, res: Response, next: NextFunction) {
     try {
@@ -70,9 +67,7 @@ export class MetaController {
         throw new AppError('Organization ID is required', 400);
       }
 
-      const account = await prisma.whatsAppAccount.findFirst({
-        where: { id, organizationId },
-      });
+      const account = await metaService.getAccount(id, organizationId);
 
       if (!account) {
         throw new AppError('Account not found', 404);

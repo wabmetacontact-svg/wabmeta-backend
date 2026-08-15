@@ -221,14 +221,22 @@ export class MetaService {
         const granularScopes = debugInfo.data.granular_scopes || [];
         metaLog.debug('Granular scopes retrieved', { granularScopes });
 
+        const wabasFound: string[] = [];
         for (const scope of granularScopes) {
           if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
-            wabaId = scope.target_ids[0];
-            metaLog.info('Found WABA ID from granular scopes', { wabaId });
-            break;
+            wabasFound.push(...scope.target_ids);
           }
           if (scope.scope === 'business_management' && scope.target_ids?.length) {
             businessId = scope.target_ids[0];
+          }
+        }
+
+        if (wabasFound.length > 0) {
+          wabaId = wabasFound[0];
+          if (wabasFound.length > 1) {
+            metaLog.warn(`Multiple WABA IDs found in granular scopes: ${wabasFound.join(', ')}. Using primary: ${wabaId}`);
+          } else {
+            metaLog.info('Found WABA ID from granular scopes', { wabaId });
           }
         }
 
@@ -237,6 +245,9 @@ export class MetaService {
           try {
             const wabas = await metaApi.getSharedWABAs(accessToken);
             if (wabas.length > 0) {
+              if (wabas.length > 1) {
+                metaLog.warn(`Multiple WABAs found from business API: ${wabas.map(w => w.id).join(', ')}. Using primary: ${wabas[0].id}`);
+              }
               wabaId = wabas[0].id;
               businessId = wabas[0].owner_business_info?.id || businessId;
               metaLog.info('Found WABA from business API', { wabaId });
@@ -438,22 +449,6 @@ export class MetaService {
         message: 'Saving account...',
       });
 
-      const existingConnectedInOrg = await prisma.whatsAppAccount.findFirst({
-        where: {
-          organizationId,
-          status: WhatsAppAccountStatus.CONNECTED,
-          phoneNumberId: { not: primaryPhone.id },
-        },
-      });
-
-      if (existingConnectedInOrg) {
-        throw new AppError(
-          `Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
-          `Please disconnect it first before connecting a new one.`,
-          400
-        );
-      }
-
       metaLog.debug('Encrypting access token', { phoneNumberId: primaryPhone.id });
       const encryptedToken = encrypt(accessToken);
       const verifyDecrypt = safeDecryptStrict(encryptedToken);
@@ -472,9 +467,25 @@ export class MetaService {
       const combinedSecret = `PIN::${phonePin}::WEBHOOK::${webhookVerifyToken}`;
       const encryptedWebhookSecret = encrypt(combinedSecret);
 
-      let savedAccount;
-      try {
-        const existingByPhone = await prisma.whatsAppAccount.findUnique({
+      // ✅ Atomic transaction to prevent race conditions with multiple connected accounts
+      const savedAccount = await prisma.$transaction(async (tx) => {
+        const existingConnectedInOrg = await tx.whatsAppAccount.findFirst({
+          where: {
+            organizationId,
+            status: WhatsAppAccountStatus.CONNECTED,
+            phoneNumberId: { not: primaryPhone.id },
+          },
+        });
+
+        if (existingConnectedInOrg) {
+          throw new AppError(
+            `Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
+            `Please disconnect it first before connecting a new one.`,
+            400
+          );
+        }
+
+        const existingByPhone = await tx.whatsAppAccount.findUnique({
           where: { phoneNumberId: primaryPhone.id },
         });
 
@@ -486,7 +497,7 @@ export class MetaService {
             newOrgId: organizationId,
           });
 
-          const hasDefault = await prisma.whatsAppAccount.findFirst({
+          const hasDefault = await tx.whatsAppAccount.findFirst({
             where: {
               organizationId,
               isDefault: true,
@@ -494,7 +505,7 @@ export class MetaService {
             },
           });
 
-          savedAccount = await prisma.whatsAppAccount.update({
+          const updated = await tx.whatsAppAccount.update({
             where: { id: existingByPhone.id },
             data: {
               organizationId,
@@ -511,17 +522,17 @@ export class MetaService {
               codeVerificationStatus: primaryPhone.codeVerificationStatus,
               nameStatus: primaryPhone.nameStatus,
               messagingLimit: primaryPhone.messagingLimitTier,
-              // ✅ persist PIN + webhook secret together (encrypted)
               webhookSecret: encryptedWebhookSecret,
             } as any,
           });
 
           metaLog.info('Account updated successfully', { organizationId });
+          return updated;
         } else {
           metaLog.info('Creating new WhatsApp account', { organizationId });
-          const accountCount = await prisma.whatsAppAccount.count({ where: { organizationId } });
+          const accountCount = await tx.whatsAppAccount.count({ where: { organizationId } });
 
-          savedAccount = await prisma.whatsAppAccount.create({
+          const created = await tx.whatsAppAccount.create({
             data: {
               organizationId,
               wabaId,
@@ -543,42 +554,9 @@ export class MetaService {
           });
 
           metaLog.info('New account created successfully', { organizationId });
+          return created;
         }
-      } catch (dbError: any) {
-        if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
-          metaLog.warn('Unique constraint hit, doing force update', { organizationId, phoneNumberId: primaryPhone.id });
-          const forceExisting = await prisma.whatsAppAccount.findFirst({
-            where: { phoneNumberId: primaryPhone.id },
-          });
-          if (forceExisting) {
-            savedAccount = await prisma.whatsAppAccount.update({
-              where: { id: forceExisting.id },
-              data: {
-                organizationId,
-                accessToken: encryptedToken,
-                tokenExpiresAt,
-                wabaId,
-                phoneNumber: cleanPhoneNumber,
-                displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
-                verifiedName: primaryPhone.verifiedName,
-                qualityRating: primaryPhone.qualityRating,
-                status: WhatsAppAccountStatus.CONNECTED,
-                connectionType: finalConnectionType,
-                isDefault: true,
-                codeVerificationStatus: primaryPhone.codeVerificationStatus,
-                nameStatus: primaryPhone.nameStatus,
-                messagingLimit: primaryPhone.messagingLimitTier,
-                webhookSecret: encryptedWebhookSecret,
-              } as any,
-            });
-            metaLog.info('Force-updated existing account successfully', { organizationId });
-          } else {
-            throw dbError;
-          }
-        } else {
-          throw dbError;
-        }
-      }
+      });
 
       // STEP 5.5: MetaConnection & PhoneNumbers
       let savedMetaConnection = null;
@@ -730,6 +708,7 @@ export class MetaService {
           status: WhatsAppAccountStatus.DISCONNECTED,
           accessToken: null,
           tokenExpiresAt: null,
+          webhookSecret: null,
           isDefault: false,
         }
       });
@@ -1074,13 +1053,21 @@ export class MetaService {
   private async syncTemplatesBackground(accountId: string, wabaId: string, accessToken: string) {
     const redis = getRedis();
     const lockKey = `sync:templates:${accountId}`;
-    const exists = await redis.get(lockKey);
-    if (exists) {
-      console.log(`⚠️ Template sync already running for ${accountId}`);
-      return;
-    }
+    let lockAcquired = false;
 
-    await redis.set(lockKey, '1', 'EX', 300);
+    if (redis) {
+      try {
+        const exists = await redis.get(lockKey);
+        if (exists) {
+          console.log(`⚠️ Template sync already running for ${accountId}`);
+          return;
+        }
+        await redis.set(lockKey, '1', 'EX', 300);
+        lockAcquired = true;
+      } catch (redisErr: any) {
+        console.warn('⚠️ Redis lock check failed, continuing template sync without lock:', redisErr.message);
+      }
+    }
 
     try {
       console.log(`🔄 Background template sync for account ${accountId}...`);
@@ -1187,11 +1174,18 @@ export class MetaService {
           data: {
             status: WhatsAppAccountStatus.DISCONNECTED,
             accessToken: null,
+            webhookSecret: null,
           },
         }).catch((e) => console.error('Failed to disconnect account in background sync error path:', e));
       }
     } finally {
-      await redis.del(lockKey);
+      if (redis && lockAcquired) {
+        try {
+          await redis.del(lockKey);
+        } catch (delErr: any) {
+          console.warn('⚠️ Failed to release template sync redis lock:', delErr.message);
+        }
+      }
     }
   }
 
@@ -1214,7 +1208,7 @@ export class MetaService {
       PENDING_DELETION: 'REJECTED',
       DELETED: 'REJECTED',
       DISABLED: 'REJECTED',
-      PAUSED: 'APPROVED',
+      PAUSED: 'REJECTED',
       LIMIT_EXCEEDED: 'REJECTED',
     };
     return map[status?.toUpperCase()] || 'PENDING';

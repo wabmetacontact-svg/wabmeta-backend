@@ -972,28 +972,43 @@ class MetaApiClient {
     typing: boolean = false
   ): Promise<boolean> {
 
-    // ✅ VALIDATION LAYER - invalid IDs pe API call hi mat karo
-    // Ye hi 8x spam errors ka cause tha
-
-    // Check 1: Empty/null
-    if (!messageId || typeof messageId !== 'string' || messageId.trim() === '') {
-      return false; // Silent - happens often
-    }
-
-    // Check 2: Must be wamid format
-    // Valid: "wamid.HBgM..." 
-    // Invalid: "cmp5..." (DB cuid), null, undefined
-    if (!messageId.startsWith('wamid.')) {
-      return false; // Silent - DB ID hai, Meta ID nahi
-    }
-
-    // Check 3: Minimum length (wamid are long)
-    if (messageId.length < 30) {
+    // ✅ VALIDATION LAYER - invalid IDs or missing params pe API call hi mat karo
+    // Check 1: Empty/null/invalid phoneNumberId
+    if (
+      !phoneNumberId ||
+      typeof phoneNumberId !== 'string' ||
+      phoneNumberId === 'null' ||
+      phoneNumberId === 'undefined' ||
+      phoneNumberId.trim() === ''
+    ) {
       return false;
     }
 
-    // Check 4: Required params
-    if (!phoneNumberId || !accessToken) {
+    // Check 2: Empty/null/invalid accessToken
+    if (
+      !accessToken ||
+      typeof accessToken !== 'string' ||
+      accessToken === 'null' ||
+      accessToken === 'undefined' ||
+      accessToken.trim() === ''
+    ) {
+      return false;
+    }
+
+    // Check 3: Empty/null messageId
+    if (!messageId || typeof messageId !== 'string' || messageId.trim() === '') {
+      return false;
+    }
+
+    // Check 4: Must be valid WhatsApp (wamid.) or Instagram/Messenger (mid.) format
+    const isWamid = messageId.startsWith('wamid.');
+    const isMid = messageId.startsWith('mid.') || messageId.startsWith('a_mid.') || messageId.startsWith('m_mid.');
+    if (!isWamid && !isMid) {
+      return false; // Silent - DB cuid or unrecognized format
+    }
+
+    // Check 5: Minimum length
+    if (messageId.length < 15) {
       return false;
     }
 

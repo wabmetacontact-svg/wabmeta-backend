@@ -171,6 +171,7 @@ class WhatsAppController {
           status: WhatsAppAccountStatus.DISCONNECTED,
           accessToken: null,
           tokenExpiresAt: null,
+          webhookSecret: null,
           isDefault: false,
         },
       });

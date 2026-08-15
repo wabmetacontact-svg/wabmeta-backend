@@ -1057,7 +1057,7 @@ export class TemplatesService {
         const metaStatusRaw = String(mt.status || 'PENDING').toUpperCase();
         const mappedStatus: TemplateStatus =
           metaStatusRaw === 'APPROVED' ? 'APPROVED'
-            : metaStatusRaw === 'REJECTED' ? 'REJECTED'
+            : (metaStatusRaw === 'REJECTED' || metaStatusRaw === 'PAUSED' || metaStatusRaw === 'DISABLED') ? 'REJECTED'
               : 'PENDING';
 
         const rejectionReason = mt.rejected_reason || mt.rejection_reason || null;
