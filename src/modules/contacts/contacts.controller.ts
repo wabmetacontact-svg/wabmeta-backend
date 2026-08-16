@@ -528,9 +528,6 @@ export class ContactsController {
       const toRestore = existing
         .filter(c => c.status === 'DELETED')
         .map(c => c.id);
-      const existingActive = new Set(
-        existing.filter(c => c.status !== 'DELETED').map(c => c.phone)
-      );
       const toCreate = valid.filter(
         p => !existingMap.has(p.fullNumber)
       );
@@ -611,7 +608,7 @@ export class ContactsController {
     } catch (error) { next(error); }
   }
 
-  // ── CSV UPLOAD ──────────────────────────────────────────────
+  // ── CSV UPLOAD (OPTIMIZED) ──────────────────────────────────
   async csvUpload(
     req: AuthRequest, res: Response, next: NextFunction
   ) {
@@ -632,9 +629,14 @@ export class ContactsController {
         throw new AppError(`Maximum ${MAX_CSV} contacts per CSV upload`, 400);
       }
 
-      const results = { created: 0, updated: 0, skipped: 0, errors: [] as string[] };
+      const results = { 
+        created: 0, 
+        updated: 0, 
+        skipped: 0, 
+        errors: [] as string[] 
+      };
 
-      // 1. Parse + validate phones
+      // ─── 1. VALIDATE PHONES ─────────────────────────────────
       const phoneToData = new Map<string, any>();
       const validPhones: string[] = [];
 
@@ -669,22 +671,39 @@ export class ContactsController {
         });
       }
 
-      // 2. Fetch existing
+      console.log(`📊 Processing ${validPhones.length} valid contacts`);
+
+      // ─── 2. FETCH EXISTING (SINGLE QUERY) ───────────────────
       const existing = await prisma.contact.findMany({
         where: { organizationId, phone: { in: validPhones } },
-        select: { id: true, phone: true, firstName: true, lastName: true, email: true },
+        select: { 
+          id: true, 
+          phone: true, 
+          firstName: true, 
+          lastName: true, 
+          email: true,
+          status: true,
+        },
       });
       const existingMap = new Map(existing.map(c => [c.phone, c]));
 
+      // ─── 3. SEPARATE CREATE / UPDATE / RESTORE ──────────────
       const toCreate: any[] = [];
       const toUpdate: any[] = [];
+      const toRestore: string[] = []; // Deleted contact IDs
 
       for (const [phone, data] of phoneToData) {
         const ex = existingMap.get(phone);
+
         if (ex) {
+          // Restore if deleted
+          if (ex.status === 'DELETED') {
+            toRestore.push(ex.id);
+          }
+
           toUpdate.push({
             id: ex.id,
-            firstName: data.firstName || data.first_name || ex.firstName,
+            firstName: data.firstName || data.first_name || ex.firstName || 'Unknown',
             lastName: data.lastName || data.last_name || ex.lastName,
             email: data.email || ex.email,
           });
@@ -703,7 +722,9 @@ export class ContactsController {
         }
       }
 
-      // 3. Bulk create
+      console.log(`📊 Create: ${toCreate.length}, Update: ${toUpdate.length}, Restore: ${toRestore.length}`);
+
+      // ─── 4. BULK CREATE (SINGLE QUERY) ──────────────────────
       if (toCreate.length > 0) {
         const r = await prisma.contact.createMany({
           data: toCreate,
@@ -712,40 +733,73 @@ export class ContactsController {
         results.created = r.count;
       }
 
-      // ✅ FIX Bug2: Sequential updates instead of parallel
-      // Batch size of 25 to prevent DB overload
+      // ─── 5. BULK RESTORE (SINGLE QUERY) ─────────────────────
+      if (toRestore.length > 0) {
+        await prisma.contact.updateMany({
+          where: { id: { in: toRestore } },
+          data: {
+            status: 'ACTIVE',
+            deletedAt: null,
+            deletedBy: null,
+            source: 'CSV_IMPORT',
+          },
+        });
+        console.log(`♻️ Restored ${toRestore.length} deleted contacts`);
+      }
+
+      // ─── 6. ✅ PARALLEL UPDATES (MAJOR SPEED FIX) ───────────
       if (toUpdate.length > 0) {
-        const BATCH = 25;
+        const BATCH = 100;
         for (let i = 0; i < toUpdate.length; i += BATCH) {
           const batch = toUpdate.slice(i, i + BATCH);
-          // Sequential in each batch
-          for (const u of batch) {
-            await prisma.contact.update({
-              where: { id: u.id },
-              data: {
-                firstName: u.firstName,
-                lastName: u.lastName || undefined,
-                email: u.email || undefined,
-                ...(tags.length > 0 ? { tags: { push: tags } } : {}),
-              },
-            }).catch(() => { results.errors.push(`Update failed: ${u.id}`); });
-          }
+          
+          // ✅ ALL updates in batch run in PARALLEL
+          await Promise.all(
+            batch.map(u =>
+              prisma.contact.update({
+                where: { id: u.id },
+                data: {
+                  firstName: u.firstName,
+                  lastName: u.lastName || undefined,
+                  email: u.email || undefined,
+                  ...(tags.length > 0 ? { tags: { push: tags } } : {}),
+                },
+              }).catch((e: any) => { 
+                results.errors.push(`Update failed: ${u.id} - ${e.message}`); 
+              })
+            )
+          );
+          
+          console.log(`✅ Updated batch ${Math.floor(i/BATCH) + 1}/${Math.ceil(toUpdate.length/BATCH)}`);
         }
         results.updated = toUpdate.length;
       }
 
-      // 4. Add to group
-      if (groupId && (results.created > 0 || results.updated > 0)) {
+      // ─── 7. ADD TO GROUP (SINGLE BULK QUERY) ────────────────
+      if (groupId && (results.created > 0 || results.updated > 0 || toRestore.length > 0)) {
         const allIds = await prisma.contact.findMany({
           where: { organizationId, phone: { in: validPhones } },
           select: { id: true },
         });
 
-        await prisma.contactGroupMember.createMany({
-          data: allIds.map(c => ({ groupId, contactId: c.id })),
-          skipDuplicates: true,
+        if (allIds.length > 0) {
+          await prisma.contactGroupMember.createMany({
+            data: allIds.map(c => ({ groupId, contactId: c.id })),
+            skipDuplicates: true,
+          }).catch(() => { });
+        }
+      }
+
+      // ─── 8. UPDATE SUBSCRIPTION COUNT ───────────────────────
+      const totalAdded = results.created + toRestore.length;
+      if (totalAdded > 0) {
+        await prisma.subscription.updateMany({
+          where: { organizationId },
+          data: { contactsUsed: { increment: totalAdded } },
         }).catch(() => { });
       }
+
+      console.log(`✅ CSV Upload complete: Created=${results.created}, Updated=${results.updated}, Restored=${toRestore.length}`);
 
       return res.json({
         success: true,
@@ -753,10 +807,11 @@ export class ContactsController {
           totalProcessed: contacts.length,
           created: results.created,
           updated: results.updated,
+          restored: toRestore.length,
           skipped: results.skipped,
           errors: results.errors.slice(0, 10),
         },
-        message: `${results.created} created, ${results.updated} updated`,
+        message: `${results.created} created, ${results.updated} updated${toRestore.length ? `, ${toRestore.length} restored` : ''}`,
       });
     } catch (error) { next(error); }
   }
