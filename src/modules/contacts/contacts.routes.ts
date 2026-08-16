@@ -119,9 +119,13 @@ router.get('/', contactsController.getList.bind(contactsController));
 router.post('/', validate(createContactSchema), requireActiveSubscription, checkContactLimit, contactsController.create.bind(contactsController));
 
 // Import contacts - with file upload
-router.post('/import', requireActiveSubscription, upload.single('file'), (req, res, next) => {
-  contactsController.import(req, res, next);
-});
+router.post(
+  '/import',
+  requireActiveSubscription,
+  upload.single('file'),
+  contactsImportMiddleware,
+  (req, res, next) => contactsController.import(req, res, next)
+);
 
 // ✅ Simple Bulk Paste (₹2,500+)
 router.post('/bulk-paste', contactsController.simpleBulkPaste.bind(contactsController));

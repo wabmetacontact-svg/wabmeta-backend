@@ -299,6 +299,8 @@ model Contact {
   email                  String?
   avatar                 String?
   whatsappProfileName    String?
+  whatsappAbout          String?
+  whatsappProfilePicUrl  String?
   whatsappProfileFetched Boolean              @default(false)
   lastProfileFetchAt     DateTime?
   profileFetchAttempts   Int                  @default(0)

@@ -141,6 +141,7 @@ export interface ImportContactsResponse {
   skipped: number;
   failed: number;
   totalErrors?: number;
+  restored?: number;
   errors: { row?: number; phone?: string; error: string }[];
 }
 

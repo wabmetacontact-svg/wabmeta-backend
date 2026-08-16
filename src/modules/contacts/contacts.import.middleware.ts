@@ -1,71 +1,107 @@
-// src/modules/contacts/contacts.import.middleware.ts - COMPLETE
+// src/modules/contacts/contacts.import.middleware.ts - FIXED
+// ✅ INTERNATIONAL PHONE SUPPORT
+
 import { NextFunction, Request, Response } from 'express';
 import { Readable } from 'stream';
 import csv from 'csv-parser';
+import { toCanonicalPhone } from '../../utils/phone';
 
-const normalizeIndianPhone = (value: unknown): string => {
+// ============================================
+// ✅ INTERNATIONAL NORMALIZE - phone.ts use karo
+// ============================================
+const normalizePhone = (value: unknown): string => {
     const raw = String(value ?? '').trim();
+    if (!raw) return '';
 
-    let cleaned = raw.replace(/[\s\-\(\)]/g, '');
-    cleaned = cleaned.replace(/[^0-9+]/g, '');
-
-    if (cleaned.startsWith('+91')) cleaned = cleaned.slice(3);
-    else if (cleaned.startsWith('91') && cleaned.length === 12) cleaned = cleaned.slice(2);
-
-    if (cleaned.startsWith('0') && cleaned.length === 11) cleaned = cleaned.slice(1);
-
-    return cleaned;
+    // ✅ phone.ts ka toCanonicalPhone use karo
+    const canonical = toCanonicalPhone(raw);
+    return canonical || ''; // Empty string = invalid
 };
 
 const normalizeEmail = (value: unknown): string | undefined => {
     const s = String(value ?? '').trim();
-    return s ? s : undefined;
+    return s || undefined;
 };
 
+// ✅ BOM-safe, case-insensitive key picker
 const pick = (row: any, keys: string[]): string => {
-    for (const k of keys) {
-        if (row[k] !== undefined && row[k] !== null) return String(row[k]);
-    }
-    // BOM-safe + case-insensitive fallback
+    const lowerKeys = keys.map((k) => k.toLowerCase());
+
     for (const rk of Object.keys(row || {})) {
-        const norm = rk.replace(/^\uFEFF/, '').trim().toLowerCase();
-        if (keys.map((x) => x.toLowerCase()).includes(norm)) return String(row[rk]);
+        const norm = rk
+            .replace(/^\uFEFF/, '') // Remove BOM
+            .trim()
+            .toLowerCase();
+
+        if (lowerKeys.includes(norm)) {
+            const val = row[rk];
+            if (val !== undefined && val !== null && String(val).trim() !== '') {
+                return String(val).trim();
+            }
+        }
     }
     return '';
 };
 
 /**
- * Makes /contacts/import accept:
- * 1) JSON object: { contacts: [...] }
- * 2) JSON array: [ ... ]  -> will be wrapped to { contacts: [...] }
- * 3) multipart/form-data with file -> parses CSV -> { contacts: [...] }
+ * ✅ FIXED Middleware - handles:
+ * 1) JSON { contacts: [...] }
+ * 2) JSON array [...] → wrapped
+ * 3) multipart CSV file → parsed
+ * 4) International phone numbers ✅
  */
-export const contactsImportMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+export const contactsImportMiddleware = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
     try {
-        // 1) If body is already array => wrap
-        if (Array.isArray((req as any).body)) {
-            (req as any).body = { contacts: (req as any).body };
+        const body = (req as any).body;
+
+        // ── CASE 1: Body is array ──────────────────────────────
+        if (Array.isArray(body)) {
+            (req as any).body = {
+                contacts: body.map((c: any) => ({
+                    ...c,
+                    phone: normalizePhone(c.phone),
+                    email: normalizeEmail(c.email),
+                })),
+            };
             return next();
         }
 
-        // 2) If body already has contacts array => just normalize minor things
-        if ((req as any).body?.contacts && Array.isArray((req as any).body.contacts)) {
-            (req as any).body.contacts = (req as any).body.contacts.map((c: any) => ({
-                ...c,
-                phone: normalizeIndianPhone(c.phone),
-                email: normalizeEmail(c.email),
-            }));
+        // ── CASE 2: Body has contacts array ───────────────────
+        if (Array.isArray(body?.contacts)) {
+            (req as any).body = {
+                ...body,
+                contacts: body.contacts.map((c: any) => ({
+                    ...c,
+                    // ✅ Phone normalize karo - already canonical ho
+                    //    toh wahi rahega, otherwise fix hoga
+                    phone: normalizePhone(c.phone || c.Phone || c.mobile || ''),
+                    email: normalizeEmail(c.email),
+                })),
+            };
             return next();
         }
 
-        // 3) If file provided -> parse CSV
+        // ── CASE 3: CSV File ───────────────────────────────────
         const file = (req as any).file as any | undefined;
-        if (!file?.buffer) return next(); // validation will throw "contacts required"
+        if (!file?.buffer) {
+            return next(); // No file - controller validate karega
+        }
 
         const rows: any[] = [];
+
         await new Promise<void>((resolve, reject) => {
             Readable.from(file.buffer)
-                .pipe(csv())
+                .pipe(
+                    csv({
+                        // ✅ BOM handle karo
+                        mapHeaders: ({ header }) =>
+                            header.replace(/^\uFEFF/, '').trim().toLowerCase(),
+                    })
+                )
                 .on('data', (row) => rows.push(row))
                 .on('end', () => resolve())
                 .on('error', (err) => reject(err));
@@ -73,32 +109,52 @@ export const contactsImportMiddleware = async (req: Request, res: Response, next
 
         const contacts = rows
             .map((row) => {
-                const phoneRaw = pick(row, ['phone', 'mobile', 'number', 'phone_number', 'phonenumber', 'phone number']);
-                const firstName = pick(row, ['firstName', 'first_name', 'firstname', 'name', 'full_name', 'fullname']);
-                const lastName = pick(row, ['lastName', 'last_name', 'lastname']);
-                const email = pick(row, ['email', 'mail']);
+                const phoneRaw = pick(row, [
+                    'phone', 'mobile', 'number', 'phone_number',
+                    'phonenumber', 'phone number', 'contact',
+                    'whatsapp', 'mob', 'cell',
+                ]);
 
-                const tagsRaw = pick(row, ['tags', 'tag']);
+                const firstName = pick(row, [
+                    'firstname', 'first_name', 'first name',
+                    'name', 'full_name', 'fullname',
+                    'contact name', 'contactname',
+                ]);
+
+                const lastName = pick(row, [
+                    'lastname', 'last_name', 'last name', 'surname',
+                ]);
+
+                const email = pick(row, [
+                    'email', 'mail', 'email_address', 'emailaddress',
+                ]);
+
+                const tagsRaw = pick(row, ['tags', 'tag', 'labels', 'label']);
                 const tags = tagsRaw
-                    ? tagsRaw.split(',').map((t: string) => t.trim()).filter(Boolean)
+                    ? tagsRaw
+                        .split(/[,;|]/)
+                        .map((t: string) => t.trim())
+                        .filter(Boolean)
                     : undefined;
 
                 return {
-                    phone: normalizeIndianPhone(phoneRaw),
-                    firstName: String(firstName || '').trim() || undefined,
-                    lastName: String(lastName || '').trim() || undefined,
+                    // ✅ Canonical format
+                    phone: normalizePhone(phoneRaw),
+                    firstName: firstName || undefined,
+                    lastName: lastName || undefined,
                     email: normalizeEmail(email),
                     tags,
                 };
             })
-            .filter((c) => c.phone);
+            // ✅ Sirf valid phones rakho
+            .filter((c) => c.phone && c.phone.startsWith('+'));
 
         (req as any).body = {
-            ...(req as any).body,
+            ...body,
             contacts,
-            skipDuplicates: (req as any).body?.skipDuplicates ?? true,
-            groupId: (req as any).body?.groupId,
-            tags: (req as any).body?.tags,
+            skipDuplicates: body?.skipDuplicates ?? true,
+            groupId: body?.groupId,
+            tags: body?.tags,
         };
 
         return next();
