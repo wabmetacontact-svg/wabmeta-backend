@@ -1315,10 +1315,11 @@ export class ContactsService {
 
   async deleteGroup(
     organizationId: string,
-    groupId:        string
+    groupId: string,
+    deleteContacts: boolean = false  // ✅ NEW PARAM
   ): Promise<{ message: string }> {
     const group = await prisma.contactGroup.findFirst({
-      where:   { id: groupId, organizationId },
+      where: { id: groupId, organizationId },
       include: { _count: { select: { members: true } } },
     });
 
@@ -1326,19 +1327,72 @@ export class ContactsService {
 
     const memberCount = group._count.members;
 
-    // ✅ FIX Bug1: Only nullify campaigns + delete memberships
-    // Do NOT delete contacts themselves
+    if (deleteContacts && memberCount > 0) {
+      // ✅ Get all contact IDs in this group
+      const members = await prisma.contactGroupMember.findMany({
+        where: { groupId },
+        select: { contactId: true },
+      });
+
+      const contactIds = members.map(m => m.contactId);
+
+      // ✅ Transaction: delete contacts + group together
+      await prisma.$transaction([
+        // 1. Soft delete all contacts in group
+        prisma.contact.updateMany({
+          where: {
+            id: { in: contactIds },
+            organizationId, // Safety: sirf is org ke contacts
+          },
+          data: {
+            status: 'DELETED',
+            deletedAt: new Date(),
+          },
+        }),
+        // 2. Nullify campaigns using this group
+        prisma.campaign.updateMany({
+          where: { contactGroupId: groupId },
+          data: { contactGroupId: null },
+        }),
+        // 3. Delete memberships
+        prisma.contactGroupMember.deleteMany({
+          where: { groupId },
+        }),
+        // 4. Delete group
+        prisma.contactGroup.delete({
+          where: { id: groupId },
+        }),
+      ]);
+
+      // Update subscription count
+      const subscription = await prisma.subscription.findFirst({
+        where: { organizationId }
+      });
+      if (subscription && contactIds.length > 0) {
+        await prisma.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            contactsUsed: {
+              decrement: Math.min(contactIds.length, subscription.contactsUsed)
+            }
+          }
+        });
+      }
+
+      return {
+        message: `Group "${group.name}" and ${memberCount} contacts deleted successfully.`,
+      };
+    }
+
+    // ✅ Delete group only (contacts remain)
     await prisma.$transaction([
-      // 1. Nullify campaigns using this group
       prisma.campaign.updateMany({
         where: { contactGroupId: groupId },
-        data:  { contactGroupId: null },
+        data: { contactGroupId: null },
       }),
-      // 2. Delete group memberships
       prisma.contactGroupMember.deleteMany({
         where: { groupId },
       }),
-      // 3. Delete the group
       prisma.contactGroup.delete({
         where: { id: groupId },
       }),

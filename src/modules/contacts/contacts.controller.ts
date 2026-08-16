@@ -383,8 +383,13 @@ export class ContactsController {
       const organizationId = req.user?.organizationId;
       if (!organizationId) throw new AppError('Organization context required', 400);
 
+      // ✅ deleteContacts query param check karo
+      const deleteContacts = req.query.deleteContacts === 'true';
+
       const result = await contactsService.deleteGroup(
-        organizationId, req.params.groupId as string
+        organizationId,
+        req.params.groupId as string,
+        deleteContacts  // ✅ Pass to service
       );
       sendSuccess(res, result, result.message);
     } catch (error) { next(error); }

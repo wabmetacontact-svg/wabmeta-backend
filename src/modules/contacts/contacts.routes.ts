@@ -82,7 +82,20 @@ router.post('/groups', validate(createContactGroupSchema), contactsController.cr
 router.get('/groups/:groupId', contactsController.getGroupById.bind(contactsController));
 
 router.patch('/groups/:groupId', validate(updateContactGroupSchema), contactsController.updateGroup.bind(contactsController));
+
+// Group + contacts delete (frontend se deleteContacts=true query aayega)
 router.delete('/groups/:groupId', contactsController.deleteGroup.bind(contactsController));
+
+// ✅ NEW: Delete group AND its contacts
+// Frontend call karega: DELETE /groups/:id?deleteContacts=true
+// Ya separate endpoint:
+router.delete(
+  '/groups/:groupId/contacts-and-group',
+  async (req: any, res, next) => {
+    req.query.deleteContacts = 'true';
+    contactsController.deleteGroup(req, res, next);
+  }
+);
 
 router.get('/groups/:groupId/contacts', contactsController.getGroupContacts.bind(contactsController));
 
