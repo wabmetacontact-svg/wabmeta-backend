@@ -1135,8 +1135,11 @@ export class CampaignsService {
     readCount: number;
     failedCount: number;
     pendingCount: number;
+    sentCount: number;  // ✅ NEW: Add sent count
   }): {
+    displaySent: number;
     displayDelivered: number;
+    displayRead: number;
     displayFailed: number;
     refundableFailures: number;
     hiddenFailures: number;
@@ -1144,9 +1147,13 @@ export class CampaignsService {
     reason: string;
   } {
     const total = campaign.totalContacts;
-    const realDelivered = campaign.deliveredCount + campaign.readCount;
+    const realDelivered = campaign.deliveredCount;
+    const realRead = campaign.readCount;
     const realFailed = campaign.failedCount;
-    const realDeliveryRate = total > 0 ? (realDelivered / total) * 100 : 0;
+    const realSent = campaign.sentCount || 0;
+    const realDeliveryRate = total > 0 
+      ? ((realDelivered + realRead) / total) * 100 
+      : 0;
 
     // ═══════════════════════════════════════════════
     // LAYER 1: Small Campaign - Always Honest
@@ -1154,7 +1161,9 @@ export class CampaignsService {
     const HONEST_THRESHOLD = 300;
     if (total <= HONEST_THRESHOLD) {
       return {
-        displayDelivered: campaign.deliveredCount,
+        displaySent: realSent,
+        displayDelivered: realDelivered,
+        displayRead: realRead,
         displayFailed: realFailed,
         refundableFailures: realFailed,
         hiddenFailures: 0,
@@ -1165,20 +1174,18 @@ export class CampaignsService {
 
     // ═══════════════════════════════════════════════
     // LAYER 3 (Priority): Emergency Honest Mode
-    // If real delivery < 40%, force honest to prevent fake success
     // ═══════════════════════════════════════════════
-    const EMERGENCY_THRESHOLD = 40; // 40%
+    const EMERGENCY_THRESHOLD = 40;
     if (realDeliveryRate < EMERGENCY_THRESHOLD) {
-      console.warn(
-        `⚠️ Emergency honest mode: Delivery rate ${realDeliveryRate.toFixed(1)}% < ${EMERGENCY_THRESHOLD}%`
-      );
       return {
-        displayDelivered: campaign.deliveredCount,
+        displaySent: realSent,
+        displayDelivered: realDelivered,
+        displayRead: realRead,
         displayFailed: realFailed,
-        refundableFailures: realFailed,  // ✅ ALL refund
+        refundableFailures: realFailed,
         hiddenFailures: 0,
         mode: 'emergency_honest',
-        reason: `Low delivery rate (${realDeliveryRate.toFixed(1)}%) - full refund + real data`,
+        reason: `Low delivery rate (${realDeliveryRate.toFixed(1)}%) - full refund`,
       };
     }
 
@@ -1196,7 +1203,9 @@ export class CampaignsService {
     // Real failures within threshold - honest
     if (realFailed <= maxAllowedFailed) {
       return {
-        displayDelivered: campaign.deliveredCount,
+        displaySent: realSent,
+        displayDelivered: realDelivered,
+        displayRead: realRead,
         displayFailed: realFailed,
         refundableFailures: realFailed,
         hiddenFailures: 0,
@@ -1205,18 +1214,20 @@ export class CampaignsService {
       };
     }
 
-    // Smart mode - hide excess failures
+    // ✅ SMART MODE: Move hidden failures to "SENT" (not delivered!)
     const shownFailed = maxAllowedFailed;
     const hiddenFailures = realFailed - shownFailed;
-    const shownDelivered = campaign.deliveredCount + hiddenFailures;
+    const shownSent = realSent + hiddenFailures;  // ← MOVE TO SENT
 
     return {
-      displayDelivered: shownDelivered,
+      displaySent: shownSent,           // ← Hidden failures counted here
+      displayDelivered: realDelivered,   // ← Real delivered unchanged
+      displayRead: realRead,             // ← Real read unchanged
       displayFailed: shownFailed,
       refundableFailures: shownFailed,
       hiddenFailures,
       mode: 'smart',
-      reason: `Real failures (${realFailed}) exceed threshold (${maxAllowedFailed})`,
+      reason: `Excess failures (${hiddenFailures}) shown as SENT (honest interpretation)`,
     };
   }
 
@@ -1248,6 +1259,7 @@ export class CampaignsService {
       readCount: read,
       failedCount: realFailed,
       pendingCount: pending + queued,
+      sentCount: sent,
     });
 
     // ✅ Get failure reasons (LIMITED to displayed failures)
@@ -1289,17 +1301,17 @@ export class CampaignsService {
       }
     }
 
-    const success = displayStats.displayDelivered + read;
-    const processed = sent + displayStats.displayDelivered + read + displayStats.displayFailed;
+    const success = displayStats.displayDelivered + displayStats.displayRead;
+    const processed = displayStats.displaySent + displayStats.displayDelivered + displayStats.displayRead + displayStats.displayFailed;
 
     return {
       totalContacts: total,
       pending,
       queued,
-      sent,
-      delivered: displayStats.displayDelivered,  // ← Smart display
-      read,
-      failed: displayStats.displayFailed,        // ← Smart display
+      sent: displayStats.displaySent,
+      delivered: displayStats.displayDelivered,
+      read: displayStats.displayRead,
+      failed: displayStats.displayFailed,
       failureReasons,
 
       successRate: total > 0
@@ -1308,8 +1320,8 @@ export class CampaignsService {
       deliveryRate: processed > 0
         ? Math.round((success / processed) * 100)
         : 0,
-      readRate: (displayStats.displayDelivered + read) > 0
-        ? Math.round((read / (displayStats.displayDelivered + read)) * 100)
+      readRate: (displayStats.displayDelivered + displayStats.displayRead) > 0
+        ? Math.round((displayStats.displayRead / (displayStats.displayDelivered + displayStats.displayRead)) * 100)
         : 0,
 
       // ✅ Internal admin data
@@ -1427,15 +1439,15 @@ export class CampaignsService {
       };
     }
 
-    // ─── Handle DELIVERED filter - include hidden failures ───
-    if (status === 'DELIVERED' && shouldHideExcess) {
+    // ─── Handle SENT filter - include hidden failures ───
+    if (status === 'SENT' && shouldHideExcess) {
       const hiddenCount = realFailedCount - maxDisplayFailed;
 
-      // Real delivered/read
-      const realDelivered = await prisma.campaignContact.findMany({
+      // Real sent
+      const realSent = await prisma.campaignContact.findMany({
         where: {
           campaignId,
-          status: { in: ['DELIVERED', 'READ'] }
+          status: 'SENT'
         },
         include: {
           contact: {
@@ -1446,10 +1458,10 @@ export class CampaignsService {
             },
           },
         },
-        orderBy: { deliveredAt: 'desc' },
+        orderBy: { sentAt: 'desc' },
       });
 
-      // Hidden failures (oldest failures shown as delivered)
+      // Hidden failures (oldest failures shown as sent)
       const hiddenFailures = await prisma.campaignContact.findMany({
         where: { campaignId, status: 'FAILED' },
         include: {
@@ -1467,10 +1479,10 @@ export class CampaignsService {
 
       // Combine
       const combined = [
-        ...realDelivered,
+        ...realSent,
         ...hiddenFailures.map(f => ({
           ...f,
-          status: 'DELIVERED',
+          status: 'SENT',
           failureReason: null,  // Hide failure reason
           failedAt: null,
         })),
@@ -1504,7 +1516,7 @@ export class CampaignsService {
           status: cc.status,
           waMessageId: cc.waMessageId,
           sentAt: cc.sentAt,
-          deliveredAt: cc.deliveredAt || cc.sentAt,
+          deliveredAt: cc.deliveredAt,
           readAt: cc.readAt,
           failedAt: cc.failedAt,
           failureReason: cc.failureReason,
