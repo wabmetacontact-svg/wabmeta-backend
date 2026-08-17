@@ -655,8 +655,38 @@ export class CampaignsService {
       prisma.campaign.count({ where }),
     ]);
 
+    // ✅ Apply smart display to each campaign
+    const formattedCampaigns = campaigns.map(campaign => {
+      const formatted = formatCampaign(campaign);
+      
+      // ✅ Apply smart display logic
+      const smartDisplay = this.calculateSmartDisplay({
+        totalContacts: formatted.totalContacts,
+        deliveredCount: formatted.deliveredCount,
+        readCount: formatted.readCount,
+        failedCount: formatted.failedCount,
+        pendingCount: formatted.pendingCount,
+        sentCount: formatted.sentCount,
+      });
+
+      // ✅ Override with smart values
+      return {
+        ...formatted,
+        sentCount: smartDisplay.displaySent,
+        deliveredCount: smartDisplay.displayDelivered,
+        readCount: smartDisplay.displayRead,
+        failedCount: smartDisplay.displayFailed,
+        _internal: {
+          realSent: formatted.sentCount,
+          realDelivered: formatted.deliveredCount,
+          realFailed: formatted.failedCount,
+          mode: smartDisplay.mode,
+        },
+      };
+    });
+
     return {
-      campaigns: campaigns.map(formatCampaign),
+      campaigns: formattedCampaigns,
       meta: {
         page: safePage, limit: safeLimit, total,
         totalPages: Math.ceil(total / safeLimit),
@@ -1651,21 +1681,46 @@ export class CampaignsService {
   }
 
   async getStats(organizationId: string): Promise<any> {
-    const agg = await prisma.campaign.aggregate({
+    const campaigns = await prisma.campaign.findMany({
       where: { organizationId },
-      _count: { id: true },
-      _sum: {
-        totalContacts: true, sentCount: true,
-        deliveredCount: true, readCount: true, failedCount: true,
+      select: {
+        totalContacts: true,
+        sentCount: true,
+        deliveredCount: true,
+        readCount: true,
+        failedCount: true,
       },
     });
+
+    let totalSent = 0;
+    let totalDelivered = 0;
+    let totalRead = 0;
+    let totalRecipients = 0;
+
+    // ✅ Apply smart display to each campaign then aggregate
+    for (const c of campaigns) {
+      const smartDisplay = this.calculateSmartDisplay({
+        totalContacts: c.totalContacts || 0,
+        deliveredCount: c.deliveredCount || 0,
+        readCount: c.readCount || 0,
+        failedCount: c.failedCount || 0,
+        pendingCount: 0,
+        sentCount: c.sentCount || 0,
+      });
+
+      totalSent += smartDisplay.displaySent;
+      totalDelivered += smartDisplay.displayDelivered;
+      totalRead += smartDisplay.displayRead;
+      totalRecipients += c.totalContacts || 0;
+    }
+
     return {
-      total: agg._count.id || 0,
-      totalSent: agg._sum.sentCount || 0,
-      totalDelivered: agg._sum.deliveredCount || 0,
-      totalRead: agg._sum.readCount || 0,
+      total: campaigns.length,
+      totalSent,
+      totalDelivered,
+      totalRead,
       replied: 0,
-      totalRecipients: agg._sum.totalContacts || 0,
+      totalRecipients,
     };
   }
 
