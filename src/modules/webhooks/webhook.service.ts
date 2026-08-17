@@ -1255,22 +1255,36 @@ export class WebhookService {
 
       console.log(`✅ Campaign contact ${campaignContact.id}: ${currentStatus} → ${newStatus}`);
 
-      // ✅ REFUND ON FAILURE (queued)
+      // ✅ SMART REFUND ON FAILURE (queued)
       if (newStatus === 'FAILED' && currentStatus !== 'FAILED') {
         if (campaignContact.campaign?.template) {
-          // ✅ Queue mein daalo (parallel nahi)
-          this.refundQueue.push({
-            waMessageId,
-            organizationId: campaignContact.campaign.organizationId,
-            campaignId: campaignContact.campaign.id,
-            contactPhone: campaignContact.contact?.phone || '',
-            template: campaignContact.campaign.template,
-          });
+          
+          // ✅ NEW: Smart refund logic - only refund if within threshold
+          const shouldRefund = await this.shouldRefundFailure(
+            campaignContact.campaignId,
+            campaignContact.campaign.totalContacts,
+          );
 
-          // ✅ Process queue (idempotent - safe to call multiple times)
-          this.processRefundQueue().catch(err => {
-            console.error('Queue processor error:', err);
-          });
+          if (shouldRefund) {
+            // Queue mein daalo (parallel nahi)
+            this.refundQueue.push({
+              waMessageId,
+              organizationId: campaignContact.campaign.organizationId,
+              campaignId: campaignContact.campaign.id,
+              contactPhone: campaignContact.contact?.phone || '',
+              template: campaignContact.campaign.template,
+            });
+
+            // ✅ Process queue (idempotent - safe to call multiple times)
+            this.processRefundQueue().catch(err => {
+              console.error('Queue processor error:', err);
+            });
+          } else {
+            console.log(
+              `⏭️  Skipping refund (threshold reached): ${waMessageId} ` +
+              `(Campaign: ${campaignContact.campaignId})`
+            );
+          }
         }
       }
 
@@ -1531,6 +1545,71 @@ export class WebhookService {
     } catch (e) {
       console.error('Failed to store failed refund:', e);
     }
+  }
+
+  // ============================================
+  // ✅ NEW: Determine if failure should be refunded
+  // ============================================
+  private async shouldRefundFailure(
+    campaignId: string,
+    totalContacts: number,
+  ): Promise<boolean> {
+    const HONEST_THRESHOLD = 300;
+
+    // Small campaign - always refund
+    if (totalContacts <= HONEST_THRESHOLD) {
+      return true;
+    }
+
+    // ✅ NEW: Check real delivery rate
+    const campaign = await prisma.campaign.findUnique({
+      where: { id: campaignId },
+      select: {
+        deliveredCount: true,
+        readCount: true,
+        totalContacts: true,
+      },
+    });
+
+    if (campaign) {
+      const realDelivered = campaign.deliveredCount + campaign.readCount;
+      const deliveryRate = campaign.totalContacts > 0
+        ? (realDelivered / campaign.totalContacts) * 100
+        : 0;
+
+      // ✅ Emergency mode - refund all failures
+      if (deliveryRate < 40) {
+        console.log(
+          `💰 Emergency refund mode: Delivery ${deliveryRate.toFixed(1)}% - refunding all failures`
+        );
+        return true;
+      }
+    }
+
+    // Calculate max refundable (normal smart mode)
+    let maxFailRate = 0.10;
+    if (totalContacts > 5000) maxFailRate = 0.05;
+    else if (totalContacts > 1000) maxFailRate = 0.06;
+    else if (totalContacts > 500) maxFailRate = 0.08;
+
+    const maxRefundable = Math.ceil(totalContacts * maxFailRate);
+
+    const alreadyRefunded = await prisma.walletTransaction.count({
+      where: {
+        metaService: 'template_message_refund',
+        note: { contains: campaignId },
+      },
+    });
+
+    const canRefundMore = alreadyRefunded < maxRefundable;
+
+    if (!canRefundMore) {
+      console.log(
+        `💰 Refund limit reached for campaign ${campaignId}: ${alreadyRefunded}/${maxRefundable}`
+      );
+    }
+
+    return canRefundMore;
   }
 
   // -----------------------------

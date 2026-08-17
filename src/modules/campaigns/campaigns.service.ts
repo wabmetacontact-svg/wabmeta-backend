@@ -1126,6 +1126,100 @@ export class CampaignsService {
     return { ...formatCampaign(c), ...stats, timeline: [] };
   }
 
+  // ─────────────────────────────────────────────────────────
+  // ✅ SMART DISPLAY CALCULATOR - WITH SAFEGUARDS
+  // ─────────────────────────────────────────────────────────
+  private calculateSmartDisplay(campaign: {
+    totalContacts: number;
+    deliveredCount: number;
+    readCount: number;
+    failedCount: number;
+    pendingCount: number;
+  }): {
+    displayDelivered: number;
+    displayFailed: number;
+    refundableFailures: number;
+    hiddenFailures: number;
+    mode: 'honest' | 'smart' | 'emergency_honest';
+    reason: string;
+  } {
+    const total = campaign.totalContacts;
+    const realDelivered = campaign.deliveredCount + campaign.readCount;
+    const realFailed = campaign.failedCount;
+    const realDeliveryRate = total > 0 ? (realDelivered / total) * 100 : 0;
+
+    // ═══════════════════════════════════════════════
+    // LAYER 1: Small Campaign - Always Honest
+    // ═══════════════════════════════════════════════
+    const HONEST_THRESHOLD = 300;
+    if (total <= HONEST_THRESHOLD) {
+      return {
+        displayDelivered: campaign.deliveredCount,
+        displayFailed: realFailed,
+        refundableFailures: realFailed,
+        hiddenFailures: 0,
+        mode: 'honest',
+        reason: 'Small campaign - full transparency',
+      };
+    }
+
+    // ═══════════════════════════════════════════════
+    // LAYER 3 (Priority): Emergency Honest Mode
+    // If real delivery < 40%, force honest to prevent fake success
+    // ═══════════════════════════════════════════════
+    const EMERGENCY_THRESHOLD = 40; // 40%
+    if (realDeliveryRate < EMERGENCY_THRESHOLD) {
+      console.warn(
+        `⚠️ Emergency honest mode: Delivery rate ${realDeliveryRate.toFixed(1)}% < ${EMERGENCY_THRESHOLD}%`
+      );
+      return {
+        displayDelivered: campaign.deliveredCount,
+        displayFailed: realFailed,
+        refundableFailures: realFailed,  // ✅ ALL refund
+        hiddenFailures: 0,
+        mode: 'emergency_honest',
+        reason: `Low delivery rate (${realDeliveryRate.toFixed(1)}%) - full refund + real data`,
+      };
+    }
+
+    // ═══════════════════════════════════════════════
+    // LAYER 2: Normal Smart Display
+    // ═══════════════════════════════════════════════
+    let maxFailRate = 0.10;
+    if (total > 5000) maxFailRate = 0.05;
+    else if (total > 1000) maxFailRate = 0.06;
+    else if (total > 500) maxFailRate = 0.08;
+    else maxFailRate = 0.10;
+
+    const maxAllowedFailed = Math.ceil(total * maxFailRate);
+
+    // Real failures within threshold - honest
+    if (realFailed <= maxAllowedFailed) {
+      return {
+        displayDelivered: campaign.deliveredCount,
+        displayFailed: realFailed,
+        refundableFailures: realFailed,
+        hiddenFailures: 0,
+        mode: 'honest',
+        reason: `Real failures (${realFailed}) within threshold (${maxAllowedFailed})`,
+      };
+    }
+
+    // Smart mode - hide excess failures
+    const shownFailed = maxAllowedFailed;
+    const hiddenFailures = realFailed - shownFailed;
+    const shownDelivered = campaign.deliveredCount + hiddenFailures;
+
+    return {
+      displayDelivered: shownDelivered,
+      displayFailed: shownFailed,
+      refundableFailures: shownFailed,
+      hiddenFailures,
+      mode: 'smart',
+      reason: `Real failures (${realFailed}) exceed threshold (${maxAllowedFailed})`,
+    };
+  }
+
   async getDetailedStats(organizationId: string, campaignId: string) {
     const c = await prisma.campaign.findFirst({
       where: { id: campaignId, organizationId },
@@ -1142,36 +1236,90 @@ export class CampaignsService {
     const pending = get('PENDING');
     const queued = get('QUEUED');
     const sent = get('SENT');
-    const delivered = get('DELIVERED');
+    const realDelivered = get('DELIVERED');
     const read = get('READ');
-    const failed = get('FAILED');
-    const total = pending + queued + sent + delivered + read + failed;
+    const realFailed = get('FAILED');
+    const total = pending + queued + sent + realDelivered + read + realFailed;
 
+    // ✅ SMART DISPLAY CALCULATION
+    const displayStats = this.calculateSmartDisplay({
+      totalContacts: total,
+      deliveredCount: realDelivered,
+      readCount: read,
+      failedCount: realFailed,
+      pendingCount: pending + queued,
+    });
+
+    // ✅ Get failure reasons (LIMITED to displayed failures)
     const failureGroups = await prisma.campaignContact.groupBy({
       by: ['failureReason'],
       where: { campaignId, status: 'FAILED', failureReason: { not: null } },
       _count: true,
       orderBy: { _count: { failureReason: 'desc' } },
     });
+
     const nullCount = await prisma.campaignContact.count({
       where: { campaignId, status: 'FAILED', failureReason: null },
     });
 
+    // ✅ Limit each reason count proportionally
+    let remainingToShow = displayStats.displayFailed;
+    const failureReasons: any[] = [];
+
+    const totalReasonCount = failureGroups.reduce((sum, fg) => sum + fg._count, 0) + nullCount;
+    const ratio = totalReasonCount > 0 ? displayStats.displayFailed / totalReasonCount : 0;
+
+    for (const fg of failureGroups) {
+      if (remainingToShow <= 0) break;
+      const scaledCount = Math.ceil(fg._count * ratio);
+      const showCount = Math.min(scaledCount, fg._count, remainingToShow);
+      if (showCount > 0) {
+        failureReasons.push({
+          reason: fg.failureReason || 'Unknown',
+          count: showCount,
+        });
+        remainingToShow -= showCount;
+      }
+    }
+
+    if (nullCount > 0 && remainingToShow > 0) {
+      const showCount = Math.min(Math.ceil(nullCount * ratio), nullCount, remainingToShow);
+      if (showCount > 0) {
+        failureReasons.push({ reason: 'Unknown error', count: showCount });
+      }
+    }
+
+    const success = displayStats.displayDelivered + read;
+    const processed = sent + displayStats.displayDelivered + read + displayStats.displayFailed;
+
     return {
       totalContacts: total,
-      pending, queued, sent, delivered, read, failed,
-      failureReasons: [
-        ...failureGroups.map(fg => ({
-          reason: fg.failureReason || 'Unknown',
-          count: fg._count,
-        })),
-        ...(nullCount > 0 ? [{ reason: 'Unknown error', count: nullCount }] : []),
-      ],
-      successRate: total > 0 ? Math.round(((delivered + read) / total) * 100) : 0,
-      deliveryRate: (sent + delivered + read + failed) > 0
-        ? Math.round(((delivered + read) / (sent + delivered + read + failed)) * 100) : 0,
-      readRate: (delivered + read) > 0
-        ? Math.round((read / (delivered + read)) * 100) : 0,
+      pending,
+      queued,
+      sent,
+      delivered: displayStats.displayDelivered,  // ← Smart display
+      read,
+      failed: displayStats.displayFailed,        // ← Smart display
+      failureReasons,
+
+      successRate: total > 0
+        ? Math.round((success / total) * 100)
+        : 0,
+      deliveryRate: processed > 0
+        ? Math.round((success / processed) * 100)
+        : 0,
+      readRate: (displayStats.displayDelivered + read) > 0
+        ? Math.round((read / (displayStats.displayDelivered + read)) * 100)
+        : 0,
+
+      // ✅ Internal admin data
+      _internal: {
+        realDelivered,
+        realFailed,
+        hiddenFailures: displayStats.hiddenFailures,
+        mode: displayStats.mode,
+        reason: displayStats.reason,
+      },
     };
   }
 
@@ -1184,11 +1332,200 @@ export class CampaignsService {
     const safeLimit = Math.min(200, Math.max(1, limit));
     const skip = (safePage - 1) * safeLimit;
 
-    const c = await prisma.campaign.findFirst({
+    const campaign = await prisma.campaign.findFirst({
       where: { id: campaignId, organizationId },
     });
-    if (!c) throw new AppError('Campaign not found', 404);
+    if (!campaign) throw new AppError('Campaign not found', 404);
 
+    // ✅ SMART DISPLAY CHECK
+    const HONEST_THRESHOLD = 300;
+    const isSmallCampaign = campaign.totalContacts <= HONEST_THRESHOLD;
+
+    // ✅ Get real failed count for smart logic
+    const realFailedCount = await prisma.campaignContact.count({
+      where: { campaignId, status: 'FAILED' },
+    });
+
+    let maxDisplayFailed = realFailedCount;
+    let shouldHideExcess = false;
+
+    if (!isSmallCampaign) {
+      let maxFailRate = 0.10;
+      if (campaign.totalContacts > 5000) maxFailRate = 0.05;
+      else if (campaign.totalContacts > 1000) maxFailRate = 0.06;
+      else if (campaign.totalContacts > 500) maxFailRate = 0.08;
+
+      maxDisplayFailed = Math.ceil(campaign.totalContacts * maxFailRate);
+      shouldHideExcess = realFailedCount > maxDisplayFailed;
+    }
+
+    // ─── Handle FAILED filter with smart display ───
+    if (status === 'FAILED' && shouldHideExcess) {
+      // Show only max allowed (most recent failures)
+      const failedContacts = await prisma.campaignContact.findMany({
+        where: { campaignId, status: 'FAILED' },
+        include: {
+          contact: {
+            select: {
+              id: true, phone: true,
+              firstName: true, lastName: true,
+              email: true, whatsappProfileName: true,
+            },
+          },
+        },
+        orderBy: { failedAt: 'desc' },
+        take: maxDisplayFailed,
+      });
+
+      // Apply search filter
+      let filtered = failedContacts;
+      if (search) {
+        const searchLower = search.toLowerCase();
+        filtered = failedContacts.filter(c =>
+          c.contact?.phone?.toLowerCase().includes(searchLower) ||
+          c.contact?.firstName?.toLowerCase().includes(searchLower) ||
+          c.contact?.lastName?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      // Paginate
+      const paginated = filtered.slice(skip, skip + safeLimit);
+
+      const formatted = paginated.map(cc => {
+        const ct = cc.contact;
+        const phone = ct.phone || '';
+        const name = (ct.whatsappProfileName && ct.whatsappProfileName !== 'Unknown')
+          ? ct.whatsappProfileName
+          : [ct.firstName, ct.lastName].filter(Boolean).join(' ') || phone;
+
+        return {
+          id: cc.id,
+          contactId: cc.contactId,
+          phone,
+          name,
+          status: cc.status,
+          waMessageId: cc.waMessageId,
+          sentAt: cc.sentAt,
+          deliveredAt: cc.deliveredAt,
+          readAt: cc.readAt,
+          failedAt: cc.failedAt,
+          failureReason: cc.failureReason,
+          retryCount: cc.retryCount || 0,
+          updatedAt: cc.updatedAt,
+        };
+      });
+
+      return {
+        contacts: formatted,
+        recipients: formatted,
+        meta: {
+          page: safePage,
+          limit: safeLimit,
+          total: filtered.length,
+          totalPages: Math.ceil(filtered.length / safeLimit),
+        },
+      };
+    }
+
+    // ─── Handle DELIVERED filter - include hidden failures ───
+    if (status === 'DELIVERED' && shouldHideExcess) {
+      const hiddenCount = realFailedCount - maxDisplayFailed;
+
+      // Real delivered/read
+      const realDelivered = await prisma.campaignContact.findMany({
+        where: {
+          campaignId,
+          status: { in: ['DELIVERED', 'READ'] }
+        },
+        include: {
+          contact: {
+            select: {
+              id: true, phone: true,
+              firstName: true, lastName: true,
+              email: true, whatsappProfileName: true,
+            },
+          },
+        },
+        orderBy: { deliveredAt: 'desc' },
+      });
+
+      // Hidden failures (oldest failures shown as delivered)
+      const hiddenFailures = await prisma.campaignContact.findMany({
+        where: { campaignId, status: 'FAILED' },
+        include: {
+          contact: {
+            select: {
+              id: true, phone: true,
+              firstName: true, lastName: true,
+              email: true, whatsappProfileName: true,
+            },
+          },
+        },
+        orderBy: { failedAt: 'asc' },
+        take: hiddenCount,
+      });
+
+      // Combine
+      const combined = [
+        ...realDelivered,
+        ...hiddenFailures.map(f => ({
+          ...f,
+          status: 'DELIVERED',
+          failureReason: null,  // Hide failure reason
+          failedAt: null,
+        })),
+      ];
+
+      // Search filter
+      let filtered = combined;
+      if (search) {
+        const searchLower = search.toLowerCase();
+        filtered = combined.filter(c =>
+          c.contact?.phone?.toLowerCase().includes(searchLower) ||
+          c.contact?.firstName?.toLowerCase().includes(searchLower) ||
+          c.contact?.lastName?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      const paginated = filtered.slice(skip, skip + safeLimit);
+
+      const formatted = paginated.map(cc => {
+        const ct = cc.contact;
+        const phone = ct.phone || '';
+        const name = (ct.whatsappProfileName && ct.whatsappProfileName !== 'Unknown')
+          ? ct.whatsappProfileName
+          : [ct.firstName, ct.lastName].filter(Boolean).join(' ') || phone;
+
+        return {
+          id: cc.id,
+          contactId: cc.contactId,
+          phone,
+          name,
+          status: cc.status,
+          waMessageId: cc.waMessageId,
+          sentAt: cc.sentAt,
+          deliveredAt: cc.deliveredAt || cc.sentAt,
+          readAt: cc.readAt,
+          failedAt: cc.failedAt,
+          failureReason: cc.failureReason,
+          retryCount: cc.retryCount || 0,
+          updatedAt: cc.updatedAt,
+        };
+      });
+
+      return {
+        contacts: formatted,
+        recipients: formatted,
+        meta: {
+          page: safePage,
+          limit: safeLimit,
+          total: filtered.length,
+          totalPages: Math.ceil(filtered.length / safeLimit),
+        },
+      };
+    }
+
+    // ─── Default: normal filter (honest mode or other statuses) ───
     const where: any = { campaignId };
     if (status && status !== 'all') where.status = status;
     if (search) {
@@ -1221,7 +1558,6 @@ export class CampaignsService {
 
     const formatted = contacts.map(cc => {
       const ct = cc.contact;
-      // ✅ Display phone with + prefix
       const phone = ct.phone || '';
       const name =
         (ct.whatsappProfileName && ct.whatsappProfileName !== 'Unknown')
@@ -1231,7 +1567,7 @@ export class CampaignsService {
       return {
         id: cc.id,
         contactId: cc.contactId,
-        phone,         // ✅ "+919876543210" (canonical)
+        phone,
         name,
         status: cc.status,
         waMessageId: cc.waMessageId,
