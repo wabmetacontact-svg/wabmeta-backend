@@ -3,6 +3,10 @@
 import { Router, Request } from 'express';
 import { authenticate } from '../../middleware/auth';
 import { inboxController } from './inbox.controller';
+import { inboxMediaService } from './inbox.media';
+import axios from 'axios';
+import prisma from '../../config/database';
+import { safeDecryptStrict } from '../../utils/encryption';
 
 import multer from 'multer';
 import fs from 'fs';
@@ -11,11 +15,115 @@ import path from 'path';
 const router = Router();
 
 // ==========================================
-// PUBLIC MEDIA PROXY (Used for showing images in UI)
+// ✅ Media proxy endpoint
 // ==========================================
-router.get('/media/:mediaId', (req, res, next) =>
-  inboxController.getMedia(req as any, res, next)
-);
+router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
+  try {
+    const { mediaId } = req.params;
+    const organizationId = req.user?.organizationId;
+    
+    if (!organizationId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    if (!mediaId || !/^\d+$/.test(mediaId)) {
+      return res.status(400).json({ error: 'Invalid media ID' });
+    }
+    
+    console.log(`📥 Media proxy request: ${mediaId} for org ${organizationId}`);
+    
+    // ✅ Step 1: Try to find in database (Cloudinary URL)
+    const message = await prisma.message.findFirst({
+      where: {
+        mediaId,
+        conversation: { organizationId },
+      },
+      select: {
+        mediaUrl: true,
+        mediaMimeType: true,
+        fileName: true,
+        metadata: true,
+      },
+    });
+    
+    // ✅ Step 2: Cloudinary URL hai toh redirect
+    const meta = (message?.metadata as any) || {};
+    const cloudinaryUrl = meta.cloudinaryUrl || 
+                         (message?.mediaUrl?.includes('cloudinary.com') 
+                           ? message.mediaUrl 
+                           : null);
+    
+    if (cloudinaryUrl) {
+      console.log(`☁️ Redirecting to Cloudinary: ${mediaId}`);
+      return res.redirect(cloudinaryUrl);
+    }
+    
+    // ✅ Step 3: Meta se fetch karo
+    let accessToken: string | null = null;
+    
+    const account = await prisma.whatsAppAccount.findFirst({
+      where: { organizationId, isActive: true },
+    });
+    
+    if (account?.accessToken) {
+      accessToken = safeDecryptStrict(account.accessToken);
+    }
+    
+    if (!accessToken) {
+      const connection = await prisma.metaConnection.findFirst({
+        where: { organizationId },
+      });
+      if (connection?.accessToken) {
+        accessToken = safeDecryptStrict(connection.accessToken);
+      }
+    }
+    
+    if (!accessToken) {
+      return res.status(404).json({ error: 'No WhatsApp account configured' });
+    }
+    
+    // Get media URL from Meta
+    const mediaUrl = await inboxMediaService.getMediaUrl(mediaId, accessToken);
+    
+    if (!mediaUrl) {
+      return res.status(404).json({ error: 'Media not found on Meta' });
+    }
+    
+    // Download from Meta CDN
+    const mediaResponse = await axios.get(mediaUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      maxContentLength: 100 * 1024 * 1024, // 100MB
+    });
+    
+    const mimeType = mediaResponse.headers['content-type'] || 
+                     message?.mediaMimeType || 
+                     'application/octet-stream';
+    
+    const fileName = message?.fileName || `file_${mediaId}`;
+    
+    // ✅ Send to client with proper headers
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader(
+      'Content-Disposition', 
+      `inline; filename="${fileName}"`
+    );
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour cache
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    
+    return res.send(Buffer.from(mediaResponse.data));
+    
+  } catch (error: any) {
+    console.error('Media proxy error:', error.message);
+    return res.status(500).json({ 
+      error: 'Failed to fetch media',
+      details: error.message,
+    });
+  }
+});
 
 router.get('/media-proxy', (req, res, next) =>
   inboxController.getMedia(req as any, res, next)
