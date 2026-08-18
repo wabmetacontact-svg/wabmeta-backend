@@ -53,7 +53,21 @@ const getFormatFromMime = (mimeType: string): string => {
 const getResourceType = (mimeType: string): 'image' | 'video' | 'raw' => {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('video/')) return 'video';
-  return 'raw'; // PDF, docs, audio all go to raw
+  if (mimeType.startsWith('audio/')) return 'video'; // ✅ Audio = video type in Cloudinary
+  return 'raw';
+};
+
+// ✅ NEW: Check if needs attachment flag
+const needsAttachmentFlag = (mimeType: string): boolean => {
+  const attachTypes = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats',
+    'application/vnd.ms-',
+    'text/',
+    'application/zip',
+  ];
+  return attachTypes.some(t => mimeType.toLowerCase().includes(t));
 };
 
 const getMediaCategory = (mimeType: string): 'image' | 'video' | 'audio' | 'document' => {
@@ -317,6 +331,8 @@ export class CloudinaryService {
 
     return new Promise((resolve, reject) => {
       const folder = `wabmeta-inbound/${organizationId}`;
+      
+      // ✅ FIX: Public ID - always include extension for raw
       const publicId = resourceType === 'raw'
         ? `${messageId}.${format}`
         : messageId;
@@ -330,8 +346,15 @@ export class CloudinaryService {
         use_filename: false,
         type: 'upload',
         access_mode: 'public',
-        format: resourceType === 'raw' ? format : undefined,
+        
+        // ✅ FIX: For raw files, DON'T pass format (causes issues)
+        // Format already in public_id extension
       };
+
+      // ✅ FIX: Format only for non-raw
+      if (resourceType !== 'raw') {
+        uploadOptions.format = format;
+      }
 
       const uploadStream = cloudinary.uploader.upload_stream(
         uploadOptions,
@@ -345,12 +368,31 @@ export class CloudinaryService {
             return reject(new Error('No result from Cloudinary'));
           }
 
+          // ✅ FIX: Build proper URL based on file type
           let finalUrl = result.secure_url;
-          if (resourceType === 'raw' && !finalUrl.match(/\.[a-z0-9]{2,5}(\?|$)/i)) {
-            finalUrl = `${finalUrl}.${format}`;
+
+          // For PDFs and documents - add fl_attachment for downloads
+          // OR use raw URL as-is
+          if (resourceType === 'raw') {
+            // Ensure extension in URL
+            if (!finalUrl.match(/\.[a-z0-9]{2,5}(\?|$)/i)) {
+              finalUrl = `${finalUrl}.${format}`;
+            }
+            
+            // ✅ For PDFs - viewable in browser
+            // For other docs - force download via fl_attachment
+            if (needsAttachmentFlag(mimeType) && mimeType !== 'application/pdf') {
+              // Insert fl_attachment after /upload/
+              finalUrl = finalUrl.replace(
+                '/upload/',
+                '/upload/fl_attachment/'
+              );
+            }
           }
 
-          console.log(`☁️ Inbound backup: ${result.public_id} (${(result.bytes / 1024).toFixed(1)} KB)`);
+          console.log(`☁️ Inbound backup: ${result.public_id}`);
+          console.log(`   URL: ${finalUrl}`);
+          console.log(`   Size: ${(result.bytes / 1024).toFixed(1)} KB`);
 
           resolve({
             url: finalUrl,

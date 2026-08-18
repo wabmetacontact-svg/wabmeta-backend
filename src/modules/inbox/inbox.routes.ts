@@ -21,6 +21,7 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
   try {
     const { mediaId } = req.params;
     const organizationId = req.user?.organizationId;
+    const download = req.query.download === 'true'; // ✅ NEW
     
     if (!organizationId) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -32,7 +33,7 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
     
     console.log(`📥 Media proxy request: ${mediaId} for org ${organizationId}`);
     
-    // ✅ Step 1: Try to find in database (Cloudinary URL)
+    // Find message
     const message = await prisma.message.findFirst({
       where: {
         mediaId,
@@ -46,16 +47,44 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
       },
     });
     
-    // ✅ Step 2: Cloudinary URL hai toh redirect
     const meta = (message?.metadata as any) || {};
     const cloudinaryUrl = meta.cloudinaryUrl || 
                          (message?.mediaUrl?.includes('cloudinary.com') 
                            ? message.mediaUrl 
                            : null);
     
+    // ✅ FIX: If Cloudinary URL exists, PROXY it (don't redirect)
+    // This avoids Cloudinary PDF issues
     if (cloudinaryUrl) {
-      console.log(`☁️ Redirecting to Cloudinary: ${mediaId}`);
-      return res.redirect(cloudinaryUrl);
+      try {
+        console.log(`☁️ Fetching from Cloudinary: ${mediaId}`);
+        const response = await axios.get(cloudinaryUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+        });
+        
+        const mimeType = message?.mediaMimeType || 
+                        response.headers['content-type'] || 
+                        'application/octet-stream';
+        
+        const fileName = message?.fileName || `file_${mediaId}`;
+        
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader(
+          'Content-Disposition',
+          download 
+            ? `attachment; filename="${fileName}"`
+            : `inline; filename="${fileName}"`
+        );
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        
+        return res.send(Buffer.from(response.data));
+        
+      } catch (err: any) {
+        console.error('Cloudinary fetch failed, trying Meta:', err.message);
+        // Fall through to Meta fetch
+      }
     }
     
     // ✅ Step 3: Meta se fetch karo
@@ -109,7 +138,9 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
     res.setHeader('Content-Type', mimeType);
     res.setHeader(
       'Content-Disposition', 
-      `inline; filename="${fileName}"`
+      download 
+        ? `attachment; filename="${fileName}"`
+        : `inline; filename="${fileName}"`
     );
     res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour cache
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -117,7 +148,7 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
     return res.send(Buffer.from(mediaResponse.data));
     
   } catch (error: any) {
-    console.error('Media proxy error:', error.message);
+    console.error('Media proxy error:', error.message || error);
     return res.status(500).json({ 
       error: 'Failed to fetch media',
       details: error.message,
