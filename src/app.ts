@@ -80,14 +80,25 @@ const allowedOrigins = [
   'https://www.wabmeta.com',
   'http://localhost:5173',
   'http://localhost:3000',
+  'http://localhost:8081',
+  'http://localhost:8082',
+  'http://localhost:19006',
+  'http://localhost:19000',
 ];
 
 app.use(
   cors({
     origin: (origin, callback) => {
+      // No origin = mobile app or Postman
       if (!origin) return callback(null, true);
-      const isVercel =
-        origin.endsWith('.vercel.app') || origin.includes('vercel.app');
+      
+      const isVercel = origin.endsWith('.vercel.app');
+      
+      // Development mein sab allow
+      if (process.env.NODE_ENV === 'development') {
+        return callback(null, true);
+      }
+      
       if (allowedOrigins.includes(origin) || isVercel) {
         callback(null, true);
       } else {
