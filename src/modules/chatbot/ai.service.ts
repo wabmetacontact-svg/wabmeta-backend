@@ -10,18 +10,25 @@ interface ChatMessage {
   content: string;
 }
 
+// ✅ FINAL BEST MODEL ORDER - Verified from your API key
+const AI_MODELS = [
+  'gemini-3.5-flash',       // 🥇 PRIMARY   - Newest, Thinking, 1M context
+  'gemini-2.5-flash',       // 🥈 FALLBACK  - Stable & proven
+  'gemini-2.5-flash-lite',  // 🥉 FALLBACK2 - Fast & light
+] as const;
+
+type ModelName = typeof AI_MODELS[number];
+
 class AIService {
   private genAI: GoogleGenerativeAI;
 
-  // ✅ BEST FREE MODEL - Most quota available
-  private readonly PRIMARY_MODEL = 'gemini-2.0-flash-lite';
-  private readonly FALLBACK_MODEL = 'gemini-flash-lite-latest';
-
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
-    console.log('🔑 GEMINI_API_KEY:', apiKey ?
-      `✅ Found (${apiKey.substring(0, 15)}...)` :
-      '❌ NOT FOUND'
+    console.log(
+      '🔑 GEMINI_API_KEY:',
+      apiKey
+        ? `✅ Found (${apiKey.substring(0, 15)}...)`
+        : '❌ NOT FOUND'
     );
     this.genAI = new GoogleGenerativeAI(apiKey || '');
   }
@@ -34,79 +41,116 @@ class AIService {
     userMessage: string,
     chatHistory: ChatMessage[] = []
   ): Promise<string> {
-    try {
-      if (!process.env.GEMINI_API_KEY) {
-        console.error('❌ GEMINI_API_KEY missing!');
-        return 'AI service is not configured.';
-      }
+    if (!process.env.GEMINI_API_KEY) {
+      console.error('❌ GEMINI_API_KEY missing!');
+      return 'AI service is not configured.';
+    }
 
-      // ✅ Validate history - remove empty strings
-      const cleanHistory = chatHistory.filter(
-        msg => msg.content?.trim().length > 0
-      );
+    // Clean + limit history
+    // 3.5 flash 1M context hai - 50 messages easily handle karta hai
+    const cleanHistory = chatHistory
+      .filter(msg => msg.content?.trim().length > 0)
+      .slice(-50); // ✅ 50 messages - 1M context ka faida uthao
 
-      // ✅ Keep last 20 messages for context (not 15)
-      const recentHistory = cleanHistory.slice(-20);
+    let lastError: Error | null = null;
 
+    for (const modelName of AI_MODELS) {
       try {
         return await this.callModel(
-          this.PRIMARY_MODEL,
+          modelName,
           systemPrompt,
           userMessage,
-          recentHistory
+          cleanHistory
         );
-      } catch (primaryError: any) {
-        const errorMsg = primaryError?.message || '';
-        
-        if (
-          errorMsg.includes('429') ||
-          errorMsg.includes('quota') ||
-          errorMsg.includes('503') ||
-          errorMsg.includes('RESOURCE_EXHAUSTED')
-        ) {
-          console.warn(`⚠️ Primary model quota exceeded, trying fallback...`);
-          await this.sleep(1000); // Brief wait
-          return await this.callModel(
-            this.FALLBACK_MODEL,
-            systemPrompt,
-            userMessage,
-            recentHistory
-          );
+      } catch (error: any) {
+        lastError = error;
+        const errMsg = error?.message || '';
+
+        console.warn(
+          `⚠️ Model [${modelName}] failed: ${errMsg.substring(0, 100)}`
+        );
+
+        const shouldTryNext =
+          errMsg.includes('404') ||
+          errMsg.includes('not found') ||
+          errMsg.includes('deprecated') ||
+          errMsg.includes('429') ||
+          errMsg.includes('quota') ||
+          errMsg.includes('RESOURCE_EXHAUSTED') ||
+          errMsg.includes('503') ||
+          errMsg.includes('overloaded') ||
+          errMsg.includes('unavailable');
+
+        if (shouldTryNext) {
+          if (
+            errMsg.includes('429') ||
+            errMsg.includes('RESOURCE_EXHAUSTED')
+          ) {
+            console.warn(`⏳ Rate limit on [${modelName}], waiting 1s...`);
+            await this.sleep(1000);
+          }
+          continue;
         }
-        throw primaryError;
+
+        // API Key invalid
+        if (
+          errMsg.includes('401') ||
+          errMsg.includes('403') ||
+          errMsg.includes('API_KEY_INVALID')
+        ) {
+          console.error('❌ API Key invalid - stopping retries');
+          return 'AI service is temporarily unavailable.';
+        }
+
+        // Safety block
+        if (errMsg.includes('SAFETY') || errMsg.includes('blocked')) {
+          return 'I cannot discuss this topic. Do you have any other questions? 😊';
+        }
+
+        continue;
       }
-
-    } catch (error: any) {
-      console.error('❌ All models failed:', error?.message?.substring(0, 150));
-      return this.handleError(error);
     }
-  }
 
-  // ✅ Sleep helper
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    console.error(
+      '❌ All models failed:',
+      lastError?.message?.substring(0, 150)
+    );
+    return this.handleError(lastError);
   }
 
   // ==========================================
   // Core Model Call
   // ==========================================
   private async callModel(
-    modelName: string,
+    modelName: ModelName,
     systemPrompt: string,
     userMessage: string,
     chatHistory: ChatMessage[]
   ): Promise<string> {
-    console.log(`🤖 Calling [${modelName}]: "${userMessage.substring(0, 40)}"`);
+    console.log(
+      `🤖 Calling [${modelName}]: "${userMessage.substring(0, 40)}"`
+    );
+
+    // ✅ Gemini 3.5 Flash thinking model config
+    const isThinkingModel = modelName === 'gemini-3.5-flash';
+
+    const generationConfig: any = {
+      temperature: isThinkingModel ? 1 : 0.7, // Thinking model needs temp=1
+      topK: isThinkingModel ? 64 : 40,        // As per API response
+      topP: 0.95,
+      maxOutputTokens: 512, // WhatsApp ke liye short rakho
+      // ✅ Thinking budget - short responses ke liye kam thinking
+      ...(isThinkingModel && {
+        thinkingConfig: {
+          thinkingBudget: 512, // Low budget = faster response
+        }
+      }),
+    };
 
     const model = this.genAI.getGenerativeModel({
       model: modelName,
       systemInstruction: this.buildSystemInstruction(systemPrompt),
-      generationConfig: {
-        temperature: 0.7,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 512,
-      },
+      generationConfig,
       safetySettings: [
         {
           category: HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -182,6 +226,7 @@ ALWAYS keep previous messages in mind.
   // ==========================================
   private buildGeminiHistory(chatHistory: ChatMessage[]) {
     if (!chatHistory?.length) return [];
+
     return chatHistory
       .filter(msg => msg.content?.trim())
       .map(msg => ({
@@ -196,62 +241,76 @@ ALWAYS keep previous messages in mind.
   private handleError(error: any): string {
     const msg = error?.message || '';
 
-    if (msg.includes('429') || msg.includes('quota')) {
+    if (
+      msg.includes('429') ||
+      msg.includes('quota') ||
+      msg.includes('RESOURCE_EXHAUSTED')
+    ) {
       return 'We are currently experiencing high volume. Please try again in 2 minutes! ⏳';
     }
-    if (msg.includes('503')) {
+    if (msg.includes('503') || msg.includes('overloaded')) {
       return 'The server is currently busy. Please try again in a moment. ⏳';
     }
-    if (msg.includes('401') || msg.includes('API_KEY')) {
+    if (msg.includes('401') || msg.includes('403') || msg.includes('API_KEY')) {
       return 'AI service is temporarily unavailable.';
     }
     if (msg.includes('404') || msg.includes('not found')) {
       return 'The AI service is updating. Please try again in a moment.';
     }
-    if (msg.includes('SAFETY')) {
+    if (msg.includes('SAFETY') || msg.includes('blocked')) {
       return 'I cannot discuss this topic. Do you have any other questions? 😊';
     }
     return 'A technical issue occurred. Please try again! 🔧';
   }
 
   // ==========================================
-  // Summarize - Better prompt
+  // Summarize - Lite model (cheap & fast)
   // ==========================================
   async summarizeConversation(messages: ChatMessage[]): Promise<string> {
     try {
       if (!process.env.GEMINI_API_KEY || messages.length < 10) return '';
-      
+
+      // ✅ Summarize ke liye lite use karo - save quota
       const model = this.genAI.getGenerativeModel({
-        model: this.PRIMARY_MODEL,
-        generationConfig: { 
-          temperature: 0.2,  // Low temp for factual summary
-          maxOutputTokens: 150 
+        model: 'gemini-2.5-flash-lite',
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 150,
         },
       });
-      
+
       const text = messages
-        .map(m => `${m.role === 'user' ? 'Customer' : 'Bot'}: ${m.content}`)
+        .map(
+          m => `${m.role === 'user' ? 'Customer' : 'Bot'}: ${m.content}`
+        )
         .join('\n');
-      
+
       const result = await model.generateContent(
         `Provide a 3-4 line summary of the following WhatsApp conversation.
-        Include important points: what the user asked, what the bot replied,
-        and any key details such as name, order details, or complaints.
-        
-        Conversation:
-        ${text}
-        
-        Summary:`
+Include: what the user asked, what the bot replied,
+and any key details such as name, order details, or complaints.
+
+Conversation:
+${text}
+
+Summary:`
       );
-      
+
       const summary = result.response.text().trim();
       console.log(`📝 Summary generated: "${summary.substring(0, 80)}..."`);
       return summary;
-      
+
     } catch (error: any) {
       console.warn('⚠️ Summarize failed:', error.message);
       return '';
-    } 
+    }
+  }
+
+  // ==========================================
+  // Helper
+  // ==========================================
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
