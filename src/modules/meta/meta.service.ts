@@ -817,15 +817,8 @@ export class MetaService {
 
     try {
       const debugInfo = await metaApi.debugToken(accessToken);
-      if (!debugInfo.data.is_valid) {
-        await prisma.whatsAppAccount.update({
-          where: { id: accountId },
-          data: {
-            status: WhatsAppAccountStatus.DISCONNECTED,
-            accessToken: null,
-            tokenExpiresAt: null,
-          }
-        });
+      if (debugInfo?.data && debugInfo.data.is_valid === false) {
+        metaLog.warn('debugToken returned is_valid: false', { accountId });
         return { healthy: false, reason: 'Token expired', action: 'Reconnect' };
       }
 
@@ -839,12 +832,12 @@ export class MetaService {
         await prisma.whatsAppAccount.update({
           where: { id: accountId },
           data: {
-            qualityRating: phoneInfo?.quality_rating,
+            qualityRating: phoneInfo?.quality_rating || account.qualityRating,
             displayName: phoneInfo?.verified_name || account.displayName,
-            verifiedName: phoneInfo?.verified_name,
+            verifiedName: phoneInfo?.verified_name || account.verifiedName,
             status: WhatsAppAccountStatus.CONNECTED,
-            codeVerificationStatus: phoneInfo?.code_verification_status,
-            messagingLimit: phoneInfo?.messaging_limit_tier,
+            codeVerificationStatus: phoneInfo?.code_verification_status || account.codeVerificationStatus,
+            messagingLimit: phoneInfo?.messaging_limit_tier || account.messagingLimit,
           } as any,
         });
 
@@ -853,31 +846,29 @@ export class MetaService {
           qualityRating: phoneInfo?.quality_rating,
           verifiedName: phoneInfo?.verified_name,
           messagingLimit: phoneInfo?.messaging_limit_tier,
+          codeVerificationStatus: phoneInfo?.code_verification_status,
         };
       } catch (phoneErr: any) {
-        // Phone not found or deleted
-        await prisma.whatsAppAccount.update({
-          where: { id: accountId },
-          data: { status: WhatsAppAccountStatus.DISCONNECTED }
+        // Phone verification pending or temporary API warning - DO NOT disconnect
+        metaLog.warn('Phone info check warning (number may need verification in Meta):', {
+          error: phoneErr.message,
+          phoneNumberId: account.phoneNumberId,
         });
+
         return {
-          healthy: false,
-          reason: 'Phone number not accessible',
-          action: 'Reconnect'
+          healthy: true,
+          qualityRating: account.qualityRating || 'UNKNOWN',
+          verifiedName: account.verifiedName || account.displayName,
+          messagingLimit: account.messagingLimit || 'TIER_250',
+          reason: 'Phone registration pending verification in Meta',
         };
       }
     } catch (error: any) {
-      await prisma.whatsAppAccount.update({
-        where: { id: accountId },
-        data: {
-          status: WhatsAppAccountStatus.DISCONNECTED,
-          accessToken: null,
-        }
-      });
+      metaLog.warn('Health check warning:', { error: error.message, accountId });
       return {
         healthy: false,
-        reason: error.message,
-        action: 'Reconnect'
+        reason: error.message || 'Health check warning',
+        action: 'Check Meta Connection',
       };
     }
   }
@@ -908,24 +899,18 @@ export class MetaService {
     } catch (error: any) {
       console.error(`❌ Template sync API call failed for account ${accountId}:`, error.message);
       
-      const isTokenError = 
-        error.message?.includes('token') || 
-        error.message?.includes('OAuth') || 
-        error.status === 401 || 
-        error.status === 403 || 
-        error.message?.includes('190') || 
-        error.message?.includes('133010') ||
-        error.message?.includes('not registered');
+      // Only disconnect on confirmed OAuth session expiration (code 190)
+      const metaCode = error.response?.data?.error?.code;
+      const isTokenExpired = metaCode === 190 || error.message?.includes('Error validating access token: Session has expired');
 
-      if (isTokenError) {
-        console.warn(`⚠️ Deactivating broken account ${accountId} due to template sync API error`);
+      if (isTokenExpired) {
+        console.warn(`⚠️ Token expired for account ${accountId} (code 190)`);
         await prisma.whatsAppAccount.update({
           where: { id: accountId },
           data: {
             status: WhatsAppAccountStatus.DISCONNECTED,
-            accessToken: null,
           },
-        }).catch((e) => console.error('Failed to disconnect account in template sync error path:', e));
+        }).catch((e) => console.error('Failed to update account status:', e));
       }
       throw error;
     }
@@ -1186,27 +1171,19 @@ export class MetaService {
 
       console.log(`✅ Background sync: ${synced}/${templates.length} templates`);
     } catch (error: any) {
-      console.error('❌ Background template sync failed:', error);
+      console.error('❌ Background template sync failed:', error.message || error);
       
-      const isTokenError = 
-        error.message?.includes('token') || 
-        error.message?.includes('OAuth') || 
-        error.status === 401 || 
-        error.status === 403 || 
-        error.message?.includes('190') || 
-        error.message?.includes('133010') ||
-        error.message?.includes('not registered');
+      const metaCode = error.response?.data?.error?.code;
+      const isTokenExpired = metaCode === 190 || error.message?.includes('Error validating access token: Session has expired');
 
-      if (isTokenError) {
-        console.warn(`⚠️ Deactivating broken account ${accountId} due to background sync API error`);
+      if (isTokenExpired) {
+        console.warn(`⚠️ Token expired for account ${accountId} (code 190)`);
         await prisma.whatsAppAccount.update({
           where: { id: accountId },
           data: {
             status: WhatsAppAccountStatus.DISCONNECTED,
-            accessToken: null,
-            webhookSecret: null,
           },
-        }).catch((e) => console.error('Failed to disconnect account in background sync error path:', e));
+        }).catch((e) => console.error('Failed to update account status:', e));
       }
     } finally {
       if (redis && lockAcquired) {

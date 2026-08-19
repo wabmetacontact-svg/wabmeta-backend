@@ -283,8 +283,10 @@ function buildTemplateMessage(
 // ─── CampaignsService ─────────────────────────────────────────
 export class CampaignsService {
 
-  // ✅ FIX Bug4: DB-backed lock check (in-memory Set + DB fallback)
+  // ✅ In-memory process and pause tracking for instant response
   private processingCampaigns = new Set<string>();
+  private pausedCampaigns = new Set<string>();
+  private cancelledCampaigns = new Set<string>();
 
   // ─── Count helpers ────────────────────────────────────────
   private async getQuickCounts(campaignId: string) {
@@ -815,6 +817,9 @@ export class CampaignsService {
   // START
   // ─────────────────────────────────────────────────────────
   async start(organizationId: string, campaignId: string): Promise<any> {
+    this.pausedCampaigns.delete(campaignId);
+    this.cancelledCampaigns.delete(campaignId);
+
     const campaign = await prisma.campaign.findFirst({
       where: { id: campaignId, organizationId },
       include: { template: true, whatsappAccount: true },
@@ -941,6 +946,10 @@ export class CampaignsService {
       throw new AppError('Only running campaigns can be paused', 400);
     }
 
+    // ✅ Instant in-memory halt signal
+    this.pausedCampaigns.add(campaignId);
+    this.processingCampaigns.delete(campaignId);
+
     const updated = await prisma.campaign.update({
       where: { id: campaignId },
       data: { status: 'PAUSED' },
@@ -962,6 +971,11 @@ export class CampaignsService {
     if (!['PAUSED', 'FAILED'].includes(c.status)) {
       throw new AppError(`Cannot resume campaign (status: ${c.status})`, 400);
     }
+
+    // Clear pause signals
+    this.pausedCampaigns.delete(campaignId);
+    this.cancelledCampaigns.delete(campaignId);
+    this.processingCampaigns.delete(campaignId);
 
     const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
     if (wallet?.isActive) {
@@ -1002,6 +1016,10 @@ export class CampaignsService {
     if (c.status === 'COMPLETED') {
       throw new AppError('Cannot cancel completed campaign', 400);
     }
+
+    // ✅ Instant cancel signal
+    this.cancelledCampaigns.add(campaignId);
+    this.processingCampaigns.delete(campaignId);
 
     const updated = await prisma.campaign.update({
       where: { id: campaignId },
@@ -2161,13 +2179,22 @@ export class CampaignsService {
         if (contacts.length === 0) { hasMore = false; break; }
 
         for (let i = 0; i < contacts.length; i += CONCURRENCY) {
-          // Periodic status check
-          if (totalProcessed > 0 && totalProcessed % 300 === 0) {
-            const chk = await prisma.campaign.findUnique({
-              where: { id: campaignId },
-              select: { status: true },
-            });
-            if (chk?.status !== 'RUNNING') break;
+          // ✅ Instant In-Memory Pause/Cancel Check
+          if (this.pausedCampaigns.has(campaignId) || this.cancelledCampaigns.has(campaignId)) {
+            console.log(`🛑 [Campaign ${campaignId}] Instant pause/cancel signal detected - halting immediately`);
+            hasMore = false;
+            break;
+          }
+
+          // ✅ DB Status Check on every chunk
+          const chk = await prisma.campaign.findUnique({
+            where: { id: campaignId },
+            select: { status: true },
+          });
+          if (chk?.status !== 'RUNNING') {
+            console.log(`🛑 [Campaign ${campaignId}] Campaign is ${chk?.status} in DB - halting worker immediately`);
+            hasMore = false;
+            break;
           }
 
           // Mid-campaign balance check
@@ -2520,7 +2547,12 @@ export class CampaignsService {
       }
 
       // ── Mark complete ─────────────────────────────────────
-      if (final.pendingCount === 0) {
+      const latestCampaign = await prisma.campaign.findUnique({
+        where: { id: campaignId },
+        select: { status: true },
+      });
+
+      if (latestCampaign?.status === 'RUNNING' && final.pendingCount === 0) {
         // ✅ NEW: Smart status based on success rate
         const totalProcessed = final.sentCount + final.failedCount;
         const successRate = totalProcessed > 0 

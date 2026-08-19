@@ -1537,18 +1537,18 @@ private buildTemplateComponents(
       const code      = errorData?.code;
       const message   = errorData?.message || '';
 
-      // ✅ FIX: Handle deleted phone (code 100, subcode 33)
+      // Handle phone explicitly deleted from Meta (code 100, subcode 33)
+      const subcode = errorData?.error_subcode;
       if (
         code === 100 &&
-        (message.includes('does not exist') ||
-         message.includes('missing permissions'))
+        subcode === 33 &&
+        message.includes('does not exist')
       ) {
         console.warn(
           `⚠️ Phone no longer exists in Meta. ` +
           `Marking account as DISCONNECTED.`
         );
 
-        // Mark account as disconnected
         await prisma.whatsAppAccount.update({
           where: { id: accountId },
           data: {

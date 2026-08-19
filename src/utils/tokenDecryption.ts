@@ -69,17 +69,9 @@ export async function getAccountWithDecryptedToken(
     });
   }
 
-  // ✅ Token invalid - mark disconnected
+  // ✅ Token could not be decrypted - return null without wiping DB record
   if (!finalToken) {
-    await prisma.whatsAppAccount.update({
-      where: { id: accountId },
-      data: {
-        status:         WhatsAppAccountStatus.DISCONNECTED,
-        accessToken:    null,
-        tokenExpiresAt: null,
-      },
-    }).catch(() => {});
-    
+    authLog.warn('Could not retrieve valid decrypted token for account', { accountId });
     return null;
   }
 
