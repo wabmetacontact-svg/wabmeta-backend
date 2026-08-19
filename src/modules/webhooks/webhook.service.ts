@@ -32,6 +32,7 @@ export class WebhookService {
     template: any;
   }> = [];
   private refundProcessing = false;
+  private emergencyLoggedCampaigns = new Set<string>();
 
   private accountCache = new Map<string, { data: any; expiresAt: number }>();
   private readonly CACHE_TTL = 5 * 60 * 1000;
@@ -585,15 +586,21 @@ export class WebhookService {
       return;
     }
 
-    // ✅ Sirf status update karo - headerContent mat touch karo
+    const updateData: any = {
+      status: newStatus as any,
+      rejectionReason: rejectionReason || null,
+    };
+
+    // ✅ FIX: After APPROVAL, handle is no longer needed (Meta stores media internally)
+    // Clear it so campaigns use URL fallback (which is Cloudinary - permanent)
+    if (newStatus === 'APPROVED') {
+      updateData.headerMediaId = null;
+      updateData.headerMediaUploadedAt = null;
+    }
+
     await prisma.template.update({
       where: { id: template.id },
-      data: {
-        status: newStatus as any,
-        rejectionReason: rejectionReason || null,
-        // ✅ headerContent (Cloudinary URL) NEVER overwrite karo from webhook
-        // Meta webhook mein media URL scontent hota hai (expires)
-      },
+      data: updateData,
     });
 
     console.log(`✅ Webhook: Template ${metaTemplateId} → ${newStatus}`);
@@ -1099,6 +1106,29 @@ export class WebhookService {
     statusObj: any,
     organizationId: string
   ) {
+    // ✅ FIX: Prevent status regression
+    const STATUS_PRIORITY: Record<string, number> = {
+      'PENDING': 0,
+      'QUEUED': 1,
+      'SENT': 2,
+      'DELIVERED': 3,
+      'READ': 4,
+      'FAILED': 5, // Terminal state
+    };
+
+    const currentPriority = STATUS_PRIORITY[message.status] ?? 0;
+    const newPriority = STATUS_PRIORITY[newStatus] ?? 0;
+
+    // Skip downgrades (except FAILED which is terminal)
+    if (newStatus !== 'FAILED' && newPriority <= currentPriority) {
+      return;
+    }
+
+    // Skip if already FAILED (terminal)
+    if (message.status === 'FAILED' && newStatus !== 'FAILED') {
+      return;
+    }
+
     const updatedMessage = await prisma.message.update({
       where: { id: message.id },
       data: {
@@ -1579,9 +1609,16 @@ export class WebhookService {
 
       // ✅ Emergency mode - refund all failures
       if (deliveryRate < 40) {
-        console.log(
-          `💰 Emergency refund mode: Delivery ${deliveryRate.toFixed(1)}% - refunding all failures`
-        );
+        // ✅ FIX: Log only ONCE per campaign, not per message
+        if (!this.emergencyLoggedCampaigns.has(campaignId)) {
+          console.log(
+            `💰 Emergency refund mode for campaign ${campaignId}: Delivery ${deliveryRate.toFixed(1)}%`
+          );
+          this.emergencyLoggedCampaigns.add(campaignId);
+          
+          // Clear after 5 mins to allow re-logging
+          setTimeout(() => this.emergencyLoggedCampaigns.delete(campaignId), 5 * 60 * 1000);
+        }
         return true;
       }
     }

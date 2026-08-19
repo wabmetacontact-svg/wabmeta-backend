@@ -783,11 +783,13 @@ export class TemplatesService {
       category: input.category,
       headerType: input.headerType || null,
       
-      // ✅ CHANGED: Always store Cloudinary URL (permanent)
+      // ✅ Store Cloudinary URL (permanent - never expires)
       headerContent: finalCloudinaryUrl || mediaHeaderContent,
       
-      // ✅ CHANGED: Handle stored temporarily (will be null after approval)
-      headerMediaId: null, // Don't store handle - it expires
+      // ✅ FIX BUG #12: STORE the handle initially!
+      // Meta requires this for template creation.
+      // Set to null AFTER approval webhook comes.
+      headerMediaId: finalMetaId,  // ← THIS IS THE FIX!
       
       headerMediaUploadedAt: finalMetaId ? new Date() : null,
       headerMediaLastVerified: null,

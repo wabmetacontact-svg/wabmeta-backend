@@ -192,7 +192,8 @@ const formatCampaign = (campaign: any): any => {
   };
 };
 
-// ─── Template Message Builder - HARDENED ──────────────────────
+// ✅ FINAL: buildTemplateMessage - URL fallback BILKUL NAHI
+// Media ID mandatory hai - nahi hai toh error throw karo
 function buildTemplateMessage(
   template: any,
   variables: Record<string, string>,
@@ -201,7 +202,6 @@ function buildTemplateMessage(
   const components: any[] = [];
   const headerType = String(template.headerType || '').toUpperCase();
 
-  // Header
   if (headerType === 'TEXT' && template.headerContent) {
     const vars = extractVariables(template.headerContent);
     if (vars.length > 0) {
@@ -214,105 +214,34 @@ function buildTemplateMessage(
       });
     }
   } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    const mediaType = headerType.toLowerCase();
-    
-    // ✅ Priority 1: Uploaded media ID (BEST)
-    if (metaMediaId && /^\d+$/.test(metaMediaId)) {
-      const param: any = {
-        type: mediaType,
-        [mediaType]: { id: metaMediaId },
-      };
-      if (mediaType === 'document') {
-        param.document.filename =
-          (template.headerContent || '').split('/').pop()?.split('?')[0] ||
-          'document.pdf';
-      }
-      components.push({ type: 'header', parameters: [param] });
-    } 
-    // ✅ Priority 2: URL fallback - STRICT VALIDATION
-    else if (template.headerContent?.startsWith('http')) {
-      const url = template.headerContent;
-      
-      // ❌ BLOCK: Meta CDN URLs (Meta can't fetch its own CDN)
-      const isMetaCdn = 
-        url.includes('scontent.whatsapp') ||
-        url.includes('scontent-') ||
-        url.includes('lookaside.fbsbx.com') ||
-        url.includes('fbcdn.net') ||
-        url.includes('graph.facebook.com');
-      
-      // ❌ BLOCK: Private/signed Cloudinary URLs
-      const isPrivateCloudinary = 
-        url.includes('cloudinary.com') && 
-        (url.includes('/private/') || url.includes('/authenticated/'));
-      
-      // ❌ BLOCK: URLs with auth query params (temp signed URLs)
-      const hasAuthParams = 
-        url.includes('X-Amz-Signature=') ||
-        url.includes('token=') ||
-        url.includes('signature=') ||
-        url.includes('&Expires=') ||
-        url.includes('?Expires=');
-      
-      if (isMetaCdn) {
-        console.error(`❌ [Template "${template.name}"] BLOCKED: Meta CDN URL cannot be used`);
-        console.error(`   URL: ${url.substring(0, 80)}...`);
-        console.error(`   💡 SOLUTION: Re-upload media in template settings (needs Cloudinary URL)`);
-        // ✅ THROW to fail fast instead of sending broken message
-        throw new Error(
-          `Template "${template.name}" has invalid media URL (Meta CDN). ` +
-          `Please re-upload media in template settings.`
-        );
-      }
-      
-      if (isPrivateCloudinary) {
-        console.error(`❌ [Template "${template.name}"] BLOCKED: Private Cloudinary URL`);
-        throw new Error(
-          `Template "${template.name}" has private media URL. ` +
-          `Please re-upload media as public.`
-        );
-      }
-      
-      if (hasAuthParams) {
-        console.error(`❌ [Template "${template.name}"] BLOCKED: URL with auth params (may expire)`);
-        throw new Error(
-          `Template "${template.name}" has temporary media URL. ` +
-          `Please re-upload media with permanent URL.`
-        );
-      }
-      
-      // ✅ FIX: Cloudinary raw URLs need fl_attachment for Meta to fetch
-      let finalUrl = url;
-      if (
-        url.includes('cloudinary.com') &&
-        url.includes('/raw/upload/') &&
-        !url.includes('fl_attachment')
-      ) {
-        finalUrl = url.replace('/raw/upload/', '/raw/upload/fl_attachment/');
-        console.log(`🔧 [Template] Fixed Cloudinary raw URL with fl_attachment`);
-      }
-
-      // ✅ URL is safe - use it
-      const param: any = {
-        type: mediaType,
-        [mediaType]: { link: finalUrl },
-      };
-      if (mediaType === 'document') {
-        param.document.filename =
-          finalUrl.split('/').pop()?.split('?')[0] || 'document.pdf';
-      }
-      components.push({ type: 'header', parameters: [param] });
-      console.log(`ℹ️ [Template "${template.name}"] Using URL: ${finalUrl.substring(0, 80)}...`);
-    } else {
-      // ❌ No media ID, no URL - can't send
+    // ✅ ONLY numeric Media ID accept karo
+    // URL fallback = 401 error = campaign fail
+    if (!metaMediaId || !/^\d+$/.test(String(metaMediaId))) {
       throw new Error(
-        `Template "${template.name}" has no valid media (no ID, no URL). ` +
-        `Please re-upload media in template settings.`
+        `Template "${template.name}" media not uploaded to Meta yet. ` +
+        `Campaign will retry after upload.`
       );
     }
+
+    const mediaType = headerType.toLowerCase() as
+      'image' | 'video' | 'document';
+
+    const param: any = {
+      type: mediaType,
+      [mediaType]: { id: String(metaMediaId) },
+    };
+
+    // Document ke liye filename
+    if (mediaType === 'document') {
+      const url = template.headerContent || '';
+      param.document.filename =
+        url.split('/').pop()?.split('?')[0] || 'document.pdf';
+    }
+
+    components.push({ type: 'header', parameters: [param] });
   }
 
-  // Body
+  // Body variables
   const bodyVars = extractVariables(template.bodyText || '');
   if (bodyVars.length > 0) {
     components.push({
@@ -324,7 +253,7 @@ function buildTemplateMessage(
     });
   }
 
-  // Buttons
+  // URL buttons with variables
   if (Array.isArray(template.buttons)) {
     template.buttons.forEach((btn: any, index: number) => {
       if (btn.type === 'URL' && btn.url?.includes('{{')) {
@@ -1817,234 +1746,233 @@ export class CampaignsService {
     };
   }
 
-  // ─────────────────────────────────────────────────────────
-  // MEDIA UPLOAD/CACHE - PERMANENT FIX
-  // ─────────────────────────────────────────────────────────
   private async ensureMetaMediaId(
-    template: any, phoneNumberId: string,
-    accessToken: string, wabaId: string
+    template: any,
+    phoneNumberId: string,
+    accessToken: string,
+    wabaId: string
   ): Promise<string | null> {
     const headerType = String(template.headerType || '').toUpperCase();
     if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) return null;
 
-    // ✅ ADD THIS DEBUG BLOCK AT THE START
-    console.log(`\n🔍 [ensureMetaMediaId] START:`, {
-      templateId: template.id,
-      templateName: template.name,
+    console.log(`\n🔍 [Media] Template "${template.name}":`, {
       headerType,
-      headerContent: template.headerContent?.substring(0, 100),
-      hasHeaderMediaId: !!template.headerMediaId,
-      headerMediaId: template.headerMediaId,
-      uploadedAt: template.headerMediaUploadedAt,
-      phoneNumberId,
-      tokenPrefix: accessToken?.substring(0, 10),
-      tokenLength: accessToken?.length,
-      tokenValid: accessToken?.startsWith('EAA'),
+      headerMediaId: template.headerMediaId?.substring(0, 20),
+      headerContent: template.headerContent?.substring(0, 60),
     });
 
-    // ✅ Layer 1: Check valid cached media ID (30 din TTL)
+    // ─── Step 1: Valid cached numeric ID check ──────────────
     const existingId = template.headerMediaId;
     const uploadedAt = template.headerMediaUploadedAt;
-    
-    if (existingId && /^\d+$/.test(existingId) && uploadedAt) {
+
+    if (existingId && /^\d+$/.test(String(existingId)) && uploadedAt) {
       const ageMs = Date.now() - new Date(uploadedAt).getTime();
-      if (ageMs < SEND_CONFIG.MEDIA_TTL_MS) {
-        console.log(`✅ [Media] Using cached ID: ${existingId} (${Math.floor(ageMs / 86400000)}d old)`);
-        return existingId;
+      const TTL_MS = 25 * 24 * 60 * 60 * 1000; // 25 days
+
+      if (ageMs < TTL_MS) {
+        console.log(`✅ [Media] Cached ID valid: ${existingId}`);
+        return String(existingId);
       }
       console.log(`⏰ [Media] Cache expired (${Math.floor(ageMs / 86400000)}d), re-uploading...`);
     }
 
-    // ✅ Layer 2: Validate URL exists
-    const mediaUrl = template.headerContent;
-    if (!mediaUrl?.startsWith('http')) {
-      console.warn(`⚠️ [Media] No valid URL for template "${template.name}"`);
+    // ─── Step 2: Get Cloudinary URL ─────────────────────────
+    let cloudinaryUrl = template.headerContent as string | null;
+
+    if (!cloudinaryUrl?.startsWith('http')) {
+      console.warn(`⚠️ [Media] No valid URL in template`);
       return null;
     }
 
-    // ✅ Layer 3: Validate access token BEFORE any Meta API call
-    if (!accessToken || !accessToken.startsWith('EAA') || accessToken.length < 50) {
-      console.error(`❌ [Media] Invalid access token for template "${template.name}"`, {
-        hasToken: !!accessToken,
-        tokenLength: accessToken?.length,
-        startsWithEAA: accessToken?.startsWith('EAA'),
-      });
-      return null;
-    }
-
-    // ✅ Layer 4: Detect if URL needs auth (scontent.whatsapp.net requires Meta token)
-    const isMetaCdnUrl = 
-      mediaUrl.includes('scontent.whatsapp.net') ||
-      mediaUrl.includes('lookaside.fbsbx.com') ||
-      mediaUrl.includes('graph.facebook.com') ||
-      mediaUrl.includes('scontent-') ||
-      mediaUrl.includes('fbcdn.net');
-
-    try {
-      console.log(`📥 [Media] Downloading from: ${mediaUrl.substring(0, 80)}...`, {
-        isMetaCdn: isMetaCdnUrl,
-        template: template.name,
-        headerType,
-      });
-
-      const requestHeaders: Record<string, string> = {
-        'User-Agent': 'WabMeta/1.0',
-        'Accept': '*/*',
-      };
+    // ✅ CRITICAL: Clean URL - fl_attachment hatao
+    // Meta is URL ko directly fetch karta hai - auth nahi hona chahiye
+    if (cloudinaryUrl.includes('fl_attachment')) {
+      cloudinaryUrl = cloudinaryUrl.replace(/fl_attachment\//g, '');
+      console.log(`🔧 [Media] Removed fl_attachment from URL`);
       
-      if (isMetaCdnUrl) {
-        requestHeaders['Authorization'] = `Bearer ${accessToken}`;
-        console.log(`🔑 [Media] Using auth header for Meta CDN URL`);
-      }
+      // DB update karo taaki future mein bhi clean rahe
+      await prisma.template.update({
+        where: { id: template.id },
+        data: { headerContent: cloudinaryUrl } as any,
+      }).catch(e => console.warn('⚠️ DB update failed:', e.message));
+    }
 
-      let response: any;
-      let downloadUrl = mediaUrl;
+    // ✅ Meta CDN URLs block karo (scontent.whatsapp.net etc)
+    const isMetaCdn =
+      cloudinaryUrl.includes('scontent.whatsapp') ||
+      cloudinaryUrl.includes('scontent-') ||
+      cloudinaryUrl.includes('lookaside.fbsbx.com') ||
+      cloudinaryUrl.includes('fbcdn.net');
 
-      try {
-        response = await axios.get(downloadUrl, {
-          responseType: 'arraybuffer',
-          timeout: 60_000,
-          maxContentLength: 100 * 1024 * 1024,
-          headers: requestHeaders,
-          maxRedirects: 5,
-          validateStatus: (status) => status >= 200 && status < 400,
-        });
-      } catch (downloadErr: any) {
-        // ✅ Cloudinary "raw" URL fix - try converting to fl_attachment
-        if (
-          mediaUrl.includes('cloudinary.com') &&
-          mediaUrl.includes('/raw/upload/') &&
-          (downloadErr.response?.status === 401 || downloadErr.response?.status === 403)
-        ) {
-          console.warn(`⚠️ [Media] Cloudinary raw URL blocked, trying with fl_attachment flag...`);
-          downloadUrl = mediaUrl.replace(
-            '/raw/upload/',
-            '/raw/upload/fl_attachment/'
-          );
-          try {
-            response = await axios.get(downloadUrl, {
-              responseType: 'arraybuffer',
-              timeout: 60_000,
-              maxContentLength: 100 * 1024 * 1024,
-              headers: requestHeaders,
-              maxRedirects: 5,
-            });
-            console.log(`✅ [Media] fl_attachment fallback worked`);
-          } catch (retryErr: any) {
-            console.error(`❌ [Media] fl_attachment fallback also failed`);
-            throw downloadErr;
+    if (isMetaCdn) {
+      console.error(`❌ [Media] Meta CDN URL cannot be re-used. Need re-upload.`);
+      return null;
+    }
+
+    // ✅ Token validate karo
+    if (!accessToken?.startsWith('EAA')) {
+      console.error(`❌ [Media] Invalid access token`);
+      return null;
+    }
+
+    // ─── Step 3: Verify URL publicly accessible ─────────────
+    try {
+      const axios = require('axios');
+      const headCheck = await axios.head(cloudinaryUrl, {
+        timeout: 15000,
+        validateStatus: (s: number) => true,
+      });
+
+      if (headCheck.status === 401 || headCheck.status === 403) {
+        console.error(`❌ [Media] URL not publicly accessible: ${headCheck.status}`);
+        console.error(`   URL: ${cloudinaryUrl.substring(0, 80)}`);
+        
+        // ✅ fl_attachment wali variant try karo (agar original mein nahi thi)
+        if (!cloudinaryUrl.includes('fl_attachment') && cloudinaryUrl.includes('/raw/upload/')) {
+          const withFlag = cloudinaryUrl.replace('/raw/upload/', '/raw/upload/fl_attachment/');
+          const retry = await axios.head(withFlag, {
+            timeout: 10000,
+            validateStatus: (s: number) => true,
+          });
+          
+          if (retry.status >= 200 && retry.status < 400) {
+            console.log(`✅ [Media] fl_attachment variant accessible`);
+            cloudinaryUrl = withFlag;
+          } else {
+            console.error(`❌ [Media] fl_attachment variant also failed: ${retry.status}`);
+            return null;
           }
         } else {
-          throw downloadErr;
+          return null;
         }
+      } else if (headCheck.status >= 200 && headCheck.status < 400) {
+        console.log(`✅ [Media] URL accessible (${headCheck.status})`);
+      } else {
+        console.warn(`⚠️ [Media] HEAD returned ${headCheck.status}, attempting download anyway`);
       }
+    } catch (headErr: any) {
+      console.warn(`⚠️ [Media] HEAD check failed: ${headErr.message}, proceeding with download`);
+    }
+
+    // ─── Step 4: Download from Cloudinary ───────────────────
+    try {
+      console.log(`📥 [Media] Downloading: ${cloudinaryUrl.substring(0, 80)}`);
+
+      const axios = require('axios');
+      const response = await axios.get(cloudinaryUrl, {
+        responseType: 'arraybuffer',
+        timeout: 60_000,
+        maxContentLength: 100 * 1024 * 1024,
+        headers: {
+          'User-Agent': 'WabMeta/1.0',
+          'Accept': '*/*',
+          // ✅ NO Authorization header for Cloudinary public URLs
+        },
+        maxRedirects: 5,
+        validateStatus: (status: number) => status >= 200 && status < 400,
+      });
 
       const buffer = Buffer.from(response.data);
-      
+
       if (buffer.length === 0) {
-        console.error(`❌ [Media] Downloaded 0 bytes from URL`);
+        console.error(`❌ [Media] Downloaded 0 bytes`);
         return null;
       }
 
-      const contentType = (response.headers['content-type'] || '').split(';')[0].trim();
-      const DEFAULTS: Record<string, string> = {
+      console.log(`✅ [Media] Downloaded: ${(buffer.length / 1024).toFixed(1)} KB`);
+
+      // ─── Step 5: Detect MIME type ────────────────────────
+      const contentType =
+        (response.headers['content-type'] || '').split(';')[0].trim();
+
+      const MIME_DEFAULTS: Record<string, string> = {
         IMAGE: 'image/jpeg',
         VIDEO: 'video/mp4',
         DOCUMENT: 'application/pdf',
       };
-      const mimeType = (contentType && !contentType.includes('octet-stream'))
-        ? contentType 
-        : DEFAULTS[headerType] || 'application/octet-stream';
 
-      const urlPath = mediaUrl.split('?')[0];
+      const INVALID_MIMES = [
+        'application/octet-stream',
+        'binary/octet-stream',
+        'application/binary',
+        '',
+      ];
+
+      const mimeType = INVALID_MIMES.includes(contentType)
+        ? MIME_DEFAULTS[headerType] || 'application/octet-stream'
+        : contentType;
+
+      // ─── Step 6: Build filename ──────────────────────────
+      const urlPath = cloudinaryUrl.split('?')[0];
       let filename = urlPath.split('/').pop() || 'media';
-      if (!filename.includes('.')) {
+
+      if (!filename.match(/\.[a-z0-9]{2,5}$/i)) {
         const EXT: Record<string, string> = {
-          'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp',
-          'video/mp4': '.mp4', 'video/3gpp': '.3gp',
+          'image/jpeg': '.jpg',
+          'image/png': '.png',
+          'image/webp': '.webp',
+          'video/mp4': '.mp4',
+          'video/3gpp': '.3gp',
           'application/pdf': '.pdf',
+          'audio/mpeg': '.mp3',
         };
         filename += EXT[mimeType] || '.bin';
       }
 
-      console.log(`📤 [Media] Uploading to Meta: ${filename} (${(buffer.length / 1024).toFixed(1)}KB, ${mimeType})`);
+      console.log(`📤 [Media] Uploading to Meta: ${filename} (${mimeType})`);
 
+      // ─── Step 7: Upload to Meta ──────────────────────────
       const result = await metaApi.uploadMedia(
-        phoneNumberId, accessToken, buffer, mimeType, filename, wabaId
+        phoneNumberId,
+        accessToken,
+        buffer,
+        mimeType,
+        filename,
+        wabaId
       );
-      
+
       const metaMediaId = result?.id;
-      
+
       if (!metaMediaId) {
-        console.error(`❌ [Media] Meta returned no media ID:`, result);
+        console.error(`❌ [Media] Meta returned no ID`);
         return null;
       }
-      
-      console.log(`✅ [Media] Uploaded successfully. ID: ${metaMediaId}`);
 
-      // ✅ Cache the ID
+      console.log(`✅ [Media] Uploaded to Meta: ${metaMediaId}`);
+
+      // ─── Step 8: Cache the ID ────────────────────────────
       await prisma.template.update({
         where: { id: template.id },
         data: {
           headerMediaId: metaMediaId,
           headerMediaUploadedAt: new Date(),
           headerMediaLastVerified: new Date(),
+          // ✅ Clean URL bhi save karo
+          headerContent: cloudinaryUrl,
         } as any,
-      }).catch(e => console.warn('⚠️ [Media] Cache save failed:', e.message));
+      }).catch(e => console.warn('⚠️ Cache save failed:', e.message));
 
       return metaMediaId;
-      
     } catch (err: any) {
       const status = err.response?.status;
       const metaError = err.response?.data?.error;
-      
-      // ✅ Detailed error logging
-      console.error(`❌ [Media] Upload failed for template "${template.name}":`, {
+
+      console.error(`❌ [Media] Failed:`, {
         status,
         message: err.message,
-        code: err.code,
-        metaError: metaError ? {
-          code: metaError.code,
-          subcode: metaError.error_subcode,
-          message: metaError.message,
-          type: metaError.type,
-        } : null,
-        urlPrefix: mediaUrl.substring(0, 60),
-        isMetaCdn: isMetaCdnUrl,
+        metaCode: metaError?.code,
+        metaMessage: metaError?.message,
       });
-      
-      // ✅ Specific handling for 401 - Token expired
+
+      // Token expired → account disconnect karo
       if (status === 401 || metaError?.code === 190) {
-        console.error('🔑 [Media] TOKEN EXPIRED - Marking account for reconnection');
-        
-        // Mark account as disconnected so user reconnects
+        console.error('🔑 [Media] TOKEN EXPIRED - disconnecting account');
         await prisma.whatsAppAccount.updateMany({
           where: { phoneNumberId },
-          data: { 
-            status: 'DISCONNECTED' as any,
-            accessToken: null,
-            tokenExpiresAt: null,
-          },
+          data: { status: 'DISCONNECTED' as any },
         }).catch(() => {});
       }
-      
-      // ✅ Specific handling for 403 - URL access denied (common with scontent URLs)
-      if (status === 403) {
-        console.error('🚫 [Media] URL ACCESS DENIED - Meta CDN URL expired or invalid');
-        console.error('💡 [Media] User needs to re-upload media in template settings');
-      }
-      
-      // ✅ Clear invalid cached ID so next attempt tries fresh
-      if (existingId) {
-        await prisma.template.update({
-          where: { id: template.id },
-          data: {
-            headerMediaId: null,
-            headerMediaUploadedAt: null,
-          } as any,
-        }).catch(() => {});
-      }
-      
+
       return null;
     }
   }
@@ -2120,57 +2048,34 @@ export class CampaignsService {
       const headerType = String(template.headerType || '').toUpperCase();
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
+        console.log(`📸 [Campaign ${campaignId}] Pre-uploading media to Meta...`);
+        
         cachedMediaId = await this.ensureMetaMediaId(
           template, phoneNumberId, accessToken, wabaId
         );
-        
+
+        // ✅ Media ID MANDATORY - URL fallback allowed nahi
         if (!cachedMediaId) {
-          // ✅ Check if URL is valid HTTP - if yes, fall back to link mode
-          const hasValidUrl = template.headerContent?.startsWith('http') && 
-                              !template.headerContent.includes('scontent.whatsapp.net');
-          
-          if (hasValidUrl) {
-            console.warn(`⚠️ [Campaign ${campaignId}] Media ID upload failed, will use URL link fallback`);
-            // cachedMediaId stays null - buildTemplateMessage will use URL fallback
-          } else {
-            // ✅ No valid fallback - pause campaign
-            await prisma.campaign.update({
-              where: { id: campaignId },
-              data: { status: 'PAUSED' },
-            });
-            
-            campaignSocketService.emitCampaignError(organizationId, campaignId, {
-              message: `Media upload failed. Please re-upload ${template.headerType?.toLowerCase()} in template settings (go to Templates → Edit → Re-upload media).`,
-              code: 'MEDIA_UPLOAD_FAILED',
-            });
-            return;
-          }
+          console.error(`❌ [Campaign ${campaignId}] Media upload failed - PAUSING campaign`);
+
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'PAUSED' },
+          });
+
+          campaignSocketService.emitCampaignError(organizationId, campaignId, {
+            message:
+              `Media upload to WhatsApp failed for template "${template.name}". ` +
+              `Please go to Templates → Edit → Re-upload the ${
+                template.headerType?.toLowerCase()
+              } file, then resume this campaign.`,
+            code: 'MEDIA_UPLOAD_FAILED',
+          });
+
+          return; // ✅ Campaign process nahi hoga bina valid Media ID ke
         }
 
-        // ✅ NEW: Pre-validate URL before starting campaign
-        if (!cachedMediaId) {
-          const url = template.headerContent || '';
-          const isMetaCdn = 
-            url.includes('scontent.whatsapp') ||
-            url.includes('scontent-') ||
-            url.includes('lookaside.fbsbx.com') ||
-            url.includes('fbcdn.net');
-          
-          if (isMetaCdn || !url.startsWith('http')) {
-            console.error(`❌ [Campaign ${campaignId}] Template media invalid - cannot proceed`);
-            
-            await prisma.campaign.update({
-              where: { id: campaignId },
-              data: { status: 'PAUSED' },
-            });
-            
-            campaignSocketService.emitCampaignError(organizationId, campaignId, {
-              message: `Template "${template.name}" media is invalid. Please go to Templates → Edit "${template.name}" → Re-upload media, then resume campaign.`,
-              code: 'MEDIA_INVALID',
-            });
-            return;
-          }
-        }
+        console.log(`✅ [Campaign ${campaignId}] Media ready: ${cachedMediaId}`);
       }
 
       // ── Wallet check ──────────────────────────────────────
@@ -2216,6 +2121,11 @@ export class CampaignsService {
       let totalProcessed = 0;
       let lastProgressEmit = 0;
       let rateLimitPauseUntil = 0;
+
+      // ✅ NEW: Fail-fast detection
+      let consecutiveSameErrors = 0;
+      let lastErrorReason = '';
+      const MAX_SAME_ERRORS = 10;
 
       const tierName = (campaign.whatsappAccount.messagingLimit || 'TIER_1K') as keyof typeof SEND_CONFIG.TIER_LIMITS;
       const tierConfig = SEND_CONFIG.TIER_LIMITS[tierName] ?? SEND_CONFIG.TIER_LIMITS.TIER_1K;
@@ -2400,16 +2310,57 @@ export class CampaignsService {
                 contactId: d.contactId, phone: d.phone,
               });
               totalSentCount++;
-              // ✅ FIX Bug3: toWhatsAppRecipient se already digits-only hai
               totalSentAmountPaise += Math.round(
                 getRateForCategory(template.category || 'MARKETING', d.phone, template.language) * 100
               );
               consecutiveFails = 0;
+              consecutiveSameErrors = 0;  // ✅ Reset
+              lastErrorReason = '';
             } else {
               batchFailed.push({
                 id: d.id, reason: (d as any).reason,
                 contactId: d.contactId, phone: d.phone,
               });
+
+              // ✅ NEW: Track consecutive same errors (systematic issue detection)
+              const currentReason = (d as any).reason;
+              if (currentReason === lastErrorReason) {
+                consecutiveSameErrors++;
+              } else {
+                consecutiveSameErrors = 1;
+                lastErrorReason = currentReason;
+              }
+
+              // ✅ NEW: FAIL-FAST - Pause campaign on systematic errors
+              if (consecutiveSameErrors >= MAX_SAME_ERRORS) {
+                console.error(`🚨 [Campaign ${campaignId}] ${consecutiveSameErrors} same errors: "${currentReason}"`);
+                console.error(`🚨 AUTO-PAUSING campaign to prevent further failures`);
+                
+                await prisma.campaign.update({
+                  where: { id: campaignId },
+                  data: { status: 'PAUSED' },
+                });
+                
+                campaignSocketService.emitCampaignError(organizationId, campaignId, {
+                  message: `Campaign auto-paused: ${consecutiveSameErrors} consecutive failures with same error: "${currentReason.substring(0, 100)}". Please fix the issue and resume.`,
+                  code: 'SYSTEMATIC_ERROR',
+                  errorReason: currentReason,
+                } as any);
+                
+                // Flush current batch before exit
+                if (batchSent.length > 0 || batchFailed.length > 0) {
+                  await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
+                  if (batchSent.length > 0) {
+                    this.saveToInboxBulk(
+                      organizationId, campaignId, campaign.whatsappAccountId,
+                      template.id, template.name, campaign.name, template,
+                      batchSent.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
+                    ).catch(() => { });
+                  }
+                }
+                
+                return; // ✅ EXIT campaign processing
+              }
 
               if ((d as any).isRateLimit) {
                 chunkRateLimits++;
@@ -2570,9 +2521,32 @@ export class CampaignsService {
 
       // ── Mark complete ─────────────────────────────────────
       if (final.pendingCount === 0) {
+        // ✅ NEW: Smart status based on success rate
+        const totalProcessed = final.sentCount + final.failedCount;
+        const successRate = totalProcessed > 0 
+          ? (final.sentCount / totalProcessed) * 100 
+          : 0;
+        
+        let finalStatus: any = 'COMPLETED';
+        let statusMessage = '';
+        
+        if (successRate < 20) {
+          finalStatus = 'FAILED';
+          statusMessage = `Campaign FAILED - only ${successRate.toFixed(1)}% success (${final.sentCount}/${totalProcessed})`;
+        } else if (successRate < 60) {
+          finalStatus = 'COMPLETED';
+          statusMessage = `Campaign completed with issues - ${successRate.toFixed(1)}% success`;
+        } else {
+          finalStatus = 'COMPLETED';
+          statusMessage = `Campaign completed successfully - ${successRate.toFixed(1)}% success`;
+        }
+        
         await prisma.campaign.update({
           where: { id: campaignId },
-          data: { status: 'COMPLETED', completedAt: new Date() },
+          data: { 
+            status: finalStatus, 
+            completedAt: new Date(),
+          },
         });
 
         campaignSocketService.emitCampaignCompleted(organizationId, campaignId, {
@@ -2581,9 +2555,11 @@ export class CampaignsService {
           deliveredCount: final.deliveredCount,
           readCount: final.readCount,
           totalRecipients: final.totalContacts,
-        });
+          successRate,
+          statusMessage,
+        } as any);
 
-        console.log(`🏁 Campaign ${campaignId} COMPLETED`);
+        console.log(`🏁 Campaign ${campaignId} ${finalStatus}: ${statusMessage}`);
       }
 
     } catch (err: any) {
