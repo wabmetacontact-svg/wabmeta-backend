@@ -281,17 +281,28 @@ function buildTemplateMessage(
         );
       }
       
+      // ✅ FIX: Cloudinary raw URLs need fl_attachment for Meta to fetch
+      let finalUrl = url;
+      if (
+        url.includes('cloudinary.com') &&
+        url.includes('/raw/upload/') &&
+        !url.includes('fl_attachment')
+      ) {
+        finalUrl = url.replace('/raw/upload/', '/raw/upload/fl_attachment/');
+        console.log(`🔧 [Template] Fixed Cloudinary raw URL with fl_attachment`);
+      }
+
       // ✅ URL is safe - use it
       const param: any = {
         type: mediaType,
-        [mediaType]: { link: url },
+        [mediaType]: { link: finalUrl },
       };
       if (mediaType === 'document') {
         param.document.filename =
-          url.split('/').pop()?.split('?')[0] || 'document.pdf';
+          finalUrl.split('/').pop()?.split('?')[0] || 'document.pdf';
       }
       components.push({ type: 'header', parameters: [param] });
-      console.log(`ℹ️ [Template "${template.name}"] Using public URL fallback`);
+      console.log(`ℹ️ [Template "${template.name}"] Using URL: ${finalUrl.substring(0, 80)}...`);
     } else {
       // ❌ No media ID, no URL - can't send
       throw new Error(
@@ -1873,9 +1884,9 @@ export class CampaignsService {
       console.log(`📥 [Media] Downloading from: ${mediaUrl.substring(0, 80)}...`, {
         isMetaCdn: isMetaCdnUrl,
         template: template.name,
+        headerType,
       });
 
-      // ✅ Build request headers - add Authorization ONLY for Meta CDN URLs
       const requestHeaders: Record<string, string> = {
         'User-Agent': 'WabMeta/1.0',
         'Accept': '*/*',
@@ -1886,15 +1897,47 @@ export class CampaignsService {
         console.log(`🔑 [Media] Using auth header for Meta CDN URL`);
       }
 
-      const response = await axios.get(mediaUrl, {
-        responseType: 'arraybuffer',
-        timeout: 60_000,
-        maxContentLength: 100 * 1024 * 1024,
-        headers: requestHeaders,
-        // ✅ Prevent axios from throwing on 3xx redirects
-        maxRedirects: 5,
-        validateStatus: (status) => status >= 200 && status < 400,
-      });
+      let response: any;
+      let downloadUrl = mediaUrl;
+
+      try {
+        response = await axios.get(downloadUrl, {
+          responseType: 'arraybuffer',
+          timeout: 60_000,
+          maxContentLength: 100 * 1024 * 1024,
+          headers: requestHeaders,
+          maxRedirects: 5,
+          validateStatus: (status) => status >= 200 && status < 400,
+        });
+      } catch (downloadErr: any) {
+        // ✅ Cloudinary "raw" URL fix - try converting to fl_attachment
+        if (
+          mediaUrl.includes('cloudinary.com') &&
+          mediaUrl.includes('/raw/upload/') &&
+          (downloadErr.response?.status === 401 || downloadErr.response?.status === 403)
+        ) {
+          console.warn(`⚠️ [Media] Cloudinary raw URL blocked, trying with fl_attachment flag...`);
+          downloadUrl = mediaUrl.replace(
+            '/raw/upload/',
+            '/raw/upload/fl_attachment/'
+          );
+          try {
+            response = await axios.get(downloadUrl, {
+              responseType: 'arraybuffer',
+              timeout: 60_000,
+              maxContentLength: 100 * 1024 * 1024,
+              headers: requestHeaders,
+              maxRedirects: 5,
+            });
+            console.log(`✅ [Media] fl_attachment fallback worked`);
+          } catch (retryErr: any) {
+            console.error(`❌ [Media] fl_attachment fallback also failed`);
+            throw downloadErr;
+          }
+        } else {
+          throw downloadErr;
+        }
+      }
 
       const buffer = Buffer.from(response.data);
       

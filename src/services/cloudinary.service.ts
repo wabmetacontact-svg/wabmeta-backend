@@ -182,18 +182,20 @@ export class CloudinaryService {
         });
         console.log('🖼️  Image optimization enabled');
       }
-      // Raw files (docs) - no transformation
-
       const uploadOptions: any = {
         folder,
         resource_type: resourceType,
         public_id: publicId,
-        overwrite: false,
-        unique_filename: false,
-        use_filename: false,
         type: 'upload',
         access_mode: 'public',
-        format: resourceType === 'raw' ? format : undefined,
+        overwrite: false,
+        unique_filename: resourceType === 'raw',
+        use_filename: resourceType === 'raw',
+        ...(resourceType === 'raw' && {
+          use_filename: true,
+          unique_filename: true,
+          overwrite: false,
+        }),
       };
 
       // Apply eager transformations for videos (sync compression)
