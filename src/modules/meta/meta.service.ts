@@ -967,17 +967,32 @@ export class MetaService {
         const existing = existingMap.get(key);
 
         const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
-
         const headerContent = this.extractHeaderContent(metaTemplate.components);
-        const isScontent = (url: string | null | undefined) =>
-          !!url && url.includes('scontent.whatsapp');
 
-        const finalHeaderContent =
-          (headerContent && !isScontent(headerContent))
-            ? headerContent
-            : (existing && !isScontent(existing.headerContent)
-                ? existing.headerContent
-                : null);
+        // ✅ Detect Meta CDN URLs (these need auth headers to download)
+        const isMetaCdnUrl = (url: string | null | undefined) => {
+          if (!url) return false;
+          return (
+            url.includes('scontent.whatsapp') ||
+            url.includes('scontent-') ||
+            url.includes('lookaside.fbsbx.com') ||
+            url.includes('fbcdn.net')
+          );
+        };
+
+        // ✅ Prefer non-CDN URLs (Cloudinary) but keep CDN URL if that's all we have
+        const finalHeaderContent = (() => {
+          // If new URL from Meta is Cloudinary/user URL - use it
+          if (headerContent && !isMetaCdnUrl(headerContent)) {
+            return headerContent;
+          }
+          // If existing URL in DB is Cloudinary/user URL - keep it
+          if (existing?.headerContent && !isMetaCdnUrl(existing.headerContent)) {
+            return existing.headerContent;
+          }
+          // Fallback: use whatever we have (even if CDN URL)
+          return headerContent || existing?.headerContent || null;
+        })();
 
         const baseTemplateData: any = {
           organizationId,
@@ -1101,17 +1116,32 @@ export class MetaService {
           });
 
           const extractedHandle = this.extractHeaderHandle(template.components);
-
           const headerContent = this.extractHeaderContent(template.components);
-          const isScontent = (url: string | null | undefined) =>
-            !!url && url.includes('scontent.whatsapp');
 
-          const finalHeaderContent =
-            (headerContent && !isScontent(headerContent))
-              ? headerContent
-              : (existing && !isScontent(existing.headerContent)
-                  ? existing.headerContent
-                  : null);
+          // ✅ Detect Meta CDN URLs (these need auth headers to download)
+          const isMetaCdnUrl = (url: string | null | undefined) => {
+            if (!url) return false;
+            return (
+              url.includes('scontent.whatsapp') ||
+              url.includes('scontent-') ||
+              url.includes('lookaside.fbsbx.com') ||
+              url.includes('fbcdn.net')
+            );
+          };
+
+          // ✅ Prefer non-CDN URLs (Cloudinary) but keep CDN URL if that's all we have
+          const finalHeaderContent = (() => {
+            // If new URL from Meta is Cloudinary/user URL - use it
+            if (headerContent && !isMetaCdnUrl(headerContent)) {
+              return headerContent;
+            }
+            // If existing URL in DB is Cloudinary/user URL - keep it
+            if (existing?.headerContent && !isMetaCdnUrl(existing.headerContent)) {
+              return existing.headerContent;
+            }
+            // Fallback: use whatever we have (even if CDN URL)
+            return headerContent || existing?.headerContent || null;
+          })();
 
           const baseData: any = {
             organizationId: account.organizationId,
