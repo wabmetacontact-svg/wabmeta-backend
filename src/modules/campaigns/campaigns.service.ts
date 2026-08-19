@@ -192,7 +192,7 @@ const formatCampaign = (campaign: any): any => {
   };
 };
 
-// ─── Template Message Builder ──────────────────────────────────
+// ─── Template Message Builder - HARDENED ──────────────────────
 function buildTemplateMessage(
   template: any,
   variables: Record<string, string>,
@@ -216,7 +216,7 @@ function buildTemplateMessage(
   } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
     const mediaType = headerType.toLowerCase();
     
-    // ✅ Priority 1: Use uploaded media ID (best)
+    // ✅ Priority 1: Uploaded media ID (BEST)
     if (metaMediaId && /^\d+$/.test(metaMediaId)) {
       const param: any = {
         type: mediaType,
@@ -229,32 +229,75 @@ function buildTemplateMessage(
       }
       components.push({ type: 'header', parameters: [param] });
     } 
-    // ✅ Priority 2: Fallback to public URL (Cloudinary etc)
-    // ❌ Don't send Meta CDN URLs (scontent.whatsapp.net) - Meta can't fetch them
+    // ✅ Priority 2: URL fallback - STRICT VALIDATION
     else if (template.headerContent?.startsWith('http')) {
+      const url = template.headerContent;
+      
+      // ❌ BLOCK: Meta CDN URLs (Meta can't fetch its own CDN)
       const isMetaCdn = 
-        template.headerContent.includes('scontent.whatsapp') ||
-        template.headerContent.includes('scontent-') ||
-        template.headerContent.includes('lookaside.fbsbx.com') ||
-        template.headerContent.includes('fbcdn.net');
+        url.includes('scontent.whatsapp') ||
+        url.includes('scontent-') ||
+        url.includes('lookaside.fbsbx.com') ||
+        url.includes('fbcdn.net') ||
+        url.includes('graph.facebook.com');
+      
+      // ❌ BLOCK: Private/signed Cloudinary URLs
+      const isPrivateCloudinary = 
+        url.includes('cloudinary.com') && 
+        (url.includes('/private/') || url.includes('/authenticated/'));
+      
+      // ❌ BLOCK: URLs with auth query params (temp signed URLs)
+      const hasAuthParams = 
+        url.includes('X-Amz-Signature=') ||
+        url.includes('token=') ||
+        url.includes('signature=') ||
+        url.includes('&Expires=') ||
+        url.includes('?Expires=');
       
       if (isMetaCdn) {
-        console.error(`❌ [Template] Cannot use Meta CDN URL for sending: ${template.name}`);
-        console.error(`💡 [Template] User must re-upload media to get Cloudinary URL`);
-        // Skip header - message will fail at Meta with clear error
-      } else {
-        const param: any = {
-          type: mediaType,
-          [mediaType]: { link: template.headerContent },
-        };
-        if (mediaType === 'document') {
-          param.document.filename =
-            template.headerContent.split('/').pop()?.split('?')[0] ||
-            'document.pdf';
-        }
-        components.push({ type: 'header', parameters: [param] });
-        console.log(`ℹ️ [Template] Using URL fallback for "${template.name}"`);
+        console.error(`❌ [Template "${template.name}"] BLOCKED: Meta CDN URL cannot be used`);
+        console.error(`   URL: ${url.substring(0, 80)}...`);
+        console.error(`   💡 SOLUTION: Re-upload media in template settings (needs Cloudinary URL)`);
+        // ✅ THROW to fail fast instead of sending broken message
+        throw new Error(
+          `Template "${template.name}" has invalid media URL (Meta CDN). ` +
+          `Please re-upload media in template settings.`
+        );
       }
+      
+      if (isPrivateCloudinary) {
+        console.error(`❌ [Template "${template.name}"] BLOCKED: Private Cloudinary URL`);
+        throw new Error(
+          `Template "${template.name}" has private media URL. ` +
+          `Please re-upload media as public.`
+        );
+      }
+      
+      if (hasAuthParams) {
+        console.error(`❌ [Template "${template.name}"] BLOCKED: URL with auth params (may expire)`);
+        throw new Error(
+          `Template "${template.name}" has temporary media URL. ` +
+          `Please re-upload media with permanent URL.`
+        );
+      }
+      
+      // ✅ URL is safe - use it
+      const param: any = {
+        type: mediaType,
+        [mediaType]: { link: url },
+      };
+      if (mediaType === 'document') {
+        param.document.filename =
+          url.split('/').pop()?.split('?')[0] || 'document.pdf';
+      }
+      components.push({ type: 'header', parameters: [param] });
+      console.log(`ℹ️ [Template "${template.name}"] Using public URL fallback`);
+    } else {
+      // ❌ No media ID, no URL - can't send
+      throw new Error(
+        `Template "${template.name}" has no valid media (no ID, no URL). ` +
+        `Please re-upload media in template settings.`
+      );
     }
   }
 
@@ -1773,6 +1816,21 @@ export class CampaignsService {
     const headerType = String(template.headerType || '').toUpperCase();
     if (!['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) return null;
 
+    // ✅ ADD THIS DEBUG BLOCK AT THE START
+    console.log(`\n🔍 [ensureMetaMediaId] START:`, {
+      templateId: template.id,
+      templateName: template.name,
+      headerType,
+      headerContent: template.headerContent?.substring(0, 100),
+      hasHeaderMediaId: !!template.headerMediaId,
+      headerMediaId: template.headerMediaId,
+      uploadedAt: template.headerMediaUploadedAt,
+      phoneNumberId,
+      tokenPrefix: accessToken?.substring(0, 10),
+      tokenLength: accessToken?.length,
+      tokenValid: accessToken?.startsWith('EAA'),
+    });
+
     // ✅ Layer 1: Check valid cached media ID (30 din TTL)
     const existingId = template.headerMediaId;
     const uploadedAt = template.headerMediaUploadedAt;
@@ -2041,6 +2099,31 @@ export class CampaignsService {
             campaignSocketService.emitCampaignError(organizationId, campaignId, {
               message: `Media upload failed. Please re-upload ${template.headerType?.toLowerCase()} in template settings (go to Templates → Edit → Re-upload media).`,
               code: 'MEDIA_UPLOAD_FAILED',
+            });
+            return;
+          }
+        }
+
+        // ✅ NEW: Pre-validate URL before starting campaign
+        if (!cachedMediaId) {
+          const url = template.headerContent || '';
+          const isMetaCdn = 
+            url.includes('scontent.whatsapp') ||
+            url.includes('scontent-') ||
+            url.includes('lookaside.fbsbx.com') ||
+            url.includes('fbcdn.net');
+          
+          if (isMetaCdn || !url.startsWith('http')) {
+            console.error(`❌ [Campaign ${campaignId}] Template media invalid - cannot proceed`);
+            
+            await prisma.campaign.update({
+              where: { id: campaignId },
+              data: { status: 'PAUSED' },
+            });
+            
+            campaignSocketService.emitCampaignError(organizationId, campaignId, {
+              message: `Template "${template.name}" media is invalid. Please go to Templates → Edit "${template.name}" → Re-upload media, then resume campaign.`,
+              code: 'MEDIA_INVALID',
             });
             return;
           }
