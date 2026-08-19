@@ -841,8 +841,10 @@ export class ContactsController {
         throw new AppError('Organization context required', 400);
       }
 
-      const type    = String(req.query.type || 'all');
-      const tags    = req.query.tags    ? String(req.query.tags).split(',').filter(Boolean) : [];
+      const type = String(req.query.type || 'all');
+      const tags = req.query.tags
+        ? String(req.query.tags).split(',').map(t => t.trim()).filter(Boolean)
+        : [];
       const groupId = req.query.groupId ? String(req.query.groupId) : undefined;
 
       let count = 0;
@@ -859,13 +861,13 @@ export class ContactsController {
           where: {
             organizationId,
             status: 'ACTIVE',
-            tags:   { hasSome: tags },
+            tags: { hasSome: tags },
           },
         });
       } else if (type === 'group' && groupId) {
         count = await prisma.contactGroupMember.count({
           where: {
-            groupId,
+            groupId: String(groupId),
             contact: {
               organizationId,
               status: 'ACTIVE',
@@ -892,55 +894,43 @@ export class ContactsController {
         throw new AppError('Organization context required', 400);
       }
 
-      const query = String(req.query.q || '').trim();
-      const limit = Math.min(50, parseInt(req.query.limit as string) || 30);
-
-      // Empty query returns first N contacts
-      const where: any = {
-        organizationId,
-        status: 'ACTIVE',
-      };
-
-      if (query.length >= 1) {
-        where.OR = [
-          { phone:     { contains: query, mode: 'insensitive' } },
-          { firstName: { contains: query, mode: 'insensitive' } },
-          { lastName:  { contains: query, mode: 'insensitive' } },
-          { email:     { contains: query, mode: 'insensitive' } },
-        ];
-      }
+      const q = String(req.query.q || '').trim();
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
 
       const contacts = await prisma.contact.findMany({
-        where,
-        take: limit,
-        select: {
-          id:                  true,
-          firstName:           true,
-          lastName:            true,
-          phone:               true,
-          countryCode:         true,
-          email:               true,
-          tags:                true,
-          whatsappProfileName: true,
+        where: {
+          organizationId,
+          status: 'ACTIVE',
+          ...(q ? {
+            OR: [
+              { firstName: { contains: q, mode: 'insensitive' } },
+              { lastName:  { contains: q, mode: 'insensitive' } },
+              { phone:     { contains: q, mode: 'insensitive' } },
+              { email:     { contains: q, mode: 'insensitive' } },
+            ],
+          } : {}),
         },
-        orderBy: [
-          { firstName: 'asc' },
-          { createdAt: 'desc' },
-        ],
+        select: {
+          id:        true,
+          firstName: true,
+          lastName:  true,
+          phone:     true,
+          email:     true,
+          tags:      true,
+        },
+        take: limit,
+        orderBy: { firstName: 'asc' },
       });
 
-      // Format response
-      const formatted = contacts.map(c => ({
+      const mapped = contacts.map(c => ({
         id:    c.id,
-        name:  c.whatsappProfileName ||
-               [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-               c.phone,
+        name:  [c.firstName, c.lastName].filter(Boolean).join(' ') || c.phone,
         phone: c.phone,
-        email: c.email,
+        email: c.email || '',
         tags:  c.tags || [],
       }));
 
-      sendSuccess(res, { contacts: formatted, total: formatted.length }, 'Contacts found');
+      sendSuccess(res, { contacts: mapped, total: mapped.length }, 'Contacts found');
     } catch (error) {
       next(error);
     }
