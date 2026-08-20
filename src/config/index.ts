@@ -112,6 +112,15 @@ export const config = {
     folder: process.env.CLOUDINARY_FOLDER || 'wabmeta-templates',
   },
 
+  // ✅ Cloudflare R2 Storage Config
+  r2: {
+    accountId: getEnv('R2_ACCOUNT_ID'),
+    accessKeyId: getEnv('R2_ACCESS_KEY_ID'),
+    secretAccessKey: getEnv('R2_SECRET_ACCESS_KEY'),
+    bucketName: getEnv('R2_BUCKET_NAME', 'wabmeta-media'),
+    publicUrl: getEnv('R2_PUBLIC_URL', ''),
+  },
+
   // ✅ NEW: Platform WhatsApp config
   platform: {
     whatsapp: {

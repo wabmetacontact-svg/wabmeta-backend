@@ -21,9 +21,11 @@
     "render-build": "npm install --include=dev && npx prisma generate && npx prisma migrate deploy && tsc",
     "migrate:encrypt": "ts-node src/scripts/encryptTokens.ts",
     "migrate:encrypt:dry": "ts-node src/scripts/encryptTokens.ts --dry-run",
+    "migrate:r2": "ts-node src/scripts/migrate-cloudinary-to-r2.ts",
     "generate:key": "node -e \"console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))\""
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1114.0",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@google/generative-ai": "^0.24.1",
     "@paralleldrive/cuid2": "^3.3.0",

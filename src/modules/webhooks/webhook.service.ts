@@ -1992,13 +1992,13 @@ export class WebhookService {
         }
       );
 
-      const mediaUrl = infoRes.data?.url;
+      const metaDownloadUrl = infoRes.data?.url;
       const actualMime = infoRes.data?.mime_type || mimeType;
 
-      if (!mediaUrl) return;
+      if (!metaDownloadUrl) return;
 
       // Step 2: Download from Meta CDN
-      const mediaRes = await axios.get(mediaUrl, {
+      const mediaRes = await axios.get(metaDownloadUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
         responseType: 'arraybuffer',
         timeout: 60000,
@@ -2008,18 +2008,43 @@ export class WebhookService {
       const buffer = Buffer.from(mediaRes.data);
       if (buffer.length === 0) return;
 
-      // Step 3: Upload to Cloudinary
-      const { cloudinaryService } = await import('../../services/cloudinary.service');
-      const result = await cloudinaryService.uploadInboundMedia({
-        buffer,
-        mimeType: actualMime,
-        organizationId,
-        messageId,
-      });
+      // Step 3: Upload to Cloudflare R2 (or fallback to Cloudinary)
+      let mediaUrl = '';
+      let storageKey = '';
 
-      if (!result) return;
+      const { r2Service } = await import('../../services/r2.service');
+      if (r2Service.isConfigured()) {
+        try {
+          const r2Res = await r2Service.uploadInboundMedia({
+            buffer,
+            organizationId,
+            mediaId,
+            mimeType: actualMime,
+          });
+          mediaUrl = r2Res.url;
+          storageKey = r2Res.key;
+        } catch (e: any) {
+          console.error('❌ R2 inbound upload failed:', e.message);
+        }
+      }
 
-      // Step 4: Update message with Cloudinary URL
+      if (!mediaUrl) {
+        const { cloudinaryService } = await import('../../services/cloudinary.service');
+        const result = await cloudinaryService.uploadInboundMedia({
+          buffer,
+          mimeType: actualMime,
+          organizationId,
+          messageId,
+        });
+        if (result) {
+          mediaUrl = result.url;
+          storageKey = result.publicId;
+        }
+      }
+
+      if (!mediaUrl) return;
+
+      // Step 4: Update message with media URL
       const existingMsg = await prisma.message.findUnique({
         where: { id: messageId },
         select: { metadata: true }
@@ -2030,11 +2055,11 @@ export class WebhookService {
       await prisma.message.update({
         where: { id: messageId },
         data: {
-          mediaUrl: result.url,
+          mediaUrl: mediaUrl,
           metadata: {
             ...existingMeta,
-            cloudinaryUrl: result.url,
-            cloudinaryPublicId: result.publicId,
+            storageUrl: mediaUrl,
+            storageKey: storageKey,
             backedUpAt: new Date().toISOString(),
             originalMetaMediaId: mediaId,
           } as any,

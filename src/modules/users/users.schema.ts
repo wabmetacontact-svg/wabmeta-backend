@@ -8,21 +8,21 @@ import { z } from 'zod';
 
 const nameSchema = z
   .string()
-  .min(2, 'Name must be at least 2 characters')
-  .max(50, 'Name is too long')
+  .max(100, 'Name is too long')
   .trim();
 
 const phoneSchema = z
   .string()
   .regex(/^\+?[1-9]\d{9,14}$/, 'Invalid phone number')
   .optional()
-  .nullable();
+  .nullable()
+  .or(z.literal(''));
 
-const urlSchema = z
+const avatarSchema = z
   .string()
-  .url('Invalid URL')
   .optional()
-  .nullable();
+  .nullable()
+  .or(z.literal(''));
 
 // ============================================
 // REQUEST SCHEMAS
@@ -31,15 +31,15 @@ const urlSchema = z
 export const updateProfileSchema = z.object({
   body: z.object({
     firstName: nameSchema.optional(),
-    lastName: nameSchema.optional().nullable(),
+    lastName: nameSchema.optional().nullable().or(z.literal('')),
     phone: phoneSchema,
-    avatar: urlSchema,
+    avatar: avatarSchema,
   }),
 });
 
 export const updateAvatarSchema = z.object({
   body: z.object({
-    avatar: z.string().url('Invalid avatar URL'),
+    avatar: z.string(),
   }),
 });
 
