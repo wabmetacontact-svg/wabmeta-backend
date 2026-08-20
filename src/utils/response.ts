@@ -55,18 +55,37 @@ export const successResponse = <T = any>(
     message?: string;
     meta?: any;
     statusCode?: number;
-  }
+  } | any = {}
 ): Response => {
-  const { data, message = 'Success', meta, statusCode = 200 } = options;
+  if (options && typeof options === 'object') {
+    if ('data' in options || 'meta' in options) {
+      const { data, message = 'Success', meta, statusCode = 200 } = options;
+      const response: ApiResponse<T> = {
+        success: true,
+        message,
+        data,
+        meta,
+      };
+      return res.status(statusCode).json(response);
+    }
+
+    if ('message' in options && !('items' in options) && !('count' in options)) {
+      const { message = 'Success', statusCode = 200 } = options;
+      const response: ApiResponse<T> = {
+        success: true,
+        message,
+      };
+      return res.status(statusCode).json(response);
+    }
+  }
 
   const response: ApiResponse<T> = {
     success: true,
-    message,
-    data,
-    meta,
+    message: 'Success',
+    data: options,
   };
 
-  return res.status(statusCode).json(response);
+  return res.status(200).json(response);
 };
 
 // errorResponse - Object based version

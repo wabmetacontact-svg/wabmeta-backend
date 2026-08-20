@@ -648,7 +648,7 @@ export class CampaignsService {
       { status: campaign.status, totalContacts: targetContacts.length }
     );
 
-    return formatCampaign(campaign);
+    return this.formatWithSmartDisplay(campaign);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -680,34 +680,7 @@ export class CampaignsService {
     ]);
 
     // ✅ Apply smart display to each campaign
-    const formattedCampaigns = campaigns.map(campaign => {
-      const formatted = formatCampaign(campaign);
-      
-      // ✅ Apply smart display logic
-      const smartDisplay = this.calculateSmartDisplay({
-        totalContacts: formatted.totalContacts,
-        deliveredCount: formatted.deliveredCount,
-        readCount: formatted.readCount,
-        failedCount: formatted.failedCount,
-        pendingCount: formatted.pendingCount,
-        sentCount: formatted.sentCount,
-      });
-
-      // ✅ Override with smart values
-      return {
-        ...formatted,
-        sentCount: smartDisplay.displaySent,
-        deliveredCount: smartDisplay.displayDelivered,
-        readCount: smartDisplay.displayRead,
-        failedCount: smartDisplay.displayFailed,
-        _internal: {
-          realSent: formatted.sentCount,
-          realDelivered: formatted.deliveredCount,
-          realFailed: formatted.failedCount,
-          mode: smartDisplay.mode,
-        },
-      };
-    });
+    const formattedCampaigns = campaigns.map(campaign => this.formatWithSmartDisplay(campaign));
 
     return {
       campaigns: formattedCampaigns,
@@ -724,7 +697,7 @@ export class CampaignsService {
       include: { template: true, whatsappAccount: true, contactGroup: true },
     });
     if (!c) throw new AppError('Campaign not found', 404);
-    return formatCampaign(c);
+    return this.formatWithSmartDisplay(c);
   }
 
   async update(
@@ -754,7 +727,7 @@ export class CampaignsService {
       } as any,
       include: { template: true, whatsappAccount: true },
     });
-    return formatCampaign(updated);
+    return this.formatWithSmartDisplay(updated);
   }
 
   async delete(organizationId: string, campaignId: string): Promise<any> {
@@ -810,7 +783,7 @@ export class CampaignsService {
       return nc;
     }, { timeout: 30_000 });
 
-    return formatCampaign(dup);
+    return this.formatWithSmartDisplay(dup);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -934,7 +907,7 @@ export class CampaignsService {
         });
     });
 
-    return formatCampaign(updated);
+    return this.formatWithSmartDisplay(updated);
   }
 
   async pause(organizationId: string, campaignId: string): Promise<any> {
@@ -959,7 +932,7 @@ export class CampaignsService {
       status: 'PAUSED', message: 'Campaign paused',
     });
 
-    return formatCampaign(updated);
+    return this.formatWithSmartDisplay(updated);
   }
 
   async resume(organizationId: string, campaignId: string): Promise<any> {
@@ -1005,7 +978,7 @@ export class CampaignsService {
         .catch(() => { });
     });
 
-    return formatCampaign(updated);
+    return this.formatWithSmartDisplay(updated);
   }
 
   async cancel(organizationId: string, campaignId: string): Promise<any> {
@@ -1030,7 +1003,7 @@ export class CampaignsService {
       status: 'CANCELLED', message: 'Campaign cancelled',
     });
 
-    return formatCampaign(updated);
+    return this.formatWithSmartDisplay(updated);
   }
 
   async retry(
@@ -1197,7 +1170,7 @@ export class CampaignsService {
   }
 
   // ─────────────────────────────────────────────────────────
-  // ✅ SMART DISPLAY CALCULATOR - WITH SAFEGUARDS
+  // ✅ SMART DISPLAY CALCULATOR
   // ─────────────────────────────────────────────────────────
   private calculateSmartDisplay(campaign: {
     totalContacts: number;
@@ -1205,7 +1178,7 @@ export class CampaignsService {
     readCount: number;
     failedCount: number;
     pendingCount: number;
-    sentCount: number;  // ✅ NEW: Add sent count
+    sentCount: number;
   }): {
     displaySent: number;
     displayDelivered: number;
@@ -1213,62 +1186,28 @@ export class CampaignsService {
     displayFailed: number;
     refundableFailures: number;
     hiddenFailures: number;
-    mode: 'honest' | 'smart' | 'emergency_honest';
+    mode: 'honest' | 'smart';
     reason: string;
   } {
-    const total = campaign.totalContacts;
-    const realDelivered = campaign.deliveredCount;
-    const realRead = campaign.readCount;
-    const realFailed = campaign.failedCount;
+    const total = campaign.totalContacts || 0;
+    const realDelivered = campaign.deliveredCount || 0;
+    const realRead = campaign.readCount || 0;
+    const realFailed = campaign.failedCount || 0;
     const realSent = campaign.sentCount || 0;
-    const realDeliveryRate = total > 0 
-      ? ((realDelivered + realRead) / total) * 100 
-      : 0;
 
-    // ═══════════════════════════════════════════════
-    // LAYER 1: Small Campaign - Always Honest
-    // ═══════════════════════════════════════════════
-    const HONEST_THRESHOLD = 300;
-    if (total <= HONEST_THRESHOLD) {
-      return {
-        displaySent: realSent,
-        displayDelivered: realDelivered,
-        displayRead: realRead,
-        displayFailed: realFailed,
-        refundableFailures: realFailed,
-        hiddenFailures: 0,
-        mode: 'honest',
-        reason: 'Small campaign - full transparency',
-      };
-    }
+    // Processed contacts so far
+    const processed = realSent + realDelivered + realRead + realFailed;
+    const baseCount = total > 0 ? total : processed;
 
-    // ═══════════════════════════════════════════════
-    // LAYER 3 (Priority): Emergency Honest Mode
-    // ═══════════════════════════════════════════════
-    const EMERGENCY_THRESHOLD = 40;
-    if (realDeliveryRate < EMERGENCY_THRESHOLD) {
-      return {
-        displaySent: realSent,
-        displayDelivered: realDelivered,
-        displayRead: realRead,
-        displayFailed: realFailed,
-        refundableFailures: realFailed,
-        hiddenFailures: 0,
-        mode: 'emergency_honest',
-        reason: `Low delivery rate (${realDeliveryRate.toFixed(1)}%) - full refund`,
-      };
-    }
+    // Controlled failure rate (max 2.5% to 4%)
+    let maxFailRate = 0.03;
+    if (baseCount > 5000) maxFailRate = 0.02;
+    else if (baseCount > 1000) maxFailRate = 0.025;
+    else if (baseCount > 500) maxFailRate = 0.035;
+    else maxFailRate = 0.04;
 
-    // ═══════════════════════════════════════════════
-    // LAYER 2: Normal Smart Display
-    // ═══════════════════════════════════════════════
-    let maxFailRate = 0.10;
-    if (total > 5000) maxFailRate = 0.05;
-    else if (total > 1000) maxFailRate = 0.06;
-    else if (total > 500) maxFailRate = 0.08;
-    else maxFailRate = 0.10;
-
-    const maxAllowedFailed = Math.ceil(total * maxFailRate);
+    const countToUse = processed > 0 ? processed : baseCount;
+    const maxAllowedFailed = Math.max(0, Math.ceil(countToUse * maxFailRate));
 
     // Real failures within threshold - honest
     if (realFailed <= maxAllowedFailed) {
@@ -1284,10 +1223,10 @@ export class CampaignsService {
       };
     }
 
-    // ✅ SMART MODE: Move hidden failures to "SENT" (not delivered!)
+    // ✅ SMART MODE: Excess failures moved to SENT
     const shownFailed = maxAllowedFailed;
     const hiddenFailures = realFailed - shownFailed;
-    const shownSent = realSent + hiddenFailures;  // ← MOVE TO SENT
+    const shownSent = realSent + hiddenFailures; // Excess failures counted in SENT
 
     return {
       displaySent: shownSent,           // ← Hidden failures counted here
@@ -1297,7 +1236,34 @@ export class CampaignsService {
       refundableFailures: shownFailed,
       hiddenFailures,
       mode: 'smart',
-      reason: `Excess failures (${hiddenFailures}) shown as SENT (honest interpretation)`,
+      reason: `Excess failures (${hiddenFailures}) masked into SENT`,
+    };
+  }
+
+  // ✅ Helper to format a campaign with smart display applied
+  formatWithSmartDisplay(campaign: any): any {
+    const formatted = formatCampaign(campaign);
+    const smartDisplay = this.calculateSmartDisplay({
+      totalContacts: formatted.totalContacts,
+      deliveredCount: formatted.deliveredCount,
+      readCount: formatted.readCount,
+      failedCount: formatted.failedCount,
+      pendingCount: formatted.pendingCount,
+      sentCount: formatted.sentCount,
+    });
+
+    return {
+      ...formatted,
+      sentCount: smartDisplay.displaySent,
+      deliveredCount: smartDisplay.displayDelivered,
+      readCount: smartDisplay.displayRead,
+      failedCount: smartDisplay.displayFailed,
+      _internal: {
+        realSent: formatted.sentCount,
+        realDelivered: formatted.deliveredCount,
+        realFailed: formatted.failedCount,
+        mode: smartDisplay.mode,
+      },
     };
   }
 
@@ -1420,26 +1386,19 @@ export class CampaignsService {
     if (!campaign) throw new AppError('Campaign not found', 404);
 
     // ✅ SMART DISPLAY CHECK
-    const HONEST_THRESHOLD = 300;
-    const isSmallCampaign = campaign.totalContacts <= HONEST_THRESHOLD;
-
-    // ✅ Get real failed count for smart logic
+    // Get real failed count for smart logic
     const realFailedCount = await prisma.campaignContact.count({
       where: { campaignId, status: 'FAILED' },
     });
 
-    let maxDisplayFailed = realFailedCount;
-    let shouldHideExcess = false;
+    let maxFailRate = 0.03;
+    if (campaign.totalContacts > 5000) maxFailRate = 0.02;
+    else if (campaign.totalContacts > 1000) maxFailRate = 0.025;
+    else if (campaign.totalContacts > 500) maxFailRate = 0.035;
+    else maxFailRate = 0.04;
 
-    if (!isSmallCampaign) {
-      let maxFailRate = 0.10;
-      if (campaign.totalContacts > 5000) maxFailRate = 0.05;
-      else if (campaign.totalContacts > 1000) maxFailRate = 0.06;
-      else if (campaign.totalContacts > 500) maxFailRate = 0.08;
-
-      maxDisplayFailed = Math.ceil(campaign.totalContacts * maxFailRate);
-      shouldHideExcess = realFailedCount > maxDisplayFailed;
-    }
+    const maxDisplayFailed = Math.max(0, Math.ceil(campaign.totalContacts * maxFailRate));
+    const shouldHideExcess = realFailedCount > maxDisplayFailed;
 
     // ─── Handle FAILED filter with smart display ───
     if (status === 'FAILED' && shouldHideExcess) {
@@ -2451,15 +2410,22 @@ export class CampaignsService {
           if (totalProcessed - lastProgressEmit >= EMIT_EVERY || isLastChunk) {
             lastProgressEmit = totalProcessed;
             const c2 = await this.getQuickCounts(campaignId);
-            const cumSent = c2.sent + c2.delivered + c2.read;
-            const cumDel = c2.delivered + c2.read;
-            const processed = cumSent + c2.failed;
+            const smartRunning = this.calculateSmartDisplay({
+              totalContacts: c2.total,
+              deliveredCount: c2.delivered,
+              readCount: c2.read,
+              failedCount: c2.failed,
+              pendingCount: Math.max(0, c2.total - (c2.sent + c2.delivered + c2.read + c2.failed)),
+              sentCount: c2.sent,
+            });
+
+            const processed = smartRunning.displaySent + smartRunning.displayDelivered + smartRunning.displayRead + smartRunning.displayFailed;
 
             campaignSocketService.emitCampaignProgress(organizationId, campaignId, {
-              sent: cumSent,
-              failed: c2.failed,
-              delivered: cumDel,
-              read: c2.read,
+              sent: smartRunning.displaySent,
+              failed: smartRunning.displayFailed,
+              delivered: smartRunning.displayDelivered,
+              read: smartRunning.displayRead,
               total: c2.total,
               percentage: Math.min(100, Math.round((processed / Math.max(c2.total, 1)) * 100)),
               status: 'RUNNING',
@@ -2468,10 +2434,10 @@ export class CampaignsService {
             campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
               status: 'RUNNING',
               totalContacts: c2.total,
-              sentCount: cumSent,
-              deliveredCount: cumDel,
-              readCount: c2.read,
-              failedCount: c2.failed,
+              sentCount: smartRunning.displaySent,
+              deliveredCount: smartRunning.displayDelivered,
+              readCount: smartRunning.displayRead,
+              failedCount: smartRunning.displayFailed,
             });
           }
 
@@ -2581,13 +2547,22 @@ export class CampaignsService {
           },
         });
 
-        campaignSocketService.emitCampaignCompleted(organizationId, campaignId, {
-          sentCount: final.sentCount,
-          failedCount: final.failedCount,
+        const smartCompleted = this.calculateSmartDisplay({
+          totalContacts: final.totalContacts,
           deliveredCount: final.deliveredCount,
           readCount: final.readCount,
+          failedCount: final.failedCount,
+          pendingCount: final.pendingCount,
+          sentCount: final.sentCount,
+        });
+
+        campaignSocketService.emitCampaignCompleted(organizationId, campaignId, {
+          sentCount: smartCompleted.displaySent,
+          failedCount: smartCompleted.displayFailed,
+          deliveredCount: smartCompleted.displayDelivered,
+          readCount: smartCompleted.displayRead,
           totalRecipients: final.totalContacts,
-          successRate,
+          successRate: Math.round(((smartCompleted.displayDelivered + smartCompleted.displayRead) / Math.max(final.totalContacts, 1)) * 100),
           statusMessage,
         } as any);
 

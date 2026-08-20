@@ -38,6 +38,7 @@ model User {
   createdCampaigns     Campaign[]           @relation("CampaignCreator")
   createdChatbots      Chatbot[]            @relation("ChatbotCreator")
   notifications        Notification[]
+  expoPushTokens       ExpoPushToken[]
   ownedOrganizations   Organization[]       @relation("OrganizationOwner")
   memberships          OrganizationMember[]
   refreshTokens        RefreshToken[]
@@ -716,22 +717,36 @@ model Notification {
   id             String        @id @default(cuid())
   userId         String
   organizationId String?
-  type           String        @default("system")
+  type           String        @default("system") // 'message', 'campaign', 'team', 'billing', 'alert', 'whatsapp', 'system'
   title          String
-  description    String
+  description    String        @db.Text
   actionUrl      String?
-  metadata       Json          @default("{}")
+  metadata       Json?         @default("{}")
   read           Boolean       @default(false)
-  readAt         DateTime?
   createdAt      DateTime      @default(now())
+  readAt         DateTime?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
   @@index([userId, read])
+  @@index([userId, createdAt])
   @@index([organizationId])
   @@index([type])
   @@index([createdAt])
+}
+
+model ExpoPushToken {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  deviceId   String?
+  platform   String?  // 'ios' | 'android'
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model ActivityLog {

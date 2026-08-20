@@ -39,6 +39,7 @@ import automationRoutes from './modules/automation/automation.routes';
 import callingRoutes from './modules/calling/calling.routes';
 import walletRoutes from './modules/wallet/wallet.routes';
 import instagramRoutes from './modules/instagram/instagram.routes';
+import notificationRoutes from './modules/notifications/notifications.routes';
 
 const app: Application = express();
 
@@ -249,6 +250,7 @@ app.use('/api/calling', callingRoutes);
 app.use('/api/chatbots', chatbotRoutes);
 app.use('/api', walletRoutes);
 app.use('/api/instagram', instagramRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 logger.info('✅ All API routes registered');
 
