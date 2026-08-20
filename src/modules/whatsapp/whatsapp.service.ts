@@ -1553,9 +1553,8 @@ private buildTemplateComponents(
           where: { id: accountId },
           data: {
             status: 'DISCONNECTED',
-            disconnectedAt: new Date(),
-            disconnectReason: 'Phone number deleted from Meta',
-          } as any,
+            isActive: false,
+          },
         });
 
         return { success: false, error: 'Phone number deleted from Meta' };
