@@ -1243,13 +1243,27 @@ export class CampaignsService {
   // ✅ Helper to format a campaign with smart display applied
   formatWithSmartDisplay(campaign: any): any {
     const formatted = formatCampaign(campaign);
+
+    // In Campaign table:
+    // sentCount was stored as cumulative (sent + delivered + read)
+    // deliveredCount was stored as cumulative (delivered + read)
+    // Disjoint counts extract karo:
+    const read = formatted.readCount || 0;
+    const rawDelivered = formatted.deliveredCount || 0;
+    const rawSent = formatted.sentCount || 0;
+    const failed = formatted.failedCount || 0;
+
+    const delivered = Math.max(0, rawDelivered - read);
+    const sent = Math.max(0, rawSent - rawDelivered);
+    const total = formatted.totalContacts || (sent + delivered + read + failed);
+
     const smartDisplay = this.calculateSmartDisplay({
-      totalContacts: formatted.totalContacts,
-      deliveredCount: formatted.deliveredCount,
-      readCount: formatted.readCount,
-      failedCount: formatted.failedCount,
-      pendingCount: formatted.pendingCount,
-      sentCount: formatted.sentCount,
+      totalContacts: total,
+      deliveredCount: delivered,
+      readCount: read,
+      failedCount: failed,
+      pendingCount: formatted.pendingCount || 0,
+      sentCount: sent,
     });
 
     return {
