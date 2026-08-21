@@ -13,13 +13,21 @@ const nameSchema = z
 
 const phoneSchema = z
   .string()
-  .regex(/^\+?[1-9]\d{9,14}$/, 'Invalid phone number')
+  .trim()
+  .transform((val) => val.replace(/[\s\-\(\)]/g, '')) // spaces hatao
+  .refine(
+    (val) => val === '' || /^\+?[1-9]\d{9,14}$/.test(val),
+    'Invalid phone number'
+  )
   .optional()
   .nullable()
   .or(z.literal(''));
 
+// Avatar: base64 mat allow karo profile update pe — URL only
 const avatarSchema = z
   .string()
+  .url('Avatar must be a valid URL')
+  .max(500)
   .optional()
   .nullable()
   .or(z.literal(''));
@@ -39,7 +47,10 @@ export const updateProfileSchema = z.object({
 
 export const updateAvatarSchema = z.object({
   body: z.object({
-    avatar: z.string(),
+    avatar: z
+      .string()
+      .url('Avatar must be a valid URL')
+      .max(500),
   }),
 });
 
