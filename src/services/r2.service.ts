@@ -83,6 +83,18 @@ export class R2Service {
     };
   }
 
+  async uploadMediaBuffer(
+    buffer: Buffer,
+    filename: string,
+    mimeType: string,
+    folder: string = 'media'
+  ): Promise<{ url: string; key: string; size: number }> {
+    const cleanFolder = folder.replace(/^\/+|\/+$/g, '');
+    const cleanFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const key = `${cleanFolder}/${cleanFilename}`;
+    return this.uploadBuffer(buffer, key, mimeType);
+  }
+
   async uploadTemplateMedia(options: {
     file: {
       buffer: Buffer;

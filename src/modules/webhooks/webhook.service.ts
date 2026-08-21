@@ -821,6 +821,20 @@ export class WebhookService {
         },
       });
 
+      // ✅ PERMANENT FIX (Rule 1): Background mirror incoming Meta media to R2 / Cloudinary
+      if (mediaId) {
+        inboxMediaService
+          .mirrorInboundMedia(
+            savedMessage.id,
+            mediaId,
+            organizationId,
+            mediaMimeType || 'application/octet-stream'
+          )
+          .catch((mirrorErr: any) =>
+            console.error('⚠️ Inbound media mirroring failed:', mirrorErr?.message)
+          );
+      }
+
       const updatedConversation = await prisma.conversation.update({
         where: { id: conversation.id },
         data: {

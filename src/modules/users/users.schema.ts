@@ -47,10 +47,7 @@ export const updateProfileSchema = z.object({
 
 export const updateAvatarSchema = z.object({
   body: z.object({
-    avatar: z
-      .string()
-      .url('Avatar must be a valid URL')
-      .max(500),
+    avatar: z.string().min(1, 'Avatar is required'),
   }),
 });
 

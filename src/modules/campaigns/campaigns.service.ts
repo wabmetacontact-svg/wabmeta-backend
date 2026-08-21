@@ -214,22 +214,24 @@ function buildTemplateMessage(
       });
     }
   } else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-    // ✅ ONLY numeric Media ID accept karo
-    // URL fallback = 401 error = campaign fail
-    if (!metaMediaId || !/^\d+$/.test(String(metaMediaId))) {
-      throw new Error(
-        `Template "${template.name}" media not uploaded to Meta yet. ` +
-        `Campaign will retry after upload.`
-      );
-    }
-
     const mediaType = headerType.toLowerCase() as
       'image' | 'video' | 'document';
+    const mediaUrl = template.headerContent;
 
+    // ✅ Rule 2: Prefer Permanent R2/Cloudinary URL (NEVER EXPIRES) over Meta Media Handle
     const param: any = {
       type: mediaType,
-      [mediaType]: { id: String(metaMediaId) },
     };
+
+    if (mediaUrl && mediaUrl.startsWith('http')) {
+      param[mediaType] = { link: mediaUrl };
+    } else if (metaMediaId && /^\d+$/.test(String(metaMediaId))) {
+      param[mediaType] = { id: String(metaMediaId) };
+    } else {
+      throw new Error(
+        `Template "${template.name}" media not available. Please ensure media URL is configured.`
+      );
+    }
 
     // Document ke liye filename
     if (mediaType === 'document') {
@@ -2039,34 +2041,35 @@ export class CampaignsService {
       const headerType = String(template.headerType || '').toUpperCase();
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-        console.log(`📸 [Campaign ${campaignId}] Pre-uploading media to Meta...`);
-        
-        cachedMediaId = await this.ensureMetaMediaId(
-          template, phoneNumberId, accessToken, wabaId
-        );
+        if (template.headerContent && template.headerContent.startsWith('http')) {
+          console.log(`✅ [Campaign ${campaignId}] Permanent media link found: ${template.headerContent.substring(0, 60)}`);
+        } else {
+          console.log(`📸 [Campaign ${campaignId}] Pre-uploading media to Meta...`);
+          cachedMediaId = await this.ensureMetaMediaId(
+            template, phoneNumberId, accessToken, wabaId
+          );
 
-        // ✅ Media ID MANDATORY - URL fallback allowed nahi
-        if (!cachedMediaId) {
-          console.error(`❌ [Campaign ${campaignId}] Media upload failed - PAUSING campaign`);
+          if (!cachedMediaId) {
+            console.error(`❌ [Campaign ${campaignId}] Media upload failed - PAUSING campaign`);
 
-          await prisma.campaign.update({
-            where: { id: campaignId },
-            data: { status: 'PAUSED' },
-          });
+            await prisma.campaign.update({
+              where: { id: campaignId },
+              data: { status: 'PAUSED' },
+            });
 
-          campaignSocketService.emitCampaignError(organizationId, campaignId, {
-            message:
-              `Media upload to WhatsApp failed for template "${template.name}". ` +
-              `Please go to Templates → Edit → Re-upload the ${
-                template.headerType?.toLowerCase()
-              } file, then resume this campaign.`,
-            code: 'MEDIA_UPLOAD_FAILED',
-          });
+            campaignSocketService.emitCampaignError(organizationId, campaignId, {
+              message:
+                `Media upload to WhatsApp failed for template "${template.name}". ` +
+                `Please go to Templates → Edit → Re-upload the ${
+                  template.headerType?.toLowerCase()
+                } file, then resume this campaign.`,
+              code: 'MEDIA_UPLOAD_FAILED',
+            });
 
-          return; // ✅ Campaign process nahi hoga bina valid Media ID ke
+            return;
+          }
+          console.log(`✅ [Campaign ${campaignId}] Media ready: ${cachedMediaId}`);
         }
-
-        console.log(`✅ [Campaign ${campaignId}] Media ready: ${cachedMediaId}`);
       }
 
       // ── Wallet check ──────────────────────────────────────

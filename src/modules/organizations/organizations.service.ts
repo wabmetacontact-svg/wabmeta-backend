@@ -7,6 +7,9 @@ import { comparePassword } from '../../utils/password';
 import { generateSlug } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
 import { UserRole } from '@prisma/client';
+import { r2Service } from '../../services/r2.service';
+import { v2 as cloudinary } from 'cloudinary';
+import { cloudinaryService } from '../../services/cloudinary.service';
 import {
   CreateOrganizationInput,
   UpdateOrganizationInput,
@@ -210,11 +213,53 @@ export class OrganizationsService {
       throw new AppError('Permission denied', 403);
     }
 
+    let finalLogo = input.logo;
+    if (finalLogo && finalLogo.startsWith('data:image/')) {
+      // 1. Try R2
+      if (r2Service.isConfigured()) {
+        try {
+          const parts = finalLogo.split(',');
+          const buffer = Buffer.from(parts[1], 'base64');
+          const mimeType = parts[0].split(';')[0].replace('data:', '') || 'image/png';
+          const ext = mimeType.split('/')[1] || 'png';
+          const filename = `logo_${organizationId}_${Date.now()}.${ext}`;
+          const r2Res = await r2Service.uploadMediaBuffer(
+            buffer,
+            filename,
+            mimeType,
+            `logos/${organizationId}`
+          );
+          if (r2Res?.url) {
+            finalLogo = r2Res.url;
+          }
+        } catch (err: any) {
+          console.warn('⚠️ R2 logo upload failed, trying Cloudinary:', err?.message);
+        }
+      }
+
+      // 2. Fallback to Cloudinary
+      if (finalLogo.startsWith('data:image/') && cloudinaryService.isConfigured()) {
+        try {
+          const uploadRes = await cloudinary.uploader.upload(finalLogo, {
+            folder: `wabmeta/logos/${organizationId}`,
+            transformation: [
+              { width: 400, height: 400, crop: 'limit', quality: 'auto', fetch_format: 'auto' },
+            ],
+          });
+          if (uploadRes?.secure_url) {
+            finalLogo = uploadRes.secure_url;
+          }
+        } catch (err: any) {
+          console.warn('⚠️ Cloudinary logo upload failed:', err?.message);
+        }
+      }
+    }
+
     const organization = await prisma.organization.update({
       where: { id: organizationId },
       data: {
         name: input.name,
-        logo: input.logo,
+        logo: finalLogo,
         website: input.website,
         industry: input.industry,
         timezone: input.timezone,

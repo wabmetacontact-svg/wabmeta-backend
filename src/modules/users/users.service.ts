@@ -13,6 +13,9 @@ import {
 import { whatsappApi } from '../whatsapp/whatsapp.api';
 
 import { config } from '../../config';
+import { v2 as cloudinary } from 'cloudinary';
+import { cloudinaryService } from '../../services/cloudinary.service';
+import { r2Service } from '../../services/r2.service';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -232,9 +235,52 @@ export class UsersService {
   // UPDATE AVATAR
   // ==========================================
   async updateAvatar(userId: string, avatarUrl: string): Promise<UserProfile> {
+    let finalAvatar = avatarUrl;
+
+    if (avatarUrl && avatarUrl.startsWith('data:image/')) {
+      // 1. Try R2 (Primary CDN)
+      if (r2Service.isConfigured()) {
+        try {
+          const parts = avatarUrl.split(',');
+          const buffer = Buffer.from(parts[1], 'base64');
+          const mimeType = parts[0].split(';')[0].replace('data:', '') || 'image/png';
+          const ext = mimeType.split('/')[1] || 'png';
+          const filename = `avatar_${userId}_${Date.now()}.${ext}`;
+          const r2Res = await r2Service.uploadMediaBuffer(
+            buffer,
+            filename,
+            mimeType,
+            `avatars/${userId}`
+          );
+          if (r2Res?.url) {
+            finalAvatar = r2Res.url;
+          }
+        } catch (err: any) {
+          console.warn('⚠️ R2 avatar upload failed, trying Cloudinary:', err?.message);
+        }
+      }
+
+      // 2. Fallback to Cloudinary
+      if (finalAvatar.startsWith('data:image/') && cloudinaryService.isConfigured()) {
+        try {
+          const uploadRes = await cloudinary.uploader.upload(avatarUrl, {
+            folder: 'wabmeta/avatars',
+            transformation: [
+              { width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto', fetch_format: 'auto' },
+            ],
+          });
+          if (uploadRes?.secure_url) {
+            finalAvatar = uploadRes.secure_url;
+          }
+        } catch (err: any) {
+          console.warn('⚠️ Cloudinary avatar upload failed:', err?.message);
+        }
+      }
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: { avatar: avatarUrl },
+      data: { avatar: finalAvatar },
     });
 
     return formatUserProfile(updatedUser);

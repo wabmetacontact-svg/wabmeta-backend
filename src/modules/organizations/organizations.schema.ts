@@ -42,7 +42,7 @@ export const createOrganizationSchema = z.object({
 export const updateOrganizationSchema = z.object({
   body: z.object({
     name: nameSchema.optional(),
-    logo: urlSchema,
+    logo: z.string().optional().nullable().or(z.literal('')),
     website: urlSchema,
     industry: z.string().max(50).optional().nullable(),
     timezone: timezoneSchema,
