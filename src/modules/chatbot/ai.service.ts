@@ -24,12 +24,9 @@ class AIService {
 
   constructor() {
     const apiKey = process.env.GEMINI_API_KEY;
-    console.log(
-      '🔑 GEMINI_API_KEY:',
-      apiKey
-        ? `✅ Found (${apiKey.substring(0, 15)}...)`
-        : '❌ NOT FOUND'
-    );
+    // Log presence only. A prefix of a real key still leaks key material into
+    // retained logs.
+    console.log('🔑 GEMINI_API_KEY:', apiKey ? '✅ configured' : '❌ NOT FOUND');
     this.genAI = new GoogleGenerativeAI(apiKey || '');
   }
 
