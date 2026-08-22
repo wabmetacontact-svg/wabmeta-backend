@@ -10,11 +10,15 @@ import {
 import { checkConnectionLock } from '../../middleware/connectionLock';
 import { authenticate } from '../../middleware/auth';
 
+import { gateMutations, ADMIN_ROLES } from '../../middleware/requireRole';
 const router = Router();
 
 // Every Instagram route is tenant data. Without this the module was reachable
 // without a token, and the controllers trusted an `x-organization-id` header.
 router.use(authenticate);
+
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use(gateMutations(...ADMIN_ROLES));
 
 // GET /api/instagram/accounts
 router.get("/accounts", getAccounts);

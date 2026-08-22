@@ -12,6 +12,7 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 
+import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 const router = Router();
 
 // ==========================================
@@ -156,11 +157,14 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
   }
 });
 
-router.get('/media-proxy', (req, res, next) =>
+router.get('/media-proxy', authenticate, (req, res, next) =>
   inboxController.getMedia(req as any, res, next)
 );
 
 router.use(authenticate);
+
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use(gateMutations(...OPERATOR_ROLES));
 
 // ==========================================
 // MULTER CONFIG (uploads/media)
@@ -176,9 +180,27 @@ const storage = multer.diskStorage({
   },
 });
 
+// Only real chat media. Blocks HTML/SVG/JS, which would execute in the browser
+// if opened from our own origin (stored XSS).
+const ALLOWED_UPLOAD_MIMES = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+  'video/mp4', 'video/3gpp', 'video/quicktime',
+  'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/amr', 'audio/mp4',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+]);
+
 const upload = multer({
   storage,
   limits: { fileSize: 16 * 1024 * 1024 }, // 16MB
+  fileFilter: (_req: Request, file: any, cb: any) => {
+    if (ALLOWED_UPLOAD_MIMES.has(file.mimetype)) return cb(null, true);
+    cb(new Error(`Unsupported file type: ${file.mimetype}`));
+  },
 });
 
 // ==========================================

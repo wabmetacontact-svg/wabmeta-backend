@@ -685,15 +685,27 @@ export class InboxController {
 
       // ✅ Local uploads - direct serve
       if (idToFetch.startsWith('/uploads/') || idToFetch.includes('uploads/media/')) {
-        const filePath = path.join(
-          process.cwd(),
-          idToFetch.startsWith('/') ? idToFetch : `/${idToFetch}`
+        // Contain the path inside the uploads directory. Without this,
+        // `?url=/uploads/../package.json` resolves outside it and serves any
+        // file under the working directory to an unauthenticated caller.
+        const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+        const requested = path.resolve(
+          uploadsRoot,
+          idToFetch.replace(/^\/?uploads\//, '').replace(/^.*uploads\/media\//, 'media/')
         );
-        
-        if (fs.existsSync(filePath)) {
+
+        if (requested !== uploadsRoot && !requested.startsWith(uploadsRoot + path.sep)) {
+          return this.sendMediaPlaceholder(res, 'Invalid media path');
+        }
+
+        if (fs.existsSync(requested)) {
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Cache-Control', 'public, max-age=86400');
-          return res.sendFile(filePath);
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          // Defence in depth: never let a stored file render inline in our
+          // origin. Images/video still display fine when referenced by <img>/<video>.
+          res.setHeader('Content-Disposition', 'inline; filename="media"');
+          return res.sendFile(requested);
         }
         return this.sendMediaPlaceholder(res, 'Local file not found');
       }

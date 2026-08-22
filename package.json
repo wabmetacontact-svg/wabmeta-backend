@@ -22,7 +22,9 @@
     "migrate:encrypt": "ts-node src/scripts/encryptTokens.ts",
     "migrate:encrypt:dry": "ts-node src/scripts/encryptTokens.ts --dry-run",
     "migrate:r2": "ts-node src/scripts/migrate-cloudinary-to-r2.ts",
-    "generate:key": "node -e \"console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))\""
+    "generate:key": "node -e \"console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1114.0",
@@ -84,6 +86,7 @@
     "nodemon": "^3.1.7",
     "prisma": "^5.22.0",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^2.1.9"
   }
 }

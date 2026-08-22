@@ -4,9 +4,13 @@ import { Router } from 'express';
 import { crmController } from './crm.controller';
 import { authenticate } from '../../middleware/auth';
 
+import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 const router = Router();
 
 router.use(authenticate);
+
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use(gateMutations(...OPERATOR_ROLES));
 
 // Stats
 router.get('/stats', crmController.getStats.bind(crmController));

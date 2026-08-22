@@ -4,9 +4,13 @@ import { authenticate } from '../../middleware/auth';
 import { rateLimit } from '../../middleware/rateLimit';
 import { checkConnectionLock } from '../../middleware/connectionLock';
 
+import { gateMutations, ADMIN_ROLES } from '../../middleware/requireRole';
 const router = Router();
 
 router.use(authenticate);
+
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use(gateMutations(...ADMIN_ROLES));
 
 // ============================================
 // ACCOUNTS APIs

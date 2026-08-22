@@ -206,17 +206,62 @@ router.post("/verify", async (req: any, res, next) => {
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    if (expectedSig !== razorpay_signature) {
+    // Constant-time compare so the signature can't be probed byte by byte.
+    const sigBuf      = Buffer.from(String(razorpay_signature), "utf8");
+    const expectedBuf = Buffer.from(expectedSig, "utf8");
+    const signatureOk =
+      sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf);
+
+    if (!signatureOk) {
       throw new AppError("Payment signature mismatch - possible fraud attempt", 400);
     }
 
     console.log("✅ Signature verified for:", razorpay_order_id);
 
-    // ✅ Get plan info from PLAN_KEY_MAP
-    const normalizedKey = (planKey as string).toLowerCase().trim();
+    // The signature only proves that *some* payment was made against this order.
+    // It says nothing about which plan was paid for, so the plan must come from
+    // the order Razorpay is holding -- never from the request body. Otherwise a
+    // real payment for the cheapest plan can be replayed with planKey set to the
+    // most expensive one.
+    const order = await getRazorpayClient().orders.fetch(razorpay_order_id);
+
+    const orderPlanKey = String((order.notes as any)?.planKey || "").toLowerCase().trim();
+    const orderOrgId   = String((order.notes as any)?.organizationId || "");
+
+    if (!orderPlanKey) {
+      throw new AppError("Order is missing plan information. Please start checkout again.", 400);
+    }
+
+    // The order must belong to the organization that is claiming it.
+    if (orderOrgId && orderOrgId !== organizationId) {
+      throw new AppError("This payment belongs to a different organization", 403);
+    }
+
+    if (order.status !== "paid") {
+      throw new AppError(`Order is not paid (status: ${order.status})`, 400);
+    }
+
+    const normalizedKey = orderPlanKey;
     const selected = PLAN_KEY_MAP[normalizedKey];
     if (!selected) {
-      throw new AppError(`Invalid planKey: ${planKey}`, 400);
+      throw new AppError(`Invalid plan on order: ${orderPlanKey}`, 400);
+    }
+
+    // Belt and braces: the amount Razorpay captured must match the plan's price.
+    if (Number(order.amount) !== selected.amount) {
+      throw new AppError(
+        `Paid amount does not match the ${selected.label} plan price`,
+        400
+      );
+    }
+
+    // A body planKey is still accepted for backwards compatibility, but it is
+    // only ever used to detect a mismatch -- never to decide what was bought.
+    const bodyPlanKey = String(planKey || "").toLowerCase().trim();
+    if (bodyPlanKey && bodyPlanKey !== normalizedKey) {
+      console.warn(
+        `⚠️ planKey mismatch — body said "${bodyPlanKey}", order says "${normalizedKey}". Using the order.`
+      );
     }
 
     // ✅ Find correct plan in DB

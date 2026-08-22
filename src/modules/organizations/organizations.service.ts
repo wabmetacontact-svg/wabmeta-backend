@@ -654,11 +654,19 @@ export class OrganizationsService {
       where: { id: userId },
     });
 
-    if (user?.password) {
-      const isValid = await comparePassword(password, user.password);
-      if (!isValid) {
-        throw new AppError('Invalid password', 400);
-      }
+    if (!user?.password) {
+      // Owners who only signed in with Google have no password. Deleting an
+      // organization cascades away all of its data, so it must not proceed
+      // without a real confirmation. (transferOwnership already rejects this.)
+      throw new AppError(
+        'Set a password on your account before deleting the organization.',
+        400
+      );
+    }
+
+    const isValid = await comparePassword(password, user.password);
+    if (!isValid) {
+      throw new AppError('Invalid password', 400);
     }
 
     // Delete organization (cascades to all related data)

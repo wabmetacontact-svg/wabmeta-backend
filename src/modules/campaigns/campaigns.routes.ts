@@ -6,6 +6,7 @@ import { campaignsController, csvUpload } from './campaigns.controller';
 import { validate } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
 import { successResponse } from '../../utils/response';
+import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 import {
   requireActiveSubscription,
   checkCampaignLimit,
@@ -28,6 +29,9 @@ import {
 const router = Router();
 
 router.use(authenticate);
+
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use(gateMutations(...OPERATOR_ROLES));
 
 // ─── Static routes (before /:id) ──────────────────────────────
 

@@ -19,6 +19,7 @@ import {
 
 import { contactsImportMiddleware } from './contacts.import.middleware';
 
+import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 const router = Router();
 // Multer config for CSV upload
 const upload = multer({
@@ -39,6 +40,9 @@ const upload = multer({
 
 // All routes require authentication
 router.use(authenticate);
+
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use(gateMutations(...OPERATOR_ROLES));
 
 // ============================================
 // FEATURE ACCESS & COMMON

@@ -108,10 +108,12 @@ export class CRMService {
     notifyUserId?: string;
     trackAdSource?: boolean;
   }) {
+    const { id: _id, organizationId: _org, ...safe } = data as any;
+
     return (prisma as any).organizationSettings.upsert({
       where: { organizationId },
-      create: { organizationId, ...data },
-      update: data,
+      create: { ...safe, organizationId },   // organizationId last: not overridable
+      update: safe,
     });
   }
 
@@ -670,10 +672,13 @@ export class CRMService {
       });
     }
 
+    // Never let the client set identity/tenant fields through the spread.
+    const { id: _id, organizationId: _org, createdAt: _c, ...safe } = data as any;
+
     return prisma.lead.update({
       where: { id: leadId },
       data: {
-        ...data,
+        ...safe,
         lastActivityAt: new Date(),
         ...(data.status === 'WON' || data.status === 'LOST'
           ? { actualCloseDate: new Date() }

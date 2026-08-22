@@ -3,10 +3,14 @@ import { automationController } from './automation.controller';
 import { authenticate } from '../../middleware/auth';
 import { requireActiveSubscription, checkAutomationLimit } from '../../middleware/planLimits';
 
+import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 const router = Router();
 
 // All routes require authentication
 router.use(authenticate);
+
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use(gateMutations(...OPERATOR_ROLES));
 
 /**
  * @route   GET /api/v1/automations/stats

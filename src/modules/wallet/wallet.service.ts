@@ -575,8 +575,31 @@ export async function processTopUp(
     }
   } catch (err: any) {
     if (err instanceof AppError) throw err;
-    console.error('⚠️ Razorpay API error, using claimed amount:', err.message);
-    actualAmountPaise = toPaise(data.amount);
+
+    // Razorpay is unreachable, so the authoritative amount is unknown. Falling
+    // back to the client-supplied `data.amount` here would let a real ₹100
+    // payment be presented as any amount at all -- the signature is valid
+    // either way, so it offers no protection.
+    //
+    // Use the amount this server recorded when it created the order. If even
+    // that is missing, credit nothing: the webhook and the reconciliation job
+    // both settle from Razorpay's own figure, and creditWalletAtomic is
+    // idempotent, so failing closed only delays the credit.
+    console.error('⚠️ Razorpay API unreachable during verify:', err.message);
+
+    const storedOrder = await prisma.walletTopUpOrder.findFirst({
+      where:  { razorpayOrderId: data.razorpayOrderId, organizationId },
+      select: { amountPaise: true },
+    });
+
+    if (!storedOrder) {
+      throw new AppError(
+        'Could not confirm the payment amount right now. It will be credited automatically once verified.',
+        503
+      );
+    }
+
+    actualAmountPaise = storedOrder.amountPaise;
   }
 
   // ── Step 3: Credit atomically (idempotent) ───────────────────────────────

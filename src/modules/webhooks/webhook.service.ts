@@ -471,6 +471,14 @@ export class WebhookService {
           await this.handleTemplateUpdate(payload, value);
           return { status: 'processed', reason: 'Template update processed' };
 
+        case 'message_template_category_update':
+          // Meta reclassifies templates (e.g. a MARKETING message declared as
+          // UTILITY is moved to MARKETING). Billing charges per stored category,
+          // so if we ignore this the org is billed at the wrong rate. Persist
+          // Meta's authoritative category.
+          await this.handleTemplateCategoryUpdate(value);
+          return { status: 'processed', reason: 'Template category update processed' };
+
         case 'calls':
           await this.handleCallWebhook(payload, value);
           return { status: 'processed', reason: 'Call webhook processed' };
@@ -575,7 +583,8 @@ export class WebhookService {
   private async handleTemplateStatusUpdate(
     metaTemplateId: string,
     newStatus: string,
-    rejectionReason?: string
+    rejectionReason?: string,
+    metaCategory?: string
   ) {
     const template = await prisma.template.findFirst({
       where: { metaTemplateId },
@@ -588,6 +597,9 @@ export class WebhookService {
 
     const updateData: any = {
       status: newStatus as any,
+      // Meta includes the (possibly corrected) category on approval. Keep the
+      // stored category in sync so billing uses the rate Meta actually applies.
+      ...(metaCategory ? { category: metaCategory } : {}),
       rejectionReason: rejectionReason || null,
     };
 
@@ -606,11 +618,42 @@ export class WebhookService {
     console.log(`✅ Webhook: Template ${metaTemplateId} → ${newStatus}`);
   }
 
+  /**
+   * message_template_category_update — Meta moved a template to a different
+   * category. Billing charges per stored category, so this must be persisted or
+   * the org is charged at the wrong rate indefinitely.
+   */
+  private async handleTemplateCategoryUpdate(value: any) {
+    try {
+      const metaTemplateId = String(value.message_template_id || '');
+      // Meta uses new_category (with correct_category on some payloads).
+      const newCategory = String(
+        value.new_category || value.correct_category || value.category || ''
+      ).toUpperCase().trim();
+
+      if (!metaTemplateId || !newCategory) return;
+
+      const result = await prisma.template.updateMany({
+        where: { metaTemplateId },
+        data:  { category: newCategory as any },
+      });
+
+      if (result.count > 0) {
+        console.log(`🏷️  Template ${metaTemplateId} category → ${newCategory} (billing rate updated)`);
+      }
+    } catch (e: any) {
+      console.error('Template category update error:', e.message);
+    }
+  }
+
   private async handleTemplateUpdate(payload: any, value: any) {
     try {
       const metaTemplateId = String(value.message_template_id || '');
       const event = String(value.event || '').toUpperCase();
       const rejectionReason = value.reason || value.rejection_reason || undefined;
+      const metaCategory = value.category
+        ? String(value.category).toUpperCase().trim()
+        : undefined;
 
       console.log(`🔄 Template update webhook received [${event}] for template ID: ${metaTemplateId}`);
 
@@ -620,7 +663,7 @@ export class WebhookService {
         else if (event === 'REJECTED') newStatus = 'REJECTED';
         else if (event === 'PAUSED') newStatus = 'PAUSED';
 
-        await this.handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason);
+        await this.handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason, metaCategory);
       }
     } catch (e) {
       console.error('❌ Template update handling error:', e);
