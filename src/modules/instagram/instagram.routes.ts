@@ -8,8 +8,13 @@ import {
   getAnalytics
 } from "./instagram.controller";
 import { checkConnectionLock } from '../../middleware/connectionLock';
+import { authenticate } from '../../middleware/auth';
 
 const router = Router();
+
+// Every Instagram route is tenant data. Without this the module was reachable
+// without a token, and the controllers trusted an `x-organization-id` header.
+router.use(authenticate);
 
 // GET /api/instagram/accounts
 router.get("/accounts", getAccounts);

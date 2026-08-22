@@ -3,6 +3,8 @@
 import { Request, Response } from 'express';
 import { analyticsService } from './analytics.service';
 import { sendSuccess, errorResponse } from '../../utils/response';
+import { resolveOrganizationId } from '../../utils/resolveOrgId';
+import { AuthRequest } from '../../types/express';
 
 class AnalyticsController {
     async getOverview(req: Request, res: Response) {
@@ -27,7 +29,7 @@ class AnalyticsController {
 
     async getUnifiedDashboard(req: Request, res: Response) {
         try {
-            const organizationId = req.user?.organizationId || req.headers['x-organization-id'];
+            const organizationId = await resolveOrganizationId(req as AuthRequest);
             if (!organizationId) {
                 return errorResponse(res, 'Organization not found', 400);
             }

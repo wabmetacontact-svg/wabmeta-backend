@@ -3,22 +3,18 @@ import { WhatsAppAccountStatus } from '@prisma/client';
 import prisma from '../../config/database';
 import { whatsappService } from './whatsapp.service';
 import { successResponse, errorResponse } from '../../utils/response';
+import { resolveOrganizationId } from '../../utils/resolveOrgId';
+import { AuthRequest } from '../../types/express';
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
 
-const getOrgId = (req: Request): string | null => {
-  const headerOrg =
-    (req.header('X-Organization-Id') || req.header('x-organization-id'))?.trim() || '';
-
-  const queryOrg =
-    (typeof req.query.organizationId === 'string' ? req.query.organizationId : '')?.trim() || '';
-
-  const userOrg = (req.user as any)?.organizationId?.trim?.() || '';
-
-  return headerOrg || queryOrg || userOrg || null;
-};
+// Header and query used to win over the verified JWT here, so an authenticated
+// user could act on any tenant by naming it. resolveOrganizationId honours an
+// explicit organization only after checking the caller is a member of it.
+const getOrgId = (req: Request): Promise<string> =>
+  resolveOrganizationId(req as AuthRequest);
 
 const sanitizeAccount = (account: any) => {
   const { accessToken, webhookSecret, ...safe } = account;
@@ -44,7 +40,7 @@ class WhatsAppController {
   // ✅ GET /api/v1/whatsapp/accounts
   async getAccounts(req: Request, res: Response, next: NextFunction) {
     try {
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
       if (!organizationId) {
         return errorResponse(res, 'X-Organization-Id missing', 400);
       }
@@ -71,7 +67,7 @@ class WhatsAppController {
   // ✅ GET /api/v1/whatsapp/accounts/:accountId
   async getAccount(req: Request, res: Response, next: NextFunction) {
     try {
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
       const accountId = req.params.accountId as string;
 
       if (!organizationId) {
@@ -103,7 +99,7 @@ class WhatsAppController {
   // ✅ POST /api/v1/whatsapp/accounts/:accountId/default
   async setDefaultAccount(req: Request, res: Response, next: NextFunction) {
     try {
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
       const accountId = req.params.accountId as string;
 
       if (!organizationId) {
@@ -145,7 +141,7 @@ class WhatsAppController {
   // ✅ DELETE /api/v1/whatsapp/accounts/:accountId
   async disconnectAccount(req: Request, res: Response, next: NextFunction) {
     try {
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
       const accountId = req.params.accountId as string;
 
       if (!organizationId) {
@@ -464,7 +460,7 @@ class WhatsAppController {
     next: NextFunction
   ) {
     try {
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
       const accountId = req.params.accountId as string;
 
       if (!organizationId) {
@@ -514,7 +510,7 @@ class WhatsAppController {
     next: NextFunction
   ) {
     try {
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
 
       if (!organizationId) {
         return errorResponse(res, 'X-Organization-Id missing', 400);

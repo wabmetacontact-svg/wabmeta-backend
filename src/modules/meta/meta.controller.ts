@@ -12,13 +12,11 @@ import { templatesService } from '../templates/templates.service';
 import { metaApi } from './meta.api';
 import { encrypt } from '../../utils/encryption';
 import { metaService } from './meta.service';
+import { resolveOrganizationId } from '../../utils/resolveOrgId';
 
-// Helper to safely get organization ID from headers
-const getOrgId = (req: Request): string => {
-  const header = req.headers['x-organization-id'];
-  if (!header) return '';
-  return Array.isArray(header) ? header[0] : header;
-};
+// Was header-only, ignoring the verified JWT entirely.
+const getOrgId = (req: Request): Promise<string> =>
+  resolveOrganizationId(req as AuthRequest);
 
 // Extended Request interface
 interface AuthRequest extends Request {
@@ -36,7 +34,7 @@ export class MetaController {
   // ============================================
   async getAccounts(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const organizationId = getOrgId(req) || req.query.organizationId as string;
+      const organizationId = await getOrgId(req);
 
       if (!organizationId) {
         throw new AppError('Organization ID is required', 400);
@@ -61,7 +59,7 @@ export class MetaController {
   async getAccount(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
 
       if (!organizationId) {
         throw new AppError('Organization ID is required', 400);
@@ -85,7 +83,7 @@ export class MetaController {
   async disconnectAccount(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const organizationId = getOrgId(req);
+      const organizationId = await getOrgId(req);
 
       if (!organizationId) {
         throw new AppError('Organization ID is required', 400);

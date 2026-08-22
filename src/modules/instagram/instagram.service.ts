@@ -84,10 +84,22 @@ export const createDmAutomation = async (organizationId: string, data: any) => {
 /**
  * Status toggle karna (Active/Paused)
  */
-export const updateDmStatus = async (id: string, isActive: boolean) => {
-  return await prisma.igDmAutomation.update({
-    where: { id },
+export const updateDmStatus = async (
+  id: string,
+  organizationId: string,
+  isActive: boolean
+) => {
+  // updateMany so a rule belonging to another organization simply matches
+  // nothing rather than being toggled.
+  const result = await prisma.igDmAutomation.updateMany({
+    where: { id, organizationId },
     data: { isActive }
+  });
+
+  if (result.count === 0) return null;
+
+  return await prisma.igDmAutomation.findFirst({
+    where: { id, organizationId }
   });
 };
 
