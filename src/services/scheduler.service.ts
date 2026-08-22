@@ -4,6 +4,7 @@
 // ✅ Silent skips (no log spam)
 
 import cron from 'node-cron';
+import { withAdvisoryLock } from '../utils/withLock';
 import { automationEngine } from '../modules/automation/automation.engine';
 import prisma from '../config/database';
 import { SubscriptionStatus, PlanType } from '@prisma/client';
@@ -47,7 +48,7 @@ export function initializeScheduler() {
 
     state.automation = true;
     try {
-      await automationEngine.triggerScheduled();
+      await withAdvisoryLock('scheduler:automation', () => automationEngine.triggerScheduled());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();
@@ -69,7 +70,7 @@ export function initializeScheduler() {
     state.inactivity = true;
     try {
       console.log('💤 Running inactivity check...');
-      await automationEngine.triggerInactivity();
+      await withAdvisoryLock('scheduler:inactivity', () => automationEngine.triggerInactivity());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();
@@ -91,7 +92,7 @@ export function initializeScheduler() {
 
     state.subscriptionExpiry = true;
     try {
-      await checkAndExpireSubscriptions();
+      await withAdvisoryLock('scheduler:subExpiry', () => checkAndExpireSubscriptions());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();
@@ -110,7 +111,7 @@ export function initializeScheduler() {
     if (state.expiryWarnings) return;
     state.expiryWarnings = true;
     try {
-      await sendExpiryWarnings();
+      await withAdvisoryLock('scheduler:expiryWarnings', () => sendExpiryWarnings());
     } catch (error: any) {
       if (error?.code !== 'P2024') {
         console.error('Expiry warning error:', error.message);

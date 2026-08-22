@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { config } from './config';
+import prisma from './config/database';
 import { initializeCampaignSocket } from './modules/campaigns/campaigns.socket';
 
 interface AuthenticatedSocket extends Socket {
@@ -54,27 +55,31 @@ export const initializeSocket = (server: HttpServer) => {
 
   // ✅ Auth middleware - same as before
   io.use((socket: AuthenticatedSocket, next) => {
-    const token =
+    // The client sends auth.token as "Bearer <jwt>" (and a bare auth.rawToken).
+    // Strip the scheme so jwt.verify sees the token itself.
+    const raw =
+      socket.handshake.auth?.rawToken ||
       socket.handshake.auth?.token ||
-      socket.handshake.headers?.authorization?.split(' ')[1];
+      socket.handshake.headers?.authorization ||
+      '';
+    const token = String(raw).replace(/^Bearer\s+/i, '').trim();
 
-    const orgFromAuth = socket.handshake.auth?.organizationId;
-
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, config.jwt.secret) as any;
-        socket.userId = decoded.userId || decoded.id;
-        socket.organizationId = decoded.organizationId || orgFromAuth;
-        socket.email = decoded.email;
-      } catch (e) {
-        console.warn('⚠️ Invalid socket token - allowing as guest');
-        socket.organizationId = orgFromAuth;
-      }
-    } else {
-      socket.organizationId = orgFromAuth;
+    if (!token) {
+      return next(new Error('Authentication required'));
     }
 
-    next();
+    try {
+      const decoded = jwt.verify(token, config.jwt.secret) as any;
+      socket.userId = decoded.userId || decoded.id;
+      // Tenant comes from the verified token, never from the client handshake.
+      // Previously an invalid token still connected as a guest and the org was
+      // taken from handshake.auth, letting anyone join any org's room.
+      socket.organizationId = decoded.organizationId;
+      socket.email = decoded.email;
+      return next();
+    } catch (e) {
+      return next(new Error('Invalid or expired token'));
+    }
   });
 
   io.on('connection', (socket: AuthenticatedSocket) => {
@@ -103,29 +108,19 @@ export const initializeSocket = (server: HttpServer) => {
       console.log(`👤 Auto-joined user room: user:${socket.userId}`);
     }
 
-    // ✅ Manual org join
-    socket.on('org:join', (orgId: string) => {
-      if (orgId && typeof orgId === 'string') {
-        socket.organizationId = orgId;
-        socket.join(`org:${orgId}`);
-        console.log(`📂 Manually joined org: org:${orgId}`);
-      }
-    });
+    // Org/user rooms are joined automatically from the verified token above.
+    // The old manual `org:join` / `user:join` handlers let a client join any
+    // room by id and have been removed.
 
-    // ✅ NEW: Manual user room join (agar userId token me na ho)
-    socket.on('user:join', (userId: string) => {
-      if (userId && typeof userId === 'string') {
-        socket.userId = userId;
-        socket.join(`user:${userId}`);
-        console.log(`👤 Manually joined user room: user:${userId}`);
-      }
-    });
-
-    // ✅ Conversation rooms
-    socket.on('join:conversation', (conversationId: string) => {
-      if (conversationId && typeof conversationId === 'string') {
-        socket.join(`conversation:${conversationId}`);
-      }
+    // Conversation rooms — only if the conversation belongs to the socket's org.
+    socket.on('join:conversation', async (conversationId: string) => {
+      if (!conversationId || typeof conversationId !== 'string') return;
+      if (!socket.organizationId) return;
+      const conv = await prisma.conversation.findFirst({
+        where: { id: conversationId, organizationId: socket.organizationId },
+        select: { id: true },
+      });
+      if (conv) socket.join(`conversation:${conversationId}`);
     });
 
     socket.on('leave:conversation', (conversationId: string) => {
@@ -134,9 +129,14 @@ export const initializeSocket = (server: HttpServer) => {
       }
     });
 
-    // ✅ Campaign rooms
-    socket.on('campaign:join', (id: string) => {
-      if (id) socket.join(`campaign:${id}`);
+    // Campaign rooms — only if the campaign belongs to the socket's org.
+    socket.on('campaign:join', async (id: string) => {
+      if (!id || !socket.organizationId) return;
+      const camp = await prisma.campaign.findFirst({
+        where: { id, organizationId: socket.organizationId },
+        select: { id: true },
+      });
+      if (camp) socket.join(`campaign:${id}`);
     });
 
     socket.on('campaign:leave', (id: string) => {

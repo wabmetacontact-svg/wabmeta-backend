@@ -38,18 +38,16 @@ const getDurationLabel = (ms: number): string => {
 // Inhe warn level pe log karne ki zaroorat nahi
 const isExpectedRefreshFlow = (
   status: number,
-  method: string,
+  _method: string,
   path: string
 ): boolean => {
   if (status !== 401) return false;
 
-  const EXPECTED_401_PATHS = [
-    '/api/auth/me',
-    '/api/inbox/conversations',
-    '/api/dashboard',
-  ];
-
-  return EXPECTED_401_PATHS.some(p => path.startsWith(p));
+  // A 401 on any authenticated route is the normal token-refresh flow: the
+  // access token expired mid-session, the client refreshes and retries. It is
+  // not worth a warning on every route. Auth routes are the exception — a 401
+  // there is a real sign-in failure worth seeing.
+  return !path.startsWith('/api/auth/');
 };
 
 export const requestLogger = (

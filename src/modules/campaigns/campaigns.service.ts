@@ -6,6 +6,7 @@ import {
 import { AppError } from '../../middleware/errorHandler';
 import { metaApi } from '../meta/meta.api';
 import { campaignSocketService } from './campaigns.socket';
+import { claimContactBatch } from './campaigns.claim';
 import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import prisma from '../../config/database';
@@ -2145,10 +2146,15 @@ export class CampaignsService {
           rateLimitPauseUntil = 0;
         }
 
+        // Atomically claim this batch (PENDING -> QUEUED, SKIP LOCKED) so a
+        // second sender or the recovery job can never grab the same rows. Then
+        // load the claimed rows with their contacts. See campaigns.claim.ts.
+        const claimedIds = await claimContactBatch(campaignId, SEND_CONFIG.BATCH_SIZE);
+        if (claimedIds.length === 0) { hasMore = false; break; }
+
         const contacts = await prisma.campaignContact.findMany({
-          where: { campaignId, status: 'PENDING' },
+          where: { id: { in: claimedIds } },
           include: { contact: true },
-          take: SEND_CONFIG.BATCH_SIZE,
           orderBy: { createdAt: 'asc' },
         });
 

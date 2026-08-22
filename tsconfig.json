@@ -19,7 +19,7 @@
     "types": ["node", "express"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/**/*.spec.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/**/*.spec.ts", "src/tmp/**", "src/scripts/**"],
   "ts-node": {
     "files": true,
     "compilerOptions": {

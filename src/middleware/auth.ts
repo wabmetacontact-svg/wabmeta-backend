@@ -253,6 +253,17 @@ export const authenticate = async (
       }
     }
 
+    // A soft-deleted organization must behave as if it no longer exists: drop
+    // the org context so every org-scoped route rejects. This is the single
+    // gate that blocks access to a deleted org's data.
+    if (organizationId) {
+      const org = await prisma.organization.findFirst({
+        where: { id: organizationId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!org) organizationId = undefined;
+    }
+
     req.user = { id: user.id, email: user.email, organizationId };
     next();
   } catch (error) {

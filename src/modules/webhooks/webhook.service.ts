@@ -5,9 +5,13 @@
 // read the same stale currentStatus (non-FAILED) and BOTH would credit the wallet
 // — meaning one failed message could be refunded 2x (or more).
 //
-// The new refund path is guarded by a Prisma $transaction with a
-// "does a completed refund transaction already exist for this waMessageId?" check
-// under a serializable read, so only ONE refund can ever land per waMessageId.
+// The refund path checks "does a completed refund already exist for this
+// waMessageId?" before crediting. NOTE: the transaction runs at READ COMMITTED,
+// not SERIALIZABLE, and there is no unique constraint on
+// (metaChargeId, metaService), so two concurrent deliveries of the same status
+// webhook (Meta retries) can both pass the check and double-refund. The credit
+// itself is now atomic; the duplicate-refund gap needs a unique index — see
+// BACKEND_AUDIT_FINDINGS Phase 41.
 
 import prisma from '../../config/database';
 import { contactsService } from '../contacts/contacts.service';
@@ -1542,13 +1546,21 @@ export class WebhookService {
             throw new Error('Wallet not found');
           }
 
-          const balanceBefore = wallet.balancePaise;
-          const balanceAfter = balanceBefore + refundPaise;
-
-          await tx.wallet.update({
+          // Atomic credit, same reasoning as the debit fix: an absolute
+          // balance write here can be lost when a debit runs concurrently under
+          // READ COMMITTED. Increment in the database and read the result back.
+          const before = wallet.balancePaise;
+          const updatedWallet = await tx.wallet.update({
             where: { id: wallet.id },
-            data: { balancePaise: balanceAfter },
+            data: {
+              balancePaise: { increment: refundPaise },
+              totalCreditedPaise: { increment: refundPaise },
+            },
+            select: { balancePaise: true },
           });
+          const balanceBefore = updatedWallet.balancePaise - refundPaise;
+          const balanceAfter = updatedWallet.balancePaise;
+          void before;
 
           await tx.walletTransaction.create({
             data: {
@@ -1574,6 +1586,15 @@ export class WebhookService {
         },
       );
     } catch (err: any) {
+      // The unique index on (metaChargeId, metaService) is the authoritative
+      // idempotency guard. A concurrent duplicate refund now fails the insert
+      // with P2002 -- that means the refund already landed, so treat it as
+      // success rather than an error.
+      if (err?.code === 'P2002') {
+        console.log(`⏭️  Refund already recorded for ${waMessageId} (unique guard)`);
+        return;
+      }
+
       const isTimeoutError = 
         err.message?.includes('Transaction already closed') ||
         err.message?.includes('timeout');

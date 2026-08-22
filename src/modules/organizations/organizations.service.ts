@@ -181,7 +181,7 @@ export class OrganizationsService {
   // ==========================================
   async getUserOrganizations(userId: string): Promise<OrganizationResponse[]> {
     const memberships = await prisma.organizationMember.findMany({
-      where: { userId },
+      where: { userId, organization: { deletedAt: null } },
       include: {
         organization: true,
       },
@@ -656,8 +656,9 @@ export class OrganizationsService {
 
     if (!user?.password) {
       // Owners who only signed in with Google have no password. Deleting an
-      // organization cascades away all of its data, so it must not proceed
-      // without a real confirmation. (transferOwnership already rejects this.)
+      // organization removes access for the whole team and stops billing, so it
+      // must not proceed without a real confirmation. (The data itself is
+      // retained via soft delete; transferOwnership already rejects this case.)
       throw new AppError(
         'Set a password on your account before deleting the organization.',
         400
@@ -669,9 +670,11 @@ export class OrganizationsService {
       throw new AppError('Invalid password', 400);
     }
 
-    // Delete organization (cascades to all related data)
-    await prisma.organization.delete({
+    // Soft delete: retain the financial ledger. The org disappears from every
+    // read (auth drops the context, lists filter deletedAt).
+    await prisma.organization.update({
       where: { id: organizationId },
+      data:  { deletedAt: new Date() },
     });
 
     return { message: 'Organization deleted successfully' };

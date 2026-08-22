@@ -408,7 +408,9 @@ export class UsersService {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       include: {
-        ownedOrganizations: true,
+        // Only live orgs matter for the ownership-transfer guard below; a
+        // soft-deleted org would otherwise block account deletion forever.
+        ownedOrganizations: { where: { deletedAt: null } },
       },
     });
 
@@ -451,7 +453,10 @@ export class UsersService {
 
     // Delete user and all related data (cascades)
     await prisma.$transaction(async (tx) => {
-      // Delete owned organizations (will cascade to members, contacts, etc.)
+      // Full account erasure: hard-delete owned organizations (cascades to
+      // their data). Org-only deletion is soft (see organizations.service) to
+      // keep the ledger; a whole-account deletion is a complete erasure, and the
+      // org can't outlive its sole owner without an owner FK anyway.
       await tx.organization.deleteMany({
         where: { ownerId: userId },
       });

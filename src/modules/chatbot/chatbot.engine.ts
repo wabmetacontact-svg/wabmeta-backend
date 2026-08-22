@@ -4,6 +4,7 @@
 import prisma from '../../config/database';
 import { whatsappService } from '../whatsapp/whatsapp.service';
 import { aiService } from './ai.service';
+import { consumeAiQuota } from './ai.ratelimit';
 import { getRedis } from '../../config/redis';
 import { chatbotLog } from '../../utils/logger';
 
@@ -1399,18 +1400,27 @@ export class ChatbotEngine {
       session
     );
 
-    // ✅ Generate AI response
+    // ✅ Generate AI response — but only within the org's daily AI quota. This
+    // bounds abuse of the shared Gemini key; over the cap we serve the fallback
+    // without calling the model.
     let aiResponse: string;
-    try {
-      aiResponse = await aiService.generateResponse(
-        enhancedPrompt,
-        userMessage,
-        session.chatHistory
-      );
-    } catch (error: any) {
-      console.error('❌ AI generation failed:', error);
-      aiResponse = fallbackMessage || 
-        'I apologize, but I did not understand that. Please try again.';
+    const allowed = await consumeAiQuota(organizationId);
+    if (!allowed) {
+      console.warn(`⚠️ AI daily limit reached for org ${organizationId}; serving fallback`);
+      aiResponse = fallbackMessage ||
+        'Our assistant is taking a short break. Please try again later.';
+    } else {
+      try {
+        aiResponse = await aiService.generateResponse(
+          enhancedPrompt,
+          userMessage,
+          session.chatHistory
+        );
+      } catch (error: any) {
+        console.error('❌ AI generation failed:', error);
+        aiResponse = fallbackMessage ||
+          'I apologize, but I did not understand that. Please try again.';
+      }
     }
 
     // ✅ FIXED: Add to history BEFORE clearing lastInput

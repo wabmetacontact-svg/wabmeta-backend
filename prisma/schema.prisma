@@ -78,6 +78,10 @@ model Organization {
   planType                PlanType             @default(FREE_DEMO)
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
+  // Soft delete: deleting a customer must not destroy the financial ledger
+  // (payments, wallet transactions, subscriptions cascade from here). Setting
+  // this hides the org everywhere instead of removing the row.
+  deletedAt               DateTime?
   featureCsvUpload        Boolean              @default(false)
   featureOverrideByAdmin  Boolean              @default(false)
   featureSimpleBulkUpload Boolean              @default(false)
@@ -1460,6 +1464,10 @@ model WalletTransaction {
   @@index([type])
   @@index([createdAt])
   @@index([razorpayPaymentId])
+  // Refund idempotency at the database: at most one row per (charge, service),
+  // so a retried webhook fails the insert instead of double-refunding. NULL
+  // metaChargeId rows are exempt (Postgres treats NULLs as distinct).
+  @@unique([metaChargeId, metaService], name: "uniq_charge_service")
 }
 
 model WalletTopUpOrder {

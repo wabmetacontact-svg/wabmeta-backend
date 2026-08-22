@@ -1007,21 +1007,20 @@ export class ContactsService {
   // ── GET ALL TAGS ─────────────────────────────────────────
 
   async getAllTags(organizationId: string): Promise<{ tag: string; count: number }[]> {
-    const contacts = await prisma.contact.findMany({
-      where: { organizationId, status: { not: 'DELETED' } },
-      select: { tags: true },
-    });
+    // Aggregate in the database. The previous version loaded every contact row
+    // into memory just to count tags -- a full-table scan on large orgs, run
+    // whenever the tag filter UI opens. unnest() over the tags array does the
+    // counting in Postgres and returns only the distinct tags.
+    const rows = await prisma.$queryRaw<Array<{ tag: string; count: bigint }>>`
+      SELECT tag, COUNT(*)::bigint AS count
+      FROM "Contact", unnest("tags") AS tag
+      WHERE "organizationId" = ${organizationId}
+        AND "status" <> 'DELETED'
+      GROUP BY tag
+      ORDER BY count DESC
+    `;
 
-    const tagCounts = new Map<string, number>();
-    for (const c of contacts) {
-      for (const tag of c.tags) {
-        tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
-      }
-    }
-
-    return Array.from(tagCounts.entries())
-      .map(([tag, count]) => ({ tag, count }))
-      .sort((a, b) => b.count - a.count);
+    return rows.map((r) => ({ tag: r.tag, count: Number(r.count) }));
   }
 
   // ── EXPORT ───────────────────────────────────────────────
