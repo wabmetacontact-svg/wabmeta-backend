@@ -282,22 +282,37 @@ class WhatsAppController {
   async sendTemplate(req: Request, res: Response) {
     try {
       const {
-        whatsappAccountId, to, templateName, language, parameters, conversationId,
+        whatsappAccountId, accountId, to, templateName, conversationId,
         tempId, clientMsgId
       } = req.body;
       const organizationId = req.user?.organizationId;
+
+      // Clients dono naming use karte hain - sendText jaisa hi "support both".
+      // Pehle sirf language/parameters padha jata tha, to templateLanguage/
+      // components bhejne wala client silently toot jata tha.
+      const finalAccountId = whatsappAccountId || accountId;
+      const finalLanguage = req.body.language || req.body.templateLanguage;
+      const finalComponents = req.body.parameters || req.body.components;
 
       if (!organizationId) {
         return errorResponse(res, 'Organization not found', 400);
       }
 
+      if (!finalAccountId || !to || !templateName) {
+        return errorResponse(
+          res,
+          'whatsappAccountId, to, and templateName are required',
+          400
+        );
+      }
+
       const result = await whatsappService.sendTemplateMessage({
         organizationId,
-        accountId: whatsappAccountId,
+        accountId: finalAccountId,
         to,
         templateName,
-        templateLanguage: language,
-        components: parameters,
+        templateLanguage: finalLanguage,
+        components: finalComponents,
         conversationId,
         tempId: tempId || req.body.localId,
         clientMsgId: clientMsgId || req.body.client_msg_id

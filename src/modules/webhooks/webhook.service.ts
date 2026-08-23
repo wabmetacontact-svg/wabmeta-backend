@@ -19,7 +19,6 @@ import { EventEmitter } from 'events';
 import { MessageType, MessageStatus } from '@prisma/client';
 import { webhookLog, campaignLog } from '../../utils/logger';
 import { chatbotEngine } from '../chatbot/chatbot.engine';
-import { inboxMediaService } from '../inbox/inbox.media';
 import { automationEngine } from '../automation/automation.engine';
 import { toCanonicalPhone, buildPhoneVariants } from '../../utils/phone';
 import * as instagramService from '../instagram/instagram.service';
@@ -938,19 +937,19 @@ export class WebhookService {
         },
       });
 
-      // ✅ PERMANENT FIX (Rule 1): Background mirror incoming Meta media to R2 / Cloudinary
-      if (mediaId) {
-        inboxMediaService
-          .mirrorInboundMedia(
-            savedMessage.id,
-            mediaId,
-            organizationId,
-            mediaMimeType || 'application/octet-stream'
-          )
-          .catch((mirrorErr: any) =>
-            console.error('⚠️ Inbound media mirroring failed:', mirrorErr?.message)
-          );
-      }
+      // Media backup neeche backupInboundMediaAsync() se hota hai.
+      //
+      // Pehle yahan inboxMediaService.mirrorInboundMedia() bhi call hota tha,
+      // yaani ek hi media do baar Meta se download hoti thi aur dono paths
+      // same message row ka mediaUrl likhte the. Upar se mirrorInboundMedia
+      // token ke liye findFirst({ organizationId, isActive }) karta hai - yaani
+      // org ka *koi bhi* account, wo nahi jis par message aaya. Jis org ke
+      // ek se zyada WhatsApp accounts hain wahan Meta us media id ke liye
+      // galat account ka token dekh kar har baar 400 deta tha:
+      // "❌ Failed to mirror media to R2/Cloudinary: status code 400".
+      //
+      // backupInboundMediaAsync sahi account ka token use karta hai
+      // (findUnique by whatsappAccountId), isliye wahi rakha hai.
 
       // ⚡ Socket emit ab DB update se PEHLE hota hai. Pehle ye emit
       // conversation.update ke round trip ke BAAD tha, yaani har inbound

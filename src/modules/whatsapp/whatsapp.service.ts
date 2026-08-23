@@ -249,7 +249,10 @@ class WhatsAppService {
       }
     } else {
       if (messagePreview) {
-        await prisma.conversation.update({
+        // Background write: sendMessage ka setImmediate block bilkul yahi
+        // update dobara karta hai, aur caller sirf id/window fields padhta hai.
+        // Iska await seedha user ke "sent" tick mein add ho raha tha.
+        prisma.conversation.update({
           where: { id: conversation.id },
           data: {
             lastMessageAt: new Date(),
@@ -257,7 +260,9 @@ class WhatsAppService {
             isRead: true,
             unreadCount: 0,
           },
-        });
+        }).catch((e: any) =>
+          console.error('Conversation preview update error:', e?.message)
+        );
       }
     }
 
@@ -463,6 +468,18 @@ class WhatsAppService {
         }
       });
 
+      // Meta ke liye language.code mandatory hai. Pehle seedha caller ka
+      // templateLanguage use hota tha - undefined hone par payload mein
+      // language: {} jata tha aur Meta "missing: code" error deta tha.
+      // Template row pehle se fetch ho chuki hai, usi se fallback lo.
+      const resolvedLanguage = templateLanguage || template?.language;
+
+      if (!resolvedLanguage) {
+        throw new Error(
+          `Template "${templateName}" ki language nahi mili. Templates sync karke dobara try karein.`
+        );
+      }
+
       let fullContent = templateName;
       if (template?.bodyText) {
         fullContent = this.hydrateTemplate(template.bodyText, components || []);
@@ -477,7 +494,7 @@ class WhatsAppService {
         orgId,
         templateName,
         template?.category,
-        templateLanguage,
+        resolvedLanguage,
         to
       );
       if (!walletCheck.ok) {
@@ -493,7 +510,7 @@ class WhatsAppService {
         type: 'template',
         template: {
           name: templateName,
-          language: { code: templateLanguage },
+          language: { code: resolvedLanguage },
           components: components || [],
         },
       };
