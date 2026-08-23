@@ -40,6 +40,9 @@ export class WebhookService {
 
   private accountCache = new Map<string, { data: any; expiresAt: number }>();
   private readonly CACHE_TTL = 5 * 60 * 1000;
+  // Meta ka phoneNumberId -> hamara PhoneNumber.id (UUID). Ye mapping
+  // practically immutable hai, isliye accountCache jaisa TTL cache safe hai.
+  private phoneNumberUUIDCache = new Map<string, { id: string; expiresAt: number }>();
 
   private extractValue(payload: any) {
     return payload?.entry?.[0]?.changes?.[0]?.value;
@@ -121,8 +124,12 @@ export class WebhookService {
   // ============================================
   private async findOrCreateContact(
     organizationId: string,
-    phone: string
+    phone: string,
+    profileName?: string
   ): Promise<{ contact: any; wasNewlyCreated: boolean }> {
+
+    const goodName =
+      profileName && profileName !== 'Unknown' ? profileName : null;
 
     const canonical = toCanonicalPhone(phone) || toCanonicalPhone(`+${phone}`);
 
@@ -142,16 +149,33 @@ export class WebhookService {
     });
 
     if (existing) {
-      // ✅ Migrate old format phones silently
-      if (existing.phone !== canonical) {
-        prisma.contact.update({
-          where: { id: existing.id },
-          data: { phone: canonical },
-        })
-        .then(() => console.log(`🔄 Phone migrated: ${existing.phone} → ${canonical}`))
-        .catch(() => {}); // Non-fatal
+      // Phone migration + WhatsApp profile name refresh - dono ek hi background
+      // write mein. Message delivery inme se kisi ke liye nahi rukti.
+      const patch: any = {};
+
+      if (existing.phone !== canonical) patch.phone = canonical;
+
+      const nameChanged = !!goodName && existing.firstName !== goodName;
+      if (nameChanged) {
+        patch.firstName = goodName;
+        patch.whatsappProfileName = goodName;
+        patch.whatsappProfileFetched = true;
+        patch.lastProfileFetchAt = new Date();
       }
-      return { contact: existing, wasNewlyCreated: false };
+
+      if (Object.keys(patch).length > 0) {
+        prisma.contact
+          .update({ where: { id: existing.id }, data: patch })
+          .catch((e: any) =>
+            console.error('Contact profile update error:', e?.message)
+          );
+      }
+
+      // Emit ke liye naya naam turant chahiye, isliye locally merge kar do
+      return {
+        contact: nameChanged ? { ...existing, ...patch } : existing,
+        wasNewlyCreated: false,
+      };
     }
 
     // ✅ STEP 2: Upsert - handles race condition automatically
@@ -170,14 +194,28 @@ export class WebhookService {
           organizationId,
           phone: canonical,
           countryCode,
-          firstName: 'Unknown',
+          firstName: goodName || 'Unknown',
           status: 'ACTIVE',
           source: 'WHATSAPP_INBOUND',
+          ...(goodName
+            ? {
+              whatsappProfileName: goodName,
+              whatsappProfileFetched: true,
+              lastProfileFetchAt: new Date(),
+            }
+            : {}),
         },
-        update: {
-          // ✅ Contact already exists (race condition)
-          // Touch nothing - just return existing data
-        },
+        update: goodName
+          ? {
+            firstName: goodName,
+            whatsappProfileName: goodName,
+            whatsappProfileFetched: true,
+            lastProfileFetchAt: new Date(),
+          }
+          : {
+            // ✅ Contact already exists (race condition)
+            // Touch nothing - just return existing data
+          },
       });
 
       // ✅ createdAt recency check - naya hai ya existing (race condition se aaya)?
@@ -223,39 +261,56 @@ export class WebhookService {
   // lekin schema mein Conversation.phoneNumberId → PhoneNumber.id (UUID) hai
   // Solution: PhoneNumber table se actual UUID dhundo, agar na mile toh null
   // ============================================
+  // Meta phoneNumberId -> PhoneNumber.id (UUID), cached.
+  // Pehle ye lookup findOrCreateConversation ke andar tha, yaani har inbound
+  // message par ek extra sequential DB round trip. Ab cached hai aur baaki
+  // lookups ke saath parallel chalta hai.
+  private async resolvePhoneNumberUUID(
+    metaPhoneNumberId: string | null
+  ): Promise<string | null> {
+    if (!metaPhoneNumberId) return null;
+
+    const cached = this.phoneNumberUUIDCache.get(metaPhoneNumberId);
+    if (cached && cached.expiresAt > Date.now()) return cached.id;
+
+    try {
+      const phoneRecord = await prisma.phoneNumber.findFirst({
+        where: { phoneNumberId: metaPhoneNumberId }, // Meta's string ID
+        select: { id: true }, // Hamara UUID chahiye
+      });
+
+      if (!phoneRecord) {
+        // PhoneNumber table mein nahi mila - null rakho (field optional hai).
+        // Negative result cache mat karo, number baad mein register ho sakta hai.
+        console.warn(
+          `⚠️ PhoneNumber not found for metaPhoneNumberId: ${metaPhoneNumberId} ` +
+          `- conversation will have null phoneNumberId`
+        );
+        return null;
+      }
+
+      this.phoneNumberUUIDCache.set(metaPhoneNumberId, {
+        id: phoneRecord.id,
+        expiresAt: Date.now() + this.CACHE_TTL,
+      });
+
+      return phoneRecord.id; // ✅ Actual FK-valid UUID
+    } catch (e) {
+      console.error('PhoneNumber lookup error:', e);
+      // Fail silently - null phoneNumberId se conversation ban sakti hai
+      return null;
+    }
+  }
+
   private async findOrCreateConversation(
     organizationId: string,
     contactId: string,
-    metaPhoneNumberId: string | null,  // Meta ka phoneNumberId string
-    messageTime: Date
+    metaPhoneNumberId: string | null,  // sirf logging ke liye
+    messageTime: Date,
+    phoneNumberUUID: string | null     // pehle se resolve kiya hua (cached)
   ): Promise<any> {
 
-    // ✅ STEP 1: Meta phoneNumberId se actual PhoneNumber.id (UUID) dhundo
-    let phoneNumberUUID: string | null = null;
-
-    if (metaPhoneNumberId) {
-      try {
-        const phoneRecord = await prisma.phoneNumber.findFirst({
-          where: { phoneNumberId: metaPhoneNumberId }, // Meta's string ID
-          select: { id: true }, // Hamara UUID chahiye
-        });
-
-        if (phoneRecord) {
-          phoneNumberUUID = phoneRecord.id; // ✅ Actual FK-valid UUID
-        } else {
-          // PhoneNumber table mein nahi mila - null rakho (field is optional)
-          console.warn(
-            `⚠️ PhoneNumber not found for metaPhoneNumberId: ${metaPhoneNumberId} ` +
-            `(org: ${organizationId}) - conversation will have null phoneNumberId`
-          );
-        }
-      } catch (e) {
-        console.error('PhoneNumber lookup error:', e);
-        // Fail silently - null phoneNumberId se conversation ban sakti hai
-      }
-    }
-
-    // ✅ STEP 2: Conversation upsert with valid UUID (or null)
+    // ✅ Conversation upsert with valid UUID (or null)
     try {
       const conversation = await prisma.conversation.upsert({
         where: {
@@ -558,10 +613,17 @@ export class WebhookService {
       for (const msg of messages) {
         const profile = this.extractProfile(payload, msg);
         if (profile) {
-          if (profile.profileName && profile.profileName !== 'Unknown') {
-            await contactsService.updateContactFromWebhook(profile.phone10, profile.profileName, account.organizationId);
-          }
-          await this.processIncomingMessage(msg, account.organizationId, account.id, account.phoneNumberId);
+          // ⚡ Pehle yahan updateContactFromWebhook await hota tha - sirf profile
+          // name ke liye 1-2 extra DB round trip, message deliver hone se PEHLE.
+          // Ab wahi kaam findOrCreateContact ke andar hota hai (usi lookup mein,
+          // aur naam ka write background mein).
+          await this.processIncomingMessage(
+            msg,
+            account.organizationId,
+            account.id,
+            account.phoneNumberId,
+            profile.profileName
+          );
         }
       }
 
@@ -675,13 +737,16 @@ export class WebhookService {
   }
 
   // -----------------------------
-  // Incoming message processing (unchanged)
+  // Incoming message processing
+  // Critical path: [dedupe | contact | phoneNumber] -> conversation upsert ->
+  // message create -> socket emit. Baaki sab writes iske baad/background mein.
   // -----------------------------
   private async processIncomingMessage(
     message: any,
     organizationId: string,
     whatsappAccountId: string,
-    phoneNumberId: string
+    phoneNumberId: string,
+    profileName?: string
   ) {
     try {
       const waFrom = String(message?.from || '');
@@ -698,31 +763,36 @@ export class WebhookService {
 
       console.log(`📥 Inbound: ${waMessageId} from ${waFrom} type=${typeRaw}`);
 
-      const existingMsg = await prisma.message.findFirst({
-        where: {
-          OR: [
-            { waMessageId },
-            { wamId: waMessageId },
-          ],
-        },
-        select: { id: true },
-      });
+      // ⚡ Ye teen queries ek dusre pe depend nahi karti. Pehle sequential
+      // chalti thi = 3 alag DB round trip. App server aur DB alag region mein
+      // hain, isliye har round trip mehnga hai - ek saath fire karo.
+      const [existingMsg, contactResult, phoneNumberUUID] = await Promise.all([
+        prisma.message.findFirst({
+          where: {
+            OR: [
+              { waMessageId },
+              { wamId: waMessageId },
+            ],
+          },
+          select: { id: true },
+        }),
+        this.findOrCreateContact(organizationId, waFrom, profileName),
+        this.resolvePhoneNumberUUID(phoneNumberId),
+      ]);
 
       if (existingMsg) {
         console.log(`⏭️ Duplicate message skipped: ${waMessageId}`);
         return;
       }
 
-      const { contact, wasNewlyCreated } = await this.findOrCreateContact(
-        organizationId,
-        waFrom
-      );
+      const { contact, wasNewlyCreated } = contactResult;
 
       let conversation = await this.findOrCreateConversation(
         organizationId,
         contact.id,
-        phoneNumberId,  // ✅ Method internally converts this to UUID via PhoneNumber table
-        messageTime
+        phoneNumberId,
+        messageTime,
+        phoneNumberUUID
       );
 
       let content: string = '';
@@ -882,16 +952,72 @@ export class WebhookService {
           );
       }
 
+      // ⚡ Socket emit ab DB update se PEHLE hota hai. Pehle ye emit
+      // conversation.update ke round trip ke BAAD tha, yaani har inbound
+      // message client tak ek pura DB round trip late pahunchta tha.
+      // Update ki nayi values hume pehle se pata hain, isliye wahi payload
+      // locally bana kar turant emit karo - DB write peeche chalti rahegi.
+      const preview = (content || `[${typeRaw}]`).substring(0, 100);
+      const windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      const contactName =
+        (contact as any).whatsappProfileName ||
+        ((contact as any).firstName
+          ? `${(contact as any).firstName} ${(contact as any).lastName || ''}`.trim()
+          : (contact as any).phone);
+
+      const contactWithName = {
+        id: contact.id,
+        phone: contact.phone,
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        avatar: contact.avatar,
+        whatsappProfileName: contact.whatsappProfileName,
+        name: contactName,
+      };
+
+      const messagePayload = {
+        ...savedMessage,
+        createdAt: savedMessage.createdAt instanceof Date ? savedMessage.createdAt.toISOString() : savedMessage.createdAt,
+        sentAt: savedMessage.sentAt instanceof Date ? savedMessage.sentAt.toISOString() : savedMessage.sentAt,
+        deliveredAt: savedMessage.deliveredAt instanceof Date ? savedMessage.deliveredAt.toISOString() : savedMessage.deliveredAt,
+        timestamp: savedMessage.timestamp instanceof Date ? savedMessage.timestamp.toISOString() : savedMessage.timestamp,
+      };
+
+      const conversationPayload: any = {
+        ...conversation,
+        lastMessageAt: messageTime.toISOString(),
+        lastMessagePreview: preview,
+        lastCustomerMessageAt: messageTime.toISOString(),
+        unreadCount: (conversation.unreadCount ?? 0) + 1,
+        isRead: false,
+        isWindowOpen: true,
+        windowExpiresAt: windowExpiresAt.toISOString(),
+        contact: contactWithName,
+      };
+
+      webhookEvents.emit('newMessage', {
+        organizationId,
+        conversationId: conversation.id,
+        message: messagePayload,
+        conversation: conversationPayload,
+      });
+
+      webhookEvents.emit('conversationUpdated', {
+        organizationId,
+        conversation: conversationPayload,
+      });
+
       const updatedConversation = await prisma.conversation.update({
         where: { id: conversation.id },
         data: {
           lastMessageAt: messageTime,
-          lastMessagePreview: (content || `[${typeRaw}]`).substring(0, 100),
+          lastMessagePreview: preview,
           lastCustomerMessageAt: messageTime,
           unreadCount: { increment: 1 },
           isRead: false,
           isWindowOpen: true,
-          windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          windowExpiresAt,
         },
         include: {
           contact: {
@@ -919,54 +1045,16 @@ export class WebhookService {
         .then(({ inboxService }) => inboxService.clearCache(organizationId))
         .catch((e: any) => console.error('Cache clear error:', e));
 
-      const contactName =
-        (updatedConversation.contact as any).whatsappProfileName ||
-        ((updatedConversation.contact as any).firstName
-          ? `${(updatedConversation.contact as any).firstName} ${(updatedConversation.contact as any).lastName || ''}`.trim()
-          : (updatedConversation.contact as any).phone);
-
-      const contactWithName = {
-        ...updatedConversation.contact,
-        name: contactName,
-      };
-
-      const messagePayload = {
-        ...savedMessage,
-        createdAt: savedMessage.createdAt instanceof Date ? savedMessage.createdAt.toISOString() : savedMessage.createdAt,
-        sentAt: savedMessage.sentAt instanceof Date ? savedMessage.sentAt.toISOString() : savedMessage.sentAt,
-        deliveredAt: savedMessage.deliveredAt instanceof Date ? savedMessage.deliveredAt.toISOString() : savedMessage.deliveredAt,
-        timestamp: savedMessage.timestamp instanceof Date ? savedMessage.timestamp.toISOString() : savedMessage.timestamp,
-      };
-
-      webhookEvents.emit('newMessage', {
-        organizationId,
-        conversationId: updatedConversation.id,
-        message: messagePayload,
-        conversation: {
-          ...updatedConversation,
-          contact: contactWithName,
-          lastMessageAt: updatedConversation.lastMessageAt instanceof Date
-            ? updatedConversation.lastMessageAt.toISOString()
-            : updatedConversation.lastMessageAt,
-          windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
-            ? updatedConversation.windowExpiresAt.toISOString()
-            : updatedConversation.windowExpiresAt,
-        },
-      });
-
-      webhookEvents.emit('conversationUpdated', {
-        organizationId,
-        conversation: {
-          ...updatedConversation,
-          contact: contactWithName,
-          lastMessageAt: updatedConversation.lastMessageAt instanceof Date
-            ? updatedConversation.lastMessageAt.toISOString()
-            : updatedConversation.lastMessageAt,
-          windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
-            ? updatedConversation.windowExpiresAt.toISOString()
-            : updatedConversation.windowExpiresAt,
-        },
-      });
+      // Authoritative unreadCount DB se aata hai. Agar optimistic value se
+      // alag nikla (do message ek saath aane par possible hai), to sirf tabhi
+      // ek correction emit bhejo - warna dobara emit karne ki zarurat nahi.
+      if (updatedConversation.unreadCount !== conversationPayload.unreadCount) {
+        conversationPayload.unreadCount = updatedConversation.unreadCount;
+        webhookEvents.emit('conversationUpdated', {
+          organizationId,
+          conversation: conversationPayload,
+        });
+      }
 
       this.runAutomations(
         wasNewlyCreated, organizationId, contact,
