@@ -1,7 +1,6 @@
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import jwt from 'jsonwebtoken';
-import { config } from './config';
+import { verifyAccessToken } from './utils/jwt';
 import prisma from './config/database';
 import { initializeCampaignSocket } from './modules/campaigns/campaigns.socket';
 
@@ -69,7 +68,12 @@ export const initializeSocket = (server: HttpServer) => {
     }
 
     try {
-      const decoded = jwt.verify(token, config.jwt.secret) as any;
+      // Access tokens are signed with JWT_ACCESS_SECRET (falling back to
+      // JWT_SECRET). This used to verify against config.jwt.secret only, so
+      // whenever the two env vars differed every valid access token passed the
+      // REST API and failed the socket handshake. verifyAccessToken tries both
+      // secrets, exactly like the HTTP auth middleware does.
+      const decoded = verifyAccessToken(token) as any;
       socket.userId = decoded.userId || decoded.id;
       // Tenant comes from the verified token, never from the client handshake.
       // Previously an invalid token still connected as a guest and the org was
@@ -77,8 +81,17 @@ export const initializeSocket = (server: HttpServer) => {
       socket.organizationId = decoded.organizationId;
       socket.email = decoded.email;
       return next();
-    } catch (e) {
-      return next(new Error('Invalid or expired token'));
+    } catch (e: any) {
+      console.error(
+        `🔒 Socket auth rejected: ${e?.name || 'Error'} - ${e?.message || e}`
+      );
+      return next(
+        new Error(
+          e?.name === 'TokenExpiredError'
+            ? 'Token expired'
+            : 'Invalid or expired token'
+        )
+      );
     }
   });
 
