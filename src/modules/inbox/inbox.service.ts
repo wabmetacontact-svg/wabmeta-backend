@@ -256,6 +256,29 @@ export class InboxService {
       },
     });
 
+    // Conversations list Redis mein cached hai. Pehle ye clear nahi hota tha,
+    // isliye chat kholne ke baad bhi list (aur pull-to-refresh) purana
+    // unreadCount hi dikhati rehti thi jab tak cache expire na ho.
+    this.clearCache(organizationId).catch((e: any) =>
+      console.error('markAsRead cache clear error:', e?.message)
+    );
+
+    // Clients ko batao ki badge clear ho gaya - warna list screen aur
+    // dusre devices par unread badge laga rehta hai.
+    import('../webhooks/webhook.service')
+      .then(({ webhookEvents }) => {
+        webhookEvents.emit('conversationUpdated', {
+          organizationId,
+          conversation: {
+            id: conversation.id,
+            unreadCount: 0,
+            isRead: true,
+          },
+        });
+      })
+      .catch((e: any) =>
+        console.error('markAsRead socket emit error:', e?.message)
+      );
     return conversation;
   }
 
