@@ -61,7 +61,7 @@ export class AutomationController {
                 throw new AppError('Organization context required', 400);
             }
 
-            const { name, description, trigger, triggerConfig, actions, isActive } = req.body;
+            const { name, description, trigger, triggerConfig, actions, isActive, targetGroupIds, excludeExisting } = req.body;
 
             if (!name || !trigger || !actions) {
                 throw new AppError('Name, trigger, and actions are required', 400);
@@ -74,6 +74,8 @@ export class AutomationController {
                 triggerConfig,
                 actions,
                 isActive,
+                targetGroupIds,
+                excludeExisting,
             });
 
             return sendSuccess(res, automation, 'Automation created successfully', 201);
@@ -93,7 +95,7 @@ export class AutomationController {
             }
 
             const id = req.params.id as string;
-            const { name, description, trigger, triggerConfig, actions, isActive } = req.body;
+            const { name, description, trigger, triggerConfig, actions, isActive, targetGroupIds, excludeExisting } = req.body;
 
             const automation = await automationService.update(organizationId, id, {
                 name,
@@ -102,6 +104,8 @@ export class AutomationController {
                 triggerConfig,
                 actions,
                 isActive,
+                targetGroupIds,
+                excludeExisting,
             });
 
             return sendSuccess(res, automation, 'Automation updated successfully');
