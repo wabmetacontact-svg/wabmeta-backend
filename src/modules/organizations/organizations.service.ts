@@ -3,6 +3,7 @@
 import prisma from '../../config/database';
 import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
+import { computeFeatureLocks } from '../../middleware/featureLock';
 import { comparePassword } from '../../utils/password';
 import { generateSlug } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
@@ -23,6 +24,9 @@ import {
 // HELPER FUNCTIONS
 // ============================================
 
+// Plan ke limits (jaise FREE_DEMO par maxChatbots = 0) bhi feature lock
+// karte hain, sirf admin ke featureXLocked columns nahi. Client ko
+// effective lock chahiye, isliye yahin compute karke bhejte hain.
 const formatOrganization = (org: any): OrganizationResponse => ({
   id: org.id,
   name: org.name,
@@ -32,11 +36,16 @@ const formatOrganization = (org: any): OrganizationResponse => ({
   industry: org.industry,
   timezone: org.timezone,
   planType: org.planType,
-  featureInboxLocked: org.featureInboxLocked,
-  featureCampaignsLocked: org.featureCampaignsLocked,
-  featureChatbotLocked: org.featureChatbotLocked,
-  featureAutomationLocked: org.featureAutomationLocked,
-  featureConnectionLocked: org.featureConnectionLocked,
+  ...(() => {
+    const locks = computeFeatureLocks(org);
+    return {
+      featureInboxLocked: locks.inbox,
+      featureCampaignsLocked: locks.campaigns,
+      featureChatbotLocked: locks.chatbot,
+      featureAutomationLocked: locks.automation,
+      featureConnectionLocked: locks.connection,
+    };
+  })(),
   createdAt: org.createdAt,
   updatedAt: org.updatedAt,
 });
@@ -148,6 +157,19 @@ export class OrganizationsService {
         },
         _count: {
           select: { members: true },
+        },
+        // Plan limits chahiye taaki effective feature locks compute ho sakein
+        subscription: {
+          select: {
+            plan: {
+              select: {
+                maxCampaigns: true,
+                maxChatbots: true,
+                maxAutomations: true,
+                maxWhatsAppAccounts: true,
+              },
+            },
+          },
         },
       },
     });

@@ -3,6 +3,7 @@
 import { PrismaClient, PlanType, SubscriptionStatus } from '@prisma/client';
 import crypto from 'crypto';
 import prisma from '../../config/database';
+import { invalidateFeatureLocks } from '../../middleware/featureLock';
 
 // ============================================
 // RAZORPAY INITIALIZATION
@@ -893,6 +894,11 @@ class BillingService {
         data: { planType: plan.type }
       });
 
+        // Plan badla hai - featureLock ka cache clear karo taaki naye plan ke
+      // locks turant effective ho jayein (warna 60s tak purane dikhenge)
+      invalidateFeatureLocks(organizationId);
+
+
       // ✅ Create Payment record for revenue tracking
       await prisma.payment.create({
         data: {
@@ -983,6 +989,11 @@ class BillingService {
       data: { planType: plan.type },
     });
 
+    // Plan badla hai - featureLock ka cache clear karo taaki naye plan ke
+    // locks turant effective ho jayein (warna 60s tak purane dikhenge)
+    invalidateFeatureLocks(organizationId);
+
+
     return subscription;
   }
 
@@ -1010,6 +1021,10 @@ class BillingService {
         cancelledAt: new Date(),
       }
     });
+
+    // Plan badla hai - featureLock ka cache clear karo taaki naye plan ke
+    // locks turant effective ho jayein (warna 60s tak purane dikhenge)
+    invalidateFeatureLocks(organizationId);
 
     console.log('Subscription cancelled:', { organizationId, reason });
 
