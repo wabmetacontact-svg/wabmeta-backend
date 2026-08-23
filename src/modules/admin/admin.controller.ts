@@ -1,6 +1,7 @@
 // src/modules/admin/admin.controller.ts
 
 import { Request, Response, NextFunction } from 'express';
+import { invalidateFeatureLocks } from '../../middleware/featureLock';
 import { adminService } from './admin.service';
 import { adminBillingService } from './admin.billing.service';
 import { AppError } from '../../middleware/errorHandler';
@@ -529,6 +530,10 @@ export class AdminController {
           featureConnectionLocked: connectionLocked ?? false,  // ✅ NEW
         } as any
       });
+
+      // featureLock middleware org locks 60s cache karta hai - admin ke
+      // change ko turant effective banane ke liye cache clear kar do
+      invalidateFeatureLocks(organizationId);
 
       return sendSuccess(res, {
         organizationId,

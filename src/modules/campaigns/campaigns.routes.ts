@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { campaignsController, csvUpload } from './campaigns.controller';
 import { validate } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { successResponse } from '../../utils/response';
 import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 import {
@@ -29,6 +30,9 @@ import {
 const router = Router();
 
 router.use(authenticate);
+
+// Plan lock - client par locked screen dikhta hai, yahan API bhi band
+router.use(featureLock('campaigns'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));

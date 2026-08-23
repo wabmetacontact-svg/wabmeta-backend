@@ -2,6 +2,7 @@
 
 import { Router, Request } from 'express';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { inboxController } from './inbox.controller';
 import { inboxMediaService } from './inbox.media';
 import axios from 'axios';
@@ -45,6 +46,9 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
         mediaMimeType: true,
         fileName: true,
         metadata: true,
+        // Media id us WABA/app se bandhi hoti hai jisne wo receive ki thi,
+        // isliye uska token chahiye - kisi bhi org account ka nahi
+        whatsappAccountId: true,
       },
     });
     
@@ -90,13 +94,31 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
     
     // ✅ Step 3: Meta se fetch karo
     let accessToken: string | null = null;
-    
-    const account = await prisma.whatsAppAccount.findFirst({
-      where: { organizationId, isActive: true },
-    });
-    
-    if (account?.accessToken) {
-      accessToken = safeDecryptStrict(account.accessToken);
+
+    // Pehle wahi account jispe ye message aaya tha. Pehle yahan seedha
+    // findFirst({ organizationId, isActive }) tha - yaani org ka *koi bhi*
+    // account. Jis org ke ek se zyada WhatsApp accounts hain wahan Meta
+    // galat token dekh kar GraphMethodException (code 100, subcode 33) deta
+    // tha aur media 404 ho jati thi.
+    if (message?.whatsappAccountId) {
+      const ownAccount = await prisma.whatsAppAccount.findUnique({
+        where: { id: message.whatsappAccountId },
+        select: { accessToken: true },
+      });
+      if (ownAccount?.accessToken) {
+        accessToken = safeDecryptStrict(ownAccount.accessToken);
+      }
+    }
+
+    // Purane messages mein whatsappAccountId na ho to legacy fallback
+    if (!accessToken) {
+      const account = await prisma.whatsAppAccount.findFirst({
+        where: { organizationId, isActive: true },
+      });
+
+      if (account?.accessToken) {
+        accessToken = safeDecryptStrict(account.accessToken);
+      }
     }
     
     if (!accessToken) {
@@ -162,6 +184,11 @@ router.get('/media-proxy', authenticate, (req, res, next) =>
 );
 
 router.use(authenticate);
+
+// Plan lock. Note: upar registered media routes (/media/:mediaId,
+// /media-proxy) jaan-bujh kar iske bahar hain - purani conversations ki
+// media locked plan par bhi load hoti rahe.
+router.use(featureLock('inbox'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));

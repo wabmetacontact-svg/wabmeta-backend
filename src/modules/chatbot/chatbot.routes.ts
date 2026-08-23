@@ -3,12 +3,16 @@
 import { Router } from 'express';
 import { chatbotController } from './chatbot.controller';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { requireActiveSubscription, checkChatbotLimit } from '../../middleware/planLimits';
 
 import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 const router = Router();
 
 router.use(authenticate);
+
+// Plan lock - client par locked screen dikhta hai, yahan API bhi band
+router.use(featureLock('chatbot'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));

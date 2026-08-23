@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { automationController } from './automation.controller';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { requireActiveSubscription, checkAutomationLimit } from '../../middleware/planLimits';
 
 import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
@@ -8,6 +9,9 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticate);
+
+// Plan lock - client par locked screen dikhta hai, yahan API bhi band
+router.use(featureLock('automation'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));
