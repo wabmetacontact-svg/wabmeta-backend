@@ -186,7 +186,9 @@ class WhatsAppService {
       });
       console.log(`👤 Created new contact: ${canonical}`);
     } else if (contact.phone !== canonical) {
-      await prisma.contact.update({
+      // Background write - value neeche locally set ho hi rahi hai, isliye
+      // iske DB round trip ka wait karne ka koi fayda nahi tha.
+      prisma.contact.update({
         where: { id: contact.id },
         data: { phone: canonical },
       }).catch(() => { });
@@ -656,6 +658,8 @@ class WhatsAppService {
         : Promise.resolve(null),
     ]);
 
+    console.log(`⏱️ Account+conversation lookup: ${Date.now() - startTime}ms`);
+
     const { account, accessToken } = accountData;
     const orgId = organizationId || account.organizationId;
     const formattedTo = this.formatPhoneNumber(to);
@@ -686,6 +690,14 @@ class WhatsAppService {
       ...content,
     };
 
+    // ⚡ Contact lookup Meta call ke result par depend nahi karta, lekin pehle
+    // uske BAAD chalta tha - yaani ek pura DB round trip seedha user ke "sent"
+    // tick mein add hota tha. Ab dono ek saath chalte hain.
+    // Note: agar Meta call fail ho jaye to bhi ye lookup complete hoga (naye
+    // number ke case mein contact ban jayega) - wo acceptable hai.
+    const contactPromise = this.getOrCreateContact(orgId, to);
+    contactPromise.catch(() => { }); // send fail ho to unhandled rejection na aaye
+
     const result = await metaApi.sendMessage(
       account.phoneNumberId, accessToken, formattedTo, messagePayload
     );
@@ -703,7 +715,9 @@ class WhatsAppService {
         content?.link || mediaUrl || null;
     }
 
-    const contact = await this.getOrCreateContact(orgId, to);
+    const dbStart = Date.now();
+
+    const contact = await contactPromise;
     let conversation = conversationData;
     if (!conversation) {
       conversation = await this.getOrCreateConversation(
@@ -732,6 +746,8 @@ class WhatsAppService {
         } as any,
       },
     });
+
+    console.log(`⏱️ Contact+conversation+message insert: ${Date.now() - dbStart}ms`);
 
     setImmediate(async () => {
       try {

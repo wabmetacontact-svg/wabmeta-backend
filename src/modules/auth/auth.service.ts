@@ -1282,8 +1282,11 @@ export class AuthService {
           throw new AppError('Session expired. Please login again.', 401);
         }
 
-        // ✅ Rotate the recent token (security maintain karo)
-        await prisma.refreshToken.delete({ where: { id: recentToken.id } });
+        // ✅ Rotate the recent token (security maintain karo).
+        // deleteMany, delete nahi: agar koi parallel refresh request wahi row
+        // pehle hata chuki ho to delete() P2025 throw karta hai, jo errorHandler
+        // mein 404 ban kar client tak jaata tha aur session wahin toot jaati thi.
+        await prisma.refreshToken.deleteMany({ where: { id: recentToken.id } });
         
         return generateTokenPair(
           recentToken.userId,
@@ -1338,14 +1341,28 @@ export class AuthService {
 
     // ─── Token expired ─────────────────────────────────────
     if (stored.expiresAt < new Date()) {
-      await prisma.refreshToken.delete({ where: { id: stored.id } });
+      // deleteMany - ye sirf cleanup hai, iske fail hone se asli 401 message
+      // dab kar 404 nahi ban jana chahiye.
+      await prisma.refreshToken.deleteMany({ where: { id: stored.id } });
       throw new AppError('Session expired. Please login again.', 401);
     }
 
     // ─── Normal rotation ───────────────────────────────────
-    await prisma.refreshToken.delete({ where: { id: stored.id } });
+    // deleteMany kabhi throw nahi karta. count === 0 ka matlab: kisi parallel
+    // request ne isi token ko already rotate kar diya. Ye race hai, reuse
+    // attack nahi - token is request ke padhte waqt valid tha. Pehle yahan
+    // delete() tha jo aise case mein P2025 -> 404 deta tha.
+    // Dono queries independent hain, isliye parallel (DB cross-region hai).
+    const [rotated, org] = await Promise.all([
+      prisma.refreshToken.deleteMany({ where: { id: stored.id } }),
+      getDefaultOrg(stored.userId),
+    ]);
 
-    const org = await getDefaultOrg(stored.userId);
+    if (rotated.count === 0) {
+      console.warn(
+        `⚠️ Concurrent rotation for user ${stored.userId} - token already rotated`
+      );
+    }
 
     return generateTokenPair(
       stored.userId,
