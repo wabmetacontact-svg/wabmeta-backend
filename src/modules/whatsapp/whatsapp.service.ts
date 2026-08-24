@@ -70,6 +70,33 @@ interface ContactCheckResult {
 // ============================================
 
 class WhatsAppService {
+  // Ek account ke liye ek waqt mein ek hi background template sync
+  private templateSyncInFlight = new Set<string>();
+
+  /**
+   * Template sync background mein trigger karo (fire-and-forget).
+   *
+   * Meta par delete ho chuke templates hamari DB mein bache reh jaate hain
+   * agar sync na chale - phir unhe bhejne par 132001 aata hai. Jab bhi wo
+   * error mile, sync chala kar stale rows saaf kar dete hain.
+   */
+  private syncTemplatesInBackground(accountId: string, organizationId: string) {
+    if (this.templateSyncInFlight.has(accountId)) return;
+    this.templateSyncInFlight.add(accountId);
+
+    import('../meta/meta.service')
+      .then(({ metaService }) =>
+        (metaService as any).syncTemplates(accountId, organizationId)
+      )
+      .then(() =>
+        console.log(`✅ Stale templates cleaned for account ${accountId}`)
+      )
+      .catch((e: any) =>
+        console.error('Background template sync failed:', e?.message)
+      )
+      .finally(() => this.templateSyncInFlight.delete(accountId));
+  }
+
   // ============================================
   // HELPER METHODS
   // ============================================
@@ -515,12 +542,76 @@ class WhatsAppService {
         },
       };
 
-      const response = await metaApi.sendMessage(
-        account.phoneNumberId,
-        accessToken,
-        formattedTo,
-        messagePayload
-      );
+      let response;
+
+      try {
+        response = await metaApi.sendMessage(
+          account.phoneNumberId,
+          accessToken,
+          formattedTo,
+          messagePayload
+        );
+      } catch (sendErr: any) {
+        // Meta 132001 = "template name does not exist in the translation".
+        // Matlab template to hai, par is language mein nahi. Ye tab hota hai
+        // jab Meta par wo translation delete ho chuki ho aur hamari DB row
+        // purani reh gayi ho (sync na chala ho).
+        //
+        // Aise mein hard fail karne ka koi matlab nahi - usi naam ka koi aur
+        // APPROVED language version ho to usse bhej do, aur background mein
+        // sync trigger kar do taaki stale row saaf ho jaye.
+        const metaCode = sendErr?.metaError?.code ?? sendErr?.response?.data?.error?.code;
+
+        if (metaCode !== 132001) throw sendErr;
+
+        console.warn(
+          `⚠️ Template "${templateName}" ${resolvedLanguage} mein nahi mila - dusri language dhoondh rahe hain`
+        );
+
+        // Stale data saaf karne ke liye sync (fire-and-forget)
+        this.syncTemplatesInBackground(accountId, orgId);
+
+        const alternatives = await prisma.template.findMany({
+          where: {
+            organizationId: account.organizationId,
+            name: templateName,
+            status: 'APPROVED',
+            language: { not: resolvedLanguage },
+          },
+          select: { language: true },
+          orderBy: { updatedAt: 'desc' },
+        });
+
+        if (alternatives.length === 0) throw sendErr;
+
+        let lastErr = sendErr;
+        response = null;
+
+        for (const alt of alternatives) {
+          if (!alt.language) continue;
+
+          console.log(`↻ Retry "${templateName}" with language ${alt.language}`);
+          messagePayload.template.language = { code: alt.language };
+
+          try {
+            response = await metaApi.sendMessage(
+              account.phoneNumberId,
+              accessToken,
+              formattedTo,
+              messagePayload
+            );
+            break;
+          } catch (retryErr: any) {
+            lastErr = retryErr;
+            const retryCode =
+              retryErr?.metaError?.code ?? retryErr?.response?.data?.error?.code;
+            // Koi aur error hai to aur languages try karne ka fayda nahi
+            if (retryCode !== 132001) throw retryErr;
+          }
+        }
+
+        if (!response) throw lastErr;
+      }
 
       const waMessageId = (response as any)?.messages?.[0]?.id || response?.messageId;
       if (!waMessageId) throw new Error('No message ID returned');

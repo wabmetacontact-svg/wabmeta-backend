@@ -762,6 +762,15 @@ export class AuthService {
 
     // ── Step 2: User existence check ────────────────────
     if (!user) {
+      // Pehle ye path chup-chaap 401 deta tha. Wrong-password wala path log
+      // karta hai, ye nahi - to logs mein dono ek jaise dikhte the aur pata
+      // nahi chalta tha ki email galat thi ya password. Ab dono distinguish
+      // hote hain. API response wahi generic rehta hai (security), sirf
+      // server-side log detail deta hai.
+      authLog.warn('Login attempt for unregistered email', {
+        email: normalizedEmail,
+      });
+
       // ✅ Timing attack prevention - same delay even for missing users
       await new Promise((r) => setTimeout(r, 200));
       throw new AppError('Invalid email or password', 401);

@@ -70,11 +70,27 @@ export class MetaService {
    * yahan distinct conversations gine jaate hain, raw message count nahi -
    * warna number hamesha zyada dikhta aur galat hota.
    */
-  private async getMessagingUsage(accountId: string, tier: string | null) {
+  private async getMessagingUsage(account: any) {
+    const accountId = account.id;
+    const tier = account.messagingLimit as string | null;
+
     const perDay =
       tier && tier in MetaService.TIER_DAILY_LIMIT
         ? MetaService.TIER_DAILY_LIMIT[tier]
         : null;
+
+    // Tier na hone ke do bilkul alag matlab hote hain, aur UI ko dono alag
+    // dikhane chahiye:
+    //   ASSIGNED - Meta ne tier de diya hai
+    //   PENDING  - sync ho chuka hai (quality rating aa gayi), par Meta ne
+    //              abhi tier assign hi nahi kiya. Naye/unverified numbers par
+    //              aisa hota hai - yahan "Syncing..." dikhana jhooth hai.
+    //   SYNCING  - is account ka sync abhi tak chala hi nahi
+    const tierStatus: 'ASSIGNED' | 'PENDING' | 'SYNCING' = tier
+      ? 'ASSIGNED'
+      : account.qualityRating
+        ? 'PENDING'
+        : 'SYNCING';
 
     let used = 0;
 
@@ -100,6 +116,7 @@ export class MetaService {
       messagingUsed24h: used,
       messagingRemaining:
         perDay === null ? null : Math.max(0, perDay - used),
+      messagingTierStatus: tierStatus,
     };
   }
 
@@ -717,10 +734,7 @@ export class MetaService {
 
     return Promise.all(
       accounts.map(async (account) => {
-        const usage = await this.getMessagingUsage(
-          account.id,
-          account.messagingLimit
-        );
+        const usage = await this.getMessagingUsage(account);
 
         // Tier kabhi sync hi nahi hua to UI par "Not set" dikhta hai.
         // Background mein Meta se laa lo - agli baar sahi dikhega.
@@ -764,10 +778,7 @@ export class MetaService {
       throw new AppError('WhatsApp account not found', 404);
     }
 
-    const usage = await this.getMessagingUsage(
-      account.id,
-      account.messagingLimit
-    );
+    const usage = await this.getMessagingUsage(account);
 
     this.ensureTierSynced(account);
 
