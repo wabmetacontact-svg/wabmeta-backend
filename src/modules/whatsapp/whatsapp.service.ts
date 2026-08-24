@@ -675,13 +675,19 @@ class WhatsAppService {
           },
         });
 
+        // 24-ghante ka customer service window SIRF customer ke reply se
+        // khulta hai - business ka apna message (template bhi) use nahi
+        // kholta. Pehle yahan isWindowOpen: true + windowExpiresAt +24h set
+        // hota tha, jiska matlab tha:
+        //   template bhejo -> DB ko lagta hai window khul gaya -> uske baad
+        //   normal text bhejne par hamara check pass ho jata -> Meta 131047
+        //   ("Re-engagement message") se reject kar deta.
+        // Window ab sirf webhook (inbound message) se khulta hai.
         await prisma.conversation.update({
           where: { id: conversationId },
           data: {
             lastMessageAt: now,
             lastMessagePreview: fullContent.substring(0, 100),
-            isWindowOpen: true,
-            windowExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
           },
         });
 

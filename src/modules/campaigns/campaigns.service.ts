@@ -2787,7 +2787,9 @@ export class CampaignsService {
             contactId: cid,
             lastMessageAt: now,
             lastMessagePreview: `Template: ${tplName}`,
-            isWindowOpen: true,
+            // Campaign business-initiated hai - customer ne reply nahi kiya,
+            // to window khula nahi hai
+            isWindowOpen: false,
             unreadCount: 0,
             isRead: true,
           })),

@@ -590,7 +590,9 @@ export class InboxService {
         data: {
           organization: { connect: { id: organizationId } },
           contact: { connect: { id: contactId } },
-          isWindowOpen: true,
+          // Nayi conversation business ki taraf se ban rahi hai - customer ne
+          // abhi kuch bheja hi nahi, to 24h window khula nahi hai
+          isWindowOpen: false,
           unreadCount: 0,
         },
         include: {
