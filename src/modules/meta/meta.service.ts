@@ -47,6 +47,62 @@ async function extractStoredPin(
 }
 
 export class MetaService {
+  // Ek hi account ke liye ek waqt mein ek hi background tier sync
+  private tierSyncInFlight = new Set<string>();
+
+  // Meta ke messaging tiers. Value = 24 ghante mein kitne UNIQUE customers
+  // ko business-initiated message bhej sakte ho. null = unlimited.
+  // Docs: https://developers.facebook.com/docs/whatsapp/messaging-limits
+  private static readonly TIER_DAILY_LIMIT: Record<string, number | null> = {
+    TIER_50: 50,
+    TIER_250: 250,
+    TIER_1K: 1000,
+    TIER_10K: 10000,
+    TIER_100K: 100000,
+    TIER_UNLIMITED: null,
+  };
+
+  /**
+   * Account ka asli messaging limit + last 24h ka usage.
+   *
+   * Meta ki limit messages par nahi, UNIQUE customers par lagti hai jinse
+   * aapne 24 ghante ke rolling window mein conversation start ki. Isliye
+   * yahan distinct conversations gine jaate hain, raw message count nahi -
+   * warna number hamesha zyada dikhta aur galat hota.
+   */
+  private async getMessagingUsage(accountId: string, tier: string | null) {
+    const perDay =
+      tier && tier in MetaService.TIER_DAILY_LIMIT
+        ? MetaService.TIER_DAILY_LIMIT[tier]
+        : null;
+
+    let used = 0;
+
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const conversations = await prisma.message.groupBy({
+        by: ['conversationId'],
+        where: {
+          whatsappAccountId: accountId,
+          direction: 'OUTBOUND',
+          createdAt: { gte: since },
+        },
+      });
+
+      used = conversations.length;
+    } catch (e: any) {
+      console.error('Messaging usage count failed:', e?.message);
+    }
+
+    return {
+      messagingLimitPerDay: perDay,
+      messagingUsed24h: used,
+      messagingRemaining:
+        perDay === null ? null : Math.max(0, perDay - used),
+    };
+  }
+
   private sanitizeAccount(account: any) {
     if (!account) return null;
 
@@ -659,7 +715,41 @@ export class MetaService {
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
     });
 
-    return accounts.map((account) => this.sanitizeAccount(account));
+    return Promise.all(
+      accounts.map(async (account) => {
+        const usage = await this.getMessagingUsage(
+          account.id,
+          account.messagingLimit
+        );
+
+        // Tier kabhi sync hi nahi hua to UI par "Not set" dikhta hai.
+        // Background mein Meta se laa lo - agli baar sahi dikhega.
+        this.ensureTierSynced(account);
+
+        return { ...this.sanitizeAccount(account), ...usage };
+      })
+    );
+  }
+
+  /**
+   * messagingLimit null ho to Meta se sync trigger karo (fire-and-forget).
+   * Response ko block nahi karta - ye sirf agli load ke liye data bharta hai.
+   */
+  private ensureTierSynced(account: any) {
+    if (account?.messagingLimit) return;
+    if (account?.status !== 'CONNECTED') return;
+    if (this.tierSyncInFlight.has(account.id)) return;
+
+    this.tierSyncInFlight.add(account.id);
+
+    import('../whatsapp/whatsapp.service')
+      .then(({ whatsappService }) =>
+        (whatsappService as any).syncAccountQuality(account.id)
+      )
+      .catch((e: any) =>
+        console.error('Tier auto-sync failed:', e?.message)
+      )
+      .finally(() => this.tierSyncInFlight.delete(account.id));
   }
 
   async getAccount(accountId: string, organizationId: string) {
@@ -674,7 +764,14 @@ export class MetaService {
       throw new AppError('WhatsApp account not found', 404);
     }
 
-    return this.sanitizeAccount(account);
+    const usage = await this.getMessagingUsage(
+      account.id,
+      account.messagingLimit
+    );
+
+    this.ensureTierSynced(account);
+
+    return { ...this.sanitizeAccount(account), ...usage };
   }
 
   /**
