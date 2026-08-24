@@ -13,16 +13,29 @@ const nameSchema = z
   .max(100, 'Organization name is too long')
   .trim();
 
-const urlSchema = z
-  .string()
-  .url('Invalid URL')
-  .optional()
-  .nullable();
+// HTML forms khaali field ko '' bhejte hain, undefined nahi. Pehle
+// website: '' par .url() fail ho jata tha aur poora settings save 400 ban
+// jata tha - jabki matlab sirf itna tha ki website di hi nahi gayi.
+// Nullable fields ke liye '' -> null (taaki user value clear bhi kar sake),
+// baaki ke liye '' -> undefined (yaani is field ko mat chhedo).
+const emptyToNull = (v: unknown) =>
+  typeof v === 'string' && v.trim() === '' ? null : v;
 
-const timezoneSchema = z
-  .string()
-  .regex(/^[A-Za-z_\/]+$/, 'Invalid timezone format')
-  .optional();
+const emptyToUndefined = (v: unknown) =>
+  typeof v === 'string' && v.trim() === '' ? undefined : v;
+
+const urlSchema = z.preprocess(
+  emptyToNull,
+  z.string().url('Invalid URL').optional().nullable()
+);
+
+const timezoneSchema = z.preprocess(
+  emptyToUndefined,
+  z
+    .string()
+    .regex(/^[A-Za-z_\/]+$/, 'Invalid timezone format')
+    .optional()
+);
 
 const roleSchema = z.nativeEnum(UserRole);
 
@@ -44,7 +57,10 @@ export const updateOrganizationSchema = z.object({
     name: nameSchema.optional(),
     logo: z.string().optional().nullable().or(z.literal('')),
     website: urlSchema,
-    industry: z.string().max(50).optional().nullable(),
+    industry: z.preprocess(
+      emptyToNull,
+      z.string().max(50).optional().nullable()
+    ),
     timezone: timezoneSchema,
   }),
 });
