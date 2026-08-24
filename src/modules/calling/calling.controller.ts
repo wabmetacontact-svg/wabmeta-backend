@@ -26,7 +26,7 @@ class CallingController {
           success: true,
           data: {
             callingEnabled: false,
-            inboundCallsEnabled: true,
+            showCallButton: true,
             callbackEnabled: true,
             callHoursEnabled: false,
             message: 'No WhatsApp account found',
@@ -35,11 +35,12 @@ class CallingController {
       }
 
       // Get token safely
-      let settings = {
+      let settings: any = {
         callingEnabled: false,
-        inboundCallsEnabled: true,
+        showCallButton: true,
         callbackEnabled: true,
         callHoursEnabled: false,
+        restrictToCountries: [],
       };
 
       try {
@@ -78,7 +79,7 @@ class CallingController {
 
       const {
         callingEnabled,
-        inboundCallsEnabled,
+        showCallButton,
         callbackEnabled,
         callHoursEnabled,
         whatsappAccountId,
@@ -114,12 +115,15 @@ class CallingController {
         accountWithToken.accessToken,
         {
           callingEnabled: callingEnabled ?? true,
-          inboundCallsEnabled: inboundCallsEnabled ?? true,
+          showCallButton: showCallButton ?? true,
           callbackEnabled: callbackEnabled ?? true,
           callHoursEnabled: callHoursEnabled ?? false,
-          // Country restriction (default: India only)
-          restrictToCountries: restrictToCountries ?? ['IN'],
-          // Business hours (default: Mon-Fri 9AM-6PM IST)
+          // Default: koi country restriction nahi.
+          // Pehle yahan ['IN'] tha - yaani agar client ye field na bheje to
+          // account chup-chaap India-only ho jata tha aur baaki duniya ke
+          // customers ko call button dikhna band ho jata. UK/US numbers ke
+          // liye ye seedha bug tha.
+          restrictToCountries: restrictToCountries ?? [],
           timezone: timezone || 'Asia/Kolkata',
           weeklyHours: weeklyHours || [],
           holidaySchedule: holidaySchedule || [],
@@ -182,7 +186,6 @@ class CallingController {
       try {
         await metaApi.enableCalling(account.phoneNumberId, accountWithToken.accessToken, {
           callingEnabled: true,
-          inboundCallsEnabled: true,
           callbackEnabled: true,
         });
         console.log('[Calling] ✅ Calling settings enabled for:', account.phoneNumberId);

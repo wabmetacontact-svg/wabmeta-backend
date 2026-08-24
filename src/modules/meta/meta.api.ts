@@ -822,6 +822,9 @@ class MetaApiClient {
       email?: string;
       websites?: string[];
       vertical?: string;
+      // Resumable upload se mila handle (uploadProfilePicture dekho).
+      // Meta yahan direct URL accept nahi karta.
+      profile_picture_handle?: string;
     }
   ): Promise<boolean> {
     try {
@@ -843,6 +846,104 @@ class MetaApiClient {
       return response.data.success === true;
     } catch (error: any) {
       throw this.handleError(error, 'Failed to update business profile');
+    }
+  }
+
+  // ============================================
+  // PROFILE PICTURE (resumable upload)
+  // ============================================
+
+  /**
+   * Meta profile picture ke liye direct URL nahi leta - pehle file ko
+   * resumable upload API par bhejna padta hai, jo ek handle deta hai, aur
+   * wahi handle business profile mein set hota hai.
+   *
+   *   1. POST /{app-id}/uploads?file_name&file_length&file_type
+   *        -> { id: "upload:<SESSION_ID>" }
+   *   2. POST /{upload:SESSION_ID}  (header file_offset: 0, body = binary)
+   *        -> { h: "<HANDLE>" }
+   */
+  async uploadResumableFile(
+    accessToken: string,
+    file: Buffer,
+    mimeType: string,
+    fileName = 'profile.jpg'
+  ): Promise<string> {
+    try {
+      const appId = config.meta.appId;
+      if (!appId) throw new Error('META_APP_ID is not configured');
+
+      // Step 1: session
+      const sessionRes = await this.client.post(
+        `${appId}/uploads`,
+        null,
+        {
+          params: {
+            file_name: fileName,
+            file_length: file.length,
+            file_type: mimeType,
+            access_token: accessToken,
+          },
+        }
+      );
+
+      const sessionId = sessionRes.data?.id;
+      if (!sessionId) throw new Error('Upload session not created');
+
+      // Step 2: binary upload
+      const uploadRes = await this.client.post(sessionId, file, {
+        headers: {
+          Authorization: `OAuth ${accessToken}`,
+          file_offset: '0',
+          'Content-Type': 'application/octet-stream',
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      const handle = uploadRes.data?.h;
+      if (!handle) throw new Error('Upload handle not returned');
+
+      console.log('[Meta API] Profile picture uploaded, handle received');
+      return handle;
+    } catch (error: any) {
+      throw this.handleError(error, 'Failed to upload profile picture');
+    }
+  }
+
+  // ============================================
+  // DISPLAY NAME
+  // ============================================
+
+  /**
+   * Display name change karo. Ye Meta ke review se guzarta hai -
+   * name_status PENDING_REVIEW ho jata hai, phir APPROVED / DECLINED.
+   *
+   * Approve hone ke BAAD number ko dobara register karna padta hai tabhi
+   * naya naam apply hota hai. Meta 30 din mein 10 changes allow karta hai.
+   */
+  async updateDisplayName(
+    phoneNumberId: string,
+    accessToken: string,
+    newDisplayName: string
+  ): Promise<boolean> {
+    try {
+      console.log(`[Meta API] Requesting display name change for ${phoneNumberId}...`);
+
+      const response = await this.client.post(
+        `${phoneNumberId}`,
+        null,
+        {
+          params: {
+            new_display_name: newDisplayName,
+            access_token: accessToken,
+          },
+        }
+      );
+
+      return response.data?.success === true;
+    } catch (error: any) {
+      throw this.handleError(error, 'Failed to update display name');
     }
   }
 
@@ -1405,7 +1506,11 @@ class MetaApiClient {
     accessToken: string,
     options: {
       callingEnabled: boolean;
-      inboundCallsEnabled?: boolean;
+      // Meta ke paas "inbound calls" ka koi alag field NAHI hai. Customers ko
+      // call karne se rokne ka asli tarika call_icon_visibility hai - call
+      // button hi chhupa do. Pehle yahan inboundCallsEnabled tha jo accept to
+      // hota tha par payload mein kabhi jaata hi nahi tha (dead toggle).
+      showCallButton?: boolean;
       callbackEnabled?: boolean;
       restrictToCountries?: string[];
       callHoursEnabled?: boolean;
@@ -1428,6 +1533,8 @@ class MetaApiClient {
       const callingSettings: any = {
         status: options.callingEnabled ? 'ENABLED' : 'DISABLED',
         callback_permission_status: options.callbackEnabled !== false ? 'ENABLED' : 'DISABLED',
+        call_icon_visibility:
+          options.showCallButton === false ? 'DISABLE_ALL' : 'DEFAULT',
         sip: { status: 'DISABLED' },
       };
 
@@ -1474,9 +1581,10 @@ class MetaApiClient {
     accessToken: string
   ): Promise<{
     callingEnabled: boolean;
-    inboundCallsEnabled: boolean;
+    showCallButton: boolean;
     callbackEnabled: boolean;
     callHoursEnabled: boolean;
+    restrictToCountries: string[];
   }> {
     try {
       console.log(`[Meta API] Fetching call settings for ${phoneNumberId}...`);
@@ -1495,7 +1603,11 @@ class MetaApiClient {
 
       return {
         callingEnabled: calling.status === 'ENABLED' || calling.calling_enabled === true || false,
-        inboundCallsEnabled: calling.inbound_calls_enabled ?? true,
+        // Pehle yahan calling.inbound_calls_enabled padha jata tha - Meta aisa
+        // koi field bhejta hi nahi, isliye hamesha true aata tha aur UI ka
+        // toggle hamesha ON dikhta tha chahe kuch bhi set ho.
+        showCallButton: calling.call_icon_visibility !== 'DISABLE_ALL',
+        restrictToCountries: calling.call_icons?.restrict_to_user_countries ?? [],
         callbackEnabled:
           calling.callback_permission_status === 'ENABLED' ||
           calling.callback_enabled === true ||
@@ -1510,7 +1622,8 @@ class MetaApiClient {
       console.error('[Meta API] ❌ Get calling settings failed');
       return {
         callingEnabled: false,
-        inboundCallsEnabled: false,
+        showCallButton: true,
+        restrictToCountries: [],
         callbackEnabled: false,
         callHoursEnabled: false,
       };

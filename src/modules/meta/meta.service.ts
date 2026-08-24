@@ -798,6 +798,163 @@ export class MetaService {
     return getAccountWithDecryptedToken(accountId);
   }
 
+  // ============================================
+  // BUSINESS PROFILE
+  // ============================================
+
+  /**
+   * Account + decrypted token nikalo, aur verify karo ki wo isi org ka hai.
+   * Business profile ke saare operations isse guzarte hain.
+   */
+  private async getOwnedAccount(accountId: string, organizationId: string) {
+    const account = await prisma.whatsAppAccount.findFirst({
+      where: { id: accountId, organizationId },
+      select: { id: true, phoneNumberId: true, phoneNumber: true },
+    });
+
+    if (!account) throw new AppError('WhatsApp account not found', 404);
+
+    const withToken = await getAccountWithDecryptedToken(accountId);
+    if (!withToken?.accessToken) {
+      throw new AppError('WhatsApp account is not connected', 400);
+    }
+
+    return { account, accessToken: withToken.accessToken };
+  }
+
+  async getBusinessProfile(accountId: string, organizationId: string) {
+    const { account, accessToken } = await this.getOwnedAccount(
+      accountId,
+      organizationId
+    );
+
+    const profile = await metaApi.getBusinessProfile(
+      account.phoneNumberId,
+      accessToken
+    );
+
+    // Display name aur uska review status DB se - wo profile endpoint
+    // ka hissa nahi hai, phone number object par hota hai
+    const local = await prisma.whatsAppAccount.findUnique({
+      where: { id: accountId },
+      select: { verifiedName: true, displayName: true, nameStatus: true } as any,
+    });
+
+    return {
+      ...profile,
+      displayName: (local as any)?.verifiedName || (local as any)?.displayName || null,
+      nameStatus: (local as any)?.nameStatus || null,
+    };
+  }
+
+  async updateBusinessProfile(
+    accountId: string,
+    organizationId: string,
+    input: {
+      about?: string;
+      address?: string;
+      description?: string;
+      email?: string;
+      websites?: string[];
+      vertical?: string;
+    }
+  ) {
+    const { account, accessToken } = await this.getOwnedAccount(
+      accountId,
+      organizationId
+    );
+
+    // Khaali strings Meta ko mat bhejo - wo "field clear karo" nahi samajhta,
+    // validation error deta hai. Undefined ka matlab "mat chhedo".
+    const payload: any = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (value === undefined) continue;
+      if (typeof value === 'string' && value.trim() === '') continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      payload[key] = value;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      throw new AppError('Nothing to update', 400);
+    }
+
+    await metaApi.updateBusinessProfile(
+      account.phoneNumberId,
+      accessToken,
+      payload
+    );
+
+    return this.getBusinessProfile(accountId, organizationId);
+  }
+
+  async updateProfilePicture(
+    accountId: string,
+    organizationId: string,
+    file: Buffer,
+    mimeType: string,
+    fileName?: string
+  ) {
+    const { account, accessToken } = await this.getOwnedAccount(
+      accountId,
+      organizationId
+    );
+
+    // Meta direct URL nahi leta - pehle resumable upload se handle lena hota hai
+    const handle = await metaApi.uploadResumableFile(
+      accessToken,
+      file,
+      mimeType,
+      fileName || 'profile.jpg'
+    );
+
+    await metaApi.updateBusinessProfile(account.phoneNumberId, accessToken, {
+      profile_picture_handle: handle,
+    });
+
+    return this.getBusinessProfile(accountId, organizationId);
+  }
+
+  /**
+   * Display name change request. Meta review karta hai (name_status
+   * PENDING_REVIEW -> APPROVED / DECLINED), aur approve hone ke baad number
+   * ko re-register karna padta hai tabhi naam actually badalta hai.
+   */
+  async requestDisplayNameChange(
+    accountId: string,
+    organizationId: string,
+    newDisplayName: string
+  ) {
+    const name = (newDisplayName || '').trim();
+
+    if (name.length < 3) {
+      throw new AppError('Display name must be at least 3 characters', 400);
+    }
+    if (name.length > 75) {
+      throw new AppError('Display name is too long (max 75 characters)', 400);
+    }
+
+    const { account, accessToken } = await this.getOwnedAccount(
+      accountId,
+      organizationId
+    );
+
+    await metaApi.updateDisplayName(account.phoneNumberId, accessToken, name);
+
+    // Local copy PENDING_REVIEW par set kar do taaki UI turant sahi dikhaye.
+    // Asli status agla quality sync le aayega.
+    await prisma.whatsAppAccount.update({
+      where: { id: accountId },
+      data: { nameStatus: 'PENDING_REVIEW' } as any,
+    });
+
+    return {
+      requestedName: name,
+      nameStatus: 'PENDING_REVIEW',
+      message:
+        'Display name submitted to Meta for review. Once approved you will need to reconnect the number for it to take effect.',
+    };
+  }
+
   async disconnectAccount(accountId: string, organizationId: string) {
     const account = await prisma.whatsAppAccount.findFirst({
       where: { id: accountId, organizationId }

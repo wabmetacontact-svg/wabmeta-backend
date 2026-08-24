@@ -2,6 +2,7 @@
 
 import { Router, Request } from 'express';
 import crypto from 'crypto';
+import multer from 'multer';
 import { metaController } from './meta.controller';
 import { getRedis } from '../../config/redis';
 
@@ -14,6 +15,7 @@ import prisma from '../../config/database';
 import { checkConnectionLock } from '../../middleware/connectionLock';
 import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
+import { resolveOrganizationId } from '../../utils/resolveOrgId';
 
 const router = Router();
 
@@ -682,6 +684,96 @@ router.delete('/organizations/:organizationId/disconnect', checkConnectionLock, 
 
 router.get('/accounts', metaController.getAccounts.bind(metaController));
 router.get('/accounts/:id', metaController.getAccount.bind(metaController));
+
+// ============================================
+// BUSINESS PROFILE
+// ============================================
+
+// Profile picture memory mein rakho - seedha Meta ke resumable upload par
+// jaati hai, disk par likhne ki zarurat nahi.
+const profilePictureUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    // Meta profile picture ke liye sirf JPEG/PNG accept karta hai
+    if (/^image\/(jpeg|jpg|png)$/.test(file.mimetype)) return cb(null, true);
+    cb(new AppError('Profile picture must be a JPEG or PNG image', 400));
+  },
+});
+
+router.get('/accounts/:id/business-profile', async (req, res, next) => {
+  try {
+    const organizationId = await resolveOrganizationId(req as any);
+    const profile = await metaService.getBusinessProfile(
+      String(req.params.id),
+      organizationId
+    );
+    return sendSuccess(res, profile, 'Business profile fetched');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/accounts/:id/business-profile', async (req, res, next) => {
+  try {
+    const organizationId = await resolveOrganizationId(req as any);
+    const profile = await metaService.updateBusinessProfile(
+      String(req.params.id),
+      organizationId,
+      {
+        about: req.body?.about,
+        address: req.body?.address,
+        description: req.body?.description,
+        email: req.body?.email,
+        websites: req.body?.websites,
+        vertical: req.body?.vertical,
+      }
+    );
+    return sendSuccess(res, profile, 'Business profile updated');
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  '/accounts/:id/business-profile/picture',
+  profilePictureUpload.single('file'),
+  async (req, res, next) => {
+    try {
+      const file = (req as any).file;
+      if (!file?.buffer) throw new AppError('Image file is required', 400);
+
+      const organizationId = await resolveOrganizationId(req as any);
+      const profile = await metaService.updateProfilePicture(
+        String(req.params.id),
+        organizationId,
+        file.buffer,
+        file.mimetype,
+        file.originalname
+      );
+      return sendSuccess(res, profile, 'Profile picture updated');
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+router.post('/accounts/:id/display-name', async (req, res, next) => {
+  try {
+    const newName = req.body?.displayName ?? req.body?.name;
+    if (!newName) throw new AppError('displayName is required', 400);
+
+    const organizationId = await resolveOrganizationId(req as any);
+    const result = await metaService.requestDisplayNameChange(
+      String(req.params.id),
+      organizationId,
+      String(newName)
+    );
+    return sendSuccess(res, result, result.message);
+  } catch (error) {
+    next(error);
+  }
+});
 router.delete('/accounts/:id', checkConnectionLock, metaController.disconnectAccount.bind(metaController));
 // ✅ Also support POST /accounts/:id/disconnect (frontend uses this)
 router.post('/accounts/:id/disconnect', checkConnectionLock, metaController.disconnectAccount.bind(metaController));
