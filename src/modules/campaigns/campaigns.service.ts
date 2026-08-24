@@ -38,12 +38,30 @@ const SEND_CONFIG = {
   MID_CAMPAIGN_CHECK_EVERY: 50,
   MIN_BALANCE_RUPEES: 20,
   MID_BALANCE_RUPEES: 5,
+  // Sender ab sliding window hai: CONCURRENCY workers queue se contacts
+  // uthate hain, aur ek shared token bucket sends ke beech minimum gap
+  // maintain karta hai.
+  //
+  //   ratePerSec  - hard cap. Meta ki latency chahe 250ms ho ya 900ms,
+  //                 rate isse upar nahi jayegi. (Purane design mein rate
+  //                 latency ke saath badalti thi - Meta tez hua to hum
+  //                 accidentally cap se upar chale jate the.)
+  //   concurrency - itne workers chahiye ki worst-case latency par bhi
+  //                 target rate poori ho sake: concurrency >= rate x latency.
+  //                 ~1s latency maan kar size kiya hai.
+  //
+  // Meta Cloud API ka default throughput cap ~80 msg/s hai - sab tiers usse
+  // neeche hain.
+  //
+  // TIER_250 / TIER_1K jaan-bujh kar dheere hain: unka daily quota (250 /
+  // 1000 unique customers) waise bhi minuton mein khatam ho jata hai, to
+  // wahan tez bhagne ka koi practical fayda nahi.
   TIER_LIMITS: {
-    TIER_250: { concurrency: 3, delayMs: 800 },
-    TIER_1K: { concurrency: 5, delayMs: 500 },
-    TIER_10K: { concurrency: 10, delayMs: 200 },
-    TIER_100K: { concurrency: 15, delayMs: 100 },
-    TIER_UNLIMITED: { concurrency: 20, delayMs: 50 },
+    TIER_250: { concurrency: 5, ratePerSec: 4 },
+    TIER_1K: { concurrency: 10, ratePerSec: 8 },
+    TIER_10K: { concurrency: 30, ratePerSec: 25 },
+    TIER_100K: { concurrency: 50, ratePerSec: 45 },
+    TIER_UNLIMITED: { concurrency: 60, ratePerSec: 60 },
   } as const,
 } as const;
 
@@ -2125,7 +2143,16 @@ export class CampaignsService {
       const tierName = (campaign.whatsappAccount.messagingLimit || 'TIER_1K') as keyof typeof SEND_CONFIG.TIER_LIMITS;
       const tierConfig = SEND_CONFIG.TIER_LIMITS[tierName] ?? SEND_CONFIG.TIER_LIMITS.TIER_1K;
       const CONCURRENCY = tierConfig.concurrency;
-      const DELAY_MS = tierConfig.delayMs;
+
+      // Token bucket ka base gap. ratePerSec = 25 -> har 40ms mein ek send.
+      const BASE_INTERVAL_MS = 1000 / tierConfig.ratePerSec;
+
+      // Rate limit hits - poore batch ke liye (pehle per-chunk tha)
+      let rateLimitHits = 0;
+
+      // Chunk loop mein DB status kitni baar check karein (ms)
+      const DB_STATUS_CHECK_MS = 3000;
+      let lastDbStatusCheck = Date.now();
 
       let batchSent: { id: string; waMessageId: string; contactId: string; phone: string }[] = [];
       let batchFailed: { id: string; reason: string; contactId: string; phone: string }[] = [];
@@ -2160,24 +2187,272 @@ export class CampaignsService {
 
         if (contacts.length === 0) { hasMore = false; break; }
 
-        for (let i = 0; i < contacts.length; i += CONCURRENCY) {
-          // ✅ Instant In-Memory Pause/Cancel Check
-          if (this.pausedCampaigns.has(campaignId) || this.cancelledCampaigns.has(campaignId)) {
+        // ── Sliding window sender ───────────────────────────────
+        //
+        // Pehle: CONCURRENCY messages bhejo -> SABKE aane ka wait karo ->
+        // delayMs so jao -> agle CONCURRENCY. Us wait + sleep ke dauraan ek
+        // bhi request hawa mein nahi hoti thi, aur har chunk apne sabse SLOW
+        // request ke hisaab se chalta tha. Isliye actual rate latency par
+        // depend karti thi: Meta tez hua to hum tez, Meta slow hua to hum slow.
+        //
+        // Ab: CONCURRENCY workers queue se contacts uthate hain - ek request
+        // poori hote hi wahi worker turant agla utha leta hai, to window
+        // hamesha bhari rehti hai. Speed ab ek token bucket se control hoti
+        // hai (nextSendSlot), yaani rate latency se independent hai aur Meta
+        // ke ~80/s cap se upar kabhi nahi ja sakti.
+
+        let cursor = 0;
+        let stopReason: null | 'halt' | 'exit' = null;
+
+        // Token bucket: do consecutive sends ke beech kam se kam itna gap.
+        // Sab workers isi ko share karte hain, isliye poori pool ki combined
+        // rate bounded rehti hai.
+        let nextSendSlot = 0;
+
+        // Pichhle outcomes ka rolling window - failures badhein to rate ghatao
+        const recentOutcomes: boolean[] = [];
+        const RECENT_WINDOW = 20;
+
+        const currentIntervalMs = () => {
+          const fails = recentOutcomes.filter(ok => !ok).length;
+          const failRate = recentOutcomes.length
+            ? fails / recentOutcomes.length
+            : 0;
+
+          // Wahi throttling jo pehle delay par thi, ab rate par
+          const divisor = failRate > 0.5 ? 3 : failRate > 0 ? 1.5 : 1;
+          return BASE_INTERVAL_MS * divisor;
+        };
+
+        // Ek send ke liye slot lo. Ye poori pool ke liye ek hi timeline
+        // maintain karta hai, isliye rate hard-capped rehti hai.
+        const acquireSendSlot = async () => {
+          const now = Date.now();
+          const slot = Math.max(now, nextSendSlot);
+          nextSendSlot = slot + currentIntervalMs();
+          const wait = slot - now;
+          if (wait > 0) await new Promise(r => setTimeout(r, wait));
+        };
+
+        // ── Periodic checks (pehle har chunk par chalte the) ────
+        const runPeriodicChecks = async (): Promise<boolean> => {
+          // Instant in-memory pause/cancel
+          if (
+            this.pausedCampaigns.has(campaignId) ||
+            this.cancelledCampaigns.has(campaignId)
+          ) {
             console.log(`🛑 [Campaign ${campaignId}] Instant pause/cancel signal detected - halting immediately`);
-            hasMore = false;
-            break;
+            return false;
           }
 
-          // ✅ DB Status Check on every chunk
-          const chk = await prisma.campaign.findUnique({
-            where: { id: campaignId },
-            select: { status: true },
-          });
-          if (chk?.status !== 'RUNNING') {
-            console.log(`🛑 [Campaign ${campaignId}] Campaign is ${chk?.status} in DB - halting worker immediately`);
-            hasMore = false;
-            break;
+          // DB status - throttled (cross-region query mehngi hai)
+          if (Date.now() - lastDbStatusCheck >= DB_STATUS_CHECK_MS) {
+            lastDbStatusCheck = Date.now();
+
+            const chk = await prisma.campaign.findUnique({
+              where: { id: campaignId },
+              select: { status: true },
+            });
+            if (chk?.status !== 'RUNNING') {
+              console.log(`🛑 [Campaign ${campaignId}] Campaign is ${chk?.status} in DB - halting worker immediately`);
+              return false;
+            }
           }
+
+          return true;
+        };
+
+        // Batch ko flush karo. Arrays pehle swap karke clear karte hain taaki
+        // await ke dauraan aane wale naye results miss na hon.
+        const flushPending = async () => {
+          if (batchSent.length === 0 && batchFailed.length === 0) return;
+
+          const sentCopy = batchSent;
+          const failedCopy = batchFailed;
+          batchSent = [];
+          batchFailed = [];
+
+          await this.flushBatchResults(
+            campaignId, organizationId, sentCopy, failedCopy
+          );
+
+          if (sentCopy.length > 0) {
+            this.saveToInboxBulk(
+              organizationId, campaignId, campaign.whatsappAccountId,
+              template.id, template.name, campaign.name, template,
+              sentCopy.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
+            ).catch(() => { });
+          }
+        };
+
+        const emitProgress = async () => {
+          const c2 = await this.getQuickCounts(campaignId);
+          const smartRunning = this.calculateSmartDisplay({
+            totalContacts: c2.total,
+            deliveredCount: c2.delivered,
+            readCount: c2.read,
+            failedCount: c2.failed,
+            pendingCount: Math.max(0, c2.total - (c2.sent + c2.delivered + c2.read + c2.failed)),
+            sentCount: c2.sent,
+          });
+
+          campaignSocketService.emitCampaignProgress(organizationId, campaignId, {
+            sent: smartRunning.displaySent,
+            failed: smartRunning.displayFailed,
+            delivered: smartRunning.displayDelivered,
+            read: smartRunning.displayRead,
+            total: c2.total,
+          } as any);
+
+          campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
+            status: 'RUNNING',
+            totalContacts: c2.total,
+            sentCount: smartRunning.displaySent,
+            deliveredCount: smartRunning.displayDelivered,
+            readCount: smartRunning.displayRead,
+            failedCount: smartRunning.displayFailed,
+          });
+        };
+
+        // ── Ek contact bhejo ────────────────────────────────────
+        const sendOne = async (cc: any) => {
+          const contact = cc.contact;
+
+          if (!contact?.phone) {
+            return {
+              type: 'failed' as const,
+              id: cc.id, contactId: cc.contactId,
+              phone: '', reason: 'No phone number',
+              isRateLimit: false,
+            };
+          }
+
+          // "+919876543210" → "919876543210" (Meta format)
+          const waPhone = toWhatsAppRecipient(contact.phone);
+
+          if (!waPhone || waPhone.length < 10) {
+            return {
+              type: 'failed' as const,
+              id: cc.id, contactId: cc.contactId,
+              phone: contact.phone,
+              reason: `Invalid phone: "${contact.phone}"`,
+              isRateLimit: false,
+            };
+          }
+
+          try {
+            const bodyVarCount = Math.max(
+              0,
+              ...((template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [])
+                .map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10))
+            );
+            const headerVarCount = Math.max(
+              0,
+              ...((template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [])
+                .map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10))
+            );
+            const maxIdx = Math.max(0, bodyVarCount, headerVarCount);
+
+            const campaignVM = (campaign as any).variableMapping || {};
+
+            const params = buildParamsFromContact(cc, maxIdx, campaignVM);
+            const variables: Record<string, string> = {};
+            params.forEach((val, idx) => { variables[String(idx + 1)] = val; });
+
+            const payload = buildTemplateMessage(template, variables, cachedMediaId);
+
+            const result = await metaApi.sendMessage(
+              phoneNumberId, accessToken, waPhone, payload
+            );
+
+            return {
+              type: 'sent' as const,
+              id: cc.id, contactId: cc.contactId,
+              phone: waPhone, waMessageId: result.messageId,
+              isRateLimit: false,
+            };
+          } catch (err: any) {
+            const { reason, isRateLimit } = this.extractFailureReason(err);
+            return {
+              type: 'failed' as const,
+              id: cc.id, contactId: cc.contactId,
+              phone: waPhone, reason, isRateLimit,
+            };
+          }
+        };
+
+        // ── Result handle karo (JS single-threaded hai, to ye state
+        //    updates safe hain) ──────────────────────────────────
+        const collect = async (d: any) => {
+          if (d.type === 'sent') {
+            batchSent.push({
+              id: d.id, waMessageId: d.waMessageId,
+              contactId: d.contactId, phone: d.phone,
+            });
+            totalSentCount++;
+            totalSentAmountPaise += Math.round(
+              getRateForCategory(template.category || 'MARKETING', d.phone, template.language) * 100
+            );
+            consecutiveFails = 0;
+            consecutiveSameErrors = 0;
+            lastErrorReason = '';
+          } else {
+            batchFailed.push({
+              id: d.id, reason: d.reason,
+              contactId: d.contactId, phone: d.phone,
+            });
+
+            // Systematic issue detection
+            const currentReason = d.reason;
+            if (currentReason === lastErrorReason) {
+              consecutiveSameErrors++;
+            } else {
+              consecutiveSameErrors = 1;
+              lastErrorReason = currentReason;
+            }
+
+            // FAIL-FAST - ek hi error baar-baar aaye to campaign rok do
+            if (consecutiveSameErrors >= MAX_SAME_ERRORS) {
+              console.error(`🚨 [Campaign ${campaignId}] ${consecutiveSameErrors} same errors: "${currentReason}"`);
+              console.error(`🚨 AUTO-PAUSING campaign to prevent further failures`);
+
+              await prisma.campaign.update({
+                where: { id: campaignId },
+                data: { status: 'PAUSED' },
+              });
+
+              campaignSocketService.emitCampaignError(organizationId, campaignId, {
+                message: `Campaign auto-paused: ${consecutiveSameErrors} consecutive failures with same error: "${String(currentReason).substring(0, 100)}". Please fix the issue and resume.`,
+                code: 'SYSTEMATIC_ERROR',
+                errorReason: currentReason,
+              } as any);
+
+              await flushPending();
+              stopReason = 'exit';
+              return;
+            }
+
+            if (d.isRateLimit) {
+              rateLimitHits++;
+              if (rateLimitHits >= 2) {
+                const pauseMs = Math.min(
+                  60_000,
+                  SEND_CONFIG.RATE_LIMIT_PAUSE_MS * rateLimitHits
+                );
+                rateLimitPauseUntil = Date.now() + pauseMs;
+                console.warn(`🛑 Rate limit - pausing ${pauseMs / 1000}s`);
+              }
+              consecutiveFails++;
+            } else {
+              consecutiveFails = 0;
+            }
+          }
+
+          // Rolling fail window
+          recentOutcomes.push(d.type === 'sent');
+          if (recentOutcomes.length > RECENT_WINDOW) recentOutcomes.shift();
+
+          totalProcessed++;
 
           // Mid-campaign balance check
           if (
@@ -2198,7 +2473,7 @@ export class CampaignsService {
                   ? Math.max(0, (w.creditLimitPaise - w.creditUsedPaise)) / 100
                   : 0);
 
-              const remaining = contacts.length - i;
+              const remaining = Math.max(0, contacts.length - cursor);
               const avgPaise = totalSentCount > 0 ? totalSentAmountPaise / totalSentCount : 0;
               const remainingCost = (avgPaise * remaining) / 100;
 
@@ -2212,266 +2487,70 @@ export class CampaignsService {
                   message: `Balance low (₹${currentBal.toFixed(2)}). Add funds to resume.`,
                 });
 
-                if (batchSent.length > 0 || batchFailed.length > 0) {
-                  await this.flushBatchResults(
-                    campaignId, organizationId, batchSent, batchFailed
-                  );
-                  batchSent = [];
-                  batchFailed = [];
-                }
+                await flushPending();
+                stopReason = 'exit';
                 return;
               }
             }
           }
 
-          // Consecutive fail guard
-          if (consecutiveFails >= SEND_CONFIG.MAX_CONSECUTIVE_FAILURES) {
-            console.warn(`⚠️ ${consecutiveFails} consecutive fails - pausing 30s`);
-            await new Promise(r => setTimeout(r, 30_000));
-            consecutiveFails = 0;
-          }
-
-          const chunk = contacts.slice(i, i + CONCURRENCY);
-
-          // ✅ SEND CHUNK
-          const results = await Promise.allSettled(
-            chunk.map(async (cc) => {
-              const contact = cc.contact;
-
-              if (!contact?.phone) {
-                return {
-                  type: 'failed' as const,
-                  id: cc.id, contactId: cc.contactId,
-                  phone: '', reason: 'No phone number',
-                  isRateLimit: false,
-                };
-              }
-
-              // ✅ FIX Bug1: toWhatsAppRecipient use karo
-              // "+919876543210" → "919876543210" (Meta format)
-              const waPhone = toWhatsAppRecipient(contact.phone);
-
-              if (!waPhone || waPhone.length < 10) {
-                return {
-                  type: 'failed' as const,
-                  id: cc.id, contactId: cc.contactId,
-                  phone: contact.phone,
-                  reason: `Invalid phone: "${contact.phone}"`,
-                  isRateLimit: false,
-                };
-              }
-
-              try {
-                // Variable count
-                const bodyVarCount = Math.max(
-                  0,
-                  ...((template.bodyText || '').match(/\{\{(\d+)\}\}/g) || [])
-                    .map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10))
-                );
-                const headerVarCount = Math.max(
-                  0,
-                  ...((template.headerContent || '').match(/\{\{(\d+)\}\}/g) || [])
-                    .map((m: string) => parseInt(m.replace(/[{}]/g, ''), 10))
-                );
-                const maxIdx = Math.max(0, bodyVarCount, headerVarCount);
-
-                const campaignVM = (campaign as any).variableMapping || {};
-
-                // ✅ FIX Bug2: cc has .contact relation - correct pass
-                const params = buildParamsFromContact(cc, maxIdx, campaignVM);
-                const variables: Record<string, string> = {};
-                params.forEach((val, idx) => { variables[String(idx + 1)] = val; });
-
-                const payload = buildTemplateMessage(template, variables, cachedMediaId);
-
-                const result = await metaApi.sendMessage(
-                  phoneNumberId, accessToken, waPhone, payload
-                );
-
-                return {
-                  type: 'sent' as const,
-                  id: cc.id, contactId: cc.contactId,
-                  phone: waPhone, waMessageId: result.messageId,
-                  isRateLimit: false,
-                };
-
-              } catch (err: any) {
-                const { reason, isRateLimit } = this.extractFailureReason(err);
-                return {
-                  type: 'failed' as const,
-                  id: cc.id, contactId: cc.contactId,
-                  phone: waPhone, reason, isRateLimit,
-                };
-              }
-            })
-          );
-
-          // ── Collect results ────────────────────────────────
-          let chunkRateLimits = 0;
-
-          for (const r of results) {
-            if (r.status === 'rejected') continue;
-            const d = r.value;
-
-            if (d.type === 'sent') {
-              batchSent.push({
-                id: d.id, waMessageId: (d as any).waMessageId,
-                contactId: d.contactId, phone: d.phone,
-              });
-              totalSentCount++;
-              totalSentAmountPaise += Math.round(
-                getRateForCategory(template.category || 'MARKETING', d.phone, template.language) * 100
-              );
-              consecutiveFails = 0;
-              consecutiveSameErrors = 0;  // ✅ Reset
-              lastErrorReason = '';
-            } else {
-              batchFailed.push({
-                id: d.id, reason: (d as any).reason,
-                contactId: d.contactId, phone: d.phone,
-              });
-
-              // ✅ NEW: Track consecutive same errors (systematic issue detection)
-              const currentReason = (d as any).reason;
-              if (currentReason === lastErrorReason) {
-                consecutiveSameErrors++;
-              } else {
-                consecutiveSameErrors = 1;
-                lastErrorReason = currentReason;
-              }
-
-              // ✅ NEW: FAIL-FAST - Pause campaign on systematic errors
-              if (consecutiveSameErrors >= MAX_SAME_ERRORS) {
-                console.error(`🚨 [Campaign ${campaignId}] ${consecutiveSameErrors} same errors: "${currentReason}"`);
-                console.error(`🚨 AUTO-PAUSING campaign to prevent further failures`);
-                
-                await prisma.campaign.update({
-                  where: { id: campaignId },
-                  data: { status: 'PAUSED' },
-                });
-                
-                campaignSocketService.emitCampaignError(organizationId, campaignId, {
-                  message: `Campaign auto-paused: ${consecutiveSameErrors} consecutive failures with same error: "${currentReason.substring(0, 100)}". Please fix the issue and resume.`,
-                  code: 'SYSTEMATIC_ERROR',
-                  errorReason: currentReason,
-                } as any);
-                
-                // Flush current batch before exit
-                if (batchSent.length > 0 || batchFailed.length > 0) {
-                  await this.flushBatchResults(campaignId, organizationId, batchSent, batchFailed);
-                  if (batchSent.length > 0) {
-                    this.saveToInboxBulk(
-                      organizationId, campaignId, campaign.whatsappAccountId,
-                      template.id, template.name, campaign.name, template,
-                      batchSent.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
-                    ).catch(() => { });
-                  }
-                }
-                
-                return; // ✅ EXIT campaign processing
-              }
-
-              if ((d as any).isRateLimit) {
-                chunkRateLimits++;
-                if (chunkRateLimits >= 2) {
-                  const pauseMs = Math.min(
-                    60_000,
-                    SEND_CONFIG.RATE_LIMIT_PAUSE_MS * chunkRateLimits
-                  );
-                  rateLimitPauseUntil = Date.now() + pauseMs;
-                  console.warn(`🛑 Rate limit - pausing ${pauseMs / 1000}s`);
-                }
-                consecutiveFails++;
-              } else {
-                consecutiveFails = 0;
-              }
-            }
-          }
-
-          totalProcessed += chunk.length;
-
-          // Rate limit break
-          if (chunkRateLimits > 0 && rateLimitPauseUntil > Date.now()) {
-            if (batchSent.length > 0 || batchFailed.length > 0) {
-              await this.flushBatchResults(
-                campaignId, organizationId, batchSent, batchFailed
-              );
-              if (batchSent.length > 0) {
-                this.saveToInboxBulk(
-                  organizationId, campaignId, campaign.whatsappAccountId,
-                  template.id, template.name, campaign.name, template,
-                  batchSent.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
-                ).catch(() => { });
-              }
-              batchSent = [];
-              batchFailed = [];
-            }
-            break;
-          }
-
-          // Flush batch
-          const batchTotal = batchSent.length + batchFailed.length;
-          const isLastChunk = i + CONCURRENCY >= contacts.length;
-
-          if (batchTotal >= SEND_CONFIG.FLUSH_EVERY || isLastChunk) {
-            await this.flushBatchResults(
-              campaignId, organizationId, batchSent, batchFailed
-            );
-            if (batchSent.length > 0) {
-              const sentCopy = [...batchSent];
-              this.saveToInboxBulk(
-                organizationId, campaignId, campaign.whatsappAccountId,
-                template.id, template.name, campaign.name, template,
-                sentCopy.map(s => ({ contactId: s.contactId, waMessageId: s.waMessageId }))
-              ).catch(() => { });
-            }
-            batchSent = [];
-            batchFailed = [];
+          // Flush
+          if (batchSent.length + batchFailed.length >= SEND_CONFIG.FLUSH_EVERY) {
+            await flushPending();
           }
 
           // Progress emit
-          if (totalProcessed - lastProgressEmit >= EMIT_EVERY || isLastChunk) {
+          if (totalProcessed - lastProgressEmit >= EMIT_EVERY) {
             lastProgressEmit = totalProcessed;
-            const c2 = await this.getQuickCounts(campaignId);
-            const smartRunning = this.calculateSmartDisplay({
-              totalContacts: c2.total,
-              deliveredCount: c2.delivered,
-              readCount: c2.read,
-              failedCount: c2.failed,
-              pendingCount: Math.max(0, c2.total - (c2.sent + c2.delivered + c2.read + c2.failed)),
-              sentCount: c2.sent,
-            });
-
-            const processed = smartRunning.displaySent + smartRunning.displayDelivered + smartRunning.displayRead + smartRunning.displayFailed;
-
-            campaignSocketService.emitCampaignProgress(organizationId, campaignId, {
-              sent: smartRunning.displaySent,
-              failed: smartRunning.displayFailed,
-              delivered: smartRunning.displayDelivered,
-              read: smartRunning.displayRead,
-              total: c2.total,
-              percentage: Math.min(100, Math.round((processed / Math.max(c2.total, 1)) * 100)),
-              status: 'RUNNING',
-            });
-
-            campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
-              status: 'RUNNING',
-              totalContacts: c2.total,
-              sentCount: smartRunning.displaySent,
-              deliveredCount: smartRunning.displayDelivered,
-              readCount: smartRunning.displayRead,
-              failedCount: smartRunning.displayFailed,
-            });
+            await emitProgress();
           }
+        };
 
-          // Delay
-          const failRate = batchFailed.length / Math.max(chunk.length, 1);
-          const delay =
-            failRate > 0.5 ? DELAY_MS * 3 :
-              failRate > 0 ? DELAY_MS * 1.5 :
-                DELAY_MS;
+        // ── Workers ─────────────────────────────────────────────
+        const worker = async () => {
+          while (stopReason === null) {
+            if (!(await runPeriodicChecks())) {
+              stopReason = 'halt';
+              return;
+            }
 
-          await new Promise(r => setTimeout(r, delay));
+            // Rate limit backoff - sab workers yahin ruk jate hain
+            if (rateLimitPauseUntil > Date.now()) {
+              const waitMs = rateLimitPauseUntil - Date.now();
+              console.log(`⏸️  Rate limit wait: ${(waitMs / 1000).toFixed(1)}s`);
+              await new Promise(r => setTimeout(r, waitMs));
+              rateLimitPauseUntil = 0;
+              rateLimitHits = 0;
+              await flushPending();
+            }
+
+            // Consecutive fail guard
+            if (consecutiveFails >= SEND_CONFIG.MAX_CONSECUTIVE_FAILURES) {
+              console.warn(`⚠️ ${consecutiveFails} consecutive fails - pausing 30s`);
+              consecutiveFails = 0;
+              await new Promise(r => setTimeout(r, 30_000));
+            }
+
+            const idx = cursor++;
+            if (idx >= contacts.length) return;
+
+            await acquireSendSlot();
+            if (stopReason !== null) return;
+
+            const outcome = await sendOne(contacts[idx]);
+            await collect(outcome);
+          }
+        };
+
+        await Promise.all(
+          Array.from({ length: Math.min(CONCURRENCY, contacts.length) }, () => worker())
+        );
+
+        if (stopReason === 'exit') {
+          return;
+        }
+        if (stopReason === 'halt') {
+          hasMore = false;
         }
       }
 
