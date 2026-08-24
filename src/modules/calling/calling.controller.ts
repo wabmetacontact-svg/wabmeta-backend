@@ -109,6 +109,33 @@ class CallingController {
       const accountWithToken = await metaService.getAccountWithToken(account.id);
       if (!accountWithToken) throw new AppError('Token decryption failed', 500);
 
+      // Meta ke errors plain Error hote hain, isliye errorHandler unhe 500
+      // bana deta tha aur asli wajah (eligibility, invalid field waghera)
+      // kabhi user tak pahunchti hi nahi thi.
+      const asClientError = (err: any) => {
+        const meta = err?.metaError;
+        if (!meta) return err;
+
+        const code = meta.code;
+        const detail = meta.error_user_msg || meta.message || 'Meta rejected the request';
+
+        // Eligibility - wahi message jo initiateCall deta hai, taaki dono
+        // jagah user ko ek hi baat sunai de
+        if (code === 141000 || /2000|limit/i.test(detail)) {
+          return new AppError(
+            'WhatsApp Calling requires a daily messaging limit of at least 2,000 unique recipients. ' +
+            'Your number is below that tier right now. ' +
+            'Send more campaigns to raise your tier, then try again.',
+            403
+          );
+        }
+
+        // 190 = token problem, baaki sab client-side galti maani jaati hai
+        const status = code === 190 ? 401 : 400;
+
+        return new AppError(`WhatsApp Calling: ${detail}`, status);
+      };
+
       // Update calling settings with full schema
       const result = await metaApi.enableCalling(
         account.phoneNumberId,
@@ -128,7 +155,10 @@ class CallingController {
           weeklyHours: weeklyHours || [],
           holidaySchedule: holidaySchedule || [],
         }
-      );
+      ).catch((err: any) => {
+        console.error('[Calling] Meta rejected settings update:', err?.metaError || err?.message);
+        throw asClientError(err);
+      });
 
       // Subscribe to calls webhook if enabling
       if (callingEnabled) {

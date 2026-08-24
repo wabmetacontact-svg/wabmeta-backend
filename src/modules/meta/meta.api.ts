@@ -1533,10 +1533,16 @@ class MetaApiClient {
       const callingSettings: any = {
         status: options.callingEnabled ? 'ENABLED' : 'DISABLED',
         callback_permission_status: options.callbackEnabled !== false ? 'ENABLED' : 'DISABLED',
-        call_icon_visibility:
-          options.showCallButton === false ? 'DISABLE_ALL' : 'DEFAULT',
         sip: { status: 'DISABLED' },
       };
+
+      // call_icon_visibility sirf tab bhejo jab user ne actually button
+      // chhupaya ho. 'DEFAULT' bhejne se kuch badalta nahi hai, par purane
+      // Graph API versions / kuch numbers is field ko reject kar dete hain -
+      // aur us wajah se poora save fail ho jata tha.
+      if (options.showCallButton === false) {
+        callingSettings.call_icon_visibility = 'DISABLE_ALL';
+      }
 
       if (options.restrictToCountries && options.restrictToCountries.length > 0) {
         callingSettings.call_icons = {
