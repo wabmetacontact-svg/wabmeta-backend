@@ -50,6 +50,16 @@ export class MetaService {
   // Ek hi account ke liye ek waqt mein ek hi background tier sync
   private tierSyncInFlight = new Set<string>();
 
+  // 24h usage ka count. Ye groupBy poore Message table par chalta hai aur
+  // /meta/accounts har jagah se call hota hai (chat kholte waqt bhi), isliye
+  // bina cache ke har chat open par N accounts x 1 heavy query lag jaati thi.
+  // Usage ko second-level accuracy ki zarurat nahi hai.
+  private usageCache = new Map<
+    string,
+    { used: number; expiresAt: number }
+  >();
+  private readonly USAGE_CACHE_TTL = 60 * 1000;
+
   // Meta ke messaging tiers. Value = 24 ghante mein kitne UNIQUE customers
   // ko business-initiated message bhej sakte ho. null = unlimited.
   // Docs: https://developers.facebook.com/docs/whatsapp/messaging-limits
@@ -94,21 +104,30 @@ export class MetaService {
 
     let used = 0;
 
-    try {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const cached = this.usageCache.get(accountId);
+    if (cached && cached.expiresAt > Date.now()) {
+      used = cached.used;
+    } else {
+      try {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      const conversations = await prisma.message.groupBy({
-        by: ['conversationId'],
-        where: {
-          whatsappAccountId: accountId,
-          direction: 'OUTBOUND',
-          createdAt: { gte: since },
-        },
-      });
+        const conversations = await prisma.message.groupBy({
+          by: ['conversationId'],
+          where: {
+            whatsappAccountId: accountId,
+            direction: 'OUTBOUND',
+            createdAt: { gte: since },
+          },
+        });
 
-      used = conversations.length;
-    } catch (e: any) {
-      console.error('Messaging usage count failed:', e?.message);
+        used = conversations.length;
+        this.usageCache.set(accountId, {
+          used,
+          expiresAt: Date.now() + this.USAGE_CACHE_TTL,
+        });
+      } catch (e: any) {
+        console.error('Messaging usage count failed:', e?.message);
+      }
     }
 
     return {

@@ -23,6 +23,7 @@ import {
   getRateForCategory,
 } from '../wallet/wallet.deduction.service';
 import { whatsappLog } from '../../utils/logger';
+import { AppError } from '../../middleware/errorHandler';
 
 // ============================================
 // INTERFACES
@@ -173,7 +174,10 @@ class WhatsAppService {
     const digits = phone.replace(/[^0-9]/g, '');
 
     if (digits.length <= 10 && !phone.startsWith('+')) {
-      throw new Error(`Phone number ${phone} is missing a country code. Messages cannot be sent without a country code.`);
+      throw new AppError(
+        `Phone number ${phone} is missing a country code. Messages cannot be sent without a country code.`,
+        400
+      );
     }
 
     return digits;
@@ -526,7 +530,10 @@ class WhatsAppService {
       );
       if (!walletCheck.ok) {
         console.warn(`💳 Blocking send: ${walletCheck.reason}`);
-        throw new Error(walletCheck.reason || 'Wallet balance insufficient for this message.');
+        throw new AppError(
+          walletCheck.reason || 'Wallet balance insufficient for this message.',
+          402
+        );
       }
 
       const formattedTo = this.formatPhoneNumber(to);
@@ -785,7 +792,13 @@ class WhatsAppService {
       }
 
       if (expired) {
-        throw new Error('User session expired (24h window closed). Send a Template Message to re-engage.');
+        // 400, 500 nahi - ye expected business rule hai. Plain Error throw
+        // karne par errorHandler ise 500 bana deta tha aur user ko sirf
+        // "Request failed with status code 500" dikhta tha, asli wajah nahi.
+        throw new AppError(
+          'This chat is outside the 24-hour messaging window. Send an approved template to start the conversation again.',
+          400
+        );
       }
     }
 
@@ -879,6 +892,31 @@ class WhatsAppService {
             id: true, phone: true, firstName: true, lastName: true,
             whatsappProfileName: true, avatar: true,
           },
+        });
+
+        // message:new bhi emit karo, sirf conversationUpdated nahi.
+        //
+        // Conversation table mein lastMessageDirection / lastMessageStatus
+        // columns hain hi nahi - inbox list ye dono message:new aur
+        // message:status events se apne local state mein rakhti hai. Text
+        // send sirf conversationUpdated bhejta tha, isliye:
+        //   - list mein naya text turant nahi dikhta tha
+        //   - tick / double tick kabhi aate hi nahi the (direction OUTBOUND
+        //     set hi nahi hota tha)
+        // Template send pehle se ye event bhejta tha - isliye template wale
+        // messages theek dikhte the aur text wale nahi.
+        webhookEvents.emit('newMessage', {
+          organizationId: orgId,
+          conversationId: conversation!.id,
+          message: {
+            ...savedMessage,
+            createdAt: now.toISOString(),
+            timestamp: now.toISOString(),
+            sentAt: now.toISOString(),
+            tempId,
+            clientMsgId,
+          },
+          tempId,
         });
 
         webhookEvents.emit('conversationUpdated', {
