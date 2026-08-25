@@ -16,6 +16,7 @@ const state = {
   inactivity: false,
   subscriptionExpiry: false,
   expiryWarnings: false,
+  webhookLogCleanup: false,
   lastPoolError: 0,
 };
 
@@ -121,7 +122,83 @@ export function initializeScheduler() {
     }
   });
 
+  // ============================================
+  // 5. WEBHOOK LOG CLEANUP - Daily 3:30 AM
+  // WebhookLog par koi retention nahi tha - March se badhte badhte
+  // 7.9 lakh rows / 784 MB ho gayi thi, poore DB ka ~46%. Chhote RDS
+  // instance ke liye ye bhaari hai, aur 7 din se purane webhook logs
+  // ka koi istemaal nahi hai.
+  // ============================================
+  cron.schedule('30 3 * * *', async () => {
+    if (state.webhookLogCleanup) return;
+    state.webhookLogCleanup = true;
+    try {
+      await withAdvisoryLock('scheduler:webhookLogCleanup', () =>
+        cleanupWebhookLogs()
+      );
+    } catch (error: any) {
+      if (error?.code !== 'P2024') {
+        console.error('Webhook log cleanup error:', error.message);
+      }
+    } finally {
+      state.webhookLogCleanup = false;
+    }
+  });
+
   console.log('✅ Scheduler initialized');
+}
+
+// ============================================
+// WEBHOOK LOG CLEANUP
+// ============================================
+const WEBHOOK_LOG_RETENTION_DAYS = 7;
+const WEBHOOK_LOG_BATCH = 5000;
+// Ek run mein itne se zyada nahi - chhote instance ko der tak na daboye
+const WEBHOOK_LOG_MAX_PER_RUN = 200000;
+
+async function cleanupWebhookLogs() {
+  if (shouldSkipDueToPoolPressure()) return;
+
+  const started = Date.now();
+  let removed = 0;
+
+  try {
+    // Batches mein delete karo. Ek hi bade DELETE se lock lamba rehta hai
+    // aur WAL bhar jata hai.
+    while (removed < WEBHOOK_LOG_MAX_PER_RUN) {
+      const n: number = await prisma.$executeRawUnsafe(
+        `DELETE FROM "WebhookLog"
+         WHERE id IN (
+           SELECT id FROM "WebhookLog"
+           WHERE "createdAt" < now() - interval '${WEBHOOK_LOG_RETENTION_DAYS} days'
+           LIMIT ${WEBHOOK_LOG_BATCH}
+         )`
+      );
+
+      removed += n;
+      if (n < WEBHOOK_LOG_BATCH) break;
+
+      // DB ko saans lene do
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    if (removed > 0) {
+      // Dead space reusable banao, warna table ghatne ke bawajood
+      // disk par badhti rehti hai
+      await prisma.$executeRawUnsafe(`VACUUM (ANALYZE) "WebhookLog"`);
+
+      console.log(
+        `🧹 Webhook logs cleaned: ${removed} rows in ${Math.round(
+          (Date.now() - started) / 1000
+        )}s`
+      );
+    }
+  } catch (error: any) {
+    if (error?.code === 'P2024') {
+      markPoolError();
+    }
+    throw error;
+  }
 }
 
 // ============================================
