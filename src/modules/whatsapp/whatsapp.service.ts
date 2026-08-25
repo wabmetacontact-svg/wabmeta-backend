@@ -106,9 +106,15 @@ class WhatsAppService {
    * with status code 500" dikhta tha, jabki Meta ne exact wajah batayi hoti
    * hai. Ye codes account/config ki dikkat hain, server crash nahi.
    */
-  private toSendError(err: any): any {
+  private toSendError(err: any, phoneNumber?: string): any {
     const meta = err?.metaError;
     if (!meta) return err;
+
+    // Meta ke test numbers "1555..." se shuru hote hain. Unke liye 131037 ka
+    // matlab display name pending hona nahi hai - test numbers sirf Meta ke
+    // console mein pehle se registered recipients ko hi bhej sakte hain.
+    const digits = String(phoneNumber || '').replace(/[^0-9]/g, '');
+    const isTestNumber = digits.startsWith('1555');
 
     const code = Number(meta.code);
     const detail =
@@ -116,9 +122,11 @@ class WhatsAppService {
 
     const friendly: Record<number, { message: string; status: number }> = {
       131037: {
-        message:
-          'This number cannot send messages yet - its display name is still awaiting Meta approval. ' +
-          'Check the display name status in Business Profile settings.',
+        message: isTestNumber
+          ? 'This is a Meta test number - it can only message recipients you have added in the Meta developer console. ' +
+            'Connect your own business number to message anyone.'
+          : 'This number cannot send messages yet - its display name is still awaiting Meta approval. ' +
+            'Check the display name status in Business Profile settings.',
         status: 400,
       },
       131047: {
@@ -891,7 +899,7 @@ class WhatsAppService {
       );
     } catch (err: any) {
       // Meta ka reject 500 nahi hona chahiye - wajah user ko dikhni chahiye
-      throw this.toSendError(err);
+      throw this.toSendError(err, account.phoneNumber);
     }
 
     console.log(`⏱️ Meta API: ${Date.now() - metaStart}ms`);
