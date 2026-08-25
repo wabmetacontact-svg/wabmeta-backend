@@ -98,6 +98,65 @@ class WhatsAppService {
       .finally(() => this.templateSyncInFlight.delete(accountId));
   }
 
+  /**
+   * Meta ke send errors ko padhne layak message mein badlo.
+   *
+   * metaApi.handleError plain Error return karta hai, isliye errorHandler
+   * har Meta rejection ko 500 bana deta tha - user ko sirf "Request failed
+   * with status code 500" dikhta tha, jabki Meta ne exact wajah batayi hoti
+   * hai. Ye codes account/config ki dikkat hain, server crash nahi.
+   */
+  private toSendError(err: any): any {
+    const meta = err?.metaError;
+    if (!meta) return err;
+
+    const code = Number(meta.code);
+    const detail =
+      meta.error_data?.details || meta.error_user_msg || meta.message || '';
+
+    const friendly: Record<number, { message: string; status: number }> = {
+      131037: {
+        message:
+          'This number cannot send messages yet - its display name is still awaiting Meta approval. ' +
+          'Check the display name status in Business Profile settings.',
+        status: 400,
+      },
+      131047: {
+        message:
+          'This chat is outside the 24-hour messaging window. Send an approved template to start the conversation again.',
+        status: 400,
+      },
+      131026: {
+        message:
+          'This number cannot receive WhatsApp messages. It may not be registered on WhatsApp.',
+        status: 400,
+      },
+      132001: {
+        message:
+          'This template is not available in the selected language. Sync your templates and try again.',
+        status: 400,
+      },
+      131048: {
+        message:
+          'Meta is rate limiting this number right now. Please try again shortly.',
+        status: 429,
+      },
+      190: {
+        message:
+          'WhatsApp connection expired. Please reconnect your WhatsApp account in Settings.',
+        status: 401,
+      },
+    };
+
+    const mapped = friendly[code];
+    if (mapped) return new AppError(mapped.message, mapped.status);
+
+    // Baaki Meta errors - unka apna message dikha do, 500 mat banao
+    if (detail) return new AppError(detail, 400);
+
+    return err;
+  }
+
   // ============================================
   // HELPER METHODS
   // ============================================
@@ -825,9 +884,15 @@ class WhatsAppService {
     const contactPromise = this.getOrCreateContact(orgId, to);
     contactPromise.catch(() => { }); // send fail ho to unhandled rejection na aaye
 
-    const result = await metaApi.sendMessage(
-      account.phoneNumberId, accessToken, formattedTo, messagePayload
-    );
+    let result;
+    try {
+      result = await metaApi.sendMessage(
+        account.phoneNumberId, accessToken, formattedTo, messagePayload
+      );
+    } catch (err: any) {
+      // Meta ka reject 500 nahi hona chahiye - wajah user ko dikhni chahiye
+      throw this.toSendError(err);
+    }
 
     console.log(`⏱️ Meta API: ${Date.now() - metaStart}ms`);
 
