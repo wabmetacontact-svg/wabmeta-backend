@@ -49,6 +49,7 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
         // Media id us WABA/app se bandhi hoti hai jisne wo receive ki thi,
         // isliye uska token chahiye - kisi bhi org account ka nahi
         whatsappAccountId: true,
+        createdAt: true,
       },
     });
     
@@ -92,6 +93,27 @@ router.get('/media/:mediaId', authenticate, async (req: any, res: any) => {
       }
     }
     
+    // Meta media sirf ~30 din rakhta hai. Us se purane message ka backup
+    // agar nahi hua to media Meta par bhi nahi hai - us par har baar 1-1.5s
+    // ka round trip lagana bekaar hai (ek purani chat kholne par 8-10 aise
+    // calls ek saath jaati thi, sab 404). Seedha bata do.
+    if (message?.createdAt) {
+      const ageDays =
+        (Date.now() - new Date(message.createdAt).getTime()) / 86400000;
+
+      if (ageDays > 30) {
+        console.log(
+          `⌛ Media ${mediaId} is ${Math.floor(ageDays)} days old and was never backed up - expired on Meta`
+        );
+        return res.status(410).json({
+          success: false,
+          error: 'MEDIA_EXPIRED',
+          message:
+            'This media is no longer available. WhatsApp only stores media for 30 days.',
+        });
+      }
+    }
+
     // ✅ Step 3: Meta se fetch karo
     let accessToken: string | null = null;
 
