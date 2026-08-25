@@ -237,12 +237,33 @@ export class UsersService {
   async updateAvatar(userId: string, avatarUrl: string): Promise<UserProfile> {
     let finalAvatar = avatarUrl;
 
-    if (avatarUrl && avatarUrl.startsWith('data:image/')) {
+    if (avatarUrl && avatarUrl.startsWith('data:')) {
+      // Sirf images. data:application/... jaisa kuch aaye to seedha reject,
+      // warna wo bina upload ke raw hi DB mein chala jata tha.
+      if (!avatarUrl.startsWith('data:image/')) {
+        throw new AppError('Avatar must be an image', 400);
+      }
+
+      const parts = avatarUrl.split(',');
+      const base64 = parts[1];
+
+      if (!base64) {
+        throw new AppError('Avatar image is malformed', 400);
+      }
+
+      // Base64 ka asli size ~ 3/4. 5MB se upar mat lo - upload slow hoga
+      // aur fail hone par poori string DB mein ghusne ka risk hai.
+      const approxBytes = Math.floor((base64.length * 3) / 4);
+      if (approxBytes > 5 * 1024 * 1024) {
+        throw new AppError('Avatar image is too large (max 5MB)', 400);
+      }
+
+      const failures: string[] = [];
+
       // 1. Try R2 (Primary CDN)
       if (r2Service.isConfigured()) {
         try {
-          const parts = avatarUrl.split(',');
-          const buffer = Buffer.from(parts[1], 'base64');
+          const buffer = Buffer.from(base64, 'base64');
           const mimeType = parts[0].split(';')[0].replace('data:', '') || 'image/png';
           const ext = mimeType.split('/')[1] || 'png';
           const filename = `avatar_${userId}_${Date.now()}.${ext}`;
@@ -254,27 +275,50 @@ export class UsersService {
           );
           if (r2Res?.url) {
             finalAvatar = r2Res.url;
+          } else {
+            failures.push('R2 returned no URL');
           }
         } catch (err: any) {
           console.warn('⚠️ R2 avatar upload failed, trying Cloudinary:', err?.message);
+          failures.push(`R2: ${err?.message || 'unknown error'}`);
         }
+      } else {
+        failures.push('R2 not configured');
       }
 
       // 2. Fallback to Cloudinary
-      if (finalAvatar.startsWith('data:image/') && cloudinaryService.isConfigured()) {
-        try {
-          const uploadRes = await cloudinary.uploader.upload(avatarUrl, {
-            folder: 'wabmeta/avatars',
-            transformation: [
-              { width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto', fetch_format: 'auto' },
-            ],
-          });
-          if (uploadRes?.secure_url) {
-            finalAvatar = uploadRes.secure_url;
+      if (finalAvatar.startsWith('data:image/')) {
+        if (cloudinaryService.isConfigured()) {
+          try {
+            const uploadRes = await cloudinary.uploader.upload(avatarUrl, {
+              folder: 'wabmeta/avatars',
+              transformation: [
+                { width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto', fetch_format: 'auto' },
+              ],
+            });
+            if (uploadRes?.secure_url) {
+              finalAvatar = uploadRes.secure_url;
+            } else {
+              failures.push('Cloudinary returned no URL');
+            }
+          } catch (err: any) {
+            console.warn('⚠️ Cloudinary avatar upload failed:', err?.message);
+            failures.push(`Cloudinary: ${err?.message || 'unknown error'}`);
           }
-        } catch (err: any) {
-          console.warn('⚠️ Cloudinary avatar upload failed:', err?.message);
+        } else {
+          failures.push('Cloudinary not configured');
         }
+      }
+
+      // Dono fail? Pehle yahan poori data-uri (kai MB ki string) DB ke avatar
+      // column mein save ho jati thi - aur user ko lagta tha photo lag gayi.
+      // Ab saaf error, taaki client ko pata chale ki upload nahi hua.
+      if (finalAvatar.startsWith('data:image/')) {
+        console.error('❌ Avatar upload failed for user', userId, failures);
+        throw new AppError(
+          'Could not upload profile photo right now. Please try again.',
+          502
+        );
       }
     }
 
