@@ -1771,6 +1771,62 @@ export class CampaignsService {
     };
   }
 
+  /**
+   * Meta se poochho ki ye number abhi messages bhej bhi sakta hai ya nahi.
+   *
+   * name_status DECLINED  = display name reject ho chuka hai
+   * code_verification EXPIRED = number ka verification khatam ho gaya
+   *
+   * Dono soorat me Meta template messages block kar deta hai, par error
+   * (#135000) "Generic user error" hota hai - usme wajah likhi hi nahi
+   * hoti. Isliye yahan pehle hi pakad lete hain.
+   */
+  private async checkNumberHealth(
+    phoneNumberId: string,
+    accessToken: string
+  ): Promise<{ blocked: boolean; reason: string; message: string }> {
+    const ok = { blocked: false, reason: '', message: '' };
+
+    try {
+      const res = await metaApi.getPhoneNumberDetails(phoneNumberId, accessToken);
+
+      const nameStatus = String(res?.nameStatus || '').toUpperCase();
+      const codeStatus = String(res?.codeVerificationStatus || '').toUpperCase();
+      const display = res?.displayPhoneNumber || phoneNumberId;
+
+      if (nameStatus === 'DECLINED') {
+        return {
+          blocked: true,
+          reason: `name_status=DECLINED`,
+          message:
+            `WhatsApp has declined the display name for ${display}. ` +
+            `This number cannot send template messages until a new name is approved. ` +
+            `Go to Meta Business Manager → WhatsApp Manager → Phone numbers → Change display name.`,
+        };
+      }
+
+      if (codeStatus === 'EXPIRED') {
+        return {
+          blocked: true,
+          reason: `code_verification_status=EXPIRED`,
+          message:
+            `Phone number verification for ${display} has expired. ` +
+            `Re-verify the number in Meta Business Manager → WhatsApp Manager → Phone numbers, ` +
+            `then resume this campaign.`,
+        };
+      }
+
+      return ok;
+    } catch (err: any) {
+      // Health check khud fail ho jaye to campaign mat roko - ho sakta hai
+      // sirf ye ek call fail hui ho. Sending khud hi bata degi.
+      console.warn(
+        `⚠️ [Health] Number health check failed, continuing anyway: ${err?.message}`
+      );
+      return ok;
+    }
+  }
+
   private async ensureMetaMediaId(
     template: any,
     phoneNumberId: string,
@@ -2060,6 +2116,39 @@ export class CampaignsService {
       }
 
       console.log(`🔑 [Campaign ${campaignId}] Token validated (${accessToken.substring(0, 10)}...)`);
+
+      // ── Number ki sehat ────────────────────────────────────
+      // Agar Meta par number ka display name DECLINED hai ya uska code
+      // verification EXPIRED hai, to wo number ek bhi template message
+      // nahi bhej sakta - Meta har send par (#135000) Generic user error
+      // deta hai, jisme koi wajah nahi likhi hoti.
+      //
+      // Pehle iski koi jaanch nahi thi, isliye 17,000 recipients wali
+      // campaign shuru ho kar consecutive failures par auto-pause hoti
+      // rehti thi aur kisi ko pata nahi chalta tha ki asli masla number
+      // ka hai, code ya template ka nahi.
+      const health = await this.checkNumberHealth(
+        campaign.whatsappAccount.phoneNumberId,
+        accessToken
+      );
+
+      if (health.blocked) {
+        console.error(
+          `❌ [Campaign ${campaignId}] Number not allowed to send: ${health.reason}`
+        );
+
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'PAUSED' },
+        });
+
+        campaignSocketService.emitCampaignError(organizationId, campaignId, {
+          message: health.message,
+          code: 'NUMBER_NOT_READY',
+        });
+
+        return;
+      }
 
       const { phoneNumberId, wabaId } = campaign.whatsappAccount;
       if (!phoneNumberId) {
