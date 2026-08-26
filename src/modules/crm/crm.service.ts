@@ -1,6 +1,7 @@
 import { Prisma, LeadStatus, LeadPriority } from '@prisma/client';
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
+import { notificationsService } from '../notifications/notifications.service';
 
 export class CRMService {
 
@@ -982,20 +983,21 @@ export class CRMService {
 
     if (!notifyUserId) return;
 
-    await prisma.notification.create({
-      data: {
-        userId:        notifyUserId,
-        organizationId,
-        type:          'new_lead',
-        title:         '🎯 New Lead Created',
-        description:   `${lead.title} has been added to your CRM pipeline.`,
-        actionUrl:     `/dashboard/crm/leads/${lead.id}`,
-        metadata: {
-          leadId:          lead.id,
-          score:           lead.score,
-          source:          lead.source,
-          chatbotQualified: lead.chatbotQualified,
-        },
+    // Service se jao, warna notification row to banti hai par phone par
+    // push kabhi nahi pahunchta
+    await notificationsService.create({
+      userId:         notifyUserId,
+      organizationId,
+      type:           'new_lead',
+      title:          '🎯 New Lead Created',
+      description:    `${lead.title} has been added to your CRM pipeline.`,
+      actionUrl:      `/(app)/crm/lead/${lead.id}`,
+      metadata: {
+        leadId:           lead.id,
+        score:            lead.score,
+        source:           lead.source,
+        chatbotQualified: lead.chatbotQualified,
+        webUrl:           `/dashboard/crm/leads/${lead.id}`,
       },
     });
 

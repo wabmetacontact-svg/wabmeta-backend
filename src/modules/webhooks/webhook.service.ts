@@ -22,6 +22,7 @@ import { chatbotEngine } from '../chatbot/chatbot.engine';
 import { automationEngine } from '../automation/automation.engine';
 import { toCanonicalPhone, buildPhoneVariants } from '../../utils/phone';
 import * as instagramService from '../instagram/instagram.service';
+import { notificationsService } from '../notifications/notifications.service';
 
 export const webhookEvents = new EventEmitter();
 webhookEvents.setMaxListeners(100);
@@ -1006,6 +1007,21 @@ export class WebhookService {
         organizationId,
         conversation: conversationPayload,
       });
+
+      // Phone par push notification. Socket sirf tab kaam karta hai jab app
+      // khula ho - band app tak message pahunchane ka yahi ek raasta hai.
+      // Jaan-bujh kar await nahi kiya: push bhejne me lagne wala waqt
+      // webhook ka jawab dene me der na kare, warna Meta retry karega.
+      notificationsService
+        .notifyNewMessage({
+          organizationId,
+          conversationId: conversation.id,
+          contactName,
+          preview,
+        })
+        .catch((err) =>
+          console.error('New message notification failed:', err?.message)
+        );
 
       const updatedConversation = await prisma.conversation.update({
         where: { id: conversation.id },

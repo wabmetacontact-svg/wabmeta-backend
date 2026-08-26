@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import prisma from '../../config/database';
 import axios from 'axios';
+import { notificationsService } from '../notifications/notifications.service';
 import {
   deductWalletForCampaign,
   getRateForCategory,
@@ -2617,7 +2618,8 @@ export class CampaignsService {
       // ── Mark complete ─────────────────────────────────────
       const latestCampaign = await prisma.campaign.findUnique({
         where: { id: campaignId },
-        select: { status: true },
+        // name bhi chahiye - notification me campaign ka naam dikhana hai
+        select: { status: true, name: true },
       });
 
       if (latestCampaign?.status === 'RUNNING' && final.pendingCount === 0) {
@@ -2669,6 +2671,33 @@ export class CampaignsService {
         } as any);
 
         console.log(`🏁 Campaign ${campaignId} ${finalStatus}: ${statusMessage}`);
+
+        // Campaign aksar tab khatam hoti hai jab user app band kar chuka hota
+        // hai. Socket us waqt kaam nahi karta - push hi pahunchta hai.
+        const doneRate = Math.round(
+          ((smartCompleted.displayDelivered + smartCompleted.displayRead) /
+            Math.max(final.totalContacts, 1)) * 100
+        );
+
+        notificationsService
+          .notifyOrganization(organizationId, {
+            type: 'campaign',
+            title:
+              finalStatus === 'FAILED'
+                ? `Campaign failed: ${latestCampaign.name}`
+                : `Campaign finished: ${latestCampaign.name}`,
+            description: `${smartCompleted.displayDelivered + smartCompleted.displayRead} of ${final.totalContacts} delivered (${doneRate}%)`,
+            actionUrl: `/(app)/campaigns/${campaignId}`,
+            metadata: {
+              campaignId,
+              status: finalStatus,
+              successRate: doneRate,
+              webUrl: `/dashboard/campaigns/${campaignId}`,
+            },
+          })
+          .catch((e) =>
+            console.error('Campaign notification failed:', e?.message)
+          );
       }
 
     } catch (err: any) {

@@ -118,14 +118,20 @@ export class MetaController {
   // ============================================
   async getEmbeddedSignupConfig(req: Request, res: Response, next: NextFunction) {
     try {
-      const config = {
-        appId: process.env.META_APP_ID,
-        configId: process.env.META_CONFIG_ID,
+      // Local naam "config" rakhne se imported app config shadow ho jati thi
+      const signupConfig = {
+        appId: config.meta.appId,
+        configId: config.meta.configId,
         version: 'v25.0',
         features: ['whatsapp_business_app_onboarding'],
+        // Mobile app ye values use karti hai OAuth dialog banane ke liye.
+        // Server se aate hain taaki client aur server kabhi alag na ho jayen.
+        mobileSignupUrl: config.meta.mobileSignupUrl,
+        mobileAppScheme: config.meta.mobileAppScheme,
+        graphApiVersion: config.meta.graphApiVersion,
       };
 
-      return sendSuccess(res, config, 'Config fetched successfully');
+      return sendSuccess(res, signupConfig, 'Config fetched successfully');
     } catch (error) {
       next(error);
     }

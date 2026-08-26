@@ -119,7 +119,11 @@ class MetaApiClient {
   // TOKEN MANAGEMENT
   // ============================================
 
-  async exchangeCodeForToken(code: string, skipRedirectUri = false): Promise<TokenExchangeResponse> {
+  async exchangeCodeForToken(
+    code: string,
+    skipRedirectUri = false,
+    redirectUriOverride?: string
+  ): Promise<TokenExchangeResponse> {
     try {
       console.log('[Meta API] Exchanging code for token...');
 
@@ -130,8 +134,10 @@ class MetaApiClient {
       };
 
       if (!skipRedirectUri) {
-        params.redirect_uri = config.meta.redirectUri;
-        console.log('[Meta API] Redirect URI:', config.meta.redirectUri);
+        // Token exchange ka redirect_uri authorize wale se HUBAHU match
+        // hona chahiye, warna Meta code reject kar deta hai.
+        params.redirect_uri = redirectUriOverride || config.meta.redirectUri;
+        console.log('[Meta API] Redirect URI:', params.redirect_uri);
       } else {
         console.log('[Meta API] ⚠️  Skipping redirect_uri (FB.login Embedded Signup flow)');
       }

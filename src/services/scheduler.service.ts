@@ -8,6 +8,7 @@ import { withAdvisoryLock } from '../utils/withLock';
 import { automationEngine } from '../modules/automation/automation.engine';
 import prisma from '../config/database';
 import { SubscriptionStatus, PlanType } from '@prisma/client';
+import { notificationsService } from '../modules/notifications/notifications.service';
 
 
 // ✅ Global state tracking
@@ -234,6 +235,19 @@ async function checkAndExpireSubscriptions() {
 
   console.log(`⏰ Expiring ${expiredSubscriptions.length} subscription(s)`);
 
+  // Notifications transaction ke BAAHAR bhejte hain. Push bhejna ek network
+  // call hai - use DB transaction ke andar rakhne se transaction lamba khinchta
+  // hai aur connection pool par dabav padta hai.
+  const expiredNotifications: Array<{
+    userId: string;
+    organizationId: string;
+    type: 'billing';
+    title: string;
+    description: string;
+    actionUrl: string;
+    metadata: Record<string, any>;
+  }> = [];
+
   for (const subscription of expiredSubscriptions) {
     try {
       await prisma.$transaction(async (tx) => {
@@ -262,18 +276,20 @@ async function checkAndExpireSubscriptions() {
           },
         });
 
-        await tx.notification.create({
-          data: {
-            userId: subscription.organization.ownerId,
-            organizationId: subscription.organizationId,
-            type: 'billing',
-            title: 'Subscription Expired',
-            description: `Your ${subscription.plan.name} subscription has expired.`,
-            actionUrl: '/dashboard/billing',
-            metadata: {
-              planName: subscription.plan.name,
-              expiredAt: now.toISOString(),
-            },
+        // Pehle yahan seedha prisma.notification.create tha - row ban jati
+        // thi par push kabhi nahi jata tha. Service se jaane par phone par
+        // bhi pahunchta hai.
+        expiredNotifications.push({
+          userId: subscription.organization.ownerId,
+          organizationId: subscription.organizationId,
+          type: 'billing' as const,
+          title: 'Subscription Expired',
+          description: `Your ${subscription.plan.name} subscription has expired.`,
+          actionUrl: '/(app)/billing',
+          metadata: {
+            planName: subscription.plan.name,
+            expiredAt: now.toISOString(),
+            webUrl: '/dashboard/billing',
           },
         });
       });
@@ -288,6 +304,13 @@ async function checkAndExpireSubscriptions() {
       }
       console.error(`❌ Expire failed for ${subscription.id}:`, err.message);
     }
+  }
+
+  // Sab expiry ho jaane ke baad notifications bhejo
+  for (const n of expiredNotifications) {
+    await notificationsService
+      .create(n)
+      .catch((e) => console.error('Expiry notification failed:', e?.message));
   }
 }
 
@@ -346,19 +369,18 @@ async function sendExpiryWarnings() {
 
         if (alreadySent) continue;
 
-        await prisma.notification.create({
-          data: {
-            userId: sub.organization.ownerId,
-            organizationId: sub.organizationId,
-            type: 'billing_warning',
-            title: `Subscription Expiring in ${days} Day${days > 1 ? 's' : ''}`,
-            description: `Your ${sub.plan.name} subscription expires soon.`,
-            actionUrl: '/dashboard/billing',
-            metadata: {
-              planName: sub.plan.name,
-              expiresAt: sub.currentPeriodEnd.toISOString(),
-              warningDays: days,
-            },
+        await notificationsService.create({
+          userId: sub.organization.ownerId,
+          organizationId: sub.organizationId,
+          type: 'billing_warning',
+          title: `Subscription Expiring in ${days} Day${days > 1 ? 's' : ''}`,
+          description: `Your ${sub.plan.name} subscription expires soon.`,
+          actionUrl: '/(app)/billing',
+          metadata: {
+            planName: sub.plan.name,
+            expiresAt: sub.currentPeriodEnd.toISOString(),
+            warningDays: days,
+            webUrl: '/dashboard/billing',
           },
         });
 

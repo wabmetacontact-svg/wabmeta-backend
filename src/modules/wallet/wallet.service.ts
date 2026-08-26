@@ -1,6 +1,7 @@
 import prisma from '../../config/database';
 import crypto from 'crypto';
 import { AppError } from '../../middleware/errorHandler';
+import { notificationsService } from '../notifications/notifications.service';
 
 const db = prisma as any;
 
@@ -887,6 +888,24 @@ async function triggerLowBalanceAlert(wallet: any) {
     `🔔 Low balance alert: org ${wallet.organizationId}, ` +
       `balance ₹${toRupees(wallet.balancePaise)}`
   );
+
+  // Pehle ye alert sirf server ke log me jata tha - user ko pata hi nahi
+  // chalta tha ki paisa khatam ho raha hai, jab tak campaign fail na ho jaye.
+  const available = toRupees(wallet.balancePaise - wallet.reservedPaise);
+
+  await notificationsService
+    .notifyOrganization(wallet.organizationId, {
+      type: 'wallet',
+      title: 'Wallet balance is low',
+      description: `Only ₹${available.toFixed(2)} left. Top up to keep your campaigns running.`,
+      actionUrl: '/(app)/wallet',
+      metadata: {
+        availableBalance: available,
+        threshold: toRupees(wallet.lowThresholdPaise),
+        webUrl: '/dashboard/wallet',
+      },
+    })
+    .catch((e) => console.error('Low balance notification failed:', e?.message));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

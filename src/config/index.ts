@@ -69,6 +69,18 @@ export const config = {
       'META_REDIRECT_URI',
       'https://wabmeta.com/meta/callback'
     ),
+    // Embedded Signup sirf Facebook ke JS SDK se chalta hai, jo React
+    // Native me nahi chal sakta. Isliye mobile app is chhote page ko
+    // apne in-app browser me kholti hai - ye page wahi FB.login flow
+    // chalata hai aur code ko app par deep-link kar deta hai.
+    // Page ka domain Meta App > Facebook Login > Allowed Domains me hona
+    // chahiye (wabmeta.com already hai, kyunki dashboard wahi use karta hai).
+    mobileSignupUrl: getEnv(
+      'META_MOBILE_SIGNUP_URL',
+      'https://wabmeta.com/mobile-connect.html'
+    ),
+    // In-app browser se app me wapas aane ke liye
+    mobileAppScheme: getEnv('META_MOBILE_APP_SCHEME', 'wabmeta://meta-callback'),
     graphApiVersion: getEnv('META_GRAPH_API_VERSION', 'v22.0'),
   },
 

@@ -239,7 +239,8 @@ export class MetaService {
     onProgress?: (progress: ConnectionProgress) => void,
     embeddedSignup = false,
     sessionWabaId?: string,
-    sessionPhoneNumberId?: string
+    sessionPhoneNumberId?: string,
+    redirectUriOverride?: string
   ): Promise<{ success: boolean; account?: any; error?: string }> {
     try {
       metaLog.info('Meta connection start', {
@@ -263,7 +264,11 @@ export class MetaService {
         accessToken = codeOrToken;
       } else {
         metaLog.info('Exchanging code for token');
-        const tokenResponse = await metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
+        const tokenResponse = await metaApi.exchangeCodeForToken(
+          codeOrToken,
+          embeddedSignup,
+          redirectUriOverride
+        );
         accessToken = tokenResponse.accessToken;
         metaLog.debug('Short-lived token obtained');
       }

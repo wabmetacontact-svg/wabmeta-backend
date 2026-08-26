@@ -3,12 +3,16 @@ export type NotificationType =
   | 'campaign'
   | 'team'
   | 'billing'
+  | 'billing_warning'
+  | 'wallet'
+  | 'new_lead'
   | 'alert'
   | 'whatsapp'
   | 'system';
 
 export interface CreateNotificationInput {
   userId: string;
+  organizationId?: string;
   type: NotificationType;
   title: string;
   description: string;

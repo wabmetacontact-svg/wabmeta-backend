@@ -298,7 +298,10 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
       userId,
       'CLOUD_API',
       undefined,   // no onProgress callback
-      true,        // embeddedSignup = true → skipRedirectUri during token exchange
+      // Web aur mobile dono FB.login (Embedded Signup) use karte hain -
+      // mobile bas use ek in-app browser page ke andar chalati hai.
+      // Us flow me redirect_uri hota hi nahi, isliye skip.
+      true,
       wabaId || undefined,        // ✅ Session WABA ID from message event
       phoneNumberId || undefined  // ✅ Session Phone Number ID from message event
     );
