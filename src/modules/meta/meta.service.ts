@@ -111,12 +111,18 @@ export class MetaService {
       try {
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+        // Meta ki limit sirf un unique customers ki hai jinhe 24 ghante mein
+        // SERVICE WINDOW KE BAHAR message bheja gaya - yaani template se shuru
+        // hui baatein. Window ke andar diye gaye jawab free hain aur limit mein
+        // nahi ginte. Pehle yahan har OUTBOUND message ginta tha, isliye
+        // "kitna use hua" asli se zyada dikhta tha.
         const conversations = await prisma.message.groupBy({
           by: ['conversationId'],
           where: {
             whatsappAccountId: accountId,
             direction: 'OUTBOUND',
             createdAt: { gte: since },
+            type: 'TEMPLATE',
           },
         });
 

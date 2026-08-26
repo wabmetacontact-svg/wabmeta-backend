@@ -1541,35 +1541,61 @@ private buildTemplateComponents(
       // Static text header - no component needed
     }
     
-    // ✅ MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT):
-    // SKIP! Meta already has approved media stored permanently.
-    // When template is sent by name, Meta auto-attaches the media.
+    // MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT)
     //
-    // Exception: Dynamic media (rare) - only if user provides header_media variable
-    else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType) && variables.header_media) {
+    // Yahan pehle likha tha ki Meta approved media khud attach kar leta
+    // hai, isliye header component bhejna hi nahi chahiye. Wo galat tha -
+    // live test se:
+    //
+    //   header component ke bina -> 132012
+    //   details: header: Format mismatch, expected IMAGE, received UNKNOWN
+    //
+    // Approval wali image sirf review ka sample hoti hai; bhejte waqt
+    // media dobara dena padta hai.
+    else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
       const mediaType = hType.toLowerCase();
-      const mediaValue = variables.header_media;
-      
-      const mediaParam: any = {
-        type: mediaType,
-        [mediaType]: {}
-      };
-      
-      // Check if it's URL or media ID
-      if (mediaValue.startsWith('http')) {
-        mediaParam[mediaType].link = mediaValue;
+
+      // Kram wahi jo campaigns me hai:
+      //   1. request ke saath aayi dynamic media
+      //   2. template ka Meta media handle (ek baar upload, baar baar use)
+      //   3. permanent URL - Meta ise HAR send par dobara download karta hai
+      const dynamic = variables.header_media;
+      const handle = template.headerMediaId;
+      const url = template.headerContent;
+
+      const mediaParam: any = { type: mediaType, [mediaType]: {} };
+
+      if (dynamic) {
+        if (String(dynamic).startsWith('http')) mediaParam[mediaType].link = dynamic;
+        else mediaParam[mediaType].id = String(dynamic);
+      } else if (handle && /^\d+$/.test(String(handle))) {
+        mediaParam[mediaType].id = String(handle);
+      } else if (url && String(url).startsWith('http')) {
+        mediaParam[mediaType].link = String(url);
       } else {
-        mediaParam[mediaType].id = mediaValue;
+        throw new AppError(
+          `Template "${template.name}" has a ${hType} header but no media is available. ` +
+          `Re-upload the file in Templates and try again.`,
+          400
+        );
       }
-      
-      components.push({ 
-        type: 'header', 
-        parameters: [mediaParam] 
+
+      if (mediaType === 'document') {
+        const src = String(url || '');
+        mediaParam.document.filename =
+          src.split('/').pop()?.split('?')[0] || 'document.pdf';
+      }
+
+      components.push({
+        type: 'header',
+        parameters: [mediaParam]
       });
-      
-      console.log(`⚡ Using dynamic media for ${template.name}`);
+
+      console.log(
+        `📎 Template ${template.name}: ${mediaType} header via ` +
+        `${mediaParam[mediaType].id ? 'media handle' : 'link'}`
+      );
     }
-    // else: Static media - Meta uses approved media automatically ✅
   }
 
   // ✅ BODY variables

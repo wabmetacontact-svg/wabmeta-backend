@@ -59,7 +59,10 @@ const SEND_CONFIG = {
   // wahan tez bhagne ka koi practical fayda nahi.
   TIER_LIMITS: {
     TIER_250: { concurrency: 5, ratePerSec: 4 },
+    // Meta ne 1K tier ko 2K kar diya hai aur ab API TIER_2K lautati hai.
+    // TIER_1K purane accounts ke liye rakha hai - dono ek jaise chalte hain.
     TIER_1K: { concurrency: 10, ratePerSec: 8 },
+    TIER_2K: { concurrency: 12, ratePerSec: 10 },
     TIER_10K: { concurrency: 30, ratePerSec: 25 },
     TIER_100K: { concurrency: 50, ratePerSec: 45 },
     TIER_UNLIMITED: { concurrency: 60, ratePerSec: 60 },
@@ -2165,8 +2168,19 @@ export class CampaignsService {
       let lastErrorReason = '';
       const MAX_SAME_ERRORS = 10;
 
-      const tierName = (campaign.whatsappAccount.messagingLimit || 'TIER_1K') as keyof typeof SEND_CONFIG.TIER_LIMITS;
-      const tierConfig = SEND_CONFIG.TIER_LIMITS[tierName] ?? SEND_CONFIG.TIER_LIMITS.TIER_1K;
+      // Tier ab roz Meta se sync hota hai. Anjaan naam aaye to sabse dheemi
+      // setting par giro - tez chalne se behtar hai ki Meta rate-limit na kare.
+      const tierName = String(campaign.whatsappAccount.messagingLimit || '')
+        .toUpperCase() as keyof typeof SEND_CONFIG.TIER_LIMITS;
+      const tierConfig = SEND_CONFIG.TIER_LIMITS[tierName] ?? SEND_CONFIG.TIER_LIMITS.TIER_250;
+
+      if (!SEND_CONFIG.TIER_LIMITS[tierName]) {
+        console.warn(
+          `⚠️ [Campaign ${campaignId}] Unknown messaging tier ` +
+          `"${campaign.whatsappAccount.messagingLimit}" - using TIER_250 speed`
+        );
+      }
+
       const CONCURRENCY = tierConfig.concurrency;
 
       // Token bucket ka base gap. ratePerSec = 25 -> har 40ms mein ek send.

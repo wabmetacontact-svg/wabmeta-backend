@@ -1058,9 +1058,14 @@ export class TemplatesService {
 
         const metaStatusRaw = String(mt.status || 'PENDING').toUpperCase();
         const mappedStatus: TemplateStatus =
+          // PAUSED aur REJECTED bilkul alag hain. PAUSED quality gir jane par
+          // lagta hai aur apne aap wapas aa sakta hai; REJECTED hamesha ke liye
+          // hai. Pehle dono REJECTED ban jate the, isliye user chalne layak
+          // template chhod kar naya banata tha.
           metaStatusRaw === 'APPROVED' ? 'APPROVED'
-            : (metaStatusRaw === 'REJECTED' || metaStatusRaw === 'PAUSED' || metaStatusRaw === 'DISABLED') ? 'REJECTED'
-              : 'PENDING';
+            : metaStatusRaw === 'PAUSED' ? 'PAUSED'
+              : (metaStatusRaw === 'REJECTED' || metaStatusRaw === 'DISABLED') ? 'REJECTED'
+                : 'PENDING';
 
         const rejectionReason = mt.rejected_reason || mt.rejection_reason || null;
 

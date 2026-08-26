@@ -151,7 +151,7 @@ export const getTemplatesQuerySchema = z.object({
     page: z.string().optional().transform(val => val ? parseInt(val) : 1),
     limit: z.string().optional().transform(val => val ? parseInt(val) : 20),
     search: z.string().optional(),
-    status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+    status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'PAUSED']).optional(),
     category: z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).optional(),
     language: z.string().optional(),
     sortBy: z.string().optional(),

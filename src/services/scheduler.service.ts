@@ -9,6 +9,7 @@ import { automationEngine } from '../modules/automation/automation.engine';
 import prisma from '../config/database';
 import { SubscriptionStatus, PlanType } from '@prisma/client';
 import { notificationsService } from '../modules/notifications/notifications.service';
+import { metaService } from '../modules/meta/meta.service';
 
 
 // ✅ Global state tracking
@@ -18,6 +19,7 @@ const state = {
   subscriptionExpiry: false,
   expiryWarnings: false,
   webhookLogCleanup: false,
+  metaSync: false,
   lastPoolError: 0,
 };
 
@@ -146,7 +148,90 @@ export function initializeScheduler() {
     }
   });
 
+  // ============================================
+  // 6. META SYNC - Daily 4:15 AM
+  // Meta apni taraf se cheezein badalta rehta hai aur hume kabhi khabar
+  // nahi hoti:
+  //   - messaging tier badhta hai (TIER_250 → TIER_100K)
+  //   - template ki category approval par badal jati hai
+  //     (UTILITY → MARKETING) - aur billing usi category se hoti hai
+  //   - template PAUSED ya REJECTED ho jate hain
+  //
+  // Pehle iska koi cron nahi tha, sirf manual sync tha. Isliye purana
+  // data mahino baitha rehta tha: accounts sabse dheemi speed par chalte
+  // the aur MARKETING templates UTILITY ke rate par charge hote the.
+  // ============================================
+  cron.schedule('15 4 * * *', async () => {
+    if (state.metaSync) return;
+    state.metaSync = true;
+    try {
+      await withAdvisoryLock('scheduler:metaSync', () => syncAllAccountsFromMeta());
+    } catch (error: any) {
+      if (error?.code !== 'P2024') {
+        console.error('Meta sync error:', error.message);
+      }
+    } finally {
+      state.metaSync = false;
+    }
+  });
+
   console.log('✅ Scheduler initialized');
+}
+
+// ============================================
+// META SYNC
+// ============================================
+async function syncAllAccountsFromMeta() {
+  if (shouldSkipDueToPoolPressure()) return;
+
+  const started = Date.now();
+
+  const accounts = await prisma.whatsAppAccount.findMany({
+    where: { status: 'CONNECTED', isActive: true },
+    select: { id: true, organizationId: true, phoneNumber: true },
+  });
+
+  if (accounts.length === 0) return;
+
+  console.log(`🔄 Meta sync: ${accounts.length} account(s)`);
+
+  let healthOk = 0;
+  let templatesOk = 0;
+  let failed = 0;
+
+  for (const acc of accounts) {
+    // Account health - tier, quality, verification status
+    try {
+      await metaService.refreshAccountHealth(acc.id, acc.organizationId);
+      healthOk++;
+    } catch (err: any) {
+      failed++;
+      console.warn(`⚠️ Health sync failed for ${acc.phoneNumber}: ${err?.message}`);
+    }
+
+    // Templates - status aur category (billing isi par chalti hai)
+    try {
+      await metaService.syncTemplates(acc.id, acc.organizationId);
+      templatesOk++;
+    } catch (err: any) {
+      failed++;
+      console.warn(`⚠️ Template sync failed for ${acc.phoneNumber}: ${err?.message}`);
+    }
+
+    // Meta ki Graph API par rate limit hai, aur ye raat me chalta hai -
+    // jaldi karne ki koi wajah nahi.
+    await new Promise((r) => setTimeout(r, 400));
+
+    if (shouldSkipDueToPoolPressure()) {
+      console.warn('⚠️ Meta sync stopped early due to DB pool pressure');
+      break;
+    }
+  }
+
+  console.log(
+    `✅ Meta sync done in ${Math.round((Date.now() - started) / 1000)}s - ` +
+    `health ${healthOk}, templates ${templatesOk}, failed ${failed}`
+  );
 }
 
 // ============================================

@@ -373,7 +373,14 @@ class MetaApiClient {
       const response = await this.client.get(`${wabaId}/phone_numbers`, {
         params: {
           access_token: accessToken,
-          fields: 'id,verified_name,display_phone_number,quality_rating,code_verification_status,platform_type,throughput,status,name_status,messaging_limit_tier',
+          // whatsapp_business_manager_messaging_limit hi ab asli tier deta hai.
+          // messaging_limit_tier deprecated hai aur null lautata hai - usi ki
+          // wajah se saare accounts "no tier" dikhte the aur campaigns sabse
+          // dheemi speed par chalti thi. Dono maang lete hain.
+          fields:
+            'id,verified_name,display_phone_number,quality_rating,' +
+            'code_verification_status,platform_type,throughput,status,name_status,' +
+            'messaging_limit_tier,whatsapp_business_manager_messaging_limit',
         },
       });
 
@@ -384,7 +391,10 @@ class MetaApiClient {
         qualityRating: phone.quality_rating,
         codeVerificationStatus: phone.code_verification_status,
         nameStatus: phone.name_status,
-        messagingLimitTier: phone.messaging_limit_tier,
+        messagingLimitTier:
+          phone.whatsapp_business_manager_messaging_limit ||
+          phone.messaging_limit_tier ||
+          null,
         platformType: phone.platform_type,
         throughput: phone.throughput,
         status: phone.status,
@@ -1037,8 +1047,9 @@ class MetaApiClient {
             // ✅ FIX: name_status add kiya + status field
             fields:
               'verified_name,code_verification_status,display_phone_number,' +
-              'quality_rating,messaging_limit_tier,platform_type,throughput,' +
-              'name_status,status,id',
+              'quality_rating,messaging_limit_tier,' +
+              'whatsapp_business_manager_messaging_limit,' +
+              'platform_type,throughput,name_status,status,id',
             access_token: accessToken,
           },
           timeout: 30000,
@@ -1048,12 +1059,23 @@ class MetaApiClient {
       console.log('📊 Phone Info from Meta:', {
         verified_name: response.data?.verified_name,
         quality_rating: response.data?.quality_rating,
-        messaging_limit_tier: response.data?.messaging_limit_tier,
+        messaging_limit_tier:
+          response.data?.whatsapp_business_manager_messaging_limit ||
+          response.data?.messaging_limit_tier,
         code_verification_status: response.data?.code_verification_status,
         name_status: response.data?.name_status,
       });
 
-      return response.data;
+      // Meta naya field bhejta hai; purana null hota hai. Consumers
+      // messaging_limit_tier padhte hain, isliye yahin normalize kar dete
+      // hain - warna har account tier-less dikhta hai.
+      return {
+        ...response.data,
+        messaging_limit_tier:
+          response.data?.whatsapp_business_manager_messaging_limit ||
+          response.data?.messaging_limit_tier ||
+          null,
+      };
     } catch (error: any) {
       console.error('Failed to get phone info:', error?.response?.data);
       throw error;

@@ -1223,6 +1223,9 @@ enum TemplateStatus {
   PENDING
   APPROVED
   REJECTED
+  // Meta ne quality gir jane par rok diya - REJECTED se alag hai,
+  // ye apne aap wapas aa sakta hai
+  PAUSED
 }
 
 enum CampaignStatus {
