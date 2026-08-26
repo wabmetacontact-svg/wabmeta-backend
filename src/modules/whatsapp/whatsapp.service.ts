@@ -852,16 +852,44 @@ class WhatsAppService {
     const orgId = organizationId || account.organizationId;
     const formattedTo = this.formatPhoneNumber(to);
 
-    if (type !== 'template' && !skipWindowCheck && conversationData) {
+    if (type !== 'template' && !skipWindowCheck) {
+      // conversationId na aaye to pehle poora window check hi skip ho jata
+      // tha - upar wali Promise.all sirf conversationId hone par lookup
+      // karti hai. Nateeja: band window par bhi plain text Meta tak chala
+      // jata tha aur Meta use "(#100) Invalid parameter" ke saath reject
+      // karta tha, jiska matlab na user samajh pata tha na logs se pata
+      // chalta tha.
+      //
+      // Ab bina conversationId ke bhi phone se conversation dhoondh lete
+      // hain. Ye extra query sirf usi soorat me chalti hai - jahan
+      // conversationId aata hai (mobile chat screen) wo path waisa hi tez hai.
+      let windowSource = conversationData;
+
+      if (!windowSource) {
+        const digits = formattedTo;
+        windowSource = await prisma.conversation.findFirst({
+          where: {
+            organizationId: orgId,
+            contact: { phone: { in: [`+${digits}`, digits] } },
+          },
+          select: {
+            id: true, contactId: true,
+            isWindowOpen: true, windowExpiresAt: true,
+            lastCustomerMessageAt: true,
+          },
+          orderBy: { lastMessageAt: 'desc' },
+        });
+      }
+
       const now = new Date();
       let expired = false;
 
-      if (conversationData.windowExpiresAt) {
-        expired = new Date(conversationData.windowExpiresAt) <= now;
-      } else if (conversationData.isWindowOpen === false) {
+      if (windowSource?.windowExpiresAt) {
+        expired = new Date(windowSource.windowExpiresAt) <= now;
+      } else if (windowSource?.isWindowOpen === false) {
         expired = true;
-      } else if (conversationData.lastCustomerMessageAt) {
-        expired = now.getTime() - new Date(conversationData.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
+      } else if (windowSource?.lastCustomerMessageAt) {
+        expired = now.getTime() - new Date(windowSource.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
       }
 
       if (expired) {

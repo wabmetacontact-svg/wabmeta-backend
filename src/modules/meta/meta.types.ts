@@ -307,6 +307,12 @@ export interface MetaApiError {
     error_user_title?: string;
     error_user_msg?: string;
     fbtrace_id: string;
+    // (#100) Invalid parameter jaisi generic errors ki asli wajah yahan
+    // hoti hai - "details" batata hai KAUNSA parameter galat hai.
+    error_data?: {
+      messaging_product?: string;
+      details?: string;
+    };
   };
 }
 

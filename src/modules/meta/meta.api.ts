@@ -100,6 +100,40 @@ class MetaApiClient {
           errorContext.metaSubcode = metaError.error_subcode;
           errorContext.fbtraceId = metaError.fbtrace_id;
 
+          // Meta ka asli jawab yahan hota hai. Bina iske "(#100) Invalid
+          // parameter" bilkul bekaar hai - pata hi nahi chalta ki kaunsa
+          // parameter galat hai.
+          errorContext.metaDetails =
+            metaError.error_data?.details ||
+            metaError.error_user_msg ||
+            undefined;
+          errorContext.metaType = metaError.type;
+
+          // Message send fail ho to payload ka dhaancha bhi chahiye
+          // (content nahi - wo private hai).
+          if (url.endsWith('/messages') && error.config?.data) {
+            try {
+              const body =
+                typeof error.config.data === 'string'
+                  ? JSON.parse(error.config.data)
+                  : error.config.data;
+
+              errorContext.sentType = body?.type;
+              errorContext.toLength = String(body?.to || '').length;
+              errorContext.hasContext = !!body?.context;
+
+              if (body?.type === 'template') {
+                errorContext.templateName = body?.template?.name;
+                errorContext.templateLang = body?.template?.language?.code;
+                errorContext.componentTypes = (body?.template?.components || [])
+                  .map((c: any) => c?.type)
+                  .join(',');
+              }
+            } catch {
+              // payload parse na ho to baaki log phir bhi jaana chahiye
+            }
+          }
+
           if (isHandledError) {
             metaLog.warn(`API handled note: ${metaError.message}`, errorContext);
           } else {
