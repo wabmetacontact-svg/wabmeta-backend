@@ -210,6 +210,14 @@ model WhatsAppAccount {
   status                 WhatsAppAccountStatus @default(PENDING)
   codeVerificationStatus String?
   nameStatus             String?
+
+  // Meta ka health_status - wahi jagah jahan wo asli wajah batata hai
+  // (payment method error, WABA banned, business verification pending).
+  // Iske bina har rok (#135000) Generic user error ban kar aati hai.
+  healthCanSend          String?   // AVAILABLE | LIMITED | BLOCKED
+  healthBlockedReason    String?   @db.Text
+  healthStatus           Json?
+  healthCheckedAt        DateTime?
   verifiedName           String?
   messagingLimit         String?
   dailyMessageLimit      Int                   @default(1000)

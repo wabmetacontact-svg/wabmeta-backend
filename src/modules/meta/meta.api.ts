@@ -407,6 +407,21 @@ class MetaApiClient {
     }
   }
 
+  /**
+   * Meta ka health_status - wahi batata hai ki ye number business-initiated
+   * messages bhej sakta hai ya nahi, aur na bhej sakne par asli wajah kya hai
+   * (payment method, banned WABA, business verification, quality).
+   *
+   * Iske bina har rok (#135000) Generic user error ban kar aati hai.
+   */
+  async getHealthStatus(phoneNumberId: string, accessToken: string): Promise<any> {
+    const response = await this.client.get(phoneNumberId, {
+      params: { access_token: accessToken, fields: 'health_status' },
+      timeout: 15000,
+    });
+    return response.data?.health_status || null;
+  }
+
   async getPhoneNumberDetails(
     phoneNumberId: string,
     accessToken: string

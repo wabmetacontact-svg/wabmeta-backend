@@ -128,7 +128,7 @@ export class ChatbotService {
     const hasOtherNode = nodes.filter((n: any) => n.type !== 'start').length > 0;
 
     if (!hasStart || !hasOtherNode) {
-      throw new AppError('Chatbot flow mein Start node aur kam se kam ek aur node hona zaroori hai', 400);
+      throw new AppError('A chatbot flow needs a Start node and at least one more node', 400);
     }
 
     return prisma.chatbot.update({

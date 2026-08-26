@@ -148,7 +148,9 @@ export class MetaService {
   private sanitizeAccount(account: any) {
     if (!account) return null;
 
-    const { accessToken, webhookSecret, ...safe } = account;
+    // healthStatus ka poora raw payload client ko bhejne ki zaroorat nahi -
+    // usme Meta ke internal ids hote hain. Sirf natija aur wajah bhejo.
+    const { accessToken, webhookSecret, healthStatus, ...safe } = account;
     return {
       ...safe,
       hasAccessToken: !!accessToken,

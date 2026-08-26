@@ -10,6 +10,7 @@ import prisma from '../config/database';
 import { SubscriptionStatus, PlanType } from '@prisma/client';
 import { notificationsService } from '../modules/notifications/notifications.service';
 import { metaService } from '../modules/meta/meta.service';
+import { accountHealthService } from '../modules/meta/accountHealth.service';
 
 
 // ✅ Global state tracking
@@ -207,6 +208,19 @@ async function syncAllAccountsFromMeta() {
     } catch (err: any) {
       failed++;
       console.warn(`⚠️ Health sync failed for ${acc.phoneNumber}: ${err?.message}`);
+    }
+
+    // Meta ka health_status - yahi batata hai ki number business-initiated
+    // messages bhej sakta hai ya nahi, aur na bhej sakne par asli wajah.
+    // Roz refresh hoti hai taaki UI par taaza haal dikhe aur campaign
+    // shuru hone se pehle sahi rok lag sake.
+    try {
+      const h = await accountHealthService.get(acc.id, { force: true });
+      if (h.blocked) {
+        console.warn(`🔴 [Health] ${acc.phoneNumber} BLOCKED: ${h.summary}`);
+      }
+    } catch {
+      // health optional hai - baaki sync rukna nahi chahiye
     }
 
     // Templates - status aur category (billing isi par chalti hai)

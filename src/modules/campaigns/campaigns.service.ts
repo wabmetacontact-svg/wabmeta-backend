@@ -12,6 +12,7 @@ import { safeDecrypt } from '../../utils/encryption';
 import prisma from '../../config/database';
 import axios from 'axios';
 import { notificationsService } from '../notifications/notifications.service';
+import { accountHealthService } from '../meta/accountHealth.service';
 import {
   deductWalletForCampaign,
   getRateForCategory,
@@ -259,7 +260,7 @@ function buildTemplateMessage(
       param[mediaType] = { id: String(metaMediaId) };
     } else if (mediaUrl && mediaUrl.startsWith('http')) {
       console.warn(
-        `⚠️ Template "${template.name}": Meta media handle nahi mila, link se bhej rahe hain (fail ho sakta hai)`
+        `⚠️ Template "${template.name}": no Meta media handle, falling back to link (this may fail)`
       );
       param[mediaType] = { link: mediaUrl };
     } else {
@@ -2064,6 +2065,42 @@ export class CampaignsService {
 
       console.log(`🔑 [Campaign ${campaignId}] Token validated (${accessToken.substring(0, 10)}...)`);
 
+      // ── Account health ────────────────────────────────────
+      // Meta health_status me saaf batata hai ki number business-initiated
+      // messages bhej sakta hai ya nahi. Agar kahin BLOCKED hai (payment
+      // method, banned WABA, business verification) to 17,000 recipients
+      // ki campaign shuru karna sirf paisa aur quality barbaad karna hai -
+      // har send (#135000) Generic user error dega jisme wajah likhi hi
+      // nahi hoti.
+      const health = await accountHealthService
+        .get(campaign.whatsappAccountId, { force: true })
+        .catch(() => null);
+
+      if (health?.blocked) {
+        console.error(
+          `❌ [Campaign ${campaignId}] Account blocked by Meta: ${health.summary}`
+        );
+
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'PAUSED' },
+        });
+
+        campaignSocketService.emitCampaignError(organizationId, campaignId, {
+          message:
+            health.summary ||
+            'WhatsApp has blocked this number from sending campaign messages. Check your WhatsApp settings.',
+          code: 'ACCOUNT_BLOCKED',
+        });
+
+        return;
+      }
+
+      if (health?.canSend === 'LIMITED' && health.summary) {
+        // Rokna nahi hai - sirf batana hai
+        console.warn(`⚠️ [Campaign ${campaignId}] Account limited: ${health.summary}`);
+      }
+
       const { phoneNumberId, wabaId } = campaign.whatsappAccount;
       if (!phoneNumberId) {
         throw new Error('WhatsApp phoneNumberId missing. Reconnect WhatsApp.');
@@ -2093,7 +2130,7 @@ export class CampaignsService {
             // Handle na bana par permanent URL hai - link se koshish karne do.
             // Campaign chalne dena behtar hai bajaye bina koshish ke rok dene ke.
             console.warn(
-              `⚠️ [Campaign ${campaignId}] Media handle nahi bana, link fallback use hoga`
+              `⚠️ [Campaign ${campaignId}] Could not create media handle, falling back to link`
             );
           } else {
             console.error(`❌ [Campaign ${campaignId}] Media upload failed - PAUSING campaign`);

@@ -24,6 +24,7 @@ import {
 } from '../wallet/wallet.deduction.service';
 import { whatsappLog } from '../../utils/logger';
 import { AppError } from '../../middleware/errorHandler';
+import { accountHealthService } from '../meta/accountHealth.service';
 
 // ============================================
 // INTERFACES
@@ -636,10 +637,21 @@ class WhatsAppService {
         // sync trigger kar do taaki stale row saaf ho jaye.
         const metaCode = sendErr?.metaError?.code ?? sendErr?.response?.data?.error?.code;
 
-        if (metaCode !== 132001) throw sendErr;
+        if (metaCode !== 132001) {
+          // (#135000) jaise opaque errors me Meta koi wajah nahi deta.
+          // health_status me wo wajah hoti hai - payment method, banned
+          // WABA, business verification. Use error me jod do, warna user
+          // ko sirf "Generic user error" dikhta hai.
+          const why = await accountHealthService
+            .explainFailure(accountId, metaCode)
+            .catch(() => null);
+
+          if (why) throw new AppError(why, 400);
+          throw sendErr;
+        }
 
         console.warn(
-          `⚠️ Template "${templateName}" ${resolvedLanguage} mein nahi mila - dusri language dhoondh rahe hain`
+          `⚠️ Template "${templateName}" not found in ${resolvedLanguage} - trying other approved languages`
         );
 
         // Stale data saaf karne ke liye sync (fire-and-forget)
@@ -1560,8 +1572,28 @@ private buildTemplateComponents(
       //   2. template ka Meta media handle (ek baar upload, baar baar use)
       //   3. permanent URL - Meta ise HAR send par dobara download karta hai
       const dynamic = variables.header_media;
-      const handle = template.headerMediaId;
       const url = template.headerContent;
+
+      // Meta ke media handles ~30 din me expire ho jate hain. Expired handle
+      // bhejne par (#135000) Generic user error milta hai, jisme koi wajah
+      // nahi likhi hoti. Campaign path ensureMetaMediaId se taazgi check
+      // karta hai; yahan koi check nahi tha - aur DB me 43 templates aise
+      // hain jinka handle ya to 25 din se purana hai ya jiski upload date
+      // hi nahi pata.
+      const HANDLE_TTL_MS = 25 * 24 * 60 * 60 * 1000;
+      const uploadedAt = template.headerMediaUploadedAt
+        ? new Date(template.headerMediaUploadedAt).getTime()
+        : null;
+      const handleIsFresh =
+        !!uploadedAt && Date.now() - uploadedAt < HANDLE_TTL_MS;
+      const handle = handleIsFresh ? template.headerMediaId : null;
+
+      if (template.headerMediaId && !handleIsFresh) {
+        console.warn(
+          `⚠️ Template "${template.name}": media handle is stale or undated - ` +
+          `falling back to the permanent URL`
+        );
+      }
 
       const mediaParam: any = { type: mediaType, [mediaType]: {} };
 
