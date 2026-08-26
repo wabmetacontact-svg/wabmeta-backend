@@ -238,15 +238,27 @@ function buildTemplateMessage(
       'image' | 'video' | 'document';
     const mediaUrl = template.headerContent;
 
-    // ✅ Rule 2: Prefer Permanent R2/Cloudinary URL (NEVER EXPIRES) over Meta Media Handle
     const param: any = {
       type: mediaType,
     };
 
-    if (mediaUrl && mediaUrl.startsWith('http')) {
-      param[mediaType] = { link: mediaUrl };
-    } else if (metaMediaId && /^\d+$/.test(String(metaMediaId))) {
+    // Meta ka media handle PEHLE, link sirf aakhri sahara.
+    //
+    // 21 Aug 2026 ko ye ulta kar diya gaya tha ("prefer permanent URL over
+    // media handle") aur tab se har media-header campaign (#135000) Generic
+    // user error de rahi thi - 0 sent. 8 Aug wali IMAGE campaign, jo handle
+    // use karti thi, 2,230 delivered kar chuki thi.
+    //
+    // Link ka ek aur nuksaan: Meta us URL ko HAR send par dobara download
+    // karta hai. 17,000 recipients matlab 17,000 downloads. Handle ek baar
+    // upload hota hai aur saare sends me reuse hota hai - tez bhi, bharosemand bhi.
+    if (metaMediaId && /^\d+$/.test(String(metaMediaId))) {
       param[mediaType] = { id: String(metaMediaId) };
+    } else if (mediaUrl && mediaUrl.startsWith('http')) {
+      console.warn(
+        `⚠️ Template "${template.name}": Meta media handle nahi mila, link se bhej rahe hain (fail ho sakta hai)`
+      );
+      param[mediaType] = { link: mediaUrl };
     } else {
       throw new Error(
         `Template "${template.name}" media not available. Please ensure media URL is configured.`
@@ -2061,15 +2073,26 @@ export class CampaignsService {
       const headerType = String(template.headerType || '').toUpperCase();
 
       if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType)) {
-        if (template.headerContent && template.headerContent.startsWith('http')) {
-          console.log(`✅ [Campaign ${campaignId}] Permanent media link found: ${template.headerContent.substring(0, 60)}`);
-        } else {
-          console.log(`📸 [Campaign ${campaignId}] Pre-uploading media to Meta...`);
-          cachedMediaId = await this.ensureMetaMediaId(
-            template, phoneNumberId, accessToken, wabaId
-          );
+        // Pehle yahan http URL milte hi upload skip ho jata tha aur builder
+        // link bhej deta tha - wahi (#135000) ki jad thi. Ab handle hamesha
+        // banate hain; wo ek baar upload hota hai aur poori campaign me
+        // reuse hota hai.
+        console.log(`📸 [Campaign ${campaignId}] Ensuring Meta media handle...`);
+        cachedMediaId = await this.ensureMetaMediaId(
+          template, phoneNumberId, accessToken, wabaId
+        );
 
-          if (!cachedMediaId) {
+        if (!cachedMediaId) {
+          const hasLink =
+            !!template.headerContent && template.headerContent.startsWith('http');
+
+          if (hasLink) {
+            // Handle na bana par permanent URL hai - link se koshish karne do.
+            // Campaign chalne dena behtar hai bajaye bina koshish ke rok dene ke.
+            console.warn(
+              `⚠️ [Campaign ${campaignId}] Media handle nahi bana, link fallback use hoga`
+            );
+          } else {
             console.error(`❌ [Campaign ${campaignId}] Media upload failed - PAUSING campaign`);
 
             await prisma.campaign.update({
@@ -2088,7 +2111,8 @@ export class CampaignsService {
 
             return;
           }
-          console.log(`✅ [Campaign ${campaignId}] Media ready: ${cachedMediaId}`);
+        } else {
+          console.log(`✅ [Campaign ${campaignId}] Media handle ready: ${cachedMediaId}`);
         }
       }
 
