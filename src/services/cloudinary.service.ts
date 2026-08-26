@@ -140,7 +140,13 @@ export class CloudinaryService {
     const mediaCategory = getMediaCategory(mimeType);
     const metaLimit = META_LIMITS[mediaCategory];
     const originalSize = file.length;
-    const needsCompression = originalSize > metaLimit;
+    // Images HAMESHA limit karo, sirf Meta ki 5MB seema paar karne par nahi.
+    // Wajah: template header ka URL Meta har single send par dobara download
+    // karta hai - 17,000 recipients ki campaign me 17,000 baar. Ek raw 1.6MB
+    // PNG par Meta (#135000) Generic user error deta tha aur poori campaign
+    // auto-pause ho jati thi, jabki wahi image transform hone par 0.26MB JPEG
+    // ban kar bina dikkat chalti hai.
+    const needsCompression = mediaCategory === 'image' || originalSize > metaLimit;
 
     console.log('☁️ Cloudinary upload starting:', {
       filename,
