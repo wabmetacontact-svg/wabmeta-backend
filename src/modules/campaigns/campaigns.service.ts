@@ -13,6 +13,7 @@ import prisma from '../../config/database';
 import axios from 'axios';
 import { notificationsService } from '../notifications/notifications.service';
 import { accountHealthService } from '../meta/accountHealth.service';
+import { describeMetaError } from '../meta/metaErrors';
 import {
   deductWalletForCampaign,
   getRateForCategory,
@@ -426,72 +427,55 @@ export class CampaignsService {
   }
 
   // ─── Error extractor ──────────────────────────────────────
+  //
+  // Pehle yahan apna alag ERROR_MAP tha, aur usme kuch matlab galat the -
+  // 131021 ko "rate limit" likha tha (asal me sender aur recipient ek hi
+  // number hone par aata hai), 131047 ko "not opted in" (asal me 24-hour
+  // window), 131057 ko "restricted" (asal me maintenance mode).
+  //
+  // Ab sab metaErrors.ts se aata hai, jo Meta ke documented list par bana
+  // hai - ek hi jagah, ek hi matlab.
   private extractFailureReason(error: any): {
     reason: string;
     isRateLimit: boolean;
     metaCode: number;
+    permanent: boolean;
+    stopCampaign: boolean;
   } {
-    const me = error.response?.data?.error;
-    const metaCode = me?.code || 0;
+    const me = error.response?.data?.error || error?.metaError;
 
     if (!me) {
       return {
         reason: (error.message || 'Unknown error').substring(0, 500),
         isRateLimit: false,
-        metaCode,
+        metaCode: 0,
+        permanent: false,
+        stopCampaign: false,
       };
     }
 
-    const subcode = me.error_subcode;
-    const details = String(me.error_data?.details || '');
-    const message = String(me.message || '');
+    const info = describeMetaError(me);
 
-    // Rate limit codes
-    const RATE_LIMIT_CODES = new Set([131048, 131021, 80007, 4, 613]);
-    const isRateLimit =
-      RATE_LIMIT_CODES.has(metaCode) ||
-      message.toLowerCase().includes('rate limit') ||
-      message.toLowerCase().includes('too many requests');
+    // Media errors me Meta ka apna detail zyada kaam ka hota hai
+    const detail = String(me.error_data?.details || '');
+    const reason =
+      info.category === 'MEDIA' && detail
+        ? `[${info.code}] ${detail}`.substring(0, 500)
+        : `[${info.code}] ${info.message}`.substring(0, 500);
 
-    const ERROR_MAP: Record<number, string> = {
-      // Rate limits
-      131048: 'Rate limit - Sending too fast',
-      131021: 'Rate limit - Meta throttling',
-      80007: 'Message rate limit',
-      4: 'API rate limit',
-      613: 'Rate limit exceeded',
-      // Media
-      131053: details.includes('No video stream')
-        ? 'Video corrupted - Re-encode H.264'
-        : details.includes('403')
-          ? 'Media URL inaccessible - Re-upload'
-          : `Media error: ${details || message}`,
-      131052: 'Media download failed',
-      // Template
-      132015: 'Template PAUSED by Meta',
-      132016: 'Template DISABLED by Meta',
-      132001: 'Template not found or not approved',
-      132000: 'Template parameters mismatch',
-      132005: 'Template hydration failed',
-      132007: 'Template content policy violation',
-      132012: 'Template format mismatch',
-      // Recipient
-      131030: 'Phone not on WhatsApp',
-      131026: 'Message undeliverable',
-      131056: 'Number restricted by Meta',
-      131047: 'User has not opted in',
-      // Account
-      131042: 'Payment issue - Check Meta account',
-      190: 'Access token expired - Reconnect WhatsApp',
-      368: 'Sender temporarily restricted',
-      100: 'Invalid parameter',
-      131051: 'Unsupported message type',
-      131057: 'Business account restricted',
+    if (!info.known) {
+      console.warn(
+        `⚠️ [Meta] Undocumented error code ${info.code} in campaign: ${info.raw || '(no detail)'}`
+      );
+    }
+
+    return {
+      reason,
+      isRateLimit: info.category === 'RATE_LIMIT',
+      metaCode: info.code,
+      permanent: info.permanent,
+      stopCampaign: info.stopCampaign === true,
     };
-
-    const reason = ERROR_MAP[metaCode] || `[${metaCode}] ${message}`.substring(0, 500);
-
-    return { reason, isRateLimit, metaCode };
   }
 
   // ─────────────────────────────────────────────────────────
@@ -2477,6 +2461,31 @@ export class CampaignsService {
               id: d.id, reason: d.reason,
               contactId: d.contactId, phone: d.phone,
             });
+
+            // Kuch errors ka matlab hai ki poori campaign ka chalna bekaar
+            // hai - token expire, payment method, template disabled, WABA
+            // restricted. Inpar 10 failures ka intezaar karna sirf paisa aur
+            // quality rating barbaad karna hai.
+            if (d.stopCampaign) {
+              console.error(
+                `🚨 [Campaign ${campaignId}] Stopping immediately: ${d.reason}`
+              );
+
+              await prisma.campaign.update({
+                where: { id: campaignId },
+                data: { status: 'PAUSED' },
+              });
+
+              campaignSocketService.emitCampaignError(organizationId, campaignId, {
+                message: d.reason,
+                code: 'BLOCKING_ERROR',
+                errorReason: d.reason,
+              } as any);
+
+              await flushPending();
+              stopReason = 'exit';
+              return;
+            }
 
             // Systematic issue detection
             const currentReason = d.reason;

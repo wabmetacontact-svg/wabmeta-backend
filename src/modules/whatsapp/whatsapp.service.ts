@@ -25,6 +25,7 @@ import {
 import { whatsappLog } from '../../utils/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { accountHealthService } from '../meta/accountHealth.service';
+import { describeMetaError } from '../meta/metaErrors';
 
 // ============================================
 // INTERFACES
@@ -117,53 +118,28 @@ class WhatsAppService {
     const digits = String(phoneNumber || '').replace(/[^0-9]/g, '');
     const isTestNumber = digits.startsWith('1555');
 
-    const code = Number(meta.code);
-    const detail =
-      meta.error_data?.details || meta.error_user_msg || meta.message || '';
+    // Ab har code metaErrors.ts se aata hai - Meta ke poore documented
+    // list se. Pehle yahan sirf 6 codes the aur baaki sab 500 ban jate the.
+    const info = describeMetaError(meta);
 
-    const friendly: Record<number, { message: string; status: number }> = {
-      131037: {
-        message: isTestNumber
-          ? 'This is a Meta test number - it can only message recipients you have added in the Meta developer console. ' +
-            'Connect your own business number to message anyone.'
-          : 'This number cannot send messages yet - its display name is still awaiting Meta approval. ' +
-            'Check the display name status in Business Profile settings.',
-        status: 400,
-      },
-      131047: {
-        message:
-          'This chat is outside the 24-hour messaging window. Send an approved template to start the conversation again.',
-        status: 400,
-      },
-      131026: {
-        message:
-          'This number cannot receive WhatsApp messages. It may not be registered on WhatsApp.',
-        status: 400,
-      },
-      132001: {
-        message:
-          'This template is not available in the selected language. Sync your templates and try again.',
-        status: 400,
-      },
-      131048: {
-        message:
-          'Meta is rate limiting this number right now. Please try again shortly.',
-        status: 429,
-      },
-      190: {
-        message:
-          'WhatsApp connection expired. Please reconnect your WhatsApp account in Settings.',
-        status: 401,
-      },
-    };
+    // Meta ke test numbers "1555..." ke liye 131037 ka matlab alag hai -
+    // display name pending nahi, balki wo sirf console me registered
+    // recipients ko hi bhej sakte hain.
+    if (info.code === 131037 && isTestNumber) {
+      return new AppError(
+        'This is a Meta test number - it can only message recipients you have added in the Meta developer console. ' +
+        'Connect your own business number to message anyone.',
+        400
+      );
+    }
 
-    const mapped = friendly[code];
-    if (mapped) return new AppError(mapped.message, mapped.status);
+    if (!info.known) {
+      console.warn(
+        `⚠️ [Meta] Undocumented error code ${info.code}: ${info.raw || '(no detail)'}`
+      );
+    }
 
-    // Baaki Meta errors - unka apna message dikha do, 500 mat banao
-    if (detail) return new AppError(detail, 400);
-
-    return err;
+    return new AppError(info.message, info.status);
   }
 
   // ============================================
