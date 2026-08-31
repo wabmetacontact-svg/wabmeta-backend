@@ -230,7 +230,12 @@ model WhatsAppAccount {
   // Alag fields isliye hain kyunki roz ki Meta sync qualityRating aur
   // messagingLimit ko overwrite karti hai - override ko chhodti hai.
   qualityRatingOverride  String?
-  healthCanSendOverride  String?   // AVAILABLE | BLOCKED
+  codeVerificationOverride String? // VERIFIED | NOT_VERIFIED | EXPIRED | PENDING
+
+  // Purana field - ab use nahi hota. DB me isliye chhoda hai kyunki chalu
+  // production ka build ise expect karta hai; hatane par har query P2022 se
+  // fail ho jati hai. Naya build sab jagah chalne ke baad hata sakte hain.
+  healthCanSendOverride  String?
   messagingLimitOverride String?
   overrideSetBy          String?
   overrideSetAt          DateTime?

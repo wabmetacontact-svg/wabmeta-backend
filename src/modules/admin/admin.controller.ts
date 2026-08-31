@@ -949,16 +949,19 @@ export class AdminController {
   async setAccountDisplayOverrides(req: AdminRequest, res: Response, next: NextFunction) {
     try {
       const { accountId } = req.params as { accountId: string };
-      const { qualityRating, messagingLimit, connectionStatus } = req.body as {
+      const {
+        qualityRating, messagingLimit, verificationStatus, connectionStatus,
+      } = req.body as {
         qualityRating?: string | null;
         messagingLimit?: string | null;
+        verificationStatus?: string | null;
         connectionStatus?: string | null;
       };
 
       const QUALITY = ['GREEN', 'YELLOW', 'RED', 'UNKNOWN'];
       const TIERS = ['TIER_250', 'TIER_1K', 'TIER_2K', 'TIER_10K', 'TIER_100K', 'TIER_UNLIMITED'];
-      // UI par sirf do haalat dikhti hain: chal raha hai, ya nahi chal raha.
-      const STATUS = ['AVAILABLE', 'BLOCKED'];
+      const VERIFICATION = ['VERIFIED', 'NOT_VERIFIED', 'EXPIRED', 'PENDING'];
+      const CONNECTION = ['CONNECTED', 'BAN', 'BLOCKED'];
 
       const clean = (v: any, allowed: string[], label: string) => {
         if (v === undefined) return undefined;                 // chhua hi nahi
@@ -975,11 +978,12 @@ export class AdminController {
 
       const q = clean(qualityRating, QUALITY, 'quality rating');
       const t = clean(messagingLimit, TIERS, 'messaging tier');
-      const st = clean(connectionStatus, STATUS, 'connection status');
+      const v = clean(verificationStatus, VERIFICATION, 'verification status');
+      const c = clean(connectionStatus, CONNECTION, 'connection status');
 
-      if (q === undefined && t === undefined && st === undefined) {
+      if (q === undefined && t === undefined && v === undefined && c === undefined) {
         throw new AppError(
-          'Send qualityRating, messagingLimit and/or connectionStatus',
+          'Send qualityRating, messagingLimit, verificationStatus and/or connectionStatus',
           400
         );
       }
@@ -993,7 +997,8 @@ export class AdminController {
       const data: any = {};
       if (q !== undefined) data.qualityRatingOverride = q;
       if (t !== undefined) data.messagingLimitOverride = t;
-      if (st !== undefined) data.healthCanSendOverride = st;
+      if (v !== undefined) data.codeVerificationOverride = v;
+      if (c !== undefined) data.healthCanSendOverride = c;
 
       // Koi bhi override bacha ho to "kaun ne set kiya" rakho, warna saaf
       const current = await prisma.whatsAppAccount.findUnique({
@@ -1001,14 +1006,16 @@ export class AdminController {
         select: {
           qualityRatingOverride: true,
           messagingLimitOverride: true,
+          codeVerificationOverride: true,
           healthCanSendOverride: true,
         } as any,
       }) as any;
 
       const finalQ = q !== undefined ? q : current?.qualityRatingOverride;
       const finalT = t !== undefined ? t : current?.messagingLimitOverride;
-      const finalS = st !== undefined ? st : current?.healthCanSendOverride;
-      const anySet = !!(finalQ || finalT || finalS);
+      const finalV = v !== undefined ? v : current?.codeVerificationOverride;
+      const finalC = c !== undefined ? c : current?.healthCanSendOverride;
+      const anySet = !!(finalQ || finalT || finalV || finalC);
 
       data.overrideSetBy = anySet ? req.admin?.email || req.admin?.id || 'admin' : null;
       data.overrideSetAt = anySet ? new Date() : null;
@@ -1020,6 +1027,7 @@ export class AdminController {
           id: true, phoneNumber: true,
           qualityRating: true, qualityRatingOverride: true,
           messagingLimit: true, messagingLimitOverride: true,
+          codeVerificationStatus: true, codeVerificationOverride: true,
           healthCanSend: true, healthCanSendOverride: true,
           overrideSetBy: true, overrideSetAt: true,
         } as any,
@@ -1028,7 +1036,7 @@ export class AdminController {
       console.log(
         `⚙️ [Admin] Display override for ${account.phoneNumber}: ` +
         `quality=${q ?? '(unchanged)'} tier=${t ?? '(unchanged)'} ` +
-        `status=${st ?? '(unchanged)'} ` +
+        `verification=${v ?? '(unchanged)'} connection=${c ?? '(unchanged)'} ` +
         `| Meta says quality=${account.qualityRating} tier=${account.messagingLimit}`
       );
 
@@ -1071,9 +1079,13 @@ export class AdminController {
           // Admin ko dono dikhne chahiye - Meta ka asli, aur jo user ko dikh raha hai
           displayQualityRating: c.qualityRatingOverride || c.qualityRating,
           displayMessagingLimit: c.messagingLimitOverride || c.messagingLimit,
-          displayCanSend: c.healthCanSendOverride || c.healthCanSend,
+          displayVerification: c.codeVerificationOverride || c.codeVerificationStatus,
+          displayConnection:
+            c.healthCanSendOverride ||
+            (c.healthCanSend === 'BLOCKED' ? 'BLOCKED' : 'CONNECTED'),
           hasOverride: !!(
-            c.qualityRatingOverride || c.messagingLimitOverride || c.healthCanSendOverride
+            c.qualityRatingOverride || c.messagingLimitOverride ||
+            c.codeVerificationOverride || c.healthCanSendOverride
           ),
         };
       });

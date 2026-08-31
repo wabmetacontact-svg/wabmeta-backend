@@ -24,7 +24,7 @@ import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
 import { getRedis } from '../../config/redis';
 import { metaLog } from '../../utils/logger';
-import { toClientAccount } from './accountView';
+import { toClientAccount, tierDailyLimit } from './accountView';
 
 async function extractStoredPin(
   webhookSecretEncrypted: string | null
@@ -64,14 +64,8 @@ export class MetaService {
   // Meta ke messaging tiers. Value = 24 ghante mein kitne UNIQUE customers
   // ko business-initiated message bhej sakte ho. null = unlimited.
   // Docs: https://developers.facebook.com/docs/whatsapp/messaging-limits
-  private static readonly TIER_DAILY_LIMIT: Record<string, number | null> = {
-    TIER_50: 50,
-    TIER_250: 250,
-    TIER_1K: 1000,
-    TIER_10K: 10000,
-    TIER_100K: 100000,
-    TIER_UNLIMITED: null,
-  };
+  // Tier ka daily limit ab accountView se aata hai - ek hi jagah, taaki
+  // naya tier jodte waqt do jagah badalna na pade.
 
   /**
    * Account ka asli messaging limit + last 24h ka usage.
@@ -85,10 +79,7 @@ export class MetaService {
     const accountId = account.id;
     const tier = account.messagingLimit as string | null;
 
-    const perDay =
-      tier && tier in MetaService.TIER_DAILY_LIMIT
-        ? MetaService.TIER_DAILY_LIMIT[tier]
-        : null;
+    const perDay = tierDailyLimit(tier);
 
     // Tier na hone ke do bilkul alag matlab hote hain, aur UI ko dono alag
     // dikhane chahiye:
