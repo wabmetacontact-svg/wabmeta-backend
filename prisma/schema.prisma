@@ -230,6 +230,7 @@ model WhatsAppAccount {
   // Alag fields isliye hain kyunki roz ki Meta sync qualityRating aur
   // messagingLimit ko overwrite karti hai - override ko chhodti hai.
   qualityRatingOverride  String?
+  healthCanSendOverride  String?   // AVAILABLE | BLOCKED
   messagingLimitOverride String?
   overrideSetBy          String?
   overrideSetAt          DateTime?

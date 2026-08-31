@@ -24,6 +24,7 @@ import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
 import { getRedis } from '../../config/redis';
 import { metaLog } from '../../utils/logger';
+import { toClientAccount } from './accountView';
 
 async function extractStoredPin(
   webhookSecretEncrypted: string | null
@@ -146,25 +147,7 @@ export class MetaService {
   }
 
   private sanitizeAccount(account: any) {
-    if (!account) return null;
-
-    // healthStatus ka poora raw payload client ko bhejne ki zaroorat nahi -
-    // usme Meta ke internal ids hote hain. Sirf natija aur wajah bhejo.
-    const {
-      accessToken, webhookSecret, healthStatus,
-      qualityRatingOverride, messagingLimitOverride, overrideSetBy, overrideSetAt,
-      ...safe
-    } = account as any;
-
-    // Admin ne value set ki ho to user ko wahi dikhe. Ye sirf display hai -
-    // sending hamesha Meta ke asli tier par chalti hai.
-    if (qualityRatingOverride) safe.qualityRating = qualityRatingOverride;
-    if (messagingLimitOverride) safe.messagingLimit = messagingLimitOverride;
-    return {
-      ...safe,
-      hasAccessToken: !!accessToken,
-      hasWebhookSecret: !!webhookSecret,
-    };
+    return toClientAccount(account);
   }
 
   private detectConnectionType(metaData: any): string {

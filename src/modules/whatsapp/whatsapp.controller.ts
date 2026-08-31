@@ -5,6 +5,7 @@ import { whatsappService } from './whatsapp.service';
 import { successResponse, errorResponse } from '../../utils/response';
 import { resolveOrganizationId } from '../../utils/resolveOrgId';
 import { AuthRequest } from '../../types/express';
+import { toClientAccount } from '../meta/accountView';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -16,10 +17,10 @@ import { AuthRequest } from '../../types/express';
 const getOrgId = (req: Request): Promise<string> =>
   resolveOrganizationId(req as AuthRequest);
 
-const sanitizeAccount = (account: any) => {
-  const { accessToken, webhookSecret, ...safe } = account;
-  return { ...safe, hasAccessToken: !!accessToken };
-};
+// Shared sanitizer. Pehle yahan apni copy thi jo admin ke display overrides
+// apply nahi karti thi - isliye "Sync" dabate hi admin ki set ki hui value
+// gayab ho jati thi aur Meta wali wapas aa jati thi.
+const sanitizeAccount = toClientAccount;
 
 const verifyOrgAccess = async (userId: string, organizationId: string) => {
   const member = await prisma.organizationMember.findUnique({
