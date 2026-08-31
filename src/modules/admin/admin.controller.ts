@@ -6,6 +6,8 @@ import { adminService } from './admin.service';
 import { adminBillingService } from './admin.billing.service';
 import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
+import { accountHealthService } from '../meta/accountHealth.service';
+import { metaService } from '../meta/meta.service';
 
 // ============================================
 // TYPES
@@ -883,6 +885,137 @@ export class AdminController {
     }
   }
 
+  /**
+   * Meta se account ki taaza haalat kheencho - quality rating, messaging
+   * tier, verification aur health (payment method, banned WABA, etc).
+   *
+   * Quality rating aur tier dono Meta assign karta hai; koi API unhe set
+   * nahi karne deti. Isliye admin sirf refresh kar sakta hai, badal nahi.
+   */
+  async refreshWhatsAppAccount(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { accountId } = req.params as { accountId: string };
+
+      const account = await prisma.whatsAppAccount.findUnique({
+        where: { id: accountId },
+        select: { id: true, organizationId: true, phoneNumber: true },
+      });
+      if (!account) throw new AppError('WhatsApp account not found', 404);
+
+      // Quality / tier / verification
+      await metaService
+        .refreshAccountHealth(account.id, account.organizationId)
+        .catch((e: any) =>
+          console.warn('Admin refresh: health sync failed:', e?.message)
+        );
+
+      // can_send_message aur uski wajah
+      const health = await accountHealthService
+        .get(account.id, { force: true })
+        .catch(() => null);
+
+      const fresh = await prisma.whatsAppAccount.findUnique({
+        where: { id: accountId },
+        select: {
+          id: true, phoneNumber: true, qualityRating: true,
+          messagingLimit: true, messagingLimitOverride: true,
+          nameStatus: true, codeVerificationStatus: true, status: true,
+          healthCanSend: true, healthBlockedReason: true, healthCheckedAt: true,
+        } as any,
+      });
+
+      return sendSuccess(res, {
+        account: fresh,
+        health: health
+          ? { canSend: health.canSend, blocked: health.blocked, summary: health.summary, issues: health.issues }
+          : null,
+      }, 'Account refreshed from Meta');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Admin ke display overrides set/clear karo.
+   *
+   * Ye Meta par KUCH NAHI badalta - quality rating aur tier Meta assign
+   * karta hai aur koi API unhe set nahi karne deti. Ye sirf ye tay karta
+   * hai ki WabMeta me user ko kya dikhe.
+   *
+   * Sending par bhi koi asar nahi: campaign speed hamesha Meta ke asli
+   * tier se chalti hai. Agar override speed bhi badal deta to admin
+   * galti se TIER_100K dikha kar Meta ka rate limit tudwa sakta tha.
+   */
+  async setAccountDisplayOverrides(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { accountId } = req.params as { accountId: string };
+      const { qualityRating, messagingLimit } = req.body as {
+        qualityRating?: string | null;
+        messagingLimit?: string | null;
+      };
+
+      const QUALITY = ['GREEN', 'YELLOW', 'RED', 'UNKNOWN'];
+      const TIERS = ['TIER_250', 'TIER_1K', 'TIER_2K', 'TIER_10K', 'TIER_100K', 'TIER_UNLIMITED'];
+
+      const clean = (v: any, allowed: string[], label: string) => {
+        if (v === undefined) return undefined;                 // chhua hi nahi
+        if (v === null || v === '') return null;               // hata do
+        const up = String(v).toUpperCase();
+        if (!allowed.includes(up)) {
+          throw new AppError(
+            `Invalid ${label}. Use one of: ${allowed.join(', ')} - or send null to clear it.`,
+            400
+          );
+        }
+        return up;
+      };
+
+      const q = clean(qualityRating, QUALITY, 'quality rating');
+      const t = clean(messagingLimit, TIERS, 'messaging tier');
+
+      if (q === undefined && t === undefined) {
+        throw new AppError('Send qualityRating and/or messagingLimit', 400);
+      }
+
+      const account = await prisma.whatsAppAccount.findUnique({
+        where: { id: accountId },
+        select: { id: true, phoneNumber: true, qualityRating: true, messagingLimit: true },
+      });
+      if (!account) throw new AppError('WhatsApp account not found', 404);
+
+      const data: any = {};
+      if (q !== undefined) data.qualityRatingOverride = q;
+      if (t !== undefined) data.messagingLimitOverride = t;
+
+      const anySet =
+        (q !== undefined ? q : account.qualityRating) != null ||
+        (t !== undefined ? t : null) != null;
+      data.overrideSetBy = anySet ? req.admin?.email || req.admin?.id || 'admin' : null;
+      data.overrideSetAt = anySet ? new Date() : null;
+
+      const updated = await prisma.whatsAppAccount.update({
+        where: { id: accountId },
+        data,
+        select: {
+          id: true, phoneNumber: true,
+          qualityRating: true, qualityRatingOverride: true,
+          messagingLimit: true, messagingLimitOverride: true,
+          overrideSetBy: true, overrideSetAt: true,
+        } as any,
+      });
+
+      console.log(
+        `⚙️ [Admin] Display override for ${account.phoneNumber}: ` +
+        `quality=${q ?? '(unchanged)'} tier=${t ?? '(unchanged)'} ` +
+        `| Meta says quality=${account.qualityRating} tier=${account.messagingLimit}`
+      );
+
+      return sendSuccess(res, updated, 'Display values updated');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getWhatsAppConnections(req: AdminRequest, res: Response, next: NextFunction) {
     try {
       const connections = await prisma.whatsAppAccount.findMany({
@@ -905,7 +1038,22 @@ export class AdminController {
         orderBy: { createdAt: 'desc' }
       });
 
-      return sendSuccess(res, connections, 'WhatsApp connections fetched');
+      // include: {} har scalar field lauta deta hai - jisme accessToken aur
+      // webhookSecret bhi hain. Wo encrypted hain, par client tak jaane ki
+      // koi wajah nahi. Bhejne se pehle hata do.
+      const safe = connections.map((c: any) => {
+        const { accessToken, webhookSecret, healthStatus, ...rest } = c;
+        return {
+          ...rest,
+          hasAccessToken: !!accessToken,
+          // Admin ko dono dikhne chahiye - Meta ka asli, aur jo user ko dikh raha hai
+          displayQualityRating: c.qualityRatingOverride || c.qualityRating,
+          displayMessagingLimit: c.messagingLimitOverride || c.messagingLimit,
+          hasOverride: !!(c.qualityRatingOverride || c.messagingLimitOverride),
+        };
+      });
+
+      return sendSuccess(res, safe, 'WhatsApp connections fetched');
     } catch (error) {
       next(error);
     }

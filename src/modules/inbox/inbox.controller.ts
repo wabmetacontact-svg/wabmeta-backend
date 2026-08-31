@@ -19,6 +19,8 @@ import fs from 'fs';
 import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+import { r2Service } from '../../services/r2.service';
+import { cloudinaryService } from '../../services/cloudinary.service';
 
 // Set ffmpeg path
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
@@ -565,7 +567,72 @@ export class InboxController {
         }
       }
 
-      const url = `${proto}://${host}/uploads/media/${finalFilename}`;
+      // ── Permanent storage par bhejo ───────────────────────
+      //
+      // Pehle yahan sirf local disk ka URL lautaya jata tha:
+      //   https://api.wabmeta.com/uploads/media/xxx.ogg
+      //
+      // Render ka filesystem ephemeral hai - har deploy/restart par
+      // uploads/ mit jata hai, aur multiple instances ek dusre ki files
+      // nahi dekh sakte. Meta us URL ko download karta hai, isliye file
+      // gayab hote hi voice message bhejna fail ho jata tha. DB me aise
+      // 2,000+ messages hain jinke URL ab 404 dete hain.
+      //
+      // Inbound media pehle se Cloudinary/R2 par jata hai - outbound bhi
+      // wahi karta hai ab.
+      const localPath = path.join(path.dirname(req.file.path), finalFilename);
+      let url = `${proto}://${host}/uploads/media/${finalFilename}`;
+      let uploadedPermanently = false;
+
+      try {
+        const buffer = fs.readFileSync(
+          fs.existsSync(localPath) ? localPath : req.file.path
+        );
+        const cleanMime = finalMime.split(';')[0].trim();
+
+        if (r2Service.isConfigured()) {
+          const r2 = await r2Service.uploadMediaBuffer(
+            buffer,
+            finalFilename,
+            cleanMime,
+            `outbound/${organizationId}`
+          );
+          if (r2?.url) {
+            url = r2.url;
+            uploadedPermanently = true;
+          }
+        }
+
+        if (!uploadedPermanently && cloudinaryService.isConfigured()) {
+          const cl = await cloudinaryService.uploadInboundMedia({
+            buffer,
+            mimeType: cleanMime,
+            organizationId,
+            messageId: `outbound_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          });
+          if (cl?.url) {
+            url = cl.url;
+            uploadedPermanently = true;
+          }
+        }
+      } catch (err: any) {
+        console.error('❌ Permanent media upload failed:', err?.message);
+      }
+
+      if (!uploadedPermanently) {
+        // Local URL sirf kuch der zinda rehta hai. Bhejna fail ho sakta hai,
+        // isliye saaf log rakhte hain - warna wajah dhoondhni mushkil hoti hai.
+        console.warn(
+          '⚠️ Media stored on local disk only - it will disappear on the next ' +
+          'deploy or restart, and WhatsApp may fail to fetch it. ' +
+          'Configure R2 or Cloudinary to fix this permanently.'
+        );
+      } else {
+        // Permanent copy ban gayi - local file ki ab zaroorat nahi
+        for (const f of [localPath, req.file.path]) {
+          try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch { /* best effort */ }
+        }
+      }
 
       const mediaType =
         finalMime.startsWith('image/') ? 'image'

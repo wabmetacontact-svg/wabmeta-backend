@@ -429,6 +429,19 @@ router.post(
   adminController.disconnectWhatsAppAccount.bind(adminController)
 );
 
+// Meta se taaza quality rating / tier / health kheencho
+router.post(
+  '/whatsapp-connections/:accountId/refresh',
+  adminController.refreshWhatsAppAccount.bind(adminController)
+);
+
+// Display overrides - user ko kya dikhe. Meta par kuch nahi badalta,
+// aur sending par bhi koi asar nahi.
+router.put(
+  '/whatsapp-connections/:accountId/display',
+  adminController.setAccountDisplayOverrides.bind(adminController)
+);
+
 // ============================================
 // WALLET MANAGEMENT ROUTES
 // ============================================

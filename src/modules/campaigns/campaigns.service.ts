@@ -2191,6 +2191,9 @@ export class CampaignsService {
 
       // Tier ab roz Meta se sync hota hai. Anjaan naam aaye to sabse dheemi
       // setting par giro - tez chalne se behtar hai ki Meta rate-limit na kare.
+      // Send speed HAMESHA Meta ke asli tier se aati hai. Admin ka override
+      // sirf dikhane ke liye hai - agar wo speed bhi badal deta to admin
+      // TIER_100K dikha kar galti se Meta ka rate limit tudwa sakta tha.
       const tierName = String(campaign.whatsappAccount.messagingLimit || '')
         .toUpperCase() as keyof typeof SEND_CONFIG.TIER_LIMITS;
       const tierConfig = SEND_CONFIG.TIER_LIMITS[tierName] ?? SEND_CONFIG.TIER_LIMITS.TIER_250;

@@ -150,7 +150,16 @@ export class MetaService {
 
     // healthStatus ka poora raw payload client ko bhejne ki zaroorat nahi -
     // usme Meta ke internal ids hote hain. Sirf natija aur wajah bhejo.
-    const { accessToken, webhookSecret, healthStatus, ...safe } = account;
+    const {
+      accessToken, webhookSecret, healthStatus,
+      qualityRatingOverride, messagingLimitOverride, overrideSetBy, overrideSetAt,
+      ...safe
+    } = account as any;
+
+    // Admin ne value set ki ho to user ko wahi dikhe. Ye sirf display hai -
+    // sending hamesha Meta ke asli tier par chalti hai.
+    if (qualityRatingOverride) safe.qualityRating = qualityRatingOverride;
+    if (messagingLimitOverride) safe.messagingLimit = messagingLimitOverride;
     return {
       ...safe,
       hasAccessToken: !!accessToken,

@@ -218,6 +218,21 @@ model WhatsAppAccount {
   healthBlockedReason    String?   @db.Text
   healthStatus           Json?
   healthCheckedAt        DateTime?
+
+  // Admin ke display overrides.
+  //
+  // Quality rating aur messaging tier dono Meta assign karta hai - koi API
+  // unhe set nahi karne deti. Ye fields sirf ye tay karti hain ki WabMeta
+  // me user ko KYA DIKHE. Sending par inka koi asar nahi: campaign speed
+  // hamesha Meta ke asli tier se chalti hai, warna admin galti se Meta ka
+  // rate limit tudwa deta.
+  //
+  // Alag fields isliye hain kyunki roz ki Meta sync qualityRating aur
+  // messagingLimit ko overwrite karti hai - override ko chhodti hai.
+  qualityRatingOverride  String?
+  messagingLimitOverride String?
+  overrideSetBy          String?
+  overrideSetAt          DateTime?
   verifiedName           String?
   messagingLimit         String?
   dailyMessageLimit      Int                   @default(1000)
