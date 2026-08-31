@@ -755,7 +755,11 @@ export class MetaService {
         // Background mein Meta se laa lo - agli baar sahi dikhega.
         this.ensureTierSynced(account);
 
-        return { ...this.sanitizeAccount(account), ...usage };
+        // usage PEHLE merge karo, phir sanitize. Ulta karne par usage ka
+        // messagingLimitPerDay (Meta ke asli tier se) admin ke override par
+        // chad jata tha - card upar 100,000/day aur neeche "0 / 2,000 used"
+        // dikhata tha.
+        return this.sanitizeAccount({ ...account, ...usage });
       })
     );
   }
@@ -797,7 +801,7 @@ export class MetaService {
 
     this.ensureTierSynced(account);
 
-    return { ...this.sanitizeAccount(account), ...usage };
+    return this.sanitizeAccount({ ...account, ...usage });
   }
 
   /**
