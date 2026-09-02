@@ -1,5 +1,6 @@
 // src/utils/jwt.ts - PRODUCTION FIX
 import jwt, { SignOptions, Secret } from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 import { config } from '../config';
 
 export interface TokenPayload {
@@ -8,6 +9,8 @@ export interface TokenPayload {
   organizationId?: string;
   tokenVersion:    number;
   type:            'access' | 'refresh';
+  // Sirf refresh tokens par lagta hai - dekho generateRefreshToken
+  jti?:            string;
   iat?:            number;
   exp?:            number;
 }
@@ -49,7 +52,23 @@ export const generateRefreshToken = (
     expiresIn: getExpirySeconds(config.jwt.refreshExpiresIn),
     // ✅ NO issuer/audience - backward compatible
   };
-  return jwt.sign({ ...payload, type: 'refresh' }, secret, options);
+
+  // jti har token ko alag banata hai.
+  //
+  // Iske bina payload sirf { userId, email, organizationId, tokenVersion }
+  // tha, aur JWT me iat/exp seconds me hote hain - to ek hi user ke do
+  // refresh same second me hone par bilkul same string banti thi. Phir
+  // refreshToken.create() unique constraint (token @unique) par P2002
+  // deta tha, jo errorHandler me 409 "This token already exists" ban kar
+  // client tak jaata tha aur us request ko fail kar deta tha.
+  //
+  // Ye aasani se hota hai: dashboard ek saath 4 call karta hai, aur user
+  // ke kai devices/tabs ek saath logged in ho sakte hain.
+  return jwt.sign(
+    { ...payload, type: 'refresh', jti: randomUUID() },
+    secret,
+    options
+  );
 };
 
 export const verifyAccessToken = (token: string): TokenPayload => {
