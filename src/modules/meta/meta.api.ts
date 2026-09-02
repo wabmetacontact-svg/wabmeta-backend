@@ -86,7 +86,29 @@ class MetaApiClient {
 
         const isRestricted = metaError?.code === 100 && metaError?.error_subcode === 33;
         const isSmbRestriction = metaError?.code === 100 && metaError?.message?.includes('SMB');
-        const isHandledError = isRestricted || isSmbRestriction;
+        
+        let isReadOrTyping = false;
+        if (url.endsWith('/messages') && error.config?.data) {
+          try {
+            const body =
+              typeof error.config.data === 'string'
+                ? JSON.parse(error.config.data)
+                : error.config.data;
+            if (body?.status === 'read' || body?.typing_indicator) {
+              isReadOrTyping = true;
+            }
+          } catch {}
+        }
+
+        const detailsStr = String(
+          metaError?.error_data?.details ||
+          metaError?.error_user_msg ||
+          metaError?.message ||
+          ''
+        );
+        const isMessageNotExist = metaError?.code === 100 && detailsStr.toLowerCase().includes('does not exist');
+        const isSilent = (error.config as any)?.silent || isReadOrTyping || isMessageNotExist;
+        const isHandledError = isRestricted || isSmbRestriction || isSilent;
 
         const errorContext: any = {
           method,
@@ -134,7 +156,9 @@ class MetaApiClient {
             }
           }
 
-          if (isHandledError) {
+          if (isSilent) {
+            metaLog.debug(`API handled note (silent): ${metaError.message}`, errorContext);
+          } else if (isHandledError) {
             metaLog.warn(`API handled note: ${metaError.message}`, errorContext);
           } else {
             metaLog.error(`API error: ${metaError.message}`, null, errorContext);

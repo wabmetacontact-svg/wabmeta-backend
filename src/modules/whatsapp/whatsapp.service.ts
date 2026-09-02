@@ -872,12 +872,20 @@ class WhatsAppService {
       const now = new Date();
       let expired = false;
 
-      if (windowSource?.windowExpiresAt) {
-        expired = new Date(windowSource.windowExpiresAt) <= now;
-      } else if (windowSource?.isWindowOpen === false) {
+      if (windowSource) {
+        if (windowSource.windowExpiresAt) {
+          expired = new Date(windowSource.windowExpiresAt) <= now;
+        } else if (windowSource.isWindowOpen === false) {
+          expired = true;
+        } else if (windowSource.lastCustomerMessageAt) {
+          expired = now.getTime() - new Date(windowSource.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
+        } else {
+          // Customer has never replied - session window is closed
+          expired = true;
+        }
+      } else {
+        // New contact with no previous chat - must initiate with a template
         expired = true;
-      } else if (windowSource?.lastCustomerMessageAt) {
-        expired = now.getTime() - new Date(windowSource.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
       }
 
       if (expired) {
@@ -1711,6 +1719,12 @@ private buildTemplateComponents(
       });
       if (!lastIncoming || !lastIncoming.wamId) return { success: false, reason: 'No incoming message' };
 
+      // Meta Cloud API only retains / allows read receipts for messages sent within the active window (24h)
+      const ageMs = Date.now() - new Date(lastIncoming.createdAt).getTime();
+      if (ageMs > 24 * 60 * 60 * 1000) {
+        return { success: false, reason: 'Message too old for typing indicator' };
+      }
+
       const conversation = await prisma.conversation.findUnique({
         where: { id: conversationId },
       });
@@ -1730,7 +1744,7 @@ private buildTemplateComponents(
 
       return { success: true };
     } catch (error: any) {
-      console.error('❌ Failed to send typing indicator:', error);
+      console.warn('⚠️ sendTypingIndicator ignored failure:', error.message || error);
       return { success: false, error: error.message };
     }
   }

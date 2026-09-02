@@ -232,22 +232,43 @@ const storage = multer.diskStorage({
 // Only real chat media. Blocks HTML/SVG/JS, which would execute in the browser
 // if opened from our own origin (stored XSS).
 const ALLOWED_UPLOAD_MIMES = new Set([
-  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-  'video/mp4', 'video/3gpp', 'video/quicktime',
-  'audio/mpeg', 'audio/ogg', 'audio/aac', 'audio/amr', 'audio/mp4',
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif',
+  'video/mp4', 'video/3gpp', 'video/quicktime', 'video/webm', 'video/x-msvideo',
+  'audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/aac', 'audio/amr', 'audio/mp4',
+  'audio/m4a', 'audio/x-m4a', 'audio/webm', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/opus',
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'text/plain',
+  'text/csv',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/octet-stream',
+]);
+
+const ALLOWED_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif',
+  'mp4', '3gp', 'mov', 'webm', 'avi',
+  'mp3', 'ogg', 'opus', 'aac', 'amr', 'm4a', 'wav',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'txt', 'csv', 'zip',
 ]);
 
 const upload = multer({
   storage,
-  limits: { fileSize: 16 * 1024 * 1024 }, // 16MB
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
   fileFilter: (_req: Request, file: any, cb: any) => {
-    if (ALLOWED_UPLOAD_MIMES.has(file.mimetype)) return cb(null, true);
+    const rawMime = (file.mimetype || '').toLowerCase();
+    const cleanMime = rawMime.split(';')[0].trim();
+    const ext = (file.originalname || '').split('.').pop()?.toLowerCase() || '';
+
+    if (ALLOWED_UPLOAD_MIMES.has(cleanMime) || ALLOWED_UPLOAD_MIMES.has(rawMime) || ALLOWED_EXTENSIONS.has(ext)) {
+      return cb(null, true);
+    }
     cb(new Error(`Unsupported file type: ${file.mimetype}`));
   },
 });

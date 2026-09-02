@@ -1313,7 +1313,29 @@ export class WebhookService {
     console.log(`✅ Message status updated: ${message.id} -> ${newStatus}`);
 
     if (newStatus === 'FAILED') {
+      const firstError = statusObj?.errors?.[0];
+      const errorCode = firstError?.code;
       console.error(`❌ Message ${message.id} failed. Meta Error:`, JSON.stringify(statusObj?.errors || [], null, 2));
+
+      // 131047: Re-engagement message -> customer service window is closed
+      if (errorCode === 131047 && message.conversationId) {
+        prisma.conversation.update({
+          where: { id: message.conversationId },
+          data: {
+            isWindowOpen: false,
+            windowExpiresAt: new Date(),
+          },
+        }).catch((err: any) => console.error('Failed to update conversation window state:', err?.message));
+
+        webhookEvents.emit('conversationUpdated', {
+          organizationId: message.conversation?.organizationId || organizationId,
+          conversation: {
+            id: message.conversationId,
+            isWindowOpen: false,
+            windowExpiresAt: new Date().toISOString(),
+          },
+        });
+      }
     }
 
     const metadata = (message.metadata as any) || {};
