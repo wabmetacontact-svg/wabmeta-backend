@@ -545,6 +545,19 @@ export class ContactsService {
       throw new AppError('No valid contacts found. Check file format.', 400);
     }
 
+    // Bina opt-in wali list hi number ban hone ki sabse badi wajah hai: log
+    // block/report karte hain, quality girti hai, Meta restrict kar deta hai.
+    // Confirmation abhi clients enforce karte hain - backend ise required nahi
+    // kar sakta jab tak purana mobile build chal raha hai (dekho
+    // contacts.schema.ts) - par jo import bina confirmation ke aata hai wo
+    // dikhna chahiye, warna pata hi nahi chalega kaun aisi list chadha raha hai.
+    if (!input.optInConfirmed) {
+      console.warn(
+        `⚠️ [Import] org ${organizationId}: ${contacts.length} contacts imported ` +
+        'without an opt-in confirmation'
+      );
+    }
+
     // ── Resolve group ──────────────────────────────────────
     let targetGroupId = groupId;
 
