@@ -1348,19 +1348,36 @@ export class AuthService {
 
       // ✅ FIX 5: Genuine attack = koi bhi token nahi + old token use ho raha hai
       // Tabhi nuke karo
-      console.error(
-        `🚨 TOKEN REUSE ATTACK detected for user ${payload.userId}`
-      );
-
-      await prisma.$transaction([
+      //
+      // updateMany, update nahi. User ka na hona yahan bilkul normal hai:
+      // account delete hone par row cascade me chali jati hai, par uske
+      // device par tokens pade rehte hain aur wo refresh maarta rehta hai.
+      // update() us case me P2025 phekta hai, poori transaction roll back
+      // hoti hai, aur neeche wala 401 kabhi chalta hi nahi - client ko 404
+      // milta hai. Client sirf 401 par logout karta hai, isliye deleted
+      // user ki app kabhi logout hoti hi nahi, bas har request fail karti
+      // rehti hai. updateMany 0 rows par chup-chaap nikal jata hai.
+      const [, bumped] = await prisma.$transaction([
         prisma.refreshToken.deleteMany({
           where: { userId: payload.userId },
         }),
-        prisma.user.update({
+        prisma.user.updateMany({
           where: { id: payload.userId },
           data: { tokenVersion: { increment: 1 } },
         }),
       ]);
+
+      // 0 rows ka matlab user hi nahi bacha - wo delete ho chuka account hai,
+      // attack nahi. Dono ka jawab same 401 hai, par log alag hona chahiye:
+      // har deleted user par "ATTACK" chhapega to asli attack us shor me kho
+      // jayega.
+      if (bumped.count === 0) {
+        console.warn(
+          `Refresh from a deleted account (user ${payload.userId}) - asking the client to sign in again`
+        );
+      } else {
+        console.error(`🚨 TOKEN REUSE ATTACK detected for user ${payload.userId}`);
+      }
 
       throw new AppError(
         'Session invalidated due to security concern. Please login again.',
