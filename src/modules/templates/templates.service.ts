@@ -210,6 +210,35 @@ const normalizeHeaderType = (t?: string | null) => {
   return ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) ? headerType : 'NONE';
 };
 
+// WhatsApp ka footer 60 characters ka hota hai.
+const FOOTER_MAX = 60;
+const OPT_OUT_NOTICE = 'Reply STOP to unsubscribe';
+
+/**
+ * MARKETING template ke footer me opt-out ki line jodta hai.
+ *
+ * - UTILITY / AUTHENTICATION ko chhod deta hai - unme opt-out expected nahi hai
+ * - Agar footer me pehle se stop/unsubscribe/opt out likha hai to haath nahi lagata
+ * - Business ka apna footer kabhi kaatta nahi: jodne se 60 char paar hote hon
+ *   to unka footer waisa hi rehne deta hai
+ */
+export function withOptOutNotice(
+  category: string | null | undefined,
+  footerText: string | null | undefined
+): string | null {
+  const isMarketing = String(category || '').toUpperCase() === 'MARKETING';
+  const existing = (footerText || '').trim();
+
+  if (!isMarketing) return existing || null;
+
+  if (/\b(stop|unsubscribe|opt[\s-]?out)\b/i.test(existing)) return existing;
+
+  if (!existing) return OPT_OUT_NOTICE;
+
+  const combined = `${existing} · ${OPT_OUT_NOTICE}`;
+  return combined.length <= FOOTER_MAX ? combined : existing;
+}
+
 // ============================================
 // ✅ FIXED: buildMetaTemplatePayload
 // ============================================
@@ -335,8 +364,16 @@ const buildMetaTemplatePayload = (t: {
   // ============================================
   // FOOTER COMPONENT
   // ============================================
-  if (t.footerText) {
-    components.push({ type: 'FOOTER', text: t.footerText });
+  // MARKETING templates me opt-out ka raasta dikhna chahiye. WhatsApp ki
+  // Business Messaging Policy yahi kehti hai, aur jo template ye nahi dikhata
+  // uske recipient ke paas Block/Report ke alawa kuch bachta hi nahi - wahi
+  // quality rating girata hai aur aakhir me number ban karwata hai.
+  //
+  // "STOP" isliye likhte hain kyunki wahi inbound par actually handle hota hai
+  // (contacts/optOut.ts). Footer wahi kehta hai jo sach me kaam karta hai.
+  const footerText = withOptOutNotice(t.category, t.footerText);
+  if (footerText) {
+    components.push({ type: 'FOOTER', text: footerText });
   }
 
   // ============================================
