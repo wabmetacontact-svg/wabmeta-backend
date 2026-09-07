@@ -20,6 +20,7 @@ import { MessageType, MessageStatus } from '@prisma/client';
 import { webhookLog, campaignLog } from '../../utils/logger';
 import { chatbotEngine } from '../chatbot/chatbot.engine';
 import { automationEngine } from '../automation/automation.engine';
+import { detectOptSignal, applyOptSignal } from '../contacts/optOut';
 import { toCanonicalPhone, buildPhoneVariants } from '../../utils/phone';
 import * as instagramService from '../instagram/instagram.service';
 import { notificationsService } from '../notifications/notifications.service';
@@ -1071,10 +1072,21 @@ export class WebhookService {
         });
       }
 
-      this.runAutomations(
-        wasNewlyCreated, organizationId, contact,
-        content, waFrom, updatedConversation, message, msgType
-      ).catch((e: any) => console.error('Automation error:', e));
+      // Opt-out sabse pehle. "STOP" par contact UNSUBSCRIBED ho jata hai
+      // (campaigns pehle se sirf ACTIVE ko bhejte hain), aur uske baad na
+      // automation chalti hai na chatbot - ruk jane ko kehne ke baad bot ka
+      // jawab aana sabse kharab cheez hai, aur wahi Block/Report karwata hai.
+      const optSignal = detectOptSignal(content);
+      const suppressBot = optSignal
+        ? await applyOptSignal(optSignal, contact.id, organizationId)
+        : false;
+
+      if (!suppressBot) {
+        this.runAutomations(
+          wasNewlyCreated, organizationId, contact,
+          content, waFrom, updatedConversation, message, msgType
+        ).catch((e: any) => console.error('Automation error:', e));
+      }
 
       prisma.organization.findUnique({
         where: { id: organizationId },
@@ -1092,7 +1104,7 @@ export class WebhookService {
       }).catch((err: any) => console.error('Error fetching org owner for push:', err));
 
 
-      if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {
+      if (!suppressBot && (msgType === 'TEXT' || msgType === 'INTERACTIVE')) {
         let chatbotContent = content;
         if (msgType === 'INTERACTIVE') {
           const iType = message?.interactive?.type;
