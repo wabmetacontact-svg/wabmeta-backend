@@ -2085,6 +2085,45 @@ export class CampaignsService {
         console.warn(`⚠️ [Campaign ${campaignId}] Account limited: ${health.summary}`);
       }
 
+      // ── Quality rating ────────────────────────────────────
+      // health_status tab BLOCKED hota hai jab Meta action le chuka hota hai.
+      // Usse pehle wo quality girata hai: GREEN -> YELLOW -> RED. RED ka
+      // matlab recipients block/report kar rahe hain aur number restriction
+      // ke kagaar par hai - us haalat me ek aur campaign chalana hi wo aakhri
+      // dhakka hota hai jo ban tak le jata hai.
+      //
+      // qualityRatingOverride jaan bujh kar nahi padha ja raha: wo sirf
+      // display ke liye hai (schema ka comment dekho), aur sending ka faisla
+      // hamesha Meta ki asli value par hona chahiye.
+      const quality = String(campaign.whatsappAccount.qualityRating || '').toUpperCase();
+
+      if (quality === 'RED') {
+        console.error(`❌ [Campaign ${campaignId}] Quality rating RED - refusing to send`);
+
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'PAUSED' },
+        });
+
+        campaignSocketService.emitCampaignError(organizationId, campaignId, {
+          message:
+            "Your number's quality rating has dropped to low (red). Sending more " +
+            'campaigns now risks WhatsApp restricting the number, so this campaign ' +
+            'is paused. Let the rating recover, then resume it.',
+          code: 'QUALITY_RED',
+        });
+
+        return;
+      }
+
+      if (quality === 'YELLOW') {
+        // Rokna nahi - sirf chetavni. Yahan se sudhar abhi mumkin hai.
+        console.warn(
+          `⚠️ [Campaign ${campaignId}] Quality rating YELLOW - recipients are ` +
+          'blocking or reporting messages'
+        );
+      }
+
       const { phoneNumberId, wabaId } = campaign.whatsappAccount;
       if (!phoneNumberId) {
         throw new Error('WhatsApp phoneNumberId missing. Reconnect WhatsApp.');
