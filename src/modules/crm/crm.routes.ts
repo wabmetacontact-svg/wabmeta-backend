@@ -45,5 +45,7 @@ router.put('/tasks/:taskId/complete', crmController.completeTask.bind(crmControl
 // Contact Notes
 router.get('/contacts/:contactId/notes', crmController.getContactNotes.bind(crmController));
 router.post('/contacts/:contactId/notes', crmController.addContactNote.bind(crmController));
+router.put('/contacts/:contactId/notes/:noteId', crmController.updateContactNote.bind(crmController));
+router.delete('/contacts/:contactId/notes/:noteId', crmController.deleteContactNote.bind(crmController));
 
 export default router;

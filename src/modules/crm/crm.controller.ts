@@ -120,6 +120,22 @@ export class CRMController {
         } catch (e) { next(e); }
     }
 
+    async updateContactNote(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId = req.user!.organizationId!;
+            const note = await crmService.updateContactNote(orgId, req.params.contactId, req.params.noteId, req.body.content);
+            return sendSuccess(res, note, 'Note updated');
+        } catch (e) { next(e); }
+    }
+
+    async deleteContactNote(req: AuthRequest, res: Response, next: NextFunction) {
+        try {
+            const orgId = req.user!.organizationId!;
+            const result = await crmService.deleteContactNote(orgId, req.params.contactId, req.params.noteId);
+            return sendSuccess(res, result, 'Note deleted');
+        } catch (e) { next(e); }
+    }
+
     // Stats
     async getStats(req: AuthRequest, res: Response, next: NextFunction) {
         try {

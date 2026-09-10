@@ -422,7 +422,7 @@ export class CRMService {
     if (options.pipelineId)      where.pipelineId     = options.pipelineId;
     if (options.stageId)         where.stageId        = options.stageId;
     if (options.assignedToId)    where.assignedToId   = options.assignedToId;
-    if (options.source)          (where as any).source = options.source;
+    if (options.source)          (where as any).source = { contains: options.source, mode: 'insensitive' };
     if (options.chatbotQualified !== undefined) {
       (where as any).chatbotQualified = options.chatbotQualified === true || String(options.chatbotQualified) === 'true';
     }
@@ -835,6 +835,35 @@ export class CRMService {
     });
   }
 
+  async updateContactNote(
+    organizationId: string,
+    contactId: string,
+    noteId: string,
+    content: string
+  ) {
+    const contact = await prisma.contact.findFirst({
+      where: { id: contactId, organizationId },
+    });
+    if (!contact) throw new AppError('Contact not found', 404);
+    // Scope the update by contactId so a note from another contact can't be edited.
+    const result = await prisma.contactNote.updateMany({
+      where: { id: noteId, contactId },
+      data: { content },
+    });
+    if (result.count === 0) throw new AppError('Note not found', 404);
+    return prisma.contactNote.findFirst({ where: { id: noteId, contactId } });
+  }
+
+  async deleteContactNote(organizationId: string, contactId: string, noteId: string) {
+    const contact = await prisma.contact.findFirst({
+      where: { id: contactId, organizationId },
+    });
+    if (!contact) throw new AppError('Contact not found', 404);
+    const result = await prisma.contactNote.deleteMany({ where: { id: noteId, contactId } });
+    if (result.count === 0) throw new AppError('Note not found', 404);
+    return { id: noteId };
+  }
+
   // ==========================================
   // STATS - UPGRADED
   // ==========================================
@@ -888,6 +917,17 @@ export class CRMService {
         ? Math.round((wonLeads / (wonLeads + lostLeads)) * 100)
         : 0;
 
+    // Real per-source counts, so the dashboard's channel tiles show numbers.
+    const sourceRows = await prisma.lead.groupBy({
+      by: ['source'],
+      where: { organizationId },
+      _count: { _all: true },
+    });
+    const leadsBySource = sourceRows.map((r: any) => ({
+      source: r.source || 'unknown',
+      count: r._count._all,
+    }));
+
     return {
       totalLeads,
       newLeads,
@@ -896,6 +936,7 @@ export class CRMService {
       chatbotLeads,
       adLeads,
       hotLeads,
+      leadsBySource,
       totalValue:   totalValueAgg._sum.value || 0,
       wonValue:     wonValueAgg._sum.value || 0,
       averageScore: Math.round((avgScoreAgg as any)._avg?.score || 0),
