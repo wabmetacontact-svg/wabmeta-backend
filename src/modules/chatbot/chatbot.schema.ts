@@ -103,6 +103,8 @@ export const createChatbotSchema = z.object({
     welcomeMessage: z.string().max(1000).optional(),
     fallbackMessage: z.string().max(1000).optional(),
     flowData: flowDataSchema.optional(),
+    channel: z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM']).optional(),
+    telegramBotId: z.string().nullable().optional(),
   }),
 });
 
@@ -119,6 +121,8 @@ export const updateChatbotSchema = z.object({
     fallbackMessage: z.string().max(1000).optional().nullable(),
     flowData: flowDataSchema.optional(),
     status: z.nativeEnum(ChatbotStatus).optional(),
+    channel: z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM']).optional(),
+    telegramBotId: z.string().nullable().optional(),
   }),
 });
 

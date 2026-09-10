@@ -48,6 +48,8 @@ export class ChatbotService {
     welcomeMessage?: string;
     fallbackMessage?: string;
     flowData?: any;
+    channel?: 'WHATSAPP' | 'INSTAGRAM' | 'TELEGRAM';
+    telegramBotId?: string | null;
   }) {
     // If setting as default, unset others
     if (data.isDefault) {
@@ -68,6 +70,8 @@ export class ChatbotService {
         welcomeMessage: data.welcomeMessage,
         fallbackMessage: data.fallbackMessage,
         flowData: data.flowData || { nodes: [], edges: [] },
+        channel: (data.channel as any) || 'WHATSAPP',
+        telegramBotId: data.telegramBotId || null,
         status: 'DRAFT',
       },
     });
@@ -82,6 +86,8 @@ export class ChatbotService {
     fallbackMessage?: string;
     flowData?: any;
     status?: ChatbotStatus;
+    channel?: 'WHATSAPP' | 'INSTAGRAM' | 'TELEGRAM';
+    telegramBotId?: string | null;
   }) {
     const chatbot = await prisma.chatbot.findFirst({
       where: { id: chatbotId, organizationId },
