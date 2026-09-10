@@ -436,12 +436,16 @@ export class MetaService {
         message: 'Setting up webhooks...',
       });
 
-      try {
-        await metaApi.subscribeToWebhooks(wabaId, accessToken);
-        metaLog.info('Webhooks subscribed');
-      } catch (webhookError: any) {
-        metaLog.warn('Webhook subscription failed', { error: webhookError.message });
-      }
+      // Nothing below reads this call's result and a failure was already
+      // non-fatal, but it sat on the critical path — with the Meta client's
+      // retry backoff it could add many seconds before the user saw
+      // "connected". Start it and let it settle after the response goes out.
+      void metaApi
+        .subscribeToWebhooks(wabaId, accessToken)
+        .then(() => metaLog.info('Webhooks subscribed'))
+        .catch((webhookError: any) =>
+          metaLog.warn('Webhook subscription failed', { error: webhookError.message })
+        );
 
       onProgress?.({
         step: 'SUBSCRIBE_WEBHOOK',

@@ -84,6 +84,9 @@ export class DashboardService {
         campaignStats,
         templateStats,
         whatsappStats,
+        channelStats,
+        telegramBotCount,
+        instagramAccountCount,
       ] = await Promise.all([
         // ─── Contacts: 5 counts in 1 query ────────────────────────────
         prisma.$queryRaw<Array<{
@@ -176,6 +179,22 @@ export class DashboardService {
         prisma.whatsAppAccount.count({
           where: { organizationId, status: 'CONNECTED' },
         }),
+
+        // ─── Per-channel breakdown (conversations + sent/received) ─────
+        prisma.$queryRaw<Array<{ channel: string; conversations: bigint; sent: bigint; received: bigint }>>`
+          SELECT c.channel::text AS channel,
+            COUNT(DISTINCT c.id)::bigint AS conversations,
+            COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND')::bigint AS sent,
+            COUNT(m.id) FILTER (WHERE m.direction = 'INBOUND')::bigint AS received
+          FROM "Conversation" c
+          LEFT JOIN "Message" m ON m."conversationId" = c.id
+          WHERE c."organizationId" = ${organizationId}
+          GROUP BY c.channel
+        `,
+
+        // ─── Connected Telegram bots + Instagram accounts ─────────────
+        prisma.telegramBot.count({ where: { organizationId } }),
+        prisma.instagramAccount.count({ where: { organizationId, isActive: true } }),
       ]);
 
       // ✅ Convert BigInt to Number for JSON serialization
@@ -223,7 +242,24 @@ export class DashboardService {
         ? Math.round((failedMessages / totalMessagesSent) * 100)
         : 0;
 
+      // Per-channel breakdown for the unified dashboard.
+      const byChannel: Record<string, { conversations: number; sent: number; received: number }> = {};
+      for (const row of channelStats) {
+        byChannel[row.channel] = {
+          conversations: Number(row.conversations),
+          sent: Number(row.sent),
+          received: Number(row.received),
+        };
+      }
+      const chan = (k: string) => byChannel[k] || { conversations: 0, sent: 0, received: 0 };
+      const channels = {
+        whatsapp: { connected: whatsappStats, ...chan('WHATSAPP') },
+        instagram: { connected: instagramAccountCount, ...chan('INSTAGRAM') },
+        telegram: { connected: telegramBotCount, ...chan('TELEGRAM') },
+      };
+
       const result = {
+        channels,
         contacts: {
           total: totalContacts,
           today: newContactsToday,

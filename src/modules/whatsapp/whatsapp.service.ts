@@ -292,9 +292,10 @@ class WhatsAppService {
     if (!conversation) {
       conversation = await prisma.conversation.findUnique({
         where: {
-          organizationId_contactId: {
+          organizationId_contactId_channel: {
             organizationId,
             contactId,
+            channel: 'WHATSAPP',
           },
         },
       });
@@ -317,7 +318,7 @@ class WhatsAppService {
       } catch (err) {
         conversation = await prisma.conversation.findUnique({
           where: {
-            organizationId_contactId: { organizationId, contactId },
+            organizationId_contactId_channel: { organizationId, contactId, channel: 'WHATSAPP' },
           },
         });
         if (!conversation) throw err;
@@ -1097,7 +1098,7 @@ class WhatsAppService {
 
         if (contact) {
           conv = await prisma.conversation.findUnique({
-            where: { organizationId_contactId: { organizationId, contactId: contact.id } },
+            where: { organizationId_contactId_channel: { organizationId, contactId: contact.id, channel: 'WHATSAPP' } },
             select: {
               id: true,
               isWindowOpen: true,
