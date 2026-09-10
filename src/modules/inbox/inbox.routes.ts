@@ -409,6 +409,11 @@ router.delete('/conversations/:id/labels/:label', (req, res, next) =>
   inboxController.removeLabel(req as any, res, next)
 );
 
+// Human handoff: pause/resume channel automation for a conversation.
+router.patch('/conversations/:id/automation', (req, res, next) =>
+  inboxController.setAutomationPaused(req as any, res, next)
+);
+
 // ==========================================
 // BULK
 // ==========================================
@@ -433,6 +438,11 @@ router.get('/search', (req, res, next) =>
 
 router.get('/stats', (req, res, next) =>
   inboxController.getStats(req as any, res, next)
+);
+
+// AI-drafted reply suggestion for the agent (human-in-the-loop).
+router.post('/conversations/:id/suggest-reply', (req, res, next) =>
+  inboxController.suggestReply(req as any, res, next)
 );
 
 export default router;

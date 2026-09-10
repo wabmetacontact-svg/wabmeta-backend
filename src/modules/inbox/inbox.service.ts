@@ -81,6 +81,7 @@ export class InboxService {
       isRead,
       assignedTo,
       labels,
+      channel,
       sortBy = 'lastMessageAt',
       sortOrder = 'desc',
     } = query;
@@ -88,6 +89,11 @@ export class InboxService {
     const where: Prisma.ConversationWhereInput = {
       organizationId,
     };
+
+    // Unified-inbox channel filter (WHATSAPP | INSTAGRAM | TELEGRAM). Omit for "All".
+    if (channel && ['WHATSAPP', 'INSTAGRAM', 'TELEGRAM'].includes(String(channel).toUpperCase())) {
+      where.channel = String(channel).toUpperCase() as Prisma.ConversationWhereInput['channel'];
+    }
 
     if (isArchived !== undefined && isArchived !== null && isArchived !== '') {
       where.isArchived = isArchived === true || isArchived === 'true';
@@ -310,11 +316,21 @@ export class InboxService {
   ) {
     await this.getConversationById(organizationId, conversationId);
 
+    // A conversation can only be assigned to a member of the same organization.
+    if (userId) {
+      const member = await prisma.organizationMember.findFirst({
+        where: { organizationId, userId },
+        select: { userId: true },
+      });
+      if (!member) throw new AppError('That user is not a member of this organization', 400);
+    }
+
     const conversation = await prisma.conversation.update({
       where: { id: conversationId },
-      data: { assignedTo: userId },
+      data: { assignedTo: userId || null },
     });
 
+    this.clearCache(organizationId).catch(() => {});
     return conversation;
   }
 
@@ -349,6 +365,22 @@ export class InboxService {
     const updatedLabels = conversation.labels.filter((l) => l !== label);
 
     return this.updateLabels(organizationId, conversationId, updatedLabels);
+  }
+
+  /**
+   * Human handoff: pause/resume channel automation for one conversation.
+   * Channel-agnostic — org-scoped so a caller can't touch another tenant.
+   */
+  async setAutomationPaused(organizationId: string, conversationId: string, paused: boolean) {
+    const result = await prisma.conversation.updateMany({
+      where: { id: conversationId, organizationId },
+      data: { automationPaused: paused },
+    });
+    if (result.count === 0) {
+      throw new AppError('Conversation not found', 404);
+    }
+    this.clearCache(organizationId).catch(() => {});
+    return prisma.conversation.findFirst({ where: { id: conversationId, organizationId } });
   }
 
   /**
@@ -454,12 +486,21 @@ export class InboxService {
     organizationId: string,
     query: string,
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    channel?: 'WHATSAPP' | 'INSTAGRAM' | 'TELEGRAM'
   ) {
+    // An empty query would otherwise match every message in the org.
+    if (!query || !query.trim()) {
+      return { messages: [], meta: { page, limit, total: 0, totalPages: 0 } };
+    }
+
+    const convWhere: Prisma.ConversationWhereInput = { organizationId };
+    if (channel && ['WHATSAPP', 'INSTAGRAM', 'TELEGRAM'].includes(channel)) {
+      convWhere.channel = channel;
+    }
+
     const where: Prisma.MessageWhereInput = {
-      conversation: {
-        organizationId,
-      },
+      conversation: convWhere,
       content: {
         contains: query,
         mode: 'insensitive',
@@ -492,6 +533,58 @@ export class InboxService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Draft an AI reply suggestion for the agent, from the recent conversation
+   * history. Human-in-the-loop: the agent reviews/edits before sending.
+   */
+  async suggestReply(organizationId: string, conversationId: string, instruction?: string) {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, organizationId },
+      include: { contact: true, organization: { select: { name: true } } },
+    });
+    if (!conversation) throw new AppError('Conversation not found', 404);
+
+    const recent = await prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: { direction: true, content: true, type: true },
+    });
+    const ordered = recent.reverse().filter((m) => m.content && m.content.trim());
+
+    if (ordered.length === 0) {
+      throw new AppError('No conversation history to draft a reply from', 400);
+    }
+
+    // INBOUND (customer) → user; OUTBOUND (us) → model.
+    const history = ordered.map((m) => ({
+      role: (m.direction === 'INBOUND' ? 'user' : 'model') as 'user' | 'model',
+      content: m.content as string,
+    }));
+
+    // The reply responds to the latest customer message; if the last turn was
+    // ours, still draft a helpful follow-up.
+    const lastInbound = [...ordered].reverse().find((m) => m.direction === 'INBOUND');
+    const userMessage = lastInbound?.content || ordered[ordered.length - 1].content || '';
+
+    const businessName = conversation.organization?.name || 'our business';
+    const contactName =
+      [conversation.contact?.firstName, conversation.contact?.lastName].filter(Boolean).join(' ').trim() ||
+      conversation.contact?.whatsappProfileName || 'the customer';
+
+    const systemPrompt = [
+      `You are a helpful, professional customer-support agent for ${businessName}.`,
+      `You are drafting a reply to ${contactName} over ${conversation.channel} for a human agent to review.`,
+      `Write only the reply message text — no preamble, no quotes, no labels.`,
+      `Be concise, warm and clear. Reply in the same language the customer used.`,
+      instruction ? `Extra instruction from the agent: ${instruction}` : '',
+    ].filter(Boolean).join(' ');
+
+    const { aiService } = await import('../chatbot/ai.service');
+    const suggestion = await aiService.generateResponse(systemPrompt, userMessage, history.slice(0, -1));
+    return { suggestion: (suggestion || '').trim() };
   }
 
   /**
@@ -575,9 +668,10 @@ export class InboxService {
   async getOrCreateConversation(organizationId: string, contactId: string) {
     let conversation = await prisma.conversation.findUnique({
       where: {
-        organizationId_contactId: {
+        organizationId_contactId_channel: {
           organizationId,
           contactId,
+          channel: 'WHATSAPP',
         },
       },
       include: {

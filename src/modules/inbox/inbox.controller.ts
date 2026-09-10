@@ -59,6 +59,7 @@ export class InboxController {
               : undefined,
         assignedTo: req.query.assignedTo as string,
         labels: req.query.labels ? (req.query.labels as string).split(',') : undefined,
+        channel: req.query.channel as any,
         sortBy: (req.query.sortBy as any) || 'lastMessageAt',
         sortOrder: (req.query.sortOrder as any) || 'desc',
       };
@@ -278,6 +279,27 @@ export class InboxController {
   }
 
   // ==========================================
+  // SET AUTOMATION PAUSED (human handoff)
+  // ==========================================
+  async setAutomationPaused(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user!.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const { id } = req.params as { id: string };
+      const { paused } = req.body;
+      if (typeof paused !== 'boolean') {
+        throw new AppError('paused must be a boolean', 400);
+      }
+
+      const conversation = await inboxService.setAutomationPaused(organizationId, id, paused);
+      return sendSuccess(res, conversation, paused ? 'Automation paused' : 'Automation resumed');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
   // REMOVE LABEL
   // ==========================================
   async removeLabel(req: AuthRequest, res: Response, next: NextFunction) {
@@ -368,13 +390,31 @@ export class InboxController {
       const organizationId = req.user?.organizationId;
       if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const searchParams = req.query.search ? String(req.query.search) : undefined;
-      const query = req.query.q ? String(req.query.q) : '';
+      const query = (req.query.q ? String(req.query.q) : (req.query.search ? String(req.query.search) : '')).trim();
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
+      const channel = req.query.channel ? (String(req.query.channel).toUpperCase() as any) : undefined;
 
-      const result = await inboxService.searchMessages(organizationId, query, page, limit);
+      const result = await inboxService.searchMessages(organizationId, query, page, limit, channel);
       return sendSuccess(res, result, 'Search completed');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // AI SUGGESTED REPLY
+  // ==========================================
+  async suggestReply(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) throw new AppError('Organization context required', 400);
+
+      const { id } = req.params as { id: string };
+      const instruction = req.body?.instruction ? String(req.body.instruction).slice(0, 500) : undefined;
+
+      const result = await inboxService.suggestReply(organizationId, id, instruction);
+      return sendSuccess(res, result, 'Reply drafted');
     } catch (error) {
       next(error);
     }

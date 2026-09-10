@@ -16,6 +16,7 @@ export const getConversationsSchema = z.object({
     isRead: z.string().transform(v => v === 'true').optional(),
     assignedTo: z.string().optional(),
     labels: z.string().optional(), // comma-separated
+    channel: z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM']).optional(),
     sortBy: z.enum(['lastMessageAt', 'createdAt', 'unreadCount']).optional().default('lastMessageAt'),
     sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
   }),
