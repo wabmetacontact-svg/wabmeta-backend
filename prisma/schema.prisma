@@ -10,36 +10,36 @@ datasource db {
 }
 
 model User {
-  id                   String               @id @default(cuid())
-  email                String               @unique
+  id                   String     @id @default(cuid())
+  email                String     @unique
   password             String?
   firstName            String
   lastName             String?
   phone                String?
   avatar               String?
-  status               UserStatus           @default(PENDING_VERIFICATION)
-  emailVerified        Boolean              @default(false)
+  status               UserStatus @default(PENDING_VERIFICATION)
+  emailVerified        Boolean    @default(false)
   emailVerifyToken     String?
   emailVerifyExpires   DateTime?
   passwordResetToken   String?
   passwordResetExpires DateTime?
-  googleId             String?              @unique
+  googleId             String?    @unique
   otpSecret            String?
-  otpEnabled           Boolean              @default(false)
+  otpEnabled           Boolean    @default(false)
   lastLoginAt          DateTime?
   lastLoginIp          String?
 
   // ✅ NEW: Token version for force logout
-  tokenVersion         Int                  @default(0)
+  tokenVersion Int @default(0)
 
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
   activityLogs         ActivityLog[]
-  createdCampaigns     Campaign[]           @relation("CampaignCreator")
-  createdChatbots      Chatbot[]            @relation("ChatbotCreator")
+  createdCampaigns     Campaign[]            @relation("CampaignCreator")
+  createdChatbots      Chatbot[]             @relation("ChatbotCreator")
   notifications        Notification[]
   expoPushTokens       ExpoPushToken[]
-  ownedOrganizations   Organization[]       @relation("OrganizationOwner")
+  ownedOrganizations   Organization[]        @relation("OrganizationOwner")
   memberships          OrganizationMember[]
   refreshTokens        RefreshToken[]
   wallet               Wallet[]
@@ -67,30 +67,30 @@ model RefreshToken {
 }
 
 model Organization {
-  id                      String               @id @default(cuid())
+  id                      String                @id @default(cuid())
   name                    String
-  slug                    String               @unique
+  slug                    String                @unique
   logo                    String?
   website                 String?
   industry                String?
-  timezone                String               @default("UTC")
+  timezone                String                @default("UTC")
   ownerId                 String
-  planType                PlanType             @default(FREE_DEMO)
-  createdAt               DateTime             @default(now())
-  updatedAt               DateTime             @updatedAt
+  planType                PlanType              @default(FREE_DEMO)
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
   // Soft delete: deleting a customer must not destroy the financial ledger
   // (payments, wallet transactions, subscriptions cascade from here). Setting
   // this hides the org everywhere instead of removing the row.
   deletedAt               DateTime?
-  featureCsvUpload        Boolean              @default(false)
-  featureOverrideByAdmin  Boolean              @default(false)
-  featureSimpleBulkUpload Boolean              @default(false)
-  featureInboxLocked      Boolean              @default(false)
-  featureCampaignsLocked  Boolean              @default(false)
-  featureChatbotLocked    Boolean              @default(false)
-  featureAutomationLocked Boolean              @default(false)
-  featureConnectionLocked Boolean              @default(false)
-  customLabels            Json                 @default("[]")
+  featureCsvUpload        Boolean               @default(false)
+  featureOverrideByAdmin  Boolean               @default(false)
+  featureSimpleBulkUpload Boolean               @default(false)
+  featureInboxLocked      Boolean               @default(false)
+  featureCampaignsLocked  Boolean               @default(false)
+  featureChatbotLocked    Boolean               @default(false)
+  featureAutomationLocked Boolean               @default(false)
+  featureConnectionLocked Boolean               @default(false)
+  customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
   automations             Automation[]
@@ -103,7 +103,7 @@ model Organization {
   metaConnection          MetaConnection?
   notifications           Notification[]
   oauthStates             OAuthState[]
-  owner                   User                 @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  owner                   User                  @relation("OrganizationOwner", fields: [ownerId], references: [id])
   members                 OrganizationMember[]
   payments                Payment[]
   pipelines               Pipeline[]
@@ -114,8 +114,11 @@ model Organization {
   whatsappAccounts        WhatsAppAccount[]
   wallet                  Wallet?
   walletAccessRequest     WalletAccessRequest[]
-  settings                OrganizationSettings?  // ✅ ADD THIS
+  settings                OrganizationSettings? // ✅ ADD THIS
   instagramAccounts       InstagramAccount[]
+  telegramBots            TelegramBot[]
+  telegramAutomations     TelegramAutomation[]
+  telegramBroadcasts      TelegramBroadcast[]
 
   @@index([slug])
   @@index([ownerId])
@@ -214,10 +217,10 @@ model WhatsAppAccount {
   // Meta ka health_status - wahi jagah jahan wo asli wajah batata hai
   // (payment method error, WABA banned, business verification pending).
   // Iske bina har rok (#135000) Generic user error ban kar aati hai.
-  healthCanSend          String?   // AVAILABLE | LIMITED | BLOCKED
-  healthBlockedReason    String?   @db.Text
-  healthStatus           Json?
-  healthCheckedAt        DateTime?
+  healthCanSend       String? // AVAILABLE | LIMITED | BLOCKED
+  healthBlockedReason String?   @db.Text
+  healthStatus        Json?
+  healthCheckedAt     DateTime?
 
   // Admin ke display overrides.
   //
@@ -229,7 +232,7 @@ model WhatsAppAccount {
   //
   // Alag fields isliye hain kyunki roz ki Meta sync qualityRating aur
   // messagingLimit ko overwrite karti hai - override ko chhodti hai.
-  qualityRatingOverride  String?
+  qualityRatingOverride    String?
   codeVerificationOverride String? // VERIFIED | NOT_VERIFIED | EXPIRED | PENDING
 
   // Purana field - ab use nahi hota. DB me isliye chhoda hai kyunki chalu
@@ -241,20 +244,20 @@ model WhatsAppAccount {
   overrideSetAt          DateTime?
   verifiedName           String?
   messagingLimit         String?
-  dailyMessageLimit      Int                   @default(1000)
-  dailyMessagesUsed      Int                   @default(0)
-  lastLimitReset         DateTime              @default(now())
+  dailyMessageLimit      Int            @default(1000)
+  dailyMessagesUsed      Int            @default(0)
+  lastLimitReset         DateTime       @default(now())
   businessProfile        Json?
-  isDefault              Boolean               @default(false)
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
-  isActive               Boolean               @default(true)
-  connectionType         String                @default("CLOUD_API")
+  isDefault              Boolean        @default(false)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  isActive               Boolean        @default(true)
+  connectionType         String         @default("CLOUD_API")
   campaigns              Campaign[]
   messages               Message[]
   messageQueue           MessageQueue[]
   templates              Template[]
-  organization           Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization           Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([wabaId])
@@ -324,10 +327,18 @@ model OAuthState {
 }
 
 model Contact {
-  id                     String               @id @default(cuid())
+  id                     String        @id @default(cuid())
   organizationId         String
   phone                  String
-  countryCode            String               @default("+91")
+  countryCode            String        @default("+91")
+  // Telegram identity (contacts reached over Telegram may have no phone; a
+  // synthetic phone "tg:<userId>" is stored to satisfy the phone uniqueness).
+  telegramUserId         String?
+  telegramUsername       String?
+  // Instagram identity (DM sender IGSID); like Telegram, a synthetic phone
+  // "ig:<igsid>" is stored to satisfy phone uniqueness.
+  instagramUserId        String?
+  instagramUsername      String?
   firstName              String?
   lastName               String?
   email                  String?
@@ -335,32 +346,34 @@ model Contact {
   whatsappProfileName    String?
   whatsappAbout          String?
   whatsappProfilePicUrl  String?
-  whatsappProfileFetched Boolean              @default(false)
+  whatsappProfileFetched Boolean       @default(false)
   lastProfileFetchAt     DateTime?
-  profileFetchAttempts   Int                  @default(0)
-  customFields           Json                 @default("{}")
-  tags                   String[]             @default([])
-  status                 ContactStatus        @default(ACTIVE)
+  profileFetchAttempts   Int           @default(0)
+  customFields           Json          @default("{}")
+  tags                   String[]      @default([])
+  status                 ContactStatus @default(ACTIVE)
   lastMessageAt          DateTime?
-  messageCount           Int                  @default(0)
+  messageCount           Int           @default(0)
   source                 String?
   deletedAt              DateTime?
-  deletedBy              String?              // userId who deleted
+  deletedBy              String? // userId who deleted
 
-  createdAt              DateTime             @default(now())
-  updatedAt              DateTime             @updatedAt
-  automationSequences    AutomationSequence[]
-  campaignContacts       CampaignContact[]
-  organization           Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  groupMemberships       ContactGroupMember[]
-  notes                  ContactNote[]
-  conversations          Conversation[]
-  leads                  Lead[]
-  messageQueue           MessageQueue[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  automationSequences AutomationSequence[]
+  campaignContacts    CampaignContact[]
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  groupMemberships    ContactGroupMember[]
+  notes               ContactNote[]
+  conversations       Conversation[]
+  leads               Lead[]
+  messageQueue        MessageQueue[]
 
   @@unique([organizationId, phone])
   @@index([organizationId])
   @@index([phone])
+  @@index([organizationId, telegramUserId])
+  @@index([organizationId, instagramUserId])
   @@index([status])
   @@index([tags])
   @@index([lastMessageAt])
@@ -400,32 +413,32 @@ model ContactGroupMember {
 }
 
 model Template {
-  id                String           @id @default(cuid())
-  organizationId    String
-  whatsappAccountId String?
-  wabaId            String?
-  metaTemplateId    String?
-  name              String
-  language          String           @default("en")
-  category          TemplateCategory @default(MARKETING)
-  headerType        String?
-  headerContent     String?
-  bodyText          String
-  footerText        String?
-  buttons           Json             @default("[]")
-  variables         Json             @default("[]")
-  status            TemplateStatus   @default(PENDING)
-  rejectionReason   String?
-  qualityScore      String?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  headerMediaId     String?
+  id                      String           @id @default(cuid())
+  organizationId          String
+  whatsappAccountId       String?
+  wabaId                  String?
+  metaTemplateId          String?
+  name                    String
+  language                String           @default("en")
+  category                TemplateCategory @default(MARKETING)
+  headerType              String?
+  headerContent           String?
+  bodyText                String
+  footerText              String?
+  buttons                 Json             @default("[]")
+  variables               Json             @default("[]")
+  status                  TemplateStatus   @default(PENDING)
+  rejectionReason         String?
+  qualityScore            String?
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+  headerMediaId           String?
   headerMediaUploadedAt   DateTime?
   headerMediaLastVerified DateTime?
-  campaigns         Campaign[]
-  messageQueue      MessageQueue[]
-  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  whatsappAccount   WhatsAppAccount? @relation(fields: [whatsappAccountId], references: [id], onDelete: Cascade)
+  campaigns               Campaign[]
+  messageQueue            MessageQueue[]
+  organization            Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  whatsappAccount         WhatsAppAccount? @relation(fields: [whatsappAccountId], references: [id], onDelete: Cascade)
 
   @@unique([whatsappAccountId, name, language])
   @@index([organizationId])
@@ -542,7 +555,11 @@ model Conversation {
   id                    String       @id @default(cuid())
   organizationId        String
   contactId             String
+  channel               Channel      @default(WHATSAPP)
   phoneNumberId         String?
+  telegramChatId        String?
+  telegramBotId         String?
+  instagramAccountId    String?
   lastMessageAt         DateTime?
   lastMessagePreview    String?
   lastCustomerMessageAt DateTime?
@@ -555,6 +572,7 @@ model Conversation {
   isPinned              Boolean      @default(false)
   assignedTo            String?
   labels                String[]     @default([])
+  automationPaused      Boolean      @default(false)
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
   contact               Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -562,9 +580,13 @@ model Conversation {
   phoneNumber           PhoneNumber? @relation(fields: [phoneNumberId], references: [id])
   messages              Message[]
 
-  @@unique([organizationId, contactId])
+  @@unique([organizationId, contactId, channel])
   @@index([organizationId])
   @@index([contactId])
+  @@index([channel])
+  @@index([telegramChatId])
+  @@index([telegramBotId])
+  @@index([instagramAccountId])
   @@index([isWindowOpen])
   @@index([windowExpiresAt])
   @@index([lastMessageAt])
@@ -579,9 +601,11 @@ model Conversation {
 model Message {
   id                String           @id @default(cuid())
   conversationId    String
+  channel           Channel          @default(WHATSAPP)
   whatsappAccountId String?
   waMessageId       String?          @unique
   wamId             String?          @unique
+  telegramMessageId String?
   direction         MessageDirection
   type              MessageType      @default(TEXT)
   content           String?
@@ -611,6 +635,8 @@ model Message {
   whatsappAccount   WhatsAppAccount? @relation(fields: [whatsappAccountId], references: [id])
 
   @@index([conversationId])
+  @@index([channel])
+  @@index([telegramMessageId])
   @@index([timestamp])
   @@index([wamId])
   @@index([waMessageId])
@@ -622,11 +648,97 @@ model Message {
   @@index([conversationId, createdAt(sort: Desc)])
 }
 
+model TelegramBot {
+  id             String       @id @default(cuid())
+  organizationId String
+  botToken       String // encrypted at rest (AES-256-GCM)
+  botUserId      String // Telegram numeric bot id, from getMe
+  username       String // bot @username
+  firstName      String?
+  webhookSecret  String // secret_token used to verify incoming webhooks
+  status         String       @default("CONNECTED") // CONNECTED | ERROR | DISABLED
+  isDefault      Boolean      @default(false)
+  lastError      String?
+  lastErrorAt    DateTime?
+  connectedAt    DateTime     @default(now())
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, botUserId])
+  @@index([organizationId])
+  @@index([botUserId])
+}
+
+model TelegramAutomation {
+  id             String       @id @default(cuid())
+  organizationId String
+  botId          String? // null = applies to every bot in the org
+  name           String
+  triggerType    String // COMMAND | KEYWORD | FALLBACK
+  pattern        String? // "/start" for COMMAND, keyword text for KEYWORD, null for FALLBACK
+  matchType      String       @default("contains") // exact | contains | starts_with (KEYWORD only)
+  responseText   String
+  // Optional inline keyboard sent with the response:
+  // [{ text, type: 'callback' | 'url', value }]. A callback button's value is a
+  // keyword/command that triggers the next rule when tapped.
+  buttons        Json?
+  isActive       Boolean      @default(true)
+  triggerCount   Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+}
+
+model TelegramBroadcast {
+  id             String       @id @default(cuid())
+  organizationId String
+  botId          String? // which bot sent it (null = mixed / per-conversation)
+  message        String
+  buttons        Json? // same shape as TelegramAutomation.buttons
+  mediaUrl       String? // public URL of an image/video to send with the message
+  mediaType      String? // mime type of the media
+  audienceTag    String? // optional contact tag filter; null = all Telegram contacts
+  status         String       @default("SENDING") // SENDING | COMPLETED | FAILED
+  total          Int          @default(0)
+  sent           Int          @default(0)
+  failed         Int          @default(0)
+  createdAt      DateTime     @default(now())
+  completedAt    DateTime?
+  organization   Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recipients     TelegramBroadcastRecipient[]
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([status])
+}
+
+// Per-recipient row makes a broadcast resumable: a crash mid-send leaves rows
+// PENDING, and boot recovery finishes them without re-sending SENT ones.
+model TelegramBroadcastRecipient {
+  id             String            @id @default(cuid())
+  broadcastId    String
+  conversationId String
+  chatId         String
+  botId          String
+  status         String            @default("PENDING") // PENDING | SENT | FAILED
+  error          String?
+  createdAt      DateTime          @default(now())
+  broadcast      TelegramBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId, status])
+}
+
 model Chatbot {
   id              String        @id @default(cuid())
   organizationId  String
   name            String
   description     String?
+  channel         Channel       @default(WHATSAPP)
+  telegramBotId   String?
   flowData        Json          @default("{}")
   triggerKeywords String[]      @default([])
   isDefault       Boolean       @default(false)
@@ -769,15 +881,15 @@ model Notification {
 }
 
 model ExpoPushToken {
-  id         String   @id @default(cuid())
-  userId     String
-  token      String   @unique
-  deviceId   String?
-  platform   String?  // 'ios' | 'android'
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  deviceId  String?
+  platform  String? // 'ios' | 'android'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -803,15 +915,15 @@ model ActivityLog {
 }
 
 model AdminUser {
-  id          String    @id @default(cuid())
-  email       String    @unique
-  password    String
-  name        String
-  role        String    @default("admin")
-  isActive    Boolean   @default(true)
-  lastLoginAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                     String                @id @default(cuid())
+  email                  String                @unique
+  password               String
+  name                   String
+  role                   String                @default("admin")
+  isActive               Boolean               @default(true)
+  lastLoginAt            DateTime?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
   reviewedWalletRequests WalletAccessRequest[]
 
   @@index([email])
@@ -850,44 +962,44 @@ model Payment {
 }
 
 model Lead {
-  id                String         @id @default(cuid())
-  organizationId    String
-  contactId         String?
-  title             String
-  value             Decimal?       @db.Decimal(12, 2)
-  currency          String         @default("INR")
-  pipelineId        String?
-  stageId           String?
-  status            LeadStatus     @default(NEW)
-  priority          LeadPriority   @default(MEDIUM)
-  source            String?        // whatsapp_ad, organic, chatbot, manual
+  id             String       @id @default(cuid())
+  organizationId String
+  contactId      String?
+  title          String
+  value          Decimal?     @db.Decimal(12, 2)
+  currency       String       @default("INR")
+  pipelineId     String?
+  stageId        String?
+  status         LeadStatus   @default(NEW)
+  priority       LeadPriority @default(MEDIUM)
+  source         String? // whatsapp_ad, organic, chatbot, manual
 
   // ✅ NEW: Smart Lead Fields
-  score             Int            @default(0)    // 0-100 lead score
-  conversationId    String?                       // WhatsApp conversation link
-  serviceInterest   String?                       // User interested service
-  budget            String?                       // User's budget
-  city              String?                       // User's city
-  adSource          String?                       // Click-to-WhatsApp ad info
-  adId              String?                       // Meta Ad ID
-  campaignId        String?                       // Meta Campaign ID
-  chatbotQualified  Boolean        @default(false) // Chatbot ne qualify kiya?
-  qualificationData Json           @default("{}") // All chatbot collected data
+  score             Int        @default(0) // 0-100 lead score
+  conversationId    String? // WhatsApp conversation link
+  serviceInterest   String? // User interested service
+  budget            String? // User's budget
+  city              String? // User's city
+  adSource          String? // Click-to-WhatsApp ad info
+  adId              String? // Meta Ad ID
+  campaignId        String? // Meta Campaign ID
+  chatbotQualified  Boolean    @default(false) // Chatbot ne qualify kiya?
+  qualificationData Json       @default("{}") // All chatbot collected data
   notes             LeadNote[]
 
   assignedToId      String?
   expectedCloseDate DateTime?
   actualCloseDate   DateTime?
   lastActivityAt    DateTime?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  contact           Contact?       @relation(fields: [contactId], references: [id])
-  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  pipeline          Pipeline?      @relation(fields: [pipelineId], references: [id])
-  stage             PipelineStage? @relation(fields: [stageId], references: [id])
-  activities        LeadActivity[]
-  tasks             LeadTask[]
+  contact      Contact?       @relation(fields: [contactId], references: [id])
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipeline     Pipeline?      @relation(fields: [pipelineId], references: [id])
+  stage        PipelineStage? @relation(fields: [stageId], references: [id])
+  activities   LeadActivity[]
+  tasks        LeadTask[]
 
   @@index([organizationId])
   @@index([contactId])
@@ -998,32 +1110,32 @@ model ContactNote {
 // ─── Instagram Integration ────────────────────────────────────────────────────
 
 model InstagramAccount {
-  id             String       @id @default(cuid())
+  id             String          @id @default(cuid())
   organizationId String
-  igUserId       String       @unique  // Instagram User ID
+  igUserId       String          @unique // Instagram User ID
   username       String
   name           String?
   biography      String?
   profilePicUrl  String?
-  followersCount Int          @default(0)
-  followingCount Int          @default(0)
-  mediaCount     Int          @default(0)
-  accessToken    String       // Long-lived token (encrypted)
+  followersCount Int             @default(0)
+  followingCount Int             @default(0)
+  mediaCount     Int             @default(0)
+  accessToken    String // Long-lived token (encrypted)
   tokenExpiresAt DateTime?
-  pageId         String?      // Facebook Page ID linked
-  wabaId         String?      // Same WABA if linked
+  pageId         String? // Facebook Page ID linked
+  wabaId         String? // Same WABA if linked
   status         IgAccountStatus @default(PENDING)
-  isActive       Boolean      @default(true)
+  isActive       Boolean         @default(true)
   lastSyncedAt   DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  dmAutomations  IgDmAutomation[]
-  commentRules   IgCommentRule[]
-  storyRules     IgStoryRule[]
-  igMessages     IgMessage[]
-  igAnalytics    IgAnalytics[]
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dmAutomations IgDmAutomation[]
+  commentRules  IgCommentRule[]
+  storyRules    IgStoryRule[]
+  igMessages    IgMessage[]
+  igAnalytics   IgAnalytics[]
 
   @@index([organizationId])
   @@index([igUserId])
@@ -1031,26 +1143,26 @@ model InstagramAccount {
 }
 
 model IgDmAutomation {
-  id                String      @id @default(cuid())
+  id                String        @id @default(cuid())
   organizationId    String
   igAccountId       String
   name              String
   description       String?
   triggerType       IgTriggerType
-  keywords          String[]    @default([])
-  matchType         String      @default("contains") // contains | exact | starts_with
-  isActive          Boolean     @default(false)
-  responseType      String      @default("text")    // text | template | flow
+  keywords          String[]      @default([])
+  matchType         String        @default("contains") // contains | exact | starts_with
+  isActive          Boolean       @default(false)
+  responseType      String        @default("text") // text | template | flow
   responseText      String?
   responseFlow      Json?
-  iceBreaker        Boolean     @default(false)
-  storyReplyEnabled Boolean     @default(false)
-  repliesCount      Int         @default(0)
+  iceBreaker        Boolean       @default(false)
+  storyReplyEnabled Boolean       @default(false)
+  repliesCount      Int           @default(0)
   lastTriggeredAt   DateTime?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+  igAccount InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([igAccountId])
@@ -1059,21 +1171,21 @@ model IgDmAutomation {
 }
 
 model IgCommentRule {
-  id             String      @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   igAccountId    String
   name           String
-  keywords       String[]    @default([])
-  postIds        String[]    @default([])  // specific posts or empty = all
-  action         String      @default("reply")  // reply | reply_and_dm | hide | delete
+  keywords       String[] @default([])
+  postIds        String[] @default([]) // specific posts or empty = all
+  action         String   @default("reply") // reply | reply_and_dm | hide | delete
   commentReply   String?
   dmMessage      String?
-  isActive       Boolean     @default(false)
-  triggeredCount Int         @default(0)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  isActive       Boolean  @default(false)
+  triggeredCount Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+  igAccount InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([igAccountId])
@@ -1081,41 +1193,41 @@ model IgCommentRule {
 }
 
 model IgStoryRule {
-  id             String      @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   igAccountId    String
   name           String
-  triggerType    String      @default("mention") // mention | reply | reaction
+  triggerType    String   @default("mention") // mention | reply | reaction
   replyMessage   String?
   dmMessage      String?
-  isActive       Boolean     @default(false)
-  triggeredCount Int         @default(0)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  isActive       Boolean  @default(false)
+  triggeredCount Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+  igAccount InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([igAccountId])
 }
 
 model IgMessage {
-  id             String      @id @default(cuid())
+  id             String           @id @default(cuid())
   igAccountId    String
-  igMessageId    String      @unique
-  senderId       String      // Instagram sender ID
+  igMessageId    String           @unique
+  senderId       String // Instagram sender ID
   senderUsername String?
-  messageType    String      @default("text") // text | image | story_reply | reaction
+  messageType    String           @default("text") // text | image | story_reply | reaction
   content        String?
   mediaUrl       String?
   storyId        String?
   direction      MessageDirection
-  isAutomated    Boolean     @default(false)
+  isAutomated    Boolean          @default(false)
   automationId   String?
   sentAt         DateTime?
-  createdAt      DateTime    @default(now())
+  createdAt      DateTime         @default(now())
 
-  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+  igAccount InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
 
   @@index([igAccountId])
   @@index([senderId])
@@ -1123,21 +1235,21 @@ model IgMessage {
 }
 
 model IgAnalytics {
-  id             String      @id @default(cuid())
-  igAccountId    String
-  date           DateTime    @db.Date
-  followersCount Int         @default(0)
-  followersGain  Int         @default(0)
-  profileViews   Int         @default(0)
-  reach          Int         @default(0)
-  impressions    Int         @default(0)
-  dmsSent        Int         @default(0)
-  dmsReceived    Int         @default(0)
-  commentsReplied Int        @default(0)
+  id                String   @id @default(cuid())
+  igAccountId       String
+  date              DateTime @db.Date
+  followersCount    Int      @default(0)
+  followersGain     Int      @default(0)
+  profileViews      Int      @default(0)
+  reach             Int      @default(0)
+  impressions       Int      @default(0)
+  dmsSent           Int      @default(0)
+  dmsReceived       Int      @default(0)
+  commentsReplied   Int      @default(0)
   automationReplies Int      @default(0)
-  createdAt      DateTime    @default(now())
+  createdAt         DateTime @default(now())
 
-  igAccount      InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
+  igAccount InstagramAccount @relation(fields: [igAccountId], references: [id], onDelete: Cascade)
 
   @@unique([igAccountId, date])
   @@index([igAccountId])
@@ -1147,29 +1259,29 @@ model IgAnalytics {
 // ✅ NEW: Organization Settings Model
 // Schema ke end mein add karo (enums se pehle)
 model OrganizationSettings {
-  id                    String   @id @default(cuid())
-  organizationId        String   @unique
+  id             String @id @default(cuid())
+  organizationId String @unique
 
   // Lead Settings
-  leadCreationMode      String   @default("FLOW_BASED") // FLOW_BASED | SCORE_BASED | HYBRID
-  leadScoreThreshold    Int      @default(50)           // Auto-create lead if score >= this
-  autoAssignLeads       Boolean  @default(false)
-  defaultAssigneeId     String?
+  leadCreationMode   String  @default("FLOW_BASED") // FLOW_BASED | SCORE_BASED | HYBRID
+  leadScoreThreshold Int     @default(50) // Auto-create lead if score >= this
+  autoAssignLeads    Boolean @default(false)
+  defaultAssigneeId  String?
 
   // Pipeline Settings
-  defaultPipelineId     String?
+  defaultPipelineId String?
 
   // Notification Settings
-  notifyOnNewLead       Boolean  @default(true)
-  notifyUserId          String?
+  notifyOnNewLead Boolean @default(true)
+  notifyUserId    String?
 
   // Ad Tracking
-  trackAdSource         Boolean  @default(true)
+  trackAdSource Boolean @default(true)
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
 }
@@ -1278,6 +1390,12 @@ enum QueueStatus {
   SKIPPED
 }
 
+enum Channel {
+  WHATSAPP
+  INSTAGRAM
+  TELEGRAM
+}
+
 enum MessageDirection {
   INBOUND
   OUTBOUND
@@ -1377,24 +1495,24 @@ enum ActivityType {
 
 // ─── Wallet Access Request ─────────────────────────────────────────────────────
 model WalletAccessRequest {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   userId         String
   reason         String
   additionalInfo String?
-  status         String   @default("pending") // pending | approved | rejected
+  status         String    @default("pending") // pending | approved | rejected
   reviewedBy     String?
   reviewNote     String?
   reviewedAt     DateTime?
-  planVerified   Boolean  @default(false)
-  requestedAt    DateTime @default(now())
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  planVerified   Boolean   @default(false)
+  requestedAt    DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   // Relations
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reviewer       AdminUser?   @relation(fields: [reviewedBy], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewer     AdminUser?   @relation(fields: [reviewedBy], references: [id])
 
   @@index([organizationId])
   @@index([status])
@@ -1403,54 +1521,54 @@ model WalletAccessRequest {
 
 // ─── Wallet ───────────────────────────────────────────────────────────────────
 model Wallet {
-  id             String   @id @default(cuid())
-  organizationId String   @unique
+  id             String @id @default(cuid())
+  organizationId String @unique
   userId         String
 
   // Access Control
-  isActive          Boolean  @default(false)
-  accessGrantedAt   DateTime?
-  accessGrantedBy   String?  // AdminUser id
+  isActive        Boolean   @default(false)
+  accessGrantedAt DateTime?
+  accessGrantedBy String? // AdminUser id
 
   // Balance (stored in paise - INR smallest unit)
-  balancePaise      Int      @default(0)  // Always store in paise
-  reservedPaise     Int      @default(0)
-  currency          String   @default("INR")
+  balancePaise  Int    @default(0) // Always store in paise
+  reservedPaise Int    @default(0)
+  currency      String @default("INR")
 
   // Credit System
-  creditEnabled     Boolean  @default(false)
-  creditLimitPaise  Int      @default(0)
-  creditUsedPaise   Int      @default(0)
+  creditEnabled    Boolean @default(false)
+  creditLimitPaise Int     @default(0)
+  creditUsedPaise  Int     @default(0)
 
   // Limits (in paise)
-  maxTopUpPaise     Int      @default(5000000)   // ₹50,000
-  maxMonthlyPaise   Int      @default(20000000)  // ₹2,00,000
+  maxTopUpPaise     Int      @default(5000000) // ₹50,000
+  maxMonthlyPaise   Int      @default(20000000) // ₹2,00,000
   currentMonthPaise Int      @default(0)
   monthResetDate    DateTime
 
   // Low Balance Alert (in paise)
-  lowThresholdPaise    Int      @default(50000)  // ₹500
-  lowAlertSent         Boolean  @default(false)
-  lastAlertSentAt      DateTime?
+  lowThresholdPaise Int       @default(50000) // ₹500
+  lowAlertSent      Boolean   @default(false)
+  lastAlertSentAt   DateTime?
 
   // Stats (in paise)
-  totalCreditedPaise   Int      @default(0)
-  totalDebitedPaise    Int      @default(0)
-  lastTransactionAt    DateTime?
+  totalCreditedPaise Int       @default(0)
+  totalDebitedPaise  Int       @default(0)
+  lastTransactionAt  DateTime?
 
   // Fraud Detection
-  flagged      Boolean  @default(false)
-  flagReason   String?
-  flaggedAt    DateTime?
-  flaggedBy    String?  // AdminUser id
+  flagged    Boolean   @default(false)
+  flagReason String?
+  flaggedAt  DateTime?
+  flaggedBy  String? // AdminUser id
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user            User                 @relation(fields: [userId], references: [id])
-  transactions    WalletTransaction[]
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User                @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
 
   @@index([organizationId])
   @@index([isActive])
@@ -1459,82 +1577,82 @@ model Wallet {
 
 // ─── Wallet Transaction ───────────────────────────────────────────────────────
 model WalletTransaction {
-  id            String   @id @default(cuid())
+  id            String @id @default(cuid())
   walletId      String
-  transactionId String   @unique @default(cuid())
+  transactionId String @unique @default(cuid())
 
-  type          String   // credit | debit | refund | admin_credit | admin_debit | reserved | released
+  type String // credit | debit | refund | admin_credit | admin_debit | reserved | released
 
   // Amounts in paise
   amountPaise        Int
   balanceBeforePaise Int
   balanceAfterPaise  Int
 
-  currency      String   @default("INR")
-  description   String
-  status        String   @default("completed") // pending | completed | failed | reversed
+  currency    String @default("INR")
+  description String
+  status      String @default("completed") // pending | completed | failed | reversed
 
   // Meta related
-  metaChargeId  String?
-  metaService   String?  // message_sending | template_message | api_usage | other
+  metaChargeId String?
+  metaService  String? // message_sending | template_message | api_usage | other
 
   // Payment related (top-ups)
   razorpayOrderId   String?
   razorpayPaymentId String?
 
   // Admin related
-  performedBy   String?  // AdminUser id
-  note          String?
+  performedBy String? // AdminUser id
+  note        String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  wallet        Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
-  @@index([walletId])
-  @@index([type])
-  @@index([createdAt])
-  @@index([razorpayPaymentId])
   // Refund idempotency at the database: at most one row per (charge, service),
   // so a retried webhook fails the insert instead of double-refunding. NULL
   // metaChargeId rows are exempt (Postgres treats NULLs as distinct).
   @@unique([metaChargeId, metaService], name: "uniq_charge_service")
+  @@index([walletId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([razorpayPaymentId])
 }
 
 model WalletTopUpOrder {
-  id                String   @id @default(cuid())
-  organizationId    String
-  walletId          String
-  
+  id             String @id @default(cuid())
+  organizationId String
+  walletId       String
+
   // Razorpay data
-  razorpayOrderId   String   @unique
-  razorpayPaymentId String?  @unique
+  razorpayOrderId   String  @unique
+  razorpayPaymentId String? @unique
   razorpaySignature String?
-  
+
   // Amount
-  amountPaise       Int
-  currency          String   @default("INR")
-  
+  amountPaise Int
+  currency    String @default("INR")
+
   // Status: PENDING, PROCESSING, COMPLETED, FAILED, REFUNDED
-  status            String   @default("PENDING")
-  
+  status String @default("PENDING")
+
   // Tracking
-  attemptCount      Int      @default(0)
-  lastAttemptAt     DateTime?
-  completedAt       DateTime?
-  failureReason     String?
-  
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  completedAt   DateTime?
+  failureReason String?
+
   // Source: 'user_verify', 'webhook', 'cron_reconciliation', 'manual'
-  creditedVia       String?
-  
+  creditedVia String?
+
   // Audit
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Related transaction
-  transactionId     String?  @unique
-  
+  transactionId String? @unique
+
   @@index([organizationId])
   @@index([status])
   @@index([razorpayOrderId])

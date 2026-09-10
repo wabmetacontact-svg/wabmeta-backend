@@ -108,6 +108,14 @@ async function bootstrap() {
       logger.warn('Campaign recovery init failed', { error: error.message });
     }
 
+    // Step 10b: Resume any Telegram broadcasts interrupted by a restart
+    try {
+      const { resumeStuckBroadcasts } = await import('./modules/telegram/telegram.service');
+      await resumeStuckBroadcasts();
+    } catch (error: any) {
+      logger.warn('Telegram broadcast recovery failed', { error: error.message });
+    }
+
     // Step 11: Redis
     try {
       const { initRedis } = await import('./config/redis');
