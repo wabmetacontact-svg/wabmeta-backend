@@ -72,6 +72,14 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  // afterAll runs even when beforeAll threw, and then these ids are undefined --
+  // which Prisma reads as "no filter", i.e. every row in the table. Bail out
+  // instead of cleaning up nothing at the cost of everything.
+  if (!organizationId || !userId) {
+    await prisma.$disconnect();
+    return;
+  }
+
   await prisma.walletTransaction.deleteMany({ where: { wallet: { organizationId } } });
   await prisma.wallet.deleteMany({ where: { organizationId } });
   await prisma.organization.deleteMany({ where: { id: organizationId } });
