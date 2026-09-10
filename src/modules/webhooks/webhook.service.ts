@@ -315,9 +315,10 @@ export class WebhookService {
     try {
       const conversation = await prisma.conversation.upsert({
         where: {
-          organizationId_contactId: {
+          organizationId_contactId_channel: {
             organizationId,
             contactId,
+            channel: 'WHATSAPP',
           },
         },
         create: {
@@ -359,7 +360,7 @@ export class WebhookService {
         // ✅ Last resort: create without phoneNumberId
         const conversation = await prisma.conversation.upsert({
           where: {
-            organizationId_contactId: { organizationId, contactId },
+            organizationId_contactId_channel: { organizationId, contactId, channel: 'WHATSAPP' },
           },
           create: {
             organizationId,
@@ -408,20 +409,34 @@ export class WebhookService {
 
         if (messaging.message && !messaging.message.is_echo) {
           const messageText = messaging.message.text;
+          const igMessageId = messaging.message.mid;
 
-          const match = await instagramService.findMatchingAutomation(igUserId, messageText);
+          const account = await prisma.instagramAccount.findUnique({
+            where: { igUserId }
+          });
+
+          // Store the DM (text or media) in the unified inbox (best-effort).
+          let automationPaused = false;
+          if (account) {
+            try {
+              const { recordInboundIgMessage } = await import('../instagram/instagram.inbox');
+              const conv = await recordInboundIgMessage(account, senderId, { text: messageText, mid: igMessageId, attachments: messaging.message.attachments });
+              automationPaused = !!conv?.automationPaused;
+            } catch (e: any) {
+              console.error('IG inbox record error:', e?.message || e);
+            }
+          }
+
+          // Human handoff: once an agent takes over, no channel automation fires.
+          const match = automationPaused ? null : await instagramService.findMatchingAutomation(igUserId, messageText);
 
           if (match && match.isActive) {
             console.log(`🤖 IG Automation Match: ${match.name}`);
 
-            const account = await prisma.instagramAccount.findUnique({
-              where: { igUserId }
-            });
-
             if (account?.accessToken) {
               const instagramApi = await import('../instagram/instagram.api');
               if (match.responseText) {
-                await instagramApi.sendIGMessage(account.accessToken, senderId, match.responseText);
+                await instagramApi.sendIGMessage(instagramService.igAccessToken(account.accessToken), senderId, match.responseText);
               }
             }
 
@@ -429,6 +444,23 @@ export class WebhookService {
               where: { id: match.id },
               data: { repliesCount: { increment: 1 }, lastTriggeredAt: new Date() }
             });
+          }
+
+          // Story mention / reply → auto-reply DM.
+          const attach0 = messaging.message.attachments?.[0];
+          const isStoryMention = attach0?.type === 'story_mention';
+          const isStoryReply = !!messaging.message.reply_to?.story;
+          if ((isStoryMention || isStoryReply) && account?.accessToken && !automationPaused) {
+            const trigger = isStoryReply ? 'reply' : 'mention';
+            const storyRule = await instagramService.findMatchingStoryRule(igUserId, trigger);
+            if (storyRule?.dmMessage) {
+              const instagramApi = await import('../instagram/instagram.api');
+              await instagramApi.sendIGMessage(instagramService.igAccessToken(account.accessToken), senderId, storyRule.dmMessage);
+              await prisma.igStoryRule.update({
+                where: { id: storyRule.id },
+                data: { triggeredCount: { increment: 1 } },
+              });
+            }
           }
         }
       }
@@ -444,20 +476,21 @@ export class WebhookService {
 
           if (senderId === igUserId) return { status: 'skipped', reason: 'Own comment' };
 
-          const rule = await prisma.igCommentRule.findFirst({
-            where: {
-              igAccount: { igUserId },
-              isActive: true,
-              OR: [
-                { keywords: { has: commentText } },
-                { keywords: { equals: [] } }
-              ]
-            },
-            include: { igAccount: true }
+          const mediaId = change.value.media?.id || change.value.media_id;
+          const rules = await prisma.igCommentRule.findMany({
+            where: { igAccount: { igUserId }, isActive: true },
+            include: { igAccount: true },
+          });
+          // Match: post targeting (empty = all posts) + keyword (empty = all comments, else contains).
+          const rule = rules.find((r) => {
+            const postOk = !r.postIds?.length || (mediaId && r.postIds.includes(mediaId));
+            if (!postOk) return false;
+            if (!r.keywords?.length) return true;
+            return r.keywords.some((k) => commentText.includes(String(k).toLowerCase()));
           });
 
           if (rule) {
-            const token = rule.igAccount.accessToken;
+            const token = instagramService.igAccessToken(rule.igAccount.accessToken);
             const instagramApi = await import('../instagram/instagram.api');
 
             if (rule.commentReply) {
