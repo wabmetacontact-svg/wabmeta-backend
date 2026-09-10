@@ -755,6 +755,7 @@ model Chatbot {
   @@index([status])
   @@index([isDefault])
   @@index([createdById])
+  @@index([channel])
 }
 
 model Automation {
