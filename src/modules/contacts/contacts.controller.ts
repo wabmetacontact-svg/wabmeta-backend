@@ -6,6 +6,7 @@ import { sendSuccess } from '../../utils/response';
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { contactFeaturesService } from './contacts.features';
+import { parseContactChannel } from './contact.channel';
 import { parseMultiplePhones, COUNTRY_CODES } from '../../utils/phoneInternational';
 import {
   CreateContactInput, UpdateContactInput, ImportContactsInput,
@@ -67,6 +68,9 @@ export class ContactsController {
         hasWhatsAppProfile:
           req.query.hasWhatsAppProfile === 'true' ? true :
             req.query.hasWhatsAppProfile === 'false' ? false : undefined,
+        // Missing ya galat value = WHATSAPP, taaki Telegram/Instagram ke
+        // synthetic-phone contacts default list me na aayein.
+        channel: parseContactChannel(req.query.channel),
       };
 
       const result = await contactsService.getList(organizationId, query);
@@ -250,7 +254,9 @@ export class ContactsController {
       const organizationId = req.user?.organizationId;
       if (!organizationId) throw new AppError('Organization context required', 400);
 
-      const stats = await contactsService.getStats(organizationId);
+      const stats = await contactsService.getStats(
+        organizationId, parseContactChannel(req.query.channel)
+      );
       sendSuccess(res, stats, 'Stats fetched successfully');
     } catch (error) { next(error); }
   }
@@ -278,7 +284,7 @@ export class ContactsController {
 
       const { groupId } = req.query;
       const contacts = await contactsService.export(
-        organizationId, groupId as string
+        organizationId, groupId as string, parseContactChannel(req.query.channel)
       );
 
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

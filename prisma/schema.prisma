@@ -1418,6 +1418,11 @@ model OrganizationSettings {
   autoAssignLeads    Boolean @default(false)
   defaultAssigneeId  String?
 
+  // Telegram/Instagram DM par koi chatbot ya AI agent qualify nahi karta, to
+  // lead customer ke pehle asli message par banta hai (crm.social.ts). Jo
+  // client sirf inbox use karta hai, CRM nahi, wo ise band kar sakta hai.
+  autoLeadFromSocial Boolean @default(true)
+
   // Pipeline Settings
   defaultPipelineId String?
 
