@@ -105,6 +105,7 @@ export class CRMService {
     leadCreationMode?: string;
     leadScoreThreshold?: number;
     autoAssignLeads?: boolean;
+    autoLeadFromSocial?: boolean;
     defaultAssigneeId?: string;
     notifyOnNewLead?: boolean;
     notifyUserId?: string;
@@ -292,7 +293,7 @@ export class CRMService {
       data: {
         organizationId,
         contactId,
-        title: params.title || `${contactDisplayName} - WhatsApp Lead`,
+        title: params.title || `${contactDisplayName} - ${this.sourceLabel(source)} Lead`,
         pipelineId: pipeline.id,
         stageId: firstStage?.id,
         status: 'NEW',
@@ -320,7 +321,7 @@ export class CRMService {
             type: 'NOTE',
             title: chatbotQualified
               ? 'Lead created via chatbot qualification'
-              : 'Lead created from WhatsApp',
+              : `Lead created from ${this.sourceLabel(source)}`,
             metadata: {
               source,
               score,
@@ -1030,6 +1031,18 @@ export class CRMService {
     if (score >= 60) return 'HIGH';
     if (score >= 40) return 'MEDIUM';
     return 'LOW';
+  }
+
+  /**
+   * Lead ka channel, source string se. Lead ka title aur pehli activity dono
+   * pehle hardcoded "WhatsApp" kehte the - Telegram/Instagram leads aane ke
+   * baad wo galat padha jata hai.
+   */
+  private sourceLabel(source: string): string {
+    const s = (source || '').toLowerCase();
+    if (s.includes('telegram')) return 'Telegram';
+    if (s.includes('instagram')) return 'Instagram';
+    return 'WhatsApp';
   }
 
   private getHigherPriority(a: LeadPriority, b: LeadPriority): LeadPriority {

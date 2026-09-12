@@ -9,6 +9,7 @@ import prisma from '../../config/database';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { webhookEvents } from '../webhooks/webhook.service';
 import { withAdvisoryLock } from '../../utils/withLock';
+import { maybeCreateSocialLead } from '../crm/crm.social';
 import * as tg from './telegram.api';
 
 // Public base URL Telegram will call our webhook on. Must be https and reachable.
@@ -436,6 +437,16 @@ export const processUpdate = async (
   webhookEvents.emit('conversationUpdated', {
     organizationId,
     conversation: updatedConversation,
+  });
+
+  // Pehle asli message par CRM lead. Media-only message ka caption khali hota
+  // hai, to wo apne aap skip ho jata hai. Ye kabhi throw nahi karta.
+  await maybeCreateSocialLead({
+    organizationId,
+    contactId: contact.id,
+    conversationId: conversation.id,
+    channel: 'TELEGRAM',
+    text: caption,
   });
 
   // Automation (best-effort). Human handoff: skip once an agent has taken over.

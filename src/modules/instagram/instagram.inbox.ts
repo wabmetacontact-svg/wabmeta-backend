@@ -9,6 +9,7 @@ import prisma from '../../config/database';
 import { webhookEvents } from '../webhooks/webhook.service';
 import { sendIGMessage, sendIGAttachment } from './instagram.api';
 import { igAccessToken } from './instagram.service';
+import { maybeCreateSocialLead } from '../crm/crm.social';
 
 type IgAccount = { id: string; organizationId: string; accessToken: string; username?: string | null };
 
@@ -134,6 +135,16 @@ export const recordInboundIgMessage = async (
 
   webhookEvents.emit('newMessage', { organizationId, conversationId: conversation.id, message: message_, conversation: updatedConversation });
   webhookEvents.emit('conversationUpdated', { organizationId, conversation: updatedConversation });
+
+  // Pehle asli message par CRM lead. Attachment-only DM ka text khali hota hai,
+  // to wo apne aap skip ho jata hai. Ye kabhi throw nahi karta.
+  await maybeCreateSocialLead({
+    organizationId,
+    contactId: contact.id,
+    conversationId: conversation.id,
+    channel: 'INSTAGRAM',
+    text,
+  });
 
   // Returned so the webhook can honour human handoff (skip automation when paused).
   return updatedConversation;
