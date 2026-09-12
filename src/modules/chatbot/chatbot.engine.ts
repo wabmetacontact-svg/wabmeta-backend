@@ -221,7 +221,8 @@ export class ChatbotEngine {
     senderPhone:        string,
     isNewConversation:  boolean,
     rawMessage?:        any
-  ): Promise<void> {
+  ): Promise<boolean> {
+    // true = kisi chatbot ne ye message sambhala (AI agent ab chup rahega)
 
     const sessionKey  = `${organizationId}:${conversationId}`;
     const cleanMessage= (messageContent || '').trim();
@@ -248,7 +249,7 @@ export class ChatbotEngine {
 
     if (!lockAcquired) {
       chatbotLog.warn('Could not acquire lock', { sessionKey });
-      return;
+      return true; // is chat par chatbot pehle se chal raha hai
     }
 
     try {
@@ -294,13 +295,13 @@ export class ChatbotEngine {
 
       if (!chatbot) {
         chatbotLog.debug('No matching chatbot');
-        return;
+        return false;
       }
 
       const flowData = chatbot.flowData as unknown as FlowData;
       if (!flowData?.nodes?.length) {
         chatbotLog.warn('Chatbot has empty flow', { chatbotId: chatbot.id });
-        return;
+        return false;
       }
 
       const account = await prisma.whatsAppAccount.findFirst({
@@ -310,7 +311,7 @@ export class ChatbotEngine {
 
       if (!account) {
         chatbotLog.error('No connected WhatsApp account', null, { organizationId });
-        return;
+        return false;
       }
 
       // Create or continue session
@@ -321,7 +322,7 @@ export class ChatbotEngine {
           account, sessionKey, chatbot.welcomeMessage || '',
           rawMessage
         );
-        if (!session) return;
+        if (!session) return true;
       } else {
         session = await this.handleExistingSession(
           session, cleanMessage, flowData,
@@ -363,8 +364,10 @@ export class ChatbotEngine {
         );
       }
 
+      return true;
     } catch (error) {
       console.error(`❌ Chatbot engine error:`, error);
+      return false;
     } finally {
       await sessionManager.releaseLock(sessionKey);
       console.log(`🤖 ═══════ ENGINE END ═══════\n`);
@@ -1924,14 +1927,31 @@ export class ChatbotEngine {
           const leadId = session.variables['leadId'];
           if (!leadId || !action.params?.stageId) break;
 
+          const toStageId: string = action.params.stageId;
+          const before = await prisma.lead.findUnique({
+            where: { id: leadId },
+            select: { stageId: true },
+          });
+
           await prisma.lead.update({
             where: { id: leadId },
             data: {
-              stageId:       action.params.stageId,
+              stageId:       toStageId,
               lastActivityAt: new Date(),
             },
           });
           console.log(`📈 Lead stage updated`);
+
+          // crm.updateLead ko bypass karta hai, isliye trigger yahan se bhi
+          if (before && before.stageId !== toStageId) {
+            import('../automation/automation.engine')
+              .then(({ automationEngine }) =>
+                automationEngine.triggerLeadStageChanged({
+                  organizationId, leadId, fromStageId: before.stageId, toStageId,
+                })
+              )
+              .catch((e: any) => console.error('Lead stage automation error:', e?.message));
+          }
           break;
         }
 

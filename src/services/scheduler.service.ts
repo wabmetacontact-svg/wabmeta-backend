@@ -21,6 +21,9 @@ const state = {
   expiryWarnings: false,
   webhookLogCleanup: false,
   metaSync: false,
+  automationJobs: false,
+  noReply: false,
+  payments: false,
   lastPoolError: 0,
 };
 
@@ -173,6 +176,79 @@ export function initializeScheduler() {
       }
     } finally {
       state.metaSync = false;
+    }
+  });
+
+  // ============================================
+  // 7. AUTOMATION JOBS - Every minute
+  // Follow-up delays aur wait_for_response timeouts (AutomationJob), aur
+  // LeadTask due reminders (TASK_DUE). Jobs SKIP LOCKED se claim hote hain,
+  // isliye lock chhoot bhi jaye to ek job do baar nahi chalta.
+  // ============================================
+  cron.schedule('* * * * *', async () => {
+    if (state.automationJobs) return;
+    if (shouldSkipDueToPoolPressure()) return;
+
+    state.automationJobs = true;
+    try {
+      await withAdvisoryLock('scheduler:automationJobs', async () => {
+        await automationEngine.runDueJobs();
+        await automationEngine.triggerTasksDue();
+      });
+    } catch (error: any) {
+      if (error?.code === 'P2024') {
+        markPoolError();
+      } else {
+        console.error('Automation jobs error:', error.message);
+      }
+    } finally {
+      state.automationJobs = false;
+    }
+  });
+
+  // ============================================
+  // 8. NO_REPLY - Every 10 minutes
+  // ============================================
+  cron.schedule('*/10 * * * *', async () => {
+    if (state.noReply) return;
+    if (shouldSkipDueToPoolPressure()) return;
+
+    state.noReply = true;
+    try {
+      await withAdvisoryLock('scheduler:noReply', () => automationEngine.triggerNoReply());
+    } catch (error: any) {
+      if (error?.code === 'P2024') {
+        markPoolError();
+      } else {
+        console.error('No-reply trigger error:', error.message);
+      }
+    } finally {
+      state.noReply = false;
+    }
+  });
+
+  // ============================================
+  // 9. CLIENT PAYMENT LINKS - Every 3 minutes
+  // Jin clients ne apne Razorpay dashboard me webhook nahi lagaya, unke payment
+  // ka pata sirf isi se chalta hai. Expire ho chuke links bina Razorpay call
+  // kiye band ho jate hain.
+  // ============================================
+  cron.schedule('*/3 * * * *', async () => {
+    if (state.payments) return;
+    if (shouldSkipDueToPoolPressure()) return;
+
+    state.payments = true;
+    try {
+      const { paymentsService } = await import('../modules/payments/payments.service');
+      await withAdvisoryLock('scheduler:payments', () => paymentsService.pollPendingPayments());
+    } catch (error: any) {
+      if (error?.code === 'P2024') {
+        markPoolError();
+      } else {
+        console.error('Payment polling error:', error.message);
+      }
+    } finally {
+      state.payments = false;
     }
   });
 

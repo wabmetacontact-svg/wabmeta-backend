@@ -2,6 +2,7 @@ import { Prisma, LeadStatus, LeadPriority } from '@prisma/client';
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { notificationsService } from '../notifications/notifications.service';
+import { parseHHMM } from '../automation/automation.timing';
 
 export class CRMService {
 
@@ -108,8 +109,25 @@ export class CRMService {
     notifyOnNewLead?: boolean;
     notifyUserId?: string;
     trackAdSource?: boolean;
+    quietHoursEnabled?: boolean;
+    quietHoursStart?: string;   // "HH:MM"
+    quietHoursEnd?: string;     // "HH:MM"
+    quietHoursTimezone?: string; // IANA, e.g. "Asia/Kolkata"
   }) {
     const { id: _id, organizationId: _org, ...safe } = data as any;
+
+    for (const key of ['quietHoursStart', 'quietHoursEnd'] as const) {
+      if (safe[key] !== undefined && parseHHMM(safe[key]) === null) {
+        throw new AppError(`${key} must be a 24-hour time like "21:00"`, 400);
+      }
+    }
+    if (safe.quietHoursTimezone !== undefined) {
+      try {
+        new Intl.DateTimeFormat('en-GB', { timeZone: safe.quietHoursTimezone });
+      } catch {
+        throw new AppError('quietHoursTimezone must be an IANA timezone like "Asia/Kolkata"', 400);
+      }
+    }
 
     return (prisma as any).organizationSettings.upsert({
       where: { organizationId },
@@ -676,7 +694,7 @@ export class CRMService {
     // Never let the client set identity/tenant fields through the spread.
     const { id: _id, organizationId: _org, createdAt: _c, ...safe } = data as any;
 
-    return prisma.lead.update({
+    const updated = await prisma.lead.update({
       where: { id: leadId },
       data: {
         ...safe,
@@ -691,6 +709,21 @@ export class CRMService {
       },
       include: { contact: true, stage: true, pipeline: true },
     });
+
+    if (data.stageId && data.stageId !== lead.stageId) {
+      // Stage badalne par LEAD_STAGE_CHANGED automations. Response ko nahi
+      // rokta. Dynamic import: automation engine ka import graph bada hai.
+      const toStageId = data.stageId;
+      import('../automation/automation.engine')
+        .then(({ automationEngine }) =>
+          automationEngine.triggerLeadStageChanged({
+            organizationId, leadId, fromStageId: lead.stageId, toStageId,
+          })
+        )
+        .catch((e: any) => console.error('Lead stage automation error:', e?.message));
+    }
+
+    return updated;
   }
 
   async deleteLead(organizationId: string, leadId: string) {

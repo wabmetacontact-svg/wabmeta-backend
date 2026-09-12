@@ -21,6 +21,7 @@ import { webhookLog, campaignLog } from '../../utils/logger';
 import { chatbotEngine } from '../chatbot/chatbot.engine';
 import { automationEngine } from '../automation/automation.engine';
 import { detectOptSignal, applyOptSignal } from '../contacts/optOut';
+import { shouldAiReply } from '../aiagent/aiagent.prompt';
 import { toCanonicalPhone, buildPhoneVariants } from '../../utils/phone';
 import * as instagramService from '../instagram/instagram.service';
 import { notificationsService } from '../notifications/notifications.service';
@@ -1115,10 +1116,13 @@ export class WebhookService {
         : false;
 
       if (!suppressBot) {
-        this.runAutomations(
-          wasNewlyCreated, organizationId, contact,
-          content, waFrom, updatedConversation, message, msgType
-        ).catch((e: any) => console.error('Automation error:', e));
+        // Automation + chatbot saath chalte hain (pehle jaise); dono me se kisi
+        // ne jawab nahi diya to AI agent. Poora routing background me.
+        this.routeInbound({
+          wasNewlyCreated, organizationId, contact, content, waFrom,
+          conversation: updatedConversation, message, msgType,
+          whatsappAccountId, savedMessageId: savedMessage.id,
+        }).catch((e: any) => console.error('Inbound routing error:', e));
       }
 
       prisma.organization.findUnique({
@@ -1136,28 +1140,6 @@ export class WebhookService {
         }
       }).catch((err: any) => console.error('Error fetching org owner for push:', err));
 
-
-      if (!suppressBot && (msgType === 'TEXT' || msgType === 'INTERACTIVE')) {
-        let chatbotContent = content;
-        if (msgType === 'INTERACTIVE') {
-          const iType = message?.interactive?.type;
-          chatbotContent = iType === 'button_reply'
-            ? (message.interactive.button_reply.id || message.interactive.button_reply.title || content)
-            : iType === 'list_reply'
-              ? (message.interactive.list_reply.id || message.interactive.list_reply.title || content)
-              : content;
-        }
-
-        const isNewConversation = wasNewlyCreated || updatedConversation.unreadCount <= 1;
-        chatbotEngine.processMessage(
-          updatedConversation.id,
-          organizationId,
-          chatbotContent,
-          waFrom,
-          isNewConversation,
-          message
-        ).catch((e: any) => console.error('Chatbot error:', e));
-      }
 
       // ✅ Auto-backup inbound media to Cloudinary (fire-and-forget)
       const MEDIA_TYPES_TO_BACKUP = ['image', 'video', 'audio', 'document', 'sticker'];
@@ -1180,6 +1162,79 @@ export class WebhookService {
     }
   }
 
+  /**
+   * Inbound WhatsApp message kaun sambhale: automations aur chatbot saath
+   * chalte hain; dono me se kisi ne nahi pakda to AI agent (agar org ne on
+   * kiya ho). Inbox me agent ne chat le li ho (automationPaused) to chatbot
+   * aur AI chup - Instagram/Telegram pehle se ye maante the, WhatsApp chatbot
+   * nahi maanta tha.
+   */
+  private async routeInbound(p: {
+    wasNewlyCreated: boolean;
+    organizationId: string;
+    contact: any;
+    content: string;
+    waFrom: string;
+    conversation: any;
+    message: any;
+    msgType: string;
+    whatsappAccountId: string;
+    savedMessageId: string;
+  }): Promise<void> {
+    const { organizationId, conversation, message, msgType, content } = p;
+    const paused = !!conversation.automationPaused;
+
+    const automationPromise = this.runAutomations(
+      p.wasNewlyCreated, organizationId, p.contact,
+      content, p.waFrom, conversation, message, msgType
+    );
+
+    let chatbotPromise: Promise<boolean> = Promise.resolve(false);
+    if (!paused && (msgType === 'TEXT' || msgType === 'INTERACTIVE')) {
+      let chatbotContent = content;
+      if (msgType === 'INTERACTIVE') {
+        const iType = message?.interactive?.type;
+        chatbotContent = iType === 'button_reply'
+          ? (message.interactive.button_reply.id || message.interactive.button_reply.title || content)
+          : iType === 'list_reply'
+            ? (message.interactive.list_reply.id || message.interactive.list_reply.title || content)
+            : content;
+      }
+
+      const isNewConversation = p.wasNewlyCreated || conversation.unreadCount <= 1;
+      chatbotPromise = chatbotEngine.processMessage(
+        conversation.id,
+        organizationId,
+        chatbotContent,
+        p.waFrom,
+        isNewConversation,
+        message
+      ).catch((e: any) => {
+        console.error('Chatbot error:', e);
+        return false;
+      });
+    }
+
+    const [handledByAutomation, handledByChatbot] = await Promise.all([automationPromise, chatbotPromise]);
+
+    // Agent on hai ya nahi - wo engine khud dekhta hai
+    if (!shouldAiReply({ agentEnabled: true, paused, handledByAutomation, handledByChatbot, msgType, text: content })) {
+      return;
+    }
+
+    const { aiAgentEngine } = await import('../aiagent/aiagent.engine');
+    await aiAgentEngine.handleInbound({
+      organizationId,
+      conversationId: conversation.id,
+      contactId: p.contact.id,
+      phone: p.waFrom,
+      text: content,
+      whatsappAccountId: p.whatsappAccountId,
+      excludeMessageId: p.savedMessageId,
+    });
+  }
+
+  /** true = kisi automation ne is message par kuch chalaya */
   private async runAutomations(
     wasNewlyCreated: boolean,
     organizationId: string,
@@ -1189,7 +1244,7 @@ export class WebhookService {
     conversation: any,
     message: any,
     msgType: string
-  ) {
+  ): Promise<boolean> {
     try {
       const context = {
         organizationId,
@@ -1199,39 +1254,55 @@ export class WebhookService {
         conversationId: conversation.id,
       };
 
-      // ✅ 1. Unknown message trigger (for new/unknown senders)
-      // Fire regardless of contact existence - the trigger itself checks
-      automationEngine.triggerUnknownMessage(context)
-        .catch(err => console.error('❌ Unknown message trigger:', err.message));
+      // ✅ 0. Pehle is reply ka asar: scheduled follow-ups rokna aur
+      // wait_for_response wale runs aage badhana. Naye triggers iske BAAD -
+      // warna isi message se shuru hua naya run turant "reply aa gaya" samajh
+      // kar ruk jata.
+      const resumed = await automationEngine.onInboundMessage({
+        ...context,
+        buttonId: msgType === 'INTERACTIVE'
+          ? message?.interactive?.button_reply?.id || message?.interactive?.list_reply?.id
+          : undefined,
+      }).catch((err): boolean => {
+        console.error('❌ Inbound automation handling:', err.message);
+        return false;
+      });
 
-      // ✅ 2. Keyword trigger (for all messages)
-      if (content) {
-        automationEngine.triggerKeyword(context)
-          .catch(err => console.error('❌ Keyword trigger:', err.message));
-      }
+      // Teeno triggers saath (pehle bhi saath chalte the); ab result ka intezar
+      // taaki pata chale kisi ne message pakda ya nahi.
+      const results = await Promise.all([
+        // ✅ 1. Unknown message trigger (for new/unknown senders)
+        // Fire regardless of contact existence - the trigger itself checks
+        automationEngine.triggerUnknownMessage(context).catch((err): boolean => {
+          console.error('❌ Unknown message trigger:', err.message);
+          return false;
+        }),
 
-      // ✅ 3. New contact trigger (only if contact was JUST created)
-      if (wasNewlyCreated) {
-        automationEngine.triggerNewContact({
-          organizationId,
-          contactId: contact.id,
-          phone: waFrom,
-        }).catch(err => console.error('❌ New contact trigger:', err.message));
-      }
+        // ✅ 2. Keyword trigger (for all messages)
+        content
+          ? automationEngine.triggerKeyword(context).catch((err): boolean => {
+              console.error('❌ Keyword trigger:', err.message);
+              return false;
+            })
+          : Promise.resolve(false),
 
-      if (msgType === 'INTERACTIVE') {
-        const buttonId = message?.interactive?.button_reply?.id;
-        if (buttonId) {
-          await automationEngine.handleButtonClick({
-            organizationId,
-            contactId: contact.id,
-            buttonId,
-            conversationId: conversation.id,
-          });
-        }
-      }
+        // ✅ 3. New contact trigger (only if contact was JUST created)
+        wasNewlyCreated
+          ? automationEngine.triggerNewContact({
+              organizationId,
+              contactId: contact.id,
+              phone: waFrom,
+            }).catch((err): boolean => {
+              console.error('❌ New contact trigger:', err.message);
+              return false;
+            })
+          : Promise.resolve(false),
+      ]);
+
+      return resumed || results.some(Boolean);
     } catch (e) {
       console.error('runAutomations error:', e);
+      return false;
     }
   }
 

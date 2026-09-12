@@ -4,6 +4,24 @@ import { automationService } from './automation.service';
 import { AutomationTrigger } from '@prisma/client';
 import { deductWalletForTemplate } from '../wallet/wallet.deduction.service';
 import { automationLog } from '../../utils/logger';
+import { notificationsService } from '../notifications/notifications.service';
+import {
+  ClaimedJob,
+  cancelPendingJobs,
+  claimDueJobs,
+  deferJob,
+  finishJob,
+  retryOrFailJob,
+  scheduleJob,
+} from './automation.jobs';
+import {
+  FREE_FORM_ACTIONS,
+  INLINE_DELAY_MAX_MS,
+  delayToMs,
+  isWindowOpen,
+  quietHoursEndsAt,
+  waitTimeoutMs,
+} from './automation.timing';
 
 interface AutomationAction {
   id: string;
@@ -46,8 +64,9 @@ class AutomationEngine {
   // ==========================================
   // ✅ TRIGGER: UNKNOWN MESSAGE
   // ==========================================
-  async triggerUnknownMessage(context: TriggerContext): Promise<void> {
-    if (!context.phone) return;
+  async triggerUnknownMessage(context: TriggerContext): Promise<boolean> {
+    if (!context.phone) return false;
+    let triggered = false;
 
     automationLog.debug('Checking UNKNOWN_MESSAGE triggers', {
       orgId: context.organizationId,
@@ -58,7 +77,7 @@ class AutomationEngine {
         context.organizationId, 'UNKNOWN_MESSAGE'
       );
 
-      if (automations.length === 0) return;
+      if (automations.length === 0) return false;
 
       const contactExistedBefore = await this.contactExistedBefore(
         context.organizationId, context.phone
@@ -93,6 +112,7 @@ class AutomationEngine {
           });
 
           await this.executeSequence(automation.id, automation.actions, context);
+          triggered = true;
         } catch (err: any) {
           automationLog.error('Unknown message automation failed', err, {
             automationId: automation.id,
@@ -104,6 +124,7 @@ class AutomationEngine {
         automationLog.error('Unknown message trigger error', error);
       }
     }
+    return triggered;
   }
 
   // ==========================================
@@ -188,7 +209,8 @@ class AutomationEngine {
   // ==========================================
   // ✅ TRIGGER: NEW CONTACT (Enhanced with Groups)
   // ==========================================
-  async triggerNewContact(context: TriggerContext): Promise<void> {
+  async triggerNewContact(context: TriggerContext): Promise<boolean> {
+    let triggered = false;
     console.log(`🤖 [AUTOMATION] Triggering NEW_CONTACT for org: ${context.organizationId}`);
 
     try {
@@ -212,10 +234,12 @@ class AutomationEngine {
 
         console.log(`🤖 Executing automation: ${automation.name}`);
         await this.executeSequence(automation.id, automation.actions as any, context);
+        triggered = true;
       }
     } catch (error) {
       console.error('🤖 NEW_CONTACT automation error:', error);
     }
+    return triggered;
   }
 
   // ==========================================
@@ -516,7 +540,7 @@ class AutomationEngine {
     contactId: string;
     buttonId: string;
     conversationId: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
     return this.handleUserResponse({
       organizationId: context.organizationId,
       contactId: context.contactId,
@@ -528,12 +552,29 @@ class AutomationEngine {
   // ==========================================
   // ✅ EXECUTE SEQUENCE (Multi-step with wait)
   // ==========================================
+  // Trigger se naya run: step 0 se, purane run ka bacha follow-up hata kar.
   private async executeSequence(
     automationId: string,
     actions: AutomationAction[],
     context: TriggerContext
   ): Promise<void> {
-    console.log(`🔄 Executing sequence: ${actions.length} steps`);
+    await this.runSteps(automationId, actions, 0, context, true);
+  }
+
+  /**
+   * `actions` hamesha automation ki POORI list hai aur `startStep` usme
+   * absolute index. Pehle resume par bachi hui list ka slice aata tha aur
+   * currentStep us slice ke hisaab se 0 se ginta tha - doosre
+   * wait_for_response ke baad sequence galat step se chalti thi.
+   */
+  private async runSteps(
+    automationId: string,
+    actions: AutomationAction[],
+    startStep: number,
+    context: TriggerContext,
+    fresh: boolean
+  ): Promise<void> {
+    console.log(`🔄 Executing sequence: steps ${startStep + 1}-${actions.length}`);
 
     // Create or get contact
     let contactId = context.contactId;
@@ -563,28 +604,54 @@ class AutomationEngine {
       return;
     }
 
-    // Create sequence tracker
-    await prisma.automationSequence.upsert({
-      where: {
-        automationId_contactId: {
+    // Opt-out (STOP) ya blocked contact ko automation kuch nahi bhejti, trigger
+    // chahe kuch bhi ho. Phone bhi yahin se: button click aur job ke context me
+    // phone nahi hota tha, aur send actions chup-chaap return ho jate the.
+    const contact = await prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { status: true, phone: true },
+    });
+    if (!contact) return;
+    if (contact.status !== 'ACTIVE') {
+      console.log(`⏭️ Contact ${contactId} is ${contact.status} - automation skipped`);
+      await prisma.automationSequence.updateMany({
+        where: { automationId, contactId, status: { in: ['ACTIVE', 'SCHEDULED', 'WAITING'] } },
+        data: { status: 'STOPPED' },
+      });
+      return;
+    }
+    context = { ...context, contactId, phone: context.phone || contact.phone };
+
+    if (fresh) {
+      // Naya trigger purane run ki jagah leta hai - uska bacha hua follow-up
+      // is naye run ke upar na chale.
+      await cancelPendingJobs({ contactId, automationId }, 'restarted by a new trigger');
+
+      await prisma.automationSequence.upsert({
+        where: {
+          automationId_contactId: {
+            automationId,
+            contactId,
+          },
+        },
+        create: {
           automationId,
           contactId,
+          currentStep: 0,
+          status: 'ACTIVE',
         },
-      },
-      create: {
-        automationId,
-        contactId,
-        currentStep: 0,
-        status: 'ACTIVE',
-      },
-      update: {
-        currentStep: 0,
-        status: 'ACTIVE',
-      },
-    });
+        update: {
+          currentStep: 0,
+          status: 'ACTIVE',
+        },
+      });
+    }
+
+    // Window ek run me ek hi baar poochte hain - template bhejne se wo khulti nahi.
+    let windowOpen: boolean | undefined;
 
     // Execute actions
-    for (let i = 0; i < actions.length; i++) {
+    for (let i = startStep; i < actions.length; i++) {
       const action = actions[i];
 
       try {
@@ -595,6 +662,30 @@ class AutomationEngine {
           where: { automationId, contactId },
           data: { currentStep: i, lastStepAt: new Date() },
         });
+
+        // 24 ghante ki window band ho to text/media Meta tak jata hi nahi
+        // (sendMessage 400 deta hai). fallbackTemplateId ho to template bhejo.
+        if (FREE_FORM_ACTIONS.has(action.type)) {
+          if (windowOpen === undefined) {
+            windowOpen = await this.isWindowOpenFor(context.organizationId, contactId);
+          }
+          if (!windowOpen) {
+            const fallbackTemplateId = action.config?.fallbackTemplateId;
+            if (fallbackTemplateId) {
+              console.log(`🪟 Step ${i + 1}: 24h window closed - sending fallback template`);
+              await this.actionSendTemplate(
+                { ...context, contactId },
+                { templateId: fallbackTemplateId, _automationId: automationId }
+              );
+            } else {
+              console.warn(
+                `🪟 Step ${i + 1}: 24h window closed - skipped ${action.type} ` +
+                `(set fallbackTemplateId to send a template instead)`
+              );
+            }
+            continue;
+          }
+        }
 
         switch (action.type) {
           case 'send_text':
@@ -627,12 +718,42 @@ class AutomationEngine {
             break;
 
           case 'wait_for_response':
-            await this.actionWaitForResponse(automationId, contactId, action.config);
+            await this.actionWaitForResponse(
+              automationId, { ...context, contactId }, action.config, i, actions
+            );
             return; // Pause until user responds
 
-          case 'delay':
-            await this.actionDelay(action.config);
-            break;
+          case 'delay': {
+            const ms = delayToMs(action.config);
+            if (ms <= INLINE_DELAY_MAX_MS) {
+              await new Promise((resolve) => setTimeout(resolve, ms));
+              break;
+            }
+            if (i + 1 >= actions.length) break; // delay ke baad koi step hi nahi
+
+            // Lamba delay: process me intezar nahi, job. Scheduler runAt par
+            // agle step se chalayega - restart ke baad bhi.
+            const runAt = new Date(Date.now() + ms);
+            await scheduleJob({
+              organizationId: context.organizationId,
+              automationId,
+              contactId,
+              type: 'RESUME_SEQUENCE',
+              runAt,
+              payload: {
+                fromStep: i + 1,
+                nextActionId: actions[i + 1]?.id,
+                phone: context.phone,
+                conversationId: context.conversationId,
+              },
+            });
+            await prisma.automationSequence.updateMany({
+              where: { automationId, contactId },
+              data: { status: 'SCHEDULED', currentStep: i },
+            });
+            console.log(`⏰ Step ${i + 1}: next step scheduled for ${runAt.toISOString()}`);
+            return;
+          }
 
           case 'add_tag':
             await this.actionAddTag({ ...context, contactId }, action.config);
@@ -646,11 +767,24 @@ class AutomationEngine {
             await this.actionCreateLead({ ...context, contactId }, action.config);
             break;
 
+          case 'send_payment_link':
+            await this.actionSendPaymentLink({ ...context, contactId }, action.config);
+            break;
+
           default:
             console.warn(`⚠️ Unknown action: ${action.type}`);
         }
       } catch (error: any) {
         console.error(`❌ Step ${i + 1} failed:`, error.message);
+        // delay/wait schedule na ho paya to agle steps abhi chal jate -
+        // follow-up bina intezar ke. Us se behtar run yahin rok dena.
+        if (action.type === 'delay' || action.type === 'wait_for_response') {
+          await prisma.automationSequence.updateMany({
+            where: { automationId, contactId },
+            data: { status: 'FAILED' },
+          }).catch(() => {});
+          return;
+        }
       }
     }
 
@@ -1058,23 +1192,62 @@ class AutomationEngine {
   // ==========================================
   // ✅ ACTION: WAIT FOR RESPONSE
   // ==========================================
+  /**
+   * config:
+   *   buttonIds / keywords        kaunsa reply gina jaye (khali = koi bhi reply)
+   *   onReply:   'continue' | 'stop'   reply aaye to aage chalo (default) ya ruko
+   *   onTimeout: 'continue' | 'stop'   itni der reply na aaye to
+   *   timeoutValue + timeoutUnit  (ya purana `timeout`, ms me)
+   *
+   * Follow-up ka pattern: quote bhejo -> wait(24h, onReply stop, onTimeout
+   * continue) -> follow-up -> wait(48h, ...) -> aakhri follow-up.
+   */
   private async actionWaitForResponse(
     automationId: string,
-    contactId: string,
-    config: any
+    context: TriggerContext & { contactId: string },
+    config: any,
+    stepIndex: number,
+    actions: AutomationAction[]
   ): Promise<void> {
     console.log(`⏸️ Pausing sequence until user responds`);
 
+    const onTimeout =
+      config.onTimeout === 'continue' || config.onTimeout === 'stop' ? config.onTimeout : null;
+    const timeoutMs = waitTimeoutMs(config);
+
     await prisma.automationSequence.updateMany({
-      where: { automationId, contactId },
+      where: { automationId, contactId: context.contactId },
       data: {
         status: 'WAITING',
+        currentStep: stepIndex,
         metadata: {
           waitingFor: config.buttonIds || config.keywords || [],
-          timeout: config.timeout || 24 * 60 * 60 * 1000, // 24 hours default
+          timeout: timeoutMs || 24 * 60 * 60 * 1000,
+          onReply: config.onReply === 'stop' ? 'stop' : 'continue',
+          onTimeout,
         },
       },
     });
+
+    // Timeout sirf tab jab builder ne bataya ho ki timeout par kya karna hai -
+    // purane automations bina timeout ke hamesha intezar karte the.
+    if (onTimeout && timeoutMs) {
+      const runAt = new Date(Date.now() + timeoutMs);
+      await scheduleJob({
+        organizationId: context.organizationId,
+        automationId,
+        contactId: context.contactId,
+        type: 'WAIT_TIMEOUT',
+        runAt,
+        payload: {
+          fromStep: stepIndex + 1,
+          nextActionId: actions[stepIndex + 1]?.id,
+          phone: context.phone,
+          conversationId: context.conversationId,
+        },
+      });
+      console.log(`⏰ No-reply timeout (${onTimeout}) at ${runAt.toISOString()}`);
+    }
   }
 
   // ==========================================
@@ -1101,6 +1274,65 @@ class AutomationEngine {
   }
 
   // ==========================================
+  // ✅ INBOUND MESSAGE (reply ka asar)
+  // ==========================================
+  /**
+   * Customer ka har inbound message - text ho ya button. Webhook ise baaki
+   * triggers se PEHLE await karta hai: warna isi message se shuru hua naya
+   * run turant "reply aa gaya" samajh kar ruk jata.
+   *
+   * Pehle sirf button click yahan aata tha, isliye text reply par
+   * wait_for_response kabhi aage nahi badhta tha.
+   */
+  async onInboundMessage(context: {
+    organizationId: string;
+    contactId: string;
+    conversationId?: string;
+    phone?: string;
+    message?: string;
+    buttonId?: string;
+  }): Promise<boolean> {
+    try {
+      await this.stopFollowUpsOnReply(context.contactId);
+    } catch (error: any) {
+      console.error('❌ stopOnReply error:', error.message);
+    }
+
+    // true = kisi wait_for_response wale run ne is reply par aage chalna shuru kiya
+    const response = context.buttonId || context.message || '';
+    if (!response) return false;
+    return this.handleUserResponse({ ...context, response });
+  }
+
+  /** Reply aate hi scheduled follow-ups band - jab tak automation stopOnReply: false na kahe. */
+  private async stopFollowUpsOnReply(contactId: string): Promise<void> {
+    if (!contactId) return;
+
+    const scheduled = await prisma.automationSequence.findMany({
+      where: { contactId, status: 'SCHEDULED' },
+      select: {
+        id: true,
+        automationId: true,
+        automation: { select: { name: true, triggerConfig: true } },
+      },
+    });
+
+    for (const seq of scheduled) {
+      if ((seq.automation.triggerConfig as any)?.stopOnReply === false) continue;
+
+      const cancelled = await cancelPendingJobs(
+        { contactId, automationId: seq.automationId, type: 'RESUME_SEQUENCE' },
+        'customer replied'
+      );
+      await prisma.automationSequence.updateMany({
+        where: { id: seq.id, status: 'SCHEDULED' },
+        data: { status: 'REPLIED' },
+      });
+      console.log(`🛑 Customer replied - stopped "${seq.automation.name}" follow-ups (${cancelled} job)`);
+    }
+  }
+
+  // ==========================================
   // ✅ HANDLE BUTTON CLICK / RESPONSE
   // ==========================================
   async handleUserResponse(context: {
@@ -1109,12 +1341,13 @@ class AutomationEngine {
     response: string; // Button ID or message text
     conversationId?: string;
     phone?: string;
-  }): Promise<void> {
-    console.log(`🔘 User response: ${context.response}`);
+  }): Promise<boolean> {
+    console.log(`🔘 User response: ${context.response.substring(0, 50)}`);
+    let resumed = false;
 
     try {
-      // Find waiting sequence
-      const sequence = await prisma.automationSequence.findFirst({
+      // Ek contact kai automations me ek saath wait kar sakta hai
+      const sequences = await prisma.automationSequence.findMany({
         where: {
           contactId: context.contactId,
           status: 'WAITING',
@@ -1122,47 +1355,415 @@ class AutomationEngine {
         include: { automation: true },
       });
 
-      if (!sequence) {
-        console.log(`ℹ️ No waiting sequence found`);
-        return;
-      }
+      if (sequences.length === 0) return false;
 
-      const metadata = sequence.metadata as any;
-      const waitingFor = metadata?.waitingFor || [];
+      const response = context.response.toLowerCase();
 
-      // Check if response matches
-      const matched = waitingFor.length === 0 || 
-        waitingFor.some((w: string) => 
-          context.response.toLowerCase().includes(w.toLowerCase())
+      for (const sequence of sequences) {
+        const metadata = (sequence.metadata as any) || {};
+        const waitingFor: string[] = metadata.waitingFor || [];
+
+        // Check if response matches
+        const matched = waitingFor.length === 0 ||
+          waitingFor.some((w) => response.includes(String(w).toLowerCase()));
+
+        if (!matched) {
+          console.log(`⏭️ Response doesn't match expected: ${waitingFor}`);
+          continue;
+        }
+
+        const nextStatus = !sequence.automation.isActive
+          ? 'STOPPED'
+          : metadata.onReply === 'stop' ? 'REPLIED' : 'ACTIVE';
+
+        // WAITING se ek hi baar palat sakta hai - timeout job aur reply ek
+        // saath aa jayein to jo pehle palte, wahi chalega.
+        const flipped = await prisma.automationSequence.updateMany({
+          where: { id: sequence.id, status: 'WAITING' },
+          data: { status: nextStatus },
+        });
+        if (flipped.count === 0) continue;
+
+        await cancelPendingJobs(
+          { contactId: context.contactId, automationId: sequence.automationId, type: 'WAIT_TIMEOUT' },
+          'customer replied'
         );
 
-      if (!matched) {
-        console.log(`⏭️ Response doesn't match expected: ${waitingFor}`);
-        return;
-      }
+        if (nextStatus !== 'ACTIVE') continue;
 
-      // Resume sequence
-      const remainingActions = (sequence.automation.actions as any[]).slice(
-        sequence.currentStep + 1
-      );
-
-      if (remainingActions.length > 0) {
-        console.log(`🔄 Resuming from step ${sequence.currentStep + 1}`);
-
-        await prisma.automationSequence.update({
-          where: { id: sequence.id },
-          data: { status: 'ACTIVE' },
-        });
-
-        await this.executeSequence(sequence.automationId, remainingActions, {
-          organizationId: context.organizationId,
-          contactId: context.contactId,
-          conversationId: context.conversationId,
-          phone: context.phone,
-        });
+        console.log(`🔄 Resuming from step ${sequence.currentStep + 2}`);
+        await this.runSteps(
+          sequence.automationId,
+          sequence.automation.actions as unknown as AutomationAction[],
+          sequence.currentStep + 1,
+          {
+            organizationId: context.organizationId,
+            contactId: context.contactId,
+            conversationId: context.conversationId,
+            phone: context.phone,
+          },
+          false
+        );
+        resumed = true;
       }
     } catch (error) {
       console.error('❌ Handle response error:', error);
+    }
+    return resumed;
+  }
+
+  // ==========================================
+  // ✅ DURABLE JOBS (follow-up delay, wait timeout)
+  // ==========================================
+  /** Scheduler har minute bulata hai. Ek tick zyada se zyada ~50 sec. */
+  async runDueJobs(): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 50_000) {
+      const jobs = await claimDueJobs(25);
+      if (jobs.length === 0) return;
+      for (const job of jobs) {
+        await this.runJob(job);
+      }
+    }
+  }
+
+  private async runJob(job: ClaimedJob): Promise<void> {
+    let resume: { actions: AutomationAction[]; start: number; context: TriggerContext } | null = null;
+
+    try {
+      const [automation, sequence, contact] = await Promise.all([
+        prisma.automation.findUnique({
+          where: { id: job.automationId },
+          select: { isActive: true, actions: true },
+        }),
+        prisma.automationSequence.findUnique({
+          where: { automationId_contactId: { automationId: job.automationId, contactId: job.contactId } },
+          select: { id: true, status: true, metadata: true },
+        }),
+        prisma.contact.findUnique({
+          where: { id: job.contactId },
+          select: { status: true, phone: true },
+        }),
+      ]);
+
+      if (!automation || !automation.isActive) {
+        await finishJob(job.id, 'CANCELLED', 'automation is inactive or deleted');
+        return;
+      }
+
+      const expected = job.type === 'WAIT_TIMEOUT' ? 'WAITING' : 'SCHEDULED';
+      if (!sequence || sequence.status !== expected) {
+        await finishJob(job.id, 'CANCELLED', `sequence is ${sequence?.status ?? 'gone'}, not ${expected}`);
+        return;
+      }
+
+      if (!contact || contact.status !== 'ACTIVE') {
+        await this.stopSequence(sequence.id, 'STOPPED');
+        await finishJob(job.id, 'CANCELLED', `contact is ${contact?.status ?? 'deleted'}`);
+        return;
+      }
+
+      const conversation = await prisma.conversation.findFirst({
+        where: { organizationId: job.organizationId, contactId: job.contactId, channel: 'WHATSAPP' },
+        select: { id: true, automationPaused: true },
+      });
+      if (conversation?.automationPaused) {
+        // Agent ne chat apne haath me le li - bot beech me na bole
+        await this.stopSequence(sequence.id, 'STOPPED');
+        await finishJob(job.id, 'CANCELLED', 'automation paused on this chat');
+        return;
+      }
+
+      const settings = await prisma.organizationSettings.findUnique({
+        where: { organizationId: job.organizationId },
+        select: {
+          quietHoursEnabled: true,
+          quietHoursStart: true,
+          quietHoursEnd: true,
+          quietHoursTimezone: true,
+        },
+      });
+      const quietUntil = quietHoursEndsAt(
+        new Date(),
+        settings && {
+          enabled: settings.quietHoursEnabled,
+          start: settings.quietHoursStart,
+          end: settings.quietHoursEnd,
+          timezone: settings.quietHoursTimezone,
+        }
+      );
+      if (quietUntil) {
+        await deferJob(job.id, quietUntil, 'quiet hours');
+        return;
+      }
+
+      if (job.type === 'WAIT_TIMEOUT' && (sequence.metadata as any)?.onTimeout !== 'continue') {
+        await this.stopSequence(sequence.id, 'TIMED_OUT');
+        await finishJob(job.id, 'DONE', 'no reply - stopped');
+        return;
+      }
+
+      // Reply aur ye job ek saath aayein to jo pehle palte wahi chalega
+      const flipped = await prisma.automationSequence.updateMany({
+        where: { id: sequence.id, status: expected },
+        data: { status: 'ACTIVE' },
+      });
+      if (flipped.count === 0) {
+        await finishJob(job.id, 'CANCELLED', 'sequence moved on');
+        return;
+      }
+
+      const actions = automation.actions as unknown as AutomationAction[];
+      const byId = job.payload.nextActionId
+        ? actions.findIndex((a) => a.id === job.payload.nextActionId)
+        : -1;
+      const start = byId >= 0 ? byId : Number(job.payload.fromStep) || 0;
+
+      // DONE pehle, steps baad me: at-most-once (automation.jobs.ts dekho)
+      await finishJob(job.id, 'DONE');
+      resume = {
+        actions,
+        start,
+        context: {
+          organizationId: job.organizationId,
+          contactId: job.contactId,
+          phone: contact.phone,
+          conversationId: conversation?.id,
+        },
+      };
+    } catch (error: any) {
+      console.error(`❌ [JOB ${job.id}] ${job.type} failed:`, error.message);
+      await retryOrFailJob(job, error.message).catch(() => {});
+      return;
+    }
+
+    if (!resume) return;
+    console.log(`⏰ [JOB] Resuming automation ${job.automationId} at step ${resume.start + 1}`);
+    await this.runSteps(job.automationId, resume.actions, resume.start, resume.context, false)
+      .catch((err: any) => console.error(`❌ [JOB ${job.id}] resume failed:`, err.message));
+  }
+
+  private async stopSequence(sequenceId: string, status: string): Promise<void> {
+    await prisma.automationSequence.updateMany({
+      where: { id: sequenceId, status: { in: ['SCHEDULED', 'WAITING'] } },
+      data: { status },
+    });
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: LEAD STAGE CHANGED
+  // ==========================================
+  /**
+   * crm.updateLead aur chatbot ka updateLeadStage dono yahan aate hain.
+   * triggerConfig: { pipelineId?, fromStageId?, toStageId? } - jo diya ho wahi milna chahiye.
+   */
+  async triggerLeadStageChanged(event: {
+    organizationId: string;
+    leadId: string;
+    fromStageId?: string | null;
+    toStageId: string;
+  }): Promise<void> {
+    try {
+      const automations = await automationService.getActiveByTrigger(
+        event.organizationId, 'LEAD_STAGE_CHANGED'
+      );
+      if (automations.length === 0) return;
+
+      const lead = await prisma.lead.findFirst({
+        where: { id: event.leadId, organizationId: event.organizationId },
+        select: { contactId: true, pipelineId: true },
+      });
+      if (!lead?.contactId) return;
+
+      for (const automation of automations) {
+        const cfg = automation.triggerConfig || {};
+        if (cfg.pipelineId && cfg.pipelineId !== lead.pipelineId) continue;
+        if (cfg.toStageId && cfg.toStageId !== event.toStageId) continue;
+        if (cfg.fromStageId && cfg.fromStageId !== event.fromStageId) continue;
+
+        if (automation.targetGroupIds?.length > 0) {
+          const inGroup = await this.isContactInTargetGroups(lead.contactId, automation.targetGroupIds);
+          if (!inGroup) continue;
+        }
+
+        automationLog.info('Lead stage automation triggered', {
+          name: automation.name,
+          id: automation.id,
+        });
+        await this.executeSequence(automation.id, automation.actions as any, {
+          organizationId: event.organizationId,
+          contactId: lead.contactId,
+          metadata: {
+            leadId: event.leadId,
+            fromStageId: event.fromStageId,
+            toStageId: event.toStageId,
+          },
+        });
+      }
+    } catch (error: any) {
+      automationLog.error('Lead stage trigger error', error);
+    }
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: NO REPLY
+  // ==========================================
+  /**
+   * Customer ne baat ki thi, humne jawab diya, aur wo `hours` ghante se chup
+   * hai. Sirf wahi chats jahan customer ne kabhi message kiya ho - campaign ke
+   * un hazaron logon par nahi chalta jinhone kabhi reply hi nahi kiya.
+   * Har chup rehne par ek hi baar: customer ke aakhri message ke baad is
+   * automation ka run ho chuka ho to dobara nahi.
+   */
+  async triggerNoReply(): Promise<void> {
+    try {
+      const automations = await automationService.getActiveByTrigger(undefined, 'NO_REPLY');
+      if (automations.length === 0) return;
+
+      for (const automation of automations) {
+        try {
+          const hours = Math.max(1, Math.round(Number(automation.triggerConfig?.hours) || 24));
+
+          const rows = await prisma.$queryRaw<Array<{ contactId: string; conversationId: string; phone: string }>>`
+            SELECT c."contactId", c."id" AS "conversationId", ct."phone"
+              FROM "Conversation" c
+              JOIN "Contact" ct ON ct."id" = c."contactId"
+             WHERE c."organizationId" = ${automation.organizationId}
+               AND c."channel" = 'WHATSAPP'
+               AND c."automationPaused" = false
+               AND ct."status" = 'ACTIVE'
+               AND ct."deletedAt" IS NULL
+               AND c."lastCustomerMessageAt" IS NOT NULL
+               AND c."lastMessageAt" > c."lastCustomerMessageAt"
+               AND c."lastMessageAt" <= now() - (${hours}::int * interval '1 hour')
+               AND c."lastMessageAt" >  now() - (${hours}::int * interval '1 hour') - interval '7 days'
+               AND NOT EXISTS (
+                 SELECT 1 FROM "AutomationSequence" s
+                  WHERE s."automationId" = ${automation.id}
+                    AND s."contactId" = c."contactId"
+                    AND s."lastStepAt" > c."lastCustomerMessageAt"
+               )
+             ORDER BY c."lastMessageAt" ASC
+             LIMIT 100
+          `;
+
+          if (rows.length === 0) continue;
+          console.log(`🔕 [NO_REPLY] ${automation.name}: ${rows.length} silent chat(s) after ${hours}h`);
+
+          for (const row of rows) {
+            try {
+              if (automation.targetGroupIds?.length > 0) {
+                const inGroup = await this.isContactInTargetGroups(row.contactId, automation.targetGroupIds);
+                if (!inGroup) continue;
+              }
+              await this.executeSequence(automation.id, automation.actions as any, {
+                organizationId: automation.organizationId,
+                contactId: row.contactId,
+                phone: row.phone,
+                conversationId: row.conversationId,
+              });
+              await new Promise((r) => setTimeout(r, 300));
+            } catch (err: any) {
+              console.error(`❌ [NO_REPLY] Failed for ${row.contactId}:`, err.message);
+            }
+          }
+        } catch (err: any) {
+          if (err?.code !== 'P2024') {
+            console.error(`❌ [NO_REPLY] Automation ${automation.id} failed:`, err.message);
+          }
+        }
+      }
+    } catch (error: any) {
+      if (error?.code !== 'P2024') {
+        console.error('🤖 No-reply trigger error:', error);
+      }
+    }
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: TASK DUE
+  // ==========================================
+  /**
+   * LeadTask ki due date aa gayi: jis agent ko lead mili hai use notification,
+   * aur org ki TASK_DUE automations lead ke contact par. reminderSentAt se har
+   * task ek hi baar.
+   */
+  async triggerTasksDue(): Promise<void> {
+    const now = new Date();
+    const tasks = await prisma.leadTask.findMany({
+      where: { isCompleted: false, reminderSentAt: null, dueDate: { lte: now } },
+      select: {
+        id: true,
+        title: true,
+        userId: true,
+        lead: {
+          select: { id: true, title: true, organizationId: true, contactId: true, assignedToId: true },
+        },
+      },
+      orderBy: { dueDate: 'asc' },
+      take: 100,
+    });
+    if (tasks.length === 0) return;
+
+    const automationsByOrg = new Map<string, Awaited<ReturnType<typeof automationService.getActiveByTrigger>>>();
+
+    for (const task of tasks) {
+      try {
+        const claimed = await prisma.leadTask.updateMany({
+          where: { id: task.id, reminderSentAt: null },
+          data: { reminderSentAt: now },
+        });
+        if (claimed.count === 0) continue;
+
+        const { lead } = task;
+        const userId =
+          lead.assignedToId ||
+          task.userId ||
+          (await prisma.organization.findUnique({
+            where: { id: lead.organizationId },
+            select: { ownerId: true },
+          }))?.ownerId;
+
+        if (userId) {
+          await notificationsService
+            .create({
+              userId,
+              organizationId: lead.organizationId,
+              type: 'alert',
+              title: '⏰ Follow-up due',
+              description: `${task.title} - ${lead.title}`,
+              actionUrl: `/(app)/crm/lead/${lead.id}`,
+              metadata: {
+                leadId: lead.id,
+                taskId: task.id,
+                webUrl: `/dashboard/crm/leads/${lead.id}`,
+              },
+            })
+            .catch((e: any) => console.error('Task due notification failed:', e?.message));
+        }
+
+        if (!lead.contactId) continue;
+
+        let automations = automationsByOrg.get(lead.organizationId);
+        if (!automations) {
+          automations = await automationService.getActiveByTrigger(lead.organizationId, 'TASK_DUE');
+          automationsByOrg.set(lead.organizationId, automations);
+        }
+
+        for (const automation of automations) {
+          if (automation.targetGroupIds?.length > 0) {
+            const inGroup = await this.isContactInTargetGroups(lead.contactId, automation.targetGroupIds);
+            if (!inGroup) continue;
+          }
+          await this.executeSequence(automation.id, automation.actions as any, {
+            organizationId: lead.organizationId,
+            contactId: lead.contactId,
+            metadata: { leadId: lead.id, taskId: task.id },
+          });
+        }
+      } catch (err: any) {
+        console.error(`❌ [TASK_DUE] Task ${task.id} failed:`, err.message);
+      }
     }
   }
 
@@ -1174,6 +1775,14 @@ class AutomationEngine {
       where: { organizationId, status: 'CONNECTED' },
       orderBy: { isDefault: 'desc' },
     });
+  }
+
+  private async isWindowOpenFor(organizationId: string, contactId: string): Promise<boolean> {
+    const conversation = await prisma.conversation.findFirst({
+      where: { organizationId, contactId, channel: 'WHATSAPP' },
+      select: { windowExpiresAt: true, isWindowOpen: true, lastCustomerMessageAt: true },
+    });
+    return isWindowOpen(conversation);
   }
 
   private async replaceVariables(text: string, context: TriggerContext): Promise<string> {
@@ -1199,32 +1808,6 @@ class AutomationEngine {
 
     return result;
   }
-
-  private async actionDelay(config: any): Promise<void> {
-    // ✅ Frontend 'value' bhejta hai, backend 'duration' expect karta tha
-    const duration = config.duration || config.value || 1;
-    const unit = config.unit || 'seconds';
-
-    let ms = duration * 1000; // default: seconds
-    if (unit === 'minutes') ms = duration * 60 * 1000;
-    if (unit === 'hours')   ms = duration * 60 * 60 * 1000;
-    if (unit === 'days')    ms = duration * 24 * 60 * 60 * 1000;
-
-    // ✅ Production safety: max 30 seconds delay in automation engine
-    // (Long delays should use scheduled jobs, not setTimeout)
-    const MAX_SAFE_DELAY = 30 * 1000;
-    if (ms > MAX_SAFE_DELAY) {
-        console.warn(
-            `⚠️ [delay] Requested ${duration} ${unit} (${ms}ms) exceeds max. ` +
-            `Capping at ${MAX_SAFE_DELAY / 1000}s for safety.`
-        );
-        ms = MAX_SAFE_DELAY;
-    }
-
-    console.log(`⏳ [delay] Waiting ${duration} ${unit} (${ms}ms)...`);
-    await new Promise((resolve) => setTimeout(resolve, ms));
-    console.log(`✅ [delay] Done waiting`);
-}
 
   private async actionAddTag(
     context: TriggerContext, 
@@ -1284,6 +1867,103 @@ class AutomationEngine {
     });
 
     console.log(`✅ Created lead`);
+  }
+
+  /**
+   * Client ke apne Razorpay se payment link bana kar customer ko bhejo.
+   * config: { amount } (rupees) ya { useLeadValue: true }, aur optional description.
+   */
+  private async actionSendPaymentLink(context: TriggerContext, config: any): Promise<void> {
+    if (!context.contactId) {
+      console.warn('⚠️ [send_payment_link] No contactId in context');
+      return;
+    }
+
+    let amount = Number(config?.amount);
+
+    if (config?.useLeadValue || !Number.isFinite(amount) || amount <= 0) {
+      const lead = await prisma.lead.findFirst({
+        where: {
+          organizationId: context.organizationId,
+          contactId: context.contactId,
+          status: { notIn: ['WON', 'LOST'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { value: true },
+      });
+      if (lead?.value) amount = Number(lead.value);
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      console.warn('⚠️ [send_payment_link] No amount (set one, or put a value on the lead)');
+      return;
+    }
+
+    const { paymentsService } = await import('../payments/payments.service');
+    const { sent } = await paymentsService.createPaymentLink({
+      organizationId: context.organizationId,
+      amountPaise: Math.round(amount * 100),
+      description: config?.description,
+      contactId: context.contactId,
+      conversationId: context.conversationId,
+      createdVia: 'automation',
+      sendOnWhatsApp: true,
+    });
+
+    console.log(`💳 [send_payment_link] ₹${amount} link created${sent ? ' and sent' : ' (not sent - window closed?)'}`);
+  }
+
+  // ==========================================
+  // ✅ TRIGGER: PAYMENT RECEIVED
+  // ==========================================
+  /**
+   * Customer ka payment aaya (client ke Razorpay par). payments.service isse
+   * bulata hai - lead Won hone aur receipt jane ke baad.
+   * triggerConfig: { minAmount } rupees me - chhote payments par na chale.
+   */
+  async triggerPaymentReceived(event: {
+    organizationId: string;
+    paymentId: string;
+    leadId?: string | null;
+    contactId?: string | null;
+    conversationId?: string | null;
+    amountPaise: number;
+  }): Promise<void> {
+    try {
+      if (!event.contactId) return;
+
+      const automations = await automationService.getActiveByTrigger(
+        event.organizationId, 'PAYMENT_RECEIVED'
+      );
+      if (automations.length === 0) return;
+
+      for (const automation of automations) {
+        const minAmount = Number((automation.triggerConfig as any)?.minAmount);
+        if (Number.isFinite(minAmount) && minAmount > 0 && event.amountPaise < minAmount * 100) continue;
+
+        if (automation.targetGroupIds?.length > 0) {
+          const inGroup = await this.isContactInTargetGroups(event.contactId, automation.targetGroupIds);
+          if (!inGroup) continue;
+        }
+
+        automationLog.info('Payment received automation triggered', {
+          name: automation.name,
+          id: automation.id,
+        });
+        await this.executeSequence(automation.id, automation.actions as any, {
+          organizationId: event.organizationId,
+          contactId: event.contactId,
+          conversationId: event.conversationId || undefined,
+          metadata: {
+            paymentId: event.paymentId,
+            leadId: event.leadId,
+            amountPaise: event.amountPaise,
+          },
+        });
+      }
+    } catch (error: any) {
+      automationLog.error('Payment received trigger error', error);
+    }
   }
 
   // Existing execute actions (keep for backward compatibility)

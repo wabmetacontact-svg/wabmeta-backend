@@ -119,6 +119,11 @@ model Organization {
   telegramBots            TelegramBot[]
   telegramAutomations     TelegramAutomation[]
   telegramBroadcasts      TelegramBroadcast[]
+  automationJobs          AutomationJob[]
+  aiAgent                 AiAgent?
+  knowledgeItems          KnowledgeItem[]
+  paymentGateway          PaymentGateway?
+  leadPayments            LeadPayment[]
 
   @@index([slug])
   @@index([ownerId])
@@ -361,6 +366,7 @@ model Contact {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   automationSequences AutomationSequence[]
+  automationJobs      AutomationJob[]
   campaignContacts    CampaignContact[]
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   groupMemberships    ContactGroupMember[]
@@ -573,6 +579,10 @@ model Conversation {
   assignedTo            String?
   labels                String[]     @default([])
   automationPaused      Boolean      @default(false)
+  // AI agent ne chat insaan ko saunpi - kyun (customer_request | complaint |
+  // unknown_answer | high_value) aur kab. Inbox me agent ko wajah dikhti hai.
+  aiHandoffReason       String?
+  aiHandoffAt           DateTime?
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
   contact               Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -775,6 +785,7 @@ model Automation {
   updatedAt       DateTime             @updatedAt
   organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sequences       AutomationSequence[]
+  jobs            AutomationJob[]
 
   @@index([organizationId])
   @@index([trigger])
@@ -798,6 +809,140 @@ model AutomationSequence {
   @@index([automationId])
   @@index([contactId])
   @@index([status])
+}
+
+// Automation ka koi bhi kaam jo "baad me" chalna hai - follow-up ke liye
+// delay, wait_for_response ka timeout. Pehle ye setTimeout the jo 30 sec par
+// capped the aur restart par kho jate the. Ab row me likha hai, aur
+// scheduler har minute due rows claim karke chalata hai.
+model AutomationJob {
+  id             String       @id @default(cuid())
+  organizationId String
+  automationId   String
+  contactId      String
+  // RESUME_SEQUENCE | WAIT_TIMEOUT
+  type           String
+  // PENDING | RUNNING | DONE | CANCELLED | FAILED
+  status         String       @default("PENDING")
+  runAt          DateTime
+  attempts       Int          @default(0)
+  lastError      String?
+  // { fromStep, nextActionId, phone, conversationId }
+  payload        Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  automation     Automation   @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@index([contactId, status])
+  @@index([automationId, contactId, status])
+}
+
+// Org ka AI Sales Agent - jo WhatsApp message kisi automation/chatbot ne
+// nahi pakda, uska jawab ye deta hai (knowledge base se), lead bharta hai,
+// aur zarurat par chat insaan ko saunp deta hai.
+model AiAgent {
+  id                 String       @id @default(cuid())
+  organizationId     String       @unique
+  isEnabled          Boolean      @default(false)
+  // Agent apna parichay isi naam se deta hai
+  name               String       @default("Assistant")
+  // Business ke baare me: kya karte hain, timing, location, policies
+  businessInfo       String       @default("")
+  // Tone, kya bolna hai / kya nahi
+  instructions       String       @default("")
+  // Callback ka waqt samajhne ke liye
+  timezone           String       @default("Asia/Kolkata")
+  handoffOnRequest   Boolean      @default(true)
+  handoffOnComplaint Boolean      @default(true)
+  handoffOnUnknown   Boolean      @default(true)
+  // Budget is rakam (INR) se upar ho to chat insaan ko. null = band.
+  handoffDealAbove   Int?
+  // Handoff ki notification kise; null = chat assignee, warna org owner
+  notifyUserId       String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// Client ka APNA Razorpay account - customer ka paisa seedha client ke paas
+// jata hai, WabMeta ke beech me nahi. WabMeta ke apne Razorpay keys
+// (subscription aur wallet top-up) env me hain aur inse alag hain.
+model PaymentGateway {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  provider       String       @default("RAZORPAY")
+  keyId          String
+  // encrypted at rest (utils/encryption)
+  keySecret      String
+  // Client apne Razorpay dashboard me webhook lagaye to uska secret - encrypted
+  webhookSecret  String?
+  // Customer ko payment page par ye naam dikhta hai
+  displayName    String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// Customer ko bheja gaya payment link aur uska haal. Confirmation do raaste se
+// aata hai - client ka webhook, aur scheduler ka polling - isliye har jagah
+// idempotent rehna zaroori hai.
+model LeadPayment {
+  id                String       @id @default(cuid())
+  organizationId    String
+  leadId            String?
+  contactId         String?
+  conversationId    String?
+  amountPaise       Int
+  currency          String       @default("INR")
+  description       String?
+  // PENDING | PAID | FAILED | EXPIRED | CANCELLED
+  status            String       @default("PENDING")
+  provider          String       @default("RAZORPAY")
+  // Razorpay ka plink_xxx
+  providerLinkId    String       @unique
+  shortUrl          String
+  providerPaymentId String?
+  paidAt            DateTime?
+  expiresAt         DateTime?
+  // manual | ai_agent | automation
+  createdVia        String       @default("manual")
+  createdById       String?
+  // Polling ne aakhri baar kab dekha
+  lastCheckedAt     DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead              Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([leadId])
+  @@index([status, lastCheckedAt])
+}
+
+// AI agent ka knowledge base: products/services (price ke saath) aur FAQs.
+// Agent price sirf yahin se bolta hai.
+model KnowledgeItem {
+  id             String       @id @default(cuid())
+  organizationId String
+  // PRODUCT | FAQ
+  type           String
+  // Product ka naam, ya FAQ ka sawaal
+  title          String
+  // Product ki details, ya FAQ ka jawab
+  content        String       @default("")
+  price          Decimal?     @db.Decimal(12, 2)
+  currency       String       @default("INR")
+  isActive       Boolean      @default(true)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, type])
 }
 
 model Webhook {
@@ -1001,6 +1146,7 @@ model Lead {
   stage        PipelineStage? @relation(fields: [stageId], references: [id])
   activities   LeadActivity[]
   tasks        LeadTask[]
+  payments     LeadPayment[]
 
   @@index([organizationId])
   @@index([contactId])
@@ -1085,6 +1231,8 @@ model LeadTask {
   dueDate     DateTime?
   isCompleted Boolean      @default(false)
   completedAt DateTime?
+  // TASK_DUE trigger ne is task ke liye reminder bhej diya - dobara nahi
+  reminderSentAt DateTime?
   priority    LeadPriority @default(MEDIUM)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -1093,6 +1241,7 @@ model LeadTask {
   @@index([leadId])
   @@index([dueDate])
   @@index([isCompleted])
+  @@index([isCompleted, reminderSentAt, dueDate])
 }
 
 model ContactNote {
@@ -1279,6 +1428,15 @@ model OrganizationSettings {
   // Ad Tracking
   trackAdSource Boolean @default(true)
 
+  // Follow-up quiet hours: is window me scheduled follow-ups nahi jaate,
+  // window khatam hone tak khisak jaate hain. Organization.timezone ka
+  // default "UTC" hai jo Indian clients ke liye galat raat banata - isliye
+  // alag timezone, aur shuru me band.
+  quietHoursEnabled  Boolean @default(false)
+  quietHoursStart    String  @default("21:00")
+  quietHoursEnd      String  @default("09:00")
+  quietHoursTimezone String  @default("Asia/Kolkata")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1437,6 +1595,10 @@ enum AutomationTrigger {
   SCHEDULE
   INACTIVITY
   UNKNOWN_MESSAGE
+  LEAD_STAGE_CHANGED
+  NO_REPLY
+  TASK_DUE
+  PAYMENT_RECEIVED
 }
 
 enum WebhookStatus {

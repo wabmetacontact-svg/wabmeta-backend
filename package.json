@@ -24,7 +24,8 @@
     "migrate:r2": "ts-node src/scripts/migrate-cloudinary-to-r2.ts",
     "generate:key": "node -e \"console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))\"",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "playground": "ts-node --transpile-only prisma/automation-playground.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1114.0",

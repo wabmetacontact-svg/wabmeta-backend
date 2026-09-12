@@ -41,6 +41,9 @@ import walletRoutes from './modules/wallet/wallet.routes';
 import instagramRoutes from './modules/instagram/instagram.routes';
 import telegramRoutes from './modules/telegram/telegram.routes';
 import notificationRoutes from './modules/notifications/notifications.routes';
+import aiAgentRoutes from './modules/aiagent/aiagent.routes';
+import paymentsRoutes from './modules/payments/payments.routes';
+import clientPaymentsWebhook from './modules/payments/payments.webhook';
 
 const app: Application = express();
 
@@ -232,6 +235,8 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // ============================================
 app.use('/api/auth', authRoutes);
 app.use('/api/webhooks', walletWebhookRouter);
+// Client ke apne Razorpay account ka webhook (WabMeta ke apne se alag)
+app.use('/api/webhooks', clientPaymentsWebhook);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
@@ -253,6 +258,8 @@ app.use('/api', walletRoutes);
 app.use('/api/instagram', instagramRoutes);
 app.use('/api/telegram', telegramRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/ai-agent', aiAgentRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 logger.info('✅ All API routes registered');
 

@@ -374,7 +374,10 @@ export class InboxService {
   async setAutomationPaused(organizationId: string, conversationId: string, paused: boolean) {
     const result = await prisma.conversation.updateMany({
       where: { id: conversationId, organizationId },
-      data: { automationPaused: paused },
+      // Bot/AI wapas chalu - AI ki di hui handoff wajah ab purani hai
+      data: paused
+        ? { automationPaused: true }
+        : { automationPaused: false, aiHandoffReason: null, aiHandoffAt: null },
     });
     if (result.count === 0) {
       throw new AppError('Conversation not found', 404);

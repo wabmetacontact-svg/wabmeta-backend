@@ -2,13 +2,34 @@
 import {
   GoogleGenerativeAI,
   HarmCategory,
-  HarmBlockThreshold
+  HarmBlockThreshold,
+  FunctionDeclaration,
 } from '@google/generative-ai';
 
 interface ChatMessage {
   role: 'user' | 'model';
   content: string;
 }
+
+/** Agent turn khaali kyun laut: key hi nahi, key galat, ya model ne jawab nahi diya */
+export type AiErrorCode = 'NO_KEY' | 'KEY_INVALID' | 'FAILED';
+
+export interface ToolCallRecord {
+  name: string;
+  args: Record<string, any>;
+  result: Record<string, any>;
+}
+
+const AGENT_SAFETY_SETTINGS = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+].map((category) => ({ category, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH }));
+
+const isRetriableModelError = (msg: string) =>
+  ['404', 'not found', 'deprecated', '429', 'quota', 'RESOURCE_EXHAUSTED', '503', 'overloaded', 'unavailable']
+    .some((s) => msg.includes(s));
 
 // ✅ FINAL BEST MODEL ORDER - Verified from your API key
 const AI_MODELS = [
@@ -258,6 +279,101 @@ ALWAYS keep previous messages in mind.
       return 'I cannot discuss this topic. Do you have any other questions? 😊';
     }
     return 'A technical issue occurred. Please try again! 🔧';
+  }
+
+  // ==========================================
+  // Tool-calling turn (AI Sales Agent)
+  // ==========================================
+  /**
+   * Ek customer message ka jawab, jisme model tools bula sakta hai (lead save,
+   * handoff...). `systemPrompt` poora hai - chatbot wala base instruction nahi
+   * juda.
+   *
+   * Koi tool chal chuka ho to doosre model par retry nahi: tool DB me likh chuka
+   * hai, dobara chalane se wahi kaam do baar hota. Tab `text` khaali aata hai aur
+   * caller apna fallback bhejta hai.
+   */
+  async runToolTurn(opts: {
+    systemPrompt: string;
+    history: ChatMessage[];
+    userMessage: string;
+    tools: FunctionDeclaration[];
+    onToolCall: (name: string, args: Record<string, any>) => Promise<Record<string, any>>;
+    maxRounds?: number;
+  }): Promise<{ text: string; toolCalls: ToolCallRecord[]; errorCode?: AiErrorCode }> {
+    const toolCalls: ToolCallRecord[] = [];
+    if (!process.env.GEMINI_API_KEY) {
+      console.error('❌ GEMINI_API_KEY missing!');
+      return { text: '', toolCalls, errorCode: 'NO_KEY' };
+    }
+
+    const maxRounds = opts.maxRounds ?? 4;
+    let lastError: any = null;
+
+    for (const modelName of AI_MODELS) {
+      try {
+        const isThinkingModel = modelName === 'gemini-3.5-flash';
+        const model = this.genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: opts.systemPrompt,
+          tools: opts.tools.length ? [{ functionDeclarations: opts.tools }] : undefined,
+          generationConfig: {
+            temperature: isThinkingModel ? 1 : 0.4,
+            topP: 0.95,
+            maxOutputTokens: 1024,
+            ...(isThinkingModel && { thinkingConfig: { thinkingBudget: 512 } }),
+          } as any,
+          safetySettings: AGENT_SAFETY_SETTINGS,
+        });
+
+        const chat = model.startChat({ history: this.buildGeminiHistory(opts.history) });
+        let result = await chat.sendMessage(opts.userMessage);
+
+        for (let round = 0; round < maxRounds; round++) {
+          const calls = result.response.functionCalls() || [];
+          if (calls.length === 0) break;
+
+          const parts = [];
+          for (const call of calls) {
+            const args = (call.args || {}) as Record<string, any>;
+            let toolResult: Record<string, any>;
+            try {
+              toolResult = await opts.onToolCall(call.name, args);
+            } catch (err: any) {
+              toolResult = { ok: false, error: err?.message || 'Tool failed' };
+            }
+            toolCalls.push({ name: call.name, args, result: toolResult });
+            parts.push({ functionResponse: { name: call.name, response: toolResult } });
+          }
+          result = await chat.sendMessage(parts);
+        }
+
+        let text = '';
+        try {
+          text = result.response.text() || '';
+        } catch {
+          text = ''; // blocked / sirf function calls
+        }
+        return { text: text.trim(), toolCalls };
+      } catch (error: any) {
+        lastError = error;
+        const errMsg = error?.message || '';
+        // Poora (500 tak) - 400 Bad Request ki asli wajah URL ke baad aati hai
+        console.warn(`⚠️ Agent model [${modelName}] failed: ${errMsg.substring(0, 500)}`);
+
+        if (toolCalls.length > 0) break;
+        if (!isRetriableModelError(errMsg)) break;
+        if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) await this.sleep(1000);
+      }
+    }
+
+    const lastMsg: string = lastError?.message || '';
+    // Google galat key par 400 deta hai (401/403 nahi) - message se pehchano
+    const errorCode: AiErrorCode = /API_KEY_INVALID|API key not valid|\b401\b|\b403\b/.test(lastMsg)
+      ? 'KEY_INVALID'
+      : 'FAILED';
+    console.error(`❌ Agent turn failed (${errorCode}):`, lastMsg.substring(0, 300));
+    return { text: '', toolCalls, errorCode };
   }
 
   // ==========================================
