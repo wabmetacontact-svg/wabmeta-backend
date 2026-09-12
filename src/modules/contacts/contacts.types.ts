@@ -1,6 +1,7 @@
 // src/modules/contacts/contacts.types.ts
 
 import { Contact, ContactStatus } from '@prisma/client';
+import { ContactChannel } from './contact.channel';
 
 // ============================================
 // REQUEST TYPES
@@ -58,6 +59,8 @@ export interface ContactsQueryInput {
   sortBy?: 'createdAt' | 'firstName' | 'lastName' | 'lastMessageAt';
   sortOrder?: 'asc' | 'desc';
   hasWhatsAppProfile?: boolean; // NEW
+  /** Default 'WHATSAPP' - Telegram/Instagram contacts list me nahi aate. */
+  channel?: ContactChannel;
 }
 
 // Contact Groups

@@ -7,6 +7,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { metaApi } from '../meta/meta.api';
 import { campaignSocketService } from './campaigns.socket';
 import { claimContactBatch } from './campaigns.claim';
+import { whatsappReachableContactWhere } from '../contacts/contact.channel';
 import { v4 as uuidv4 } from 'uuid';
 import { safeDecrypt } from '../../utils/encryption';
 import prisma from '../../config/database';
@@ -586,14 +587,19 @@ export class CampaignsService {
 
     } else if (contactIds?.length > 0) {
       targetContacts = await prisma.contact.findMany({
-        where: { id: { in: contactIds }, organizationId, status: 'ACTIVE' },
+        where: {
+          id: { in: contactIds },
+          organizationId,
+          status: 'ACTIVE',
+          ...whatsappReachableContactWhere,
+        },
       });
 
     } else if (contactGroupId) {
       const members = await prisma.contactGroupMember.findMany({
         where: {
           groupId: contactGroupId,
-          contact: { organizationId, status: 'ACTIVE' },
+          contact: { organizationId, status: 'ACTIVE', ...whatsappReachableContactWhere },
         },
         include: { contact: true },
       });
@@ -602,6 +608,7 @@ export class CampaignsService {
     } else if (audienceFilter) {
       const where: Prisma.ContactWhereInput = {
         organizationId, status: 'ACTIVE',
+        ...whatsappReachableContactWhere,
       };
       if (!audienceFilter.all) {
         if (audienceFilter.tags?.length > 0) {

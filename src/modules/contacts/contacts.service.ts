@@ -4,6 +4,7 @@ import prisma from '../../config/database';
 import { parse } from 'csv-parse/sync';
 import { AppError } from '../../middleware/errorHandler';
 import { ContactStatus, Prisma } from '@prisma/client';
+import { ContactChannel, contactChannelWhere } from './contact.channel';
 import {
   CreateContactInput,
   UpdateContactInput,
@@ -348,7 +349,7 @@ export class ContactsService {
     const {
       page = 1, limit = 20, search, status, tags,
       groupId, sortBy = 'createdAt', sortOrder = 'desc',
-      hasWhatsAppProfile,
+      hasWhatsAppProfile, channel = 'WHATSAPP',
     } = query;
 
     const safeLimit = Math.min(500, Math.max(1, limit));
@@ -357,6 +358,9 @@ export class ContactsService {
     const where: Prisma.ContactWhereInput = {
       organizationId,
       status: { not: 'DELETED' },
+      // Default WHATSAPP: Telegram/Instagram ke synthetic-phone contacts list
+      // me nahi aate. 'ALL' ya channel ka naam bhejo to wo bhi dikhte hain.
+      ...contactChannelWhere(channel),
     };
 
     if (search?.trim()) {
@@ -999,16 +1003,22 @@ export class ContactsService {
 
   // ── STATS ────────────────────────────────────────────────
 
-  async getStats(organizationId: string): Promise<ContactStats> {
+  async getStats(
+    organizationId: string,
+    channel: ContactChannel = 'WHATSAPP'
+  ): Promise<ContactStats> {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const base = { organizationId, status: { not: 'DELETED' as ContactStatus } };
+    // Stat cards list ke saath match karni chahiye - warna "4,247 total" likha
+    // rehta hai aur list me usse kam rows aati hain.
+    const chan = contactChannelWhere(channel);
+    const base = { organizationId, ...chan, status: { not: 'DELETED' as ContactStatus } };
 
     const [total, active, blocked, unsubscribed, recentlyAdded, withMessages, whatsappVerified] =
       await Promise.all([
         prisma.contact.count({ where: base }),
-        prisma.contact.count({ where: { organizationId, status: 'ACTIVE' } }),
-        prisma.contact.count({ where: { organizationId, status: 'BLOCKED' } }),
-        prisma.contact.count({ where: { organizationId, status: 'UNSUBSCRIBED' } }),
+        prisma.contact.count({ where: { organizationId, ...chan, status: 'ACTIVE' } }),
+        prisma.contact.count({ where: { organizationId, ...chan, status: 'BLOCKED' } }),
+        prisma.contact.count({ where: { organizationId, ...chan, status: 'UNSUBSCRIBED' } }),
         prisma.contact.count({ where: { ...base, createdAt: { gte: sevenDaysAgo } } }),
         prisma.contact.count({ where: { ...base, messageCount: { gt: 0 } } }),
         prisma.contact.count({ where: { ...base, whatsappProfileFetched: true } }),
@@ -1038,10 +1048,17 @@ export class ContactsService {
 
   // ── EXPORT ───────────────────────────────────────────────
 
-  async export(organizationId: string, groupId?: string): Promise<any[]> {
+  async export(
+    organizationId: string,
+    groupId?: string,
+    channel: ContactChannel = 'WHATSAPP'
+  ): Promise<any[]> {
     const where: Prisma.ContactWhereInput = {
       organizationId,
       status: { not: 'DELETED' },
+      // List ka hi default - warna user WhatsApp-only list dekh kar Export
+      // dabata hai aur CSV me "tg:5021656866" jaisi rows milti hain.
+      ...contactChannelWhere(channel),
     };
     if (groupId) where.groupMemberships = { some: { groupId } };
 
