@@ -41,19 +41,19 @@ const client_1 = require("@prisma/client");
 const database_1 = __importDefault(require("../../config/database"));
 const whatsapp_service_1 = require("./whatsapp.service");
 const response_1 = require("../../utils/response");
+const resolveOrgId_1 = require("../../utils/resolveOrgId");
+const accountView_1 = require("../meta/accountView");
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
-const getOrgId = (req) => {
-    const headerOrg = (req.header('X-Organization-Id') || req.header('x-organization-id'))?.trim() || '';
-    const queryOrg = (typeof req.query.organizationId === 'string' ? req.query.organizationId : '')?.trim() || '';
-    const userOrg = req.user?.organizationId?.trim?.() || '';
-    return headerOrg || queryOrg || userOrg || null;
-};
-const sanitizeAccount = (account) => {
-    const { accessToken, webhookSecret, ...safe } = account;
-    return { ...safe, hasAccessToken: !!accessToken };
-};
+// Header and query used to win over the verified JWT here, so an authenticated
+// user could act on any tenant by naming it. resolveOrganizationId honours an
+// explicit organization only after checking the caller is a member of it.
+const getOrgId = (req) => (0, resolveOrgId_1.resolveOrganizationId)(req);
+// Shared sanitizer. Pehle yahan apni copy thi jo admin ke display overrides
+// apply nahi karti thi - isliye "Sync" dabate hi admin ki set ki hui value
+// gayab ho jati thi aur Meta wali wapas aa jati thi.
+const sanitizeAccount = accountView_1.toClientAccount;
 const verifyOrgAccess = async (userId, organizationId) => {
     const member = await database_1.default.organizationMember.findUnique({
         where: { organizationId_userId: { organizationId, userId } },
@@ -70,7 +70,7 @@ class WhatsAppController {
     // ✅ GET /api/v1/whatsapp/accounts
     async getAccounts(req, res, next) {
         try {
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
             }
@@ -94,7 +94,7 @@ class WhatsAppController {
     // ✅ GET /api/v1/whatsapp/accounts/:accountId
     async getAccount(req, res, next) {
         try {
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             const accountId = req.params.accountId;
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
@@ -121,7 +121,7 @@ class WhatsAppController {
     // ✅ POST /api/v1/whatsapp/accounts/:accountId/default
     async setDefaultAccount(req, res, next) {
         try {
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             const accountId = req.params.accountId;
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
@@ -156,7 +156,7 @@ class WhatsAppController {
     // ✅ DELETE /api/v1/whatsapp/accounts/:accountId
     async disconnectAccount(req, res, next) {
         try {
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             const accountId = req.params.accountId;
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
@@ -177,6 +177,7 @@ class WhatsAppController {
                     status: client_1.WhatsAppAccountStatus.DISCONNECTED,
                     accessToken: null,
                     tokenExpiresAt: null,
+                    webhookSecret: null,
                     isDefault: false,
                 },
             });
@@ -273,18 +274,27 @@ class WhatsAppController {
      */
     async sendTemplate(req, res) {
         try {
-            const { whatsappAccountId, to, templateName, language, parameters, conversationId, tempId, clientMsgId } = req.body;
+            const { whatsappAccountId, accountId, to, templateName, conversationId, tempId, clientMsgId } = req.body;
             const organizationId = req.user?.organizationId;
+            // Clients dono naming use karte hain - sendText jaisa hi "support both".
+            // Pehle sirf language/parameters padha jata tha, to templateLanguage/
+            // components bhejne wala client silently toot jata tha.
+            const finalAccountId = whatsappAccountId || accountId;
+            const finalLanguage = req.body.language || req.body.templateLanguage;
+            const finalComponents = req.body.parameters || req.body.components;
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'Organization not found', 400);
             }
+            if (!finalAccountId || !to || !templateName) {
+                return (0, response_1.errorResponse)(res, 'whatsappAccountId, to, and templateName are required', 400);
+            }
             const result = await whatsapp_service_1.whatsappService.sendTemplateMessage({
                 organizationId,
-                accountId: whatsappAccountId,
+                accountId: finalAccountId,
                 to,
                 templateName,
-                templateLanguage: language,
-                components: parameters,
+                templateLanguage: finalLanguage,
+                components: finalComponents,
                 conversationId,
                 tempId: tempId || req.body.localId,
                 clientMsgId: clientMsgId || req.body.client_msg_id
@@ -394,7 +404,7 @@ class WhatsAppController {
      */
     async syncAccountQuality(req, res, next) {
         try {
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             const accountId = req.params.accountId;
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
@@ -429,7 +439,7 @@ class WhatsAppController {
      */
     async syncAllAccountsQuality(req, res, next) {
         try {
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'X-Organization-Id missing', 400);
             }

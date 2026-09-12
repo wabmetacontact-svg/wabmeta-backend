@@ -11,43 +11,43 @@ export declare const createContactSchema: z.ZodObject<{
         groupIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     }, "strip", z.ZodTypeAny, {
         phone: string;
-        tags: string[];
         customFields: Record<string, any>;
+        tags: string[];
         email?: string | undefined;
+        countryCode?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        countryCode?: string | undefined;
         groupIds?: string[] | undefined;
     }, {
         phone?: unknown;
         email?: unknown;
-        tags?: string[] | undefined;
+        countryCode?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        countryCode?: string | undefined;
         customFields?: Record<string, any> | undefined;
+        tags?: string[] | undefined;
         groupIds?: string[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         phone: string;
-        tags: string[];
         customFields: Record<string, any>;
+        tags: string[];
         email?: string | undefined;
+        countryCode?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        countryCode?: string | undefined;
         groupIds?: string[] | undefined;
     };
 }, {
     body: {
         phone?: unknown;
         email?: unknown;
-        tags?: string[] | undefined;
+        countryCode?: string | undefined;
         firstName?: string | undefined;
         lastName?: string | undefined;
-        countryCode?: string | undefined;
         customFields?: Record<string, any> | undefined;
+        tags?: string[] | undefined;
         groupIds?: string[] | undefined;
     };
 }>;
@@ -69,43 +69,43 @@ export declare const updateContactSchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         phone?: string | undefined;
         email?: string | undefined;
-        tags?: string[] | undefined;
-        firstName?: string | undefined;
-        lastName?: string | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
+        firstName?: string | undefined;
+        lastName?: string | undefined;
         customFields?: Record<string, any> | undefined;
+        tags?: string[] | undefined;
     }, {
         phone?: unknown;
         email?: unknown;
-        tags?: string[] | undefined;
-        firstName?: string | undefined;
-        lastName?: string | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
+        firstName?: string | undefined;
+        lastName?: string | undefined;
         customFields?: Record<string, any> | undefined;
+        tags?: string[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         phone?: string | undefined;
         email?: string | undefined;
-        tags?: string[] | undefined;
-        firstName?: string | undefined;
-        lastName?: string | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
+        firstName?: string | undefined;
+        lastName?: string | undefined;
         customFields?: Record<string, any> | undefined;
+        tags?: string[] | undefined;
     };
 }, {
     body: {
         phone?: unknown;
         email?: unknown;
-        tags?: string[] | undefined;
-        firstName?: string | undefined;
-        lastName?: string | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
         countryCode?: string | undefined;
+        firstName?: string | undefined;
+        lastName?: string | undefined;
         customFields?: Record<string, any> | undefined;
+        tags?: string[] | undefined;
     };
 }>;
 export declare const importContactsSchema: z.ZodObject<{
@@ -120,78 +120,83 @@ export declare const importContactsSchema: z.ZodObject<{
         }, "strip", z.ZodTypeAny, {
             phone: string;
             email?: string | undefined;
-            tags?: string[] | undefined;
             firstName?: string | undefined;
             lastName?: string | undefined;
             customFields?: Record<string, any> | undefined;
+            tags?: string[] | undefined;
         }, {
             phone?: unknown;
             email?: unknown;
-            tags?: string[] | undefined;
             firstName?: string | undefined;
             lastName?: string | undefined;
             customFields?: Record<string, any> | undefined;
+            tags?: string[] | undefined;
         }>, "many">;
         groupId: z.ZodOptional<z.ZodString>;
         groupName: z.ZodOptional<z.ZodString>;
         tags: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         skipDuplicates: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        optInConfirmed: z.ZodOptional<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         contacts: {
             phone: string;
             email?: string | undefined;
-            tags?: string[] | undefined;
             firstName?: string | undefined;
             lastName?: string | undefined;
             customFields?: Record<string, any> | undefined;
+            tags?: string[] | undefined;
         }[];
         skipDuplicates: boolean;
         tags?: string[] | undefined;
         groupId?: string | undefined;
         groupName?: string | undefined;
+        optInConfirmed?: boolean | undefined;
     }, {
         contacts: {
             phone?: unknown;
             email?: unknown;
-            tags?: string[] | undefined;
             firstName?: string | undefined;
             lastName?: string | undefined;
             customFields?: Record<string, any> | undefined;
+            tags?: string[] | undefined;
         }[];
         tags?: string[] | undefined;
         groupId?: string | undefined;
         skipDuplicates?: boolean | undefined;
         groupName?: string | undefined;
+        optInConfirmed?: boolean | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         contacts: {
             phone: string;
             email?: string | undefined;
-            tags?: string[] | undefined;
             firstName?: string | undefined;
             lastName?: string | undefined;
             customFields?: Record<string, any> | undefined;
+            tags?: string[] | undefined;
         }[];
         skipDuplicates: boolean;
         tags?: string[] | undefined;
         groupId?: string | undefined;
         groupName?: string | undefined;
+        optInConfirmed?: boolean | undefined;
     };
 }, {
     body: {
         contacts: {
             phone?: unknown;
             email?: unknown;
-            tags?: string[] | undefined;
             firstName?: string | undefined;
             lastName?: string | undefined;
             customFields?: Record<string, any> | undefined;
+            tags?: string[] | undefined;
         }[];
         tags?: string[] | undefined;
         groupId?: string | undefined;
         skipDuplicates?: boolean | undefined;
         groupName?: string | undefined;
+        optInConfirmed?: boolean | undefined;
     };
 }>;
 export declare const bulkUpdateSchema: z.ZodObject<{
@@ -207,27 +212,27 @@ export declare const bulkUpdateSchema: z.ZodObject<{
         }>>;
     }, "strip", z.ZodTypeAny, {
         contactIds: string[];
-        tags?: string[] | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
+        tags?: string[] | undefined;
         groupIds?: string[] | undefined;
     }, {
         contactIds: string[];
-        tags?: string[] | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
+        tags?: string[] | undefined;
         groupIds?: string[] | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         contactIds: string[];
-        tags?: string[] | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
+        tags?: string[] | undefined;
         groupIds?: string[] | undefined;
     };
 }, {
     body: {
         contactIds: string[];
-        tags?: string[] | undefined;
         status?: "ACTIVE" | "BLOCKED" | "UNSUBSCRIBED" | "DELETED" | undefined;
+        tags?: string[] | undefined;
         groupIds?: string[] | undefined;
     };
 }>;

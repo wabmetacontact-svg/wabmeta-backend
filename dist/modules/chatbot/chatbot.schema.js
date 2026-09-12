@@ -98,6 +98,8 @@ exports.createChatbotSchema = zod_1.z.object({
         welcomeMessage: zod_1.z.string().max(1000).optional(),
         fallbackMessage: zod_1.z.string().max(1000).optional(),
         flowData: flowDataSchema.optional(),
+        channel: zod_1.z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM']).optional(),
+        telegramBotId: zod_1.z.string().nullable().optional(),
     }),
 });
 exports.updateChatbotSchema = zod_1.z.object({
@@ -113,6 +115,8 @@ exports.updateChatbotSchema = zod_1.z.object({
         fallbackMessage: zod_1.z.string().max(1000).optional().nullable(),
         flowData: flowDataSchema.optional(),
         status: zod_1.z.nativeEnum(client_1.ChatbotStatus).optional(),
+        channel: zod_1.z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM']).optional(),
+        telegramBotId: zod_1.z.string().nullable().optional(),
     }),
 });
 exports.getChatbotsSchema = zod_1.z.object({

@@ -36,6 +36,8 @@ export declare const config: {
         readonly webhookVerifyToken: string;
         readonly configId: string;
         readonly redirectUri: string;
+        readonly mobileSignupUrl: string;
+        readonly mobileAppScheme: string;
         readonly graphApiVersion: string;
     };
     readonly google: {
@@ -69,6 +71,13 @@ export declare const config: {
         readonly apiKey: string;
         readonly apiSecret: string;
         readonly folder: string;
+    };
+    readonly r2: {
+        readonly accountId: string;
+        readonly accessKeyId: string;
+        readonly secretAccessKey: string;
+        readonly bucketName: string;
+        readonly publicUrl: string;
     };
     readonly platform: {
         readonly whatsapp: {

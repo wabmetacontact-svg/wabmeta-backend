@@ -2,49 +2,49 @@ import { Prisma, LeadStatus, LeadPriority } from '@prisma/client';
 export declare class CRMService {
     createDefaultPipeline(organizationId: string): Promise<{
         stages: {
-            name: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            order: number;
             color: string;
+            pipelineId: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
-            pipelineId: string;
         }[];
     } & {
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
-        isDefault: boolean;
         isActive: boolean;
         description: string | null;
+        isDefault: boolean;
     }>;
     getPipelines(organizationId: string): Promise<({
         stages: {
-            name: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            order: number;
             color: string;
+            pipelineId: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
-            pipelineId: string;
         }[];
     } & {
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
-        isDefault: boolean;
         isActive: boolean;
         description: string | null;
+        isDefault: boolean;
     })[]>;
     createPipeline(organizationId: string, data: {
         name: string;
@@ -56,26 +56,26 @@ export declare class CRMService {
         }[];
     }): Promise<{
         stages: {
-            name: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            order: number;
             color: string;
+            pipelineId: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
-            pipelineId: string;
         }[];
     } & {
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
-        isDefault: boolean;
         isActive: boolean;
         description: string | null;
+        isDefault: boolean;
     }>;
     getOrCreateSettings(organizationId: string): Promise<any>;
     updateSettings(organizationId: string, data: {
@@ -144,8 +144,8 @@ export declare class CRMService {
                 whatsappProfileName: string | null;
             } | null;
             pipeline: {
-                name: string;
                 id: string;
+                name: string;
             } | null;
             _count: {
                 notes: number;
@@ -153,8 +153,8 @@ export declare class CRMService {
                 tasks: number;
             };
             stage: {
-                name: string;
                 id: string;
+                name: string;
                 color: string;
             } | null;
         } & {
@@ -165,10 +165,11 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             source: string | null;
-            campaignId: string | null;
+            contactId: string | null;
+            title: string;
             currency: string;
             pipelineId: string | null;
-            title: string;
+            stageId: string | null;
             priority: import(".prisma/client").$Enums.LeadPriority;
             score: number;
             conversationId: string | null;
@@ -177,14 +178,13 @@ export declare class CRMService {
             city: string | null;
             adSource: string | null;
             adId: string | null;
+            campaignId: string | null;
             chatbotQualified: boolean;
             qualificationData: Prisma.JsonValue;
             assignedToId: string | null;
             expectedCloseDate: Date | null;
             actualCloseDate: Date | null;
             lastActivityAt: Date | null;
-            contactId: string | null;
-            stageId: string | null;
         })[];
         meta: {
             page: number;
@@ -209,16 +209,16 @@ export declare class CRMService {
                 whatsappProfileName: string | null;
             } | null;
             pipeline: {
-                name: string;
                 id: string;
+                name: string;
             } | null;
             _count: {
                 notes: number;
                 activities: number;
             };
             stage: {
-                name: string;
                 id: string;
+                name: string;
                 color: string;
             } | null;
         } & {
@@ -229,10 +229,11 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             source: string | null;
-            campaignId: string | null;
+            contactId: string | null;
+            title: string;
             currency: string;
             pipelineId: string | null;
-            title: string;
+            stageId: string | null;
             priority: import(".prisma/client").$Enums.LeadPriority;
             score: number;
             conversationId: string | null;
@@ -241,14 +242,13 @@ export declare class CRMService {
             city: string | null;
             adSource: string | null;
             adId: string | null;
+            campaignId: string | null;
             chatbotQualified: boolean;
             qualificationData: Prisma.JsonValue;
             assignedToId: string | null;
             expectedCloseDate: Date | null;
             actualCloseDate: Date | null;
             lastActivityAt: Date | null;
-            contactId: string | null;
-            stageId: string | null;
         })[];
         grouped: {
             hot: ({
@@ -262,16 +262,16 @@ export declare class CRMService {
                     whatsappProfileName: string | null;
                 } | null;
                 pipeline: {
-                    name: string;
                     id: string;
+                    name: string;
                 } | null;
                 _count: {
                     notes: number;
                     activities: number;
                 };
                 stage: {
-                    name: string;
                     id: string;
+                    name: string;
                     color: string;
                 } | null;
             } & {
@@ -282,10 +282,11 @@ export declare class CRMService {
                 createdAt: Date;
                 updatedAt: Date;
                 source: string | null;
-                campaignId: string | null;
+                contactId: string | null;
+                title: string;
                 currency: string;
                 pipelineId: string | null;
-                title: string;
+                stageId: string | null;
                 priority: import(".prisma/client").$Enums.LeadPriority;
                 score: number;
                 conversationId: string | null;
@@ -294,14 +295,13 @@ export declare class CRMService {
                 city: string | null;
                 adSource: string | null;
                 adId: string | null;
+                campaignId: string | null;
                 chatbotQualified: boolean;
                 qualificationData: Prisma.JsonValue;
                 assignedToId: string | null;
                 expectedCloseDate: Date | null;
                 actualCloseDate: Date | null;
                 lastActivityAt: Date | null;
-                contactId: string | null;
-                stageId: string | null;
             })[];
             warm: ({
                 contact: {
@@ -314,16 +314,16 @@ export declare class CRMService {
                     whatsappProfileName: string | null;
                 } | null;
                 pipeline: {
-                    name: string;
                     id: string;
+                    name: string;
                 } | null;
                 _count: {
                     notes: number;
                     activities: number;
                 };
                 stage: {
-                    name: string;
                     id: string;
+                    name: string;
                     color: string;
                 } | null;
             } & {
@@ -334,10 +334,11 @@ export declare class CRMService {
                 createdAt: Date;
                 updatedAt: Date;
                 source: string | null;
-                campaignId: string | null;
+                contactId: string | null;
+                title: string;
                 currency: string;
                 pipelineId: string | null;
-                title: string;
+                stageId: string | null;
                 priority: import(".prisma/client").$Enums.LeadPriority;
                 score: number;
                 conversationId: string | null;
@@ -346,14 +347,13 @@ export declare class CRMService {
                 city: string | null;
                 adSource: string | null;
                 adId: string | null;
+                campaignId: string | null;
                 chatbotQualified: boolean;
                 qualificationData: Prisma.JsonValue;
                 assignedToId: string | null;
                 expectedCloseDate: Date | null;
                 actualCloseDate: Date | null;
                 lastActivityAt: Date | null;
-                contactId: string | null;
-                stageId: string | null;
             })[];
             cold: ({
                 contact: {
@@ -366,16 +366,16 @@ export declare class CRMService {
                     whatsappProfileName: string | null;
                 } | null;
                 pipeline: {
-                    name: string;
                     id: string;
+                    name: string;
                 } | null;
                 _count: {
                     notes: number;
                     activities: number;
                 };
                 stage: {
-                    name: string;
                     id: string;
+                    name: string;
                     color: string;
                 } | null;
             } & {
@@ -386,10 +386,11 @@ export declare class CRMService {
                 createdAt: Date;
                 updatedAt: Date;
                 source: string | null;
-                campaignId: string | null;
+                contactId: string | null;
+                title: string;
                 currency: string;
                 pipelineId: string | null;
-                title: string;
+                stageId: string | null;
                 priority: import(".prisma/client").$Enums.LeadPriority;
                 score: number;
                 conversationId: string | null;
@@ -398,14 +399,13 @@ export declare class CRMService {
                 city: string | null;
                 adSource: string | null;
                 adId: string | null;
+                campaignId: string | null;
                 chatbotQualified: boolean;
                 qualificationData: Prisma.JsonValue;
                 assignedToId: string | null;
                 expectedCloseDate: Date | null;
                 actualCloseDate: Date | null;
                 lastActivityAt: Date | null;
-                contactId: string | null;
-                stageId: string | null;
             })[];
         };
         meta: {
@@ -421,65 +421,83 @@ export declare class CRMService {
             phone: string;
             email: string | null;
             id: string;
-            tags: string[];
-            firstName: string | null;
-            lastName: string | null;
-            avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
-            lastMessageAt: Date | null;
+            deletedAt: Date | null;
             countryCode: string;
+            telegramUserId: string | null;
+            telegramUsername: string | null;
+            instagramUserId: string | null;
+            instagramUsername: string | null;
+            firstName: string | null;
+            lastName: string | null;
+            avatar: string | null;
             whatsappProfileName: string | null;
+            whatsappAbout: string | null;
+            whatsappProfilePicUrl: string | null;
             whatsappProfileFetched: boolean;
             lastProfileFetchAt: Date | null;
             profileFetchAttempts: number;
             customFields: Prisma.JsonValue;
+            tags: string[];
+            lastMessageAt: Date | null;
             messageCount: number;
             source: string | null;
-            deletedAt: Date | null;
             deletedBy: string | null;
         } | null;
         pipeline: ({
             stages: {
-                name: string;
                 id: string;
+                name: string;
                 createdAt: Date;
                 updatedAt: Date;
-                order: number;
                 color: string;
+                pipelineId: string;
+                order: number;
                 probability: number;
                 isWon: boolean;
                 isLost: boolean;
-                pipelineId: string;
             }[];
         } & {
-            name: string;
             organizationId: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            isDefault: boolean;
             isActive: boolean;
             description: string | null;
+            isDefault: boolean;
         }) | null;
         notes: {
             userId: string | null;
             id: string;
             createdAt: Date;
             updatedAt: Date;
+            isPinned: boolean;
             leadId: string;
             content: string;
-            isPinned: boolean;
         }[];
+        stage: {
+            id: string;
+            name: string;
+            createdAt: Date;
+            updatedAt: Date;
+            color: string;
+            pipelineId: string;
+            order: number;
+            probability: number;
+            isWon: boolean;
+            isLost: boolean;
+        } | null;
         activities: {
             userId: string | null;
             id: string;
-            type: import(".prisma/client").$Enums.ActivityType;
             createdAt: Date;
+            metadata: Prisma.JsonValue | null;
             description: string | null;
             title: string;
-            metadata: Prisma.JsonValue | null;
+            type: import(".prisma/client").$Enums.ActivityType;
             leadId: string;
         }[];
         tasks: {
@@ -488,25 +506,13 @@ export declare class CRMService {
             createdAt: Date;
             updatedAt: Date;
             description: string | null;
+            completedAt: Date | null;
             title: string;
             priority: import(".prisma/client").$Enums.LeadPriority;
             leadId: string;
             dueDate: Date | null;
             isCompleted: boolean;
-            completedAt: Date | null;
         }[];
-        stage: {
-            name: string;
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            order: number;
-            color: string;
-            probability: number;
-            isWon: boolean;
-            isLost: boolean;
-            pipelineId: string;
-        } | null;
     } & {
         organizationId: string;
         value: Prisma.Decimal | null;
@@ -515,10 +521,11 @@ export declare class CRMService {
         createdAt: Date;
         updatedAt: Date;
         source: string | null;
-        campaignId: string | null;
+        contactId: string | null;
+        title: string;
         currency: string;
         pipelineId: string | null;
-        title: string;
+        stageId: string | null;
         priority: import(".prisma/client").$Enums.LeadPriority;
         score: number;
         conversationId: string | null;
@@ -527,14 +534,13 @@ export declare class CRMService {
         city: string | null;
         adSource: string | null;
         adId: string | null;
+        campaignId: string | null;
         chatbotQualified: boolean;
         qualificationData: Prisma.JsonValue;
         assignedToId: string | null;
         expectedCloseDate: Date | null;
         actualCloseDate: Date | null;
         lastActivityAt: Date | null;
-        contactId: string | null;
-        stageId: string | null;
     }>;
     createLead(organizationId: string, userId: string, data: {
         title: string;
@@ -555,46 +561,52 @@ export declare class CRMService {
             phone: string;
             email: string | null;
             id: string;
-            tags: string[];
-            firstName: string | null;
-            lastName: string | null;
-            avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
-            lastMessageAt: Date | null;
+            deletedAt: Date | null;
             countryCode: string;
+            telegramUserId: string | null;
+            telegramUsername: string | null;
+            instagramUserId: string | null;
+            instagramUsername: string | null;
+            firstName: string | null;
+            lastName: string | null;
+            avatar: string | null;
             whatsappProfileName: string | null;
+            whatsappAbout: string | null;
+            whatsappProfilePicUrl: string | null;
             whatsappProfileFetched: boolean;
             lastProfileFetchAt: Date | null;
             profileFetchAttempts: number;
             customFields: Prisma.JsonValue;
+            tags: string[];
+            lastMessageAt: Date | null;
             messageCount: number;
             source: string | null;
-            deletedAt: Date | null;
             deletedBy: string | null;
         } | null;
         pipeline: {
-            name: string;
             organizationId: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            isDefault: boolean;
             isActive: boolean;
             description: string | null;
+            isDefault: boolean;
         } | null;
         stage: {
-            name: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            order: number;
             color: string;
+            pipelineId: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
-            pipelineId: string;
         } | null;
     } & {
         organizationId: string;
@@ -604,10 +616,11 @@ export declare class CRMService {
         createdAt: Date;
         updatedAt: Date;
         source: string | null;
-        campaignId: string | null;
+        contactId: string | null;
+        title: string;
         currency: string;
         pipelineId: string | null;
-        title: string;
+        stageId: string | null;
         priority: import(".prisma/client").$Enums.LeadPriority;
         score: number;
         conversationId: string | null;
@@ -616,14 +629,13 @@ export declare class CRMService {
         city: string | null;
         adSource: string | null;
         adId: string | null;
+        campaignId: string | null;
         chatbotQualified: boolean;
         qualificationData: Prisma.JsonValue;
         assignedToId: string | null;
         expectedCloseDate: Date | null;
         actualCloseDate: Date | null;
         lastActivityAt: Date | null;
-        contactId: string | null;
-        stageId: string | null;
     }>;
     updateLead(organizationId: string, leadId: string, userId: string, data: {
         title?: string;
@@ -643,46 +655,52 @@ export declare class CRMService {
             phone: string;
             email: string | null;
             id: string;
-            tags: string[];
-            firstName: string | null;
-            lastName: string | null;
-            avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
-            lastMessageAt: Date | null;
+            deletedAt: Date | null;
             countryCode: string;
+            telegramUserId: string | null;
+            telegramUsername: string | null;
+            instagramUserId: string | null;
+            instagramUsername: string | null;
+            firstName: string | null;
+            lastName: string | null;
+            avatar: string | null;
             whatsappProfileName: string | null;
+            whatsappAbout: string | null;
+            whatsappProfilePicUrl: string | null;
             whatsappProfileFetched: boolean;
             lastProfileFetchAt: Date | null;
             profileFetchAttempts: number;
             customFields: Prisma.JsonValue;
+            tags: string[];
+            lastMessageAt: Date | null;
             messageCount: number;
             source: string | null;
-            deletedAt: Date | null;
             deletedBy: string | null;
         } | null;
         pipeline: {
-            name: string;
             organizationId: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            isDefault: boolean;
             isActive: boolean;
             description: string | null;
+            isDefault: boolean;
         } | null;
         stage: {
-            name: string;
             id: string;
+            name: string;
             createdAt: Date;
             updatedAt: Date;
-            order: number;
             color: string;
+            pipelineId: string;
+            order: number;
             probability: number;
             isWon: boolean;
             isLost: boolean;
-            pipelineId: string;
         } | null;
     } & {
         organizationId: string;
@@ -692,10 +710,11 @@ export declare class CRMService {
         createdAt: Date;
         updatedAt: Date;
         source: string | null;
-        campaignId: string | null;
+        contactId: string | null;
+        title: string;
         currency: string;
         pipelineId: string | null;
-        title: string;
+        stageId: string | null;
         priority: import(".prisma/client").$Enums.LeadPriority;
         score: number;
         conversationId: string | null;
@@ -704,14 +723,13 @@ export declare class CRMService {
         city: string | null;
         adSource: string | null;
         adId: string | null;
+        campaignId: string | null;
         chatbotQualified: boolean;
         qualificationData: Prisma.JsonValue;
         assignedToId: string | null;
         expectedCloseDate: Date | null;
         actualCloseDate: Date | null;
         lastActivityAt: Date | null;
-        contactId: string | null;
-        stageId: string | null;
     }>;
     deleteLead(organizationId: string, leadId: string): Promise<{
         message: string;
@@ -721,18 +739,18 @@ export declare class CRMService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
+        isPinned: boolean;
         leadId: string;
         content: string;
-        isPinned: boolean;
     }>;
     getLeadNotes(organizationId: string, leadId: string): Promise<{
         userId: string | null;
         id: string;
         createdAt: Date;
         updatedAt: Date;
+        isPinned: boolean;
         leadId: string;
         content: string;
-        isPinned: boolean;
     }[]>;
     addLeadTask(organizationId: string, leadId: string, userId: string, data: {
         title: string;
@@ -745,12 +763,12 @@ export declare class CRMService {
         createdAt: Date;
         updatedAt: Date;
         description: string | null;
+        completedAt: Date | null;
         title: string;
         priority: import(".prisma/client").$Enums.LeadPriority;
         leadId: string;
         dueDate: Date | null;
         isCompleted: boolean;
-        completedAt: Date | null;
     }>;
     completeTask(organizationId: string, taskId: string, userId: string): Promise<{
         userId: string | null;
@@ -758,12 +776,12 @@ export declare class CRMService {
         createdAt: Date;
         updatedAt: Date;
         description: string | null;
+        completedAt: Date | null;
         title: string;
         priority: import(".prisma/client").$Enums.LeadPriority;
         leadId: string;
         dueDate: Date | null;
         isCompleted: boolean;
-        completedAt: Date | null;
     }>;
     addContactNote(organizationId: string, contactId: string, userId: string, content: string): Promise<{
         userId: string | null;
@@ -771,8 +789,8 @@ export declare class CRMService {
         createdAt: Date;
         updatedAt: Date;
         contactId: string;
-        content: string;
         isPinned: boolean;
+        content: string;
     }>;
     getContactNotes(organizationId: string, contactId: string): Promise<{
         userId: string | null;
@@ -780,9 +798,21 @@ export declare class CRMService {
         createdAt: Date;
         updatedAt: Date;
         contactId: string;
-        content: string;
         isPinned: boolean;
+        content: string;
     }[]>;
+    updateContactNote(organizationId: string, contactId: string, noteId: string, content: string): Promise<{
+        userId: string | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        contactId: string;
+        isPinned: boolean;
+        content: string;
+    } | null>;
+    deleteContactNote(organizationId: string, contactId: string, noteId: string): Promise<{
+        id: string;
+    }>;
     getStats(organizationId: string): Promise<{
         totalLeads: number;
         newLeads: number;
@@ -791,6 +821,10 @@ export declare class CRMService {
         chatbotLeads: number;
         adLeads: number;
         hotLeads: number;
+        leadsBySource: {
+            source: any;
+            count: any;
+        }[];
         totalValue: number | Prisma.Decimal;
         wonValue: number | Prisma.Decimal;
         averageScore: number;

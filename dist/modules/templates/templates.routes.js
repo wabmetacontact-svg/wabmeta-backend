@@ -7,10 +7,13 @@ const auth_1 = require("../../middleware/auth");
 const validate_1 = require("../../middleware/validate");
 const planLimits_1 = require("../../middleware/planLimits");
 const templates_media_1 = require("./templates.media");
+const requireRole_1 = require("../../middleware/requireRole");
 const templates_schema_1 = require("./templates.schema");
 const router = (0, express_1.Router)();
 // All routes require auth
 router.use(auth_1.authenticate);
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use((0, requireRole_1.gateMutations)(...requireRole_1.OPERATOR_ROLES));
 // ─── Static routes (MUST be before /:id) ─────────────────────
 // ✅ Upload media - templates.media.ts handler directly
 router.post('/upload-media', templates_media_1.uploadMiddleware.single('file'), templates_media_1.uploadTemplateMedia // ← Direct, no controller wrapper

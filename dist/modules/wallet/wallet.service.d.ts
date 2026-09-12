@@ -198,14 +198,14 @@ export declare function getAccessRequests(options: {
             lastName: string | null;
         };
         organization: {
-            name: string;
             id: string;
+            name: string;
             planType: import(".prisma/client").$Enums.PlanType;
         };
         reviewer: {
-            name: string;
             email: string;
             id: string;
+            name: string;
         } | null;
     } & {
         userId: string;

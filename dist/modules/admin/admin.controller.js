@@ -38,10 +38,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminController = exports.AdminController = void 0;
+const featureLock_1 = require("../../middleware/featureLock");
 const admin_service_1 = require("./admin.service");
 const admin_billing_service_1 = require("./admin.billing.service");
 const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
+const accountHealth_service_1 = require("../meta/accountHealth.service");
+const meta_service_1 = require("../meta/meta.service");
 // ============================================
 // RESPONSE HELPERS
 // ============================================
@@ -445,6 +448,9 @@ class AdminController {
                     featureConnectionLocked: connectionLocked ?? false, // ✅ NEW
                 }
             });
+            // featureLock middleware org locks 60s cache karta hai - admin ke
+            // change ko turant effective banane ke liye cache clear kar do
+            (0, featureLock_1.invalidateFeatureLocks)(organizationId);
             return sendSuccess(res, {
                 organizationId,
                 features: {
@@ -750,6 +756,141 @@ class AdminController {
             next(error);
         }
     }
+    /**
+     * Meta se account ki taaza haalat kheencho - quality rating, messaging
+     * tier, verification aur health (payment method, banned WABA, etc).
+     *
+     * Quality rating aur tier dono Meta assign karta hai; koi API unhe set
+     * nahi karne deti. Isliye admin sirf refresh kar sakta hai, badal nahi.
+     */
+    async refreshWhatsAppAccount(req, res, next) {
+        try {
+            const { accountId } = req.params;
+            const account = await database_1.default.whatsAppAccount.findUnique({
+                where: { id: accountId },
+                select: { id: true, organizationId: true, phoneNumber: true },
+            });
+            if (!account)
+                throw new errorHandler_1.AppError('WhatsApp account not found', 404);
+            // Quality / tier / verification
+            await meta_service_1.metaService
+                .refreshAccountHealth(account.id, account.organizationId)
+                .catch((e) => console.warn('Admin refresh: health sync failed:', e?.message));
+            // can_send_message aur uski wajah
+            const health = await accountHealth_service_1.accountHealthService
+                .get(account.id, { force: true })
+                .catch(() => null);
+            const fresh = await database_1.default.whatsAppAccount.findUnique({
+                where: { id: accountId },
+                select: {
+                    id: true, phoneNumber: true, qualityRating: true,
+                    messagingLimit: true, messagingLimitOverride: true,
+                    nameStatus: true, codeVerificationStatus: true, status: true,
+                    healthCanSend: true, healthBlockedReason: true, healthCheckedAt: true,
+                },
+            });
+            return sendSuccess(res, {
+                account: fresh,
+                health: health
+                    ? { canSend: health.canSend, blocked: health.blocked, summary: health.summary, issues: health.issues }
+                    : null,
+            }, 'Account refreshed from Meta');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    /**
+     * Admin ke display overrides set/clear karo.
+     *
+     * Ye Meta par KUCH NAHI badalta - quality rating aur tier Meta assign
+     * karta hai aur koi API unhe set nahi karne deti. Ye sirf ye tay karta
+     * hai ki WabMeta me user ko kya dikhe.
+     *
+     * Sending par bhi koi asar nahi: campaign speed hamesha Meta ke asli
+     * tier se chalti hai. Agar override speed bhi badal deta to admin
+     * galti se TIER_100K dikha kar Meta ka rate limit tudwa sakta tha.
+     */
+    async setAccountDisplayOverrides(req, res, next) {
+        try {
+            const { accountId } = req.params;
+            const { qualityRating, messagingLimit, verificationStatus, connectionStatus, } = req.body;
+            const QUALITY = ['GREEN', 'YELLOW', 'RED', 'UNKNOWN'];
+            const TIERS = ['TIER_250', 'TIER_1K', 'TIER_2K', 'TIER_10K', 'TIER_100K', 'TIER_UNLIMITED'];
+            const VERIFICATION = ['VERIFIED', 'NOT_VERIFIED', 'EXPIRED', 'PENDING'];
+            const CONNECTION = ['CONNECTED', 'BAN', 'BLOCKED'];
+            const clean = (v, allowed, label) => {
+                if (v === undefined)
+                    return undefined; // chhua hi nahi
+                if (v === null || v === '')
+                    return null; // hata do
+                const up = String(v).toUpperCase();
+                if (!allowed.includes(up)) {
+                    throw new errorHandler_1.AppError(`Invalid ${label}. Use one of: ${allowed.join(', ')} - or send null to clear it.`, 400);
+                }
+                return up;
+            };
+            const q = clean(qualityRating, QUALITY, 'quality rating');
+            const t = clean(messagingLimit, TIERS, 'messaging tier');
+            const v = clean(verificationStatus, VERIFICATION, 'verification status');
+            const c = clean(connectionStatus, CONNECTION, 'connection status');
+            if (q === undefined && t === undefined && v === undefined && c === undefined) {
+                throw new errorHandler_1.AppError('Send qualityRating, messagingLimit, verificationStatus and/or connectionStatus', 400);
+            }
+            const account = await database_1.default.whatsAppAccount.findUnique({
+                where: { id: accountId },
+                select: { id: true, phoneNumber: true, qualityRating: true, messagingLimit: true },
+            });
+            if (!account)
+                throw new errorHandler_1.AppError('WhatsApp account not found', 404);
+            const data = {};
+            if (q !== undefined)
+                data.qualityRatingOverride = q;
+            if (t !== undefined)
+                data.messagingLimitOverride = t;
+            if (v !== undefined)
+                data.codeVerificationOverride = v;
+            if (c !== undefined)
+                data.healthCanSendOverride = c;
+            // Koi bhi override bacha ho to "kaun ne set kiya" rakho, warna saaf
+            const current = await database_1.default.whatsAppAccount.findUnique({
+                where: { id: accountId },
+                select: {
+                    qualityRatingOverride: true,
+                    messagingLimitOverride: true,
+                    codeVerificationOverride: true,
+                    healthCanSendOverride: true,
+                },
+            });
+            const finalQ = q !== undefined ? q : current?.qualityRatingOverride;
+            const finalT = t !== undefined ? t : current?.messagingLimitOverride;
+            const finalV = v !== undefined ? v : current?.codeVerificationOverride;
+            const finalC = c !== undefined ? c : current?.healthCanSendOverride;
+            const anySet = !!(finalQ || finalT || finalV || finalC);
+            data.overrideSetBy = anySet ? req.admin?.email || req.admin?.id || 'admin' : null;
+            data.overrideSetAt = anySet ? new Date() : null;
+            const updated = await database_1.default.whatsAppAccount.update({
+                where: { id: accountId },
+                data,
+                select: {
+                    id: true, phoneNumber: true,
+                    qualityRating: true, qualityRatingOverride: true,
+                    messagingLimit: true, messagingLimitOverride: true,
+                    codeVerificationStatus: true, codeVerificationOverride: true,
+                    healthCanSend: true, healthCanSendOverride: true,
+                    overrideSetBy: true, overrideSetAt: true,
+                },
+            });
+            console.log(`⚙️ [Admin] Display override for ${account.phoneNumber}: ` +
+                `quality=${q ?? '(unchanged)'} tier=${t ?? '(unchanged)'} ` +
+                `verification=${v ?? '(unchanged)'} connection=${c ?? '(unchanged)'} ` +
+                `| Meta says quality=${account.qualityRating} tier=${account.messagingLimit}`);
+            return sendSuccess(res, updated, 'Display values updated');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
     async getWhatsAppConnections(req, res, next) {
         try {
             const connections = await database_1.default.whatsAppAccount.findMany({
@@ -771,7 +912,25 @@ class AdminController {
                 },
                 orderBy: { createdAt: 'desc' }
             });
-            return sendSuccess(res, connections, 'WhatsApp connections fetched');
+            // include: {} har scalar field lauta deta hai - jisme accessToken aur
+            // webhookSecret bhi hain. Wo encrypted hain, par client tak jaane ki
+            // koi wajah nahi. Bhejne se pehle hata do.
+            const safe = connections.map((c) => {
+                const { accessToken, webhookSecret, healthStatus, ...rest } = c;
+                return {
+                    ...rest,
+                    hasAccessToken: !!accessToken,
+                    // Admin ko dono dikhne chahiye - Meta ka asli, aur jo user ko dikh raha hai
+                    displayQualityRating: c.qualityRatingOverride || c.qualityRating,
+                    displayMessagingLimit: c.messagingLimitOverride || c.messagingLimit,
+                    displayVerification: c.codeVerificationOverride || c.codeVerificationStatus,
+                    displayConnection: c.healthCanSendOverride ||
+                        (c.healthCanSend === 'BLOCKED' ? 'BLOCKED' : 'CONNECTED'),
+                    hasOverride: !!(c.qualityRatingOverride || c.messagingLimitOverride ||
+                        c.codeVerificationOverride || c.healthCanSendOverride),
+                };
+            });
+            return sendSuccess(res, safe, 'WhatsApp connections fetched');
         }
         catch (error) {
             next(error);

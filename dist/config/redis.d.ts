@@ -10,7 +10,7 @@ declare class InMemoryStore {
      * set(key, value, 'EX', seconds)
      * set(key, value, 'KEEPTTL')
      */
-    set(key: string, value: string, mode?: 'EX' | 'KEEPTTL' | string, duration?: number | string): Promise<'OK'>;
+    set(key: string, value: string, mode?: 'EX' | 'KEEPTTL' | string, duration?: number | string, flag?: 'NX' | string): Promise<'OK' | null>;
     setex(key: string, seconds: number, value: string): Promise<'OK'>;
     del(...keys: string[]): Promise<number>;
     exists(...keys: string[]): Promise<number>;

@@ -7,6 +7,7 @@ export interface ConversationsQueryInput {
     isRead?: boolean;
     assignedTo?: string;
     labels?: string[];
+    channel?: 'WHATSAPP' | 'INSTAGRAM' | 'TELEGRAM';
     sortBy?: 'lastMessageAt' | 'createdAt' | 'updatedAt';
     sortOrder?: 'asc' | 'desc';
 }

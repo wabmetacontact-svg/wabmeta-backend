@@ -140,6 +140,26 @@ class CRMController {
             next(e);
         }
     }
+    async updateContactNote(req, res, next) {
+        try {
+            const orgId = req.user.organizationId;
+            const note = await crm_service_1.crmService.updateContactNote(orgId, req.params.contactId, req.params.noteId, req.body.content);
+            return (0, response_1.sendSuccess)(res, note, 'Note updated');
+        }
+        catch (e) {
+            next(e);
+        }
+    }
+    async deleteContactNote(req, res, next) {
+        try {
+            const orgId = req.user.organizationId;
+            const result = await crm_service_1.crmService.deleteContactNote(orgId, req.params.contactId, req.params.noteId);
+            return (0, response_1.sendSuccess)(res, result, 'Note deleted');
+        }
+        catch (e) {
+            next(e);
+        }
+    }
     // Stats
     async getStats(req, res, next) {
         try {

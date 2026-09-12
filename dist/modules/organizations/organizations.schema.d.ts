@@ -2,9 +2,9 @@ import { z } from 'zod';
 export declare const createOrganizationSchema: z.ZodObject<{
     body: z.ZodObject<{
         name: z.ZodString;
-        website: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+        website: z.ZodEffects<z.ZodNullable<z.ZodOptional<z.ZodString>>, string | null | undefined, unknown>;
         industry: z.ZodOptional<z.ZodString>;
-        timezone: z.ZodOptional<z.ZodString>;
+        timezone: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
     }, "strip", z.ZodTypeAny, {
         name: string;
         website?: string | null | undefined;
@@ -12,9 +12,9 @@ export declare const createOrganizationSchema: z.ZodObject<{
         timezone?: string | undefined;
     }, {
         name: string;
-        website?: string | null | undefined;
+        website?: unknown;
         industry?: string | undefined;
-        timezone?: string | undefined;
+        timezone?: unknown;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
@@ -26,18 +26,18 @@ export declare const createOrganizationSchema: z.ZodObject<{
 }, {
     body: {
         name: string;
-        website?: string | null | undefined;
+        website?: unknown;
         industry?: string | undefined;
-        timezone?: string | undefined;
+        timezone?: unknown;
     };
 }>;
 export declare const updateOrganizationSchema: z.ZodObject<{
     body: z.ZodObject<{
         name: z.ZodOptional<z.ZodString>;
-        logo: z.ZodNullable<z.ZodOptional<z.ZodString>>;
-        website: z.ZodNullable<z.ZodOptional<z.ZodString>>;
-        industry: z.ZodNullable<z.ZodOptional<z.ZodString>>;
-        timezone: z.ZodOptional<z.ZodString>;
+        logo: z.ZodUnion<[z.ZodNullable<z.ZodOptional<z.ZodString>>, z.ZodLiteral<"">]>;
+        website: z.ZodEffects<z.ZodNullable<z.ZodOptional<z.ZodString>>, string | null | undefined, unknown>;
+        industry: z.ZodEffects<z.ZodNullable<z.ZodOptional<z.ZodString>>, string | null | undefined, unknown>;
+        timezone: z.ZodEffects<z.ZodOptional<z.ZodString>, string | undefined, unknown>;
     }, "strip", z.ZodTypeAny, {
         name?: string | undefined;
         logo?: string | null | undefined;
@@ -47,9 +47,9 @@ export declare const updateOrganizationSchema: z.ZodObject<{
     }, {
         name?: string | undefined;
         logo?: string | null | undefined;
-        website?: string | null | undefined;
-        industry?: string | null | undefined;
-        timezone?: string | undefined;
+        website?: unknown;
+        industry?: unknown;
+        timezone?: unknown;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
@@ -63,9 +63,9 @@ export declare const updateOrganizationSchema: z.ZodObject<{
     body: {
         name?: string | undefined;
         logo?: string | null | undefined;
-        website?: string | null | undefined;
-        industry?: string | null | undefined;
-        timezone?: string | undefined;
+        website?: unknown;
+        industry?: unknown;
+        timezone?: unknown;
     };
 }>;
 export declare const inviteMemberSchema: z.ZodObject<{

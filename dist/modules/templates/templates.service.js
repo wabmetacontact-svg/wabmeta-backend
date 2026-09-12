@@ -13,6 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.templatesService = exports.TemplatesService = void 0;
+exports.withOptOutNotice = withOptOutNotice;
 const axios_1 = __importDefault(require("axios"));
 const database_1 = __importDefault(require("../../config/database"));
 const errorHandler_1 = require("../../middleware/errorHandler");
@@ -159,6 +160,29 @@ const normalizeHeaderType = (t) => {
     const headerType = String(t || 'NONE').toUpperCase();
     return ['TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'].includes(headerType) ? headerType : 'NONE';
 };
+// WhatsApp ka footer 60 characters ka hota hai.
+const FOOTER_MAX = 60;
+const OPT_OUT_NOTICE = 'Reply STOP to unsubscribe';
+/**
+ * MARKETING template ke footer me opt-out ki line jodta hai.
+ *
+ * - UTILITY / AUTHENTICATION ko chhod deta hai - unme opt-out expected nahi hai
+ * - Agar footer me pehle se stop/unsubscribe/opt out likha hai to haath nahi lagata
+ * - Business ka apna footer kabhi kaatta nahi: jodne se 60 char paar hote hon
+ *   to unka footer waisa hi rehne deta hai
+ */
+function withOptOutNotice(category, footerText) {
+    const isMarketing = String(category || '').toUpperCase() === 'MARKETING';
+    const existing = (footerText || '').trim();
+    if (!isMarketing)
+        return existing || null;
+    if (/\b(stop|unsubscribe|opt[\s-]?out)\b/i.test(existing))
+        return existing;
+    if (!existing)
+        return OPT_OUT_NOTICE;
+    const combined = `${existing} · ${OPT_OUT_NOTICE}`;
+    return combined.length <= FOOTER_MAX ? combined : existing;
+}
 // ============================================
 // ✅ FIXED: buildMetaTemplatePayload
 // ============================================
@@ -251,8 +275,16 @@ const buildMetaTemplatePayload = (t) => {
     // ============================================
     // FOOTER COMPONENT
     // ============================================
-    if (t.footerText) {
-        components.push({ type: 'FOOTER', text: t.footerText });
+    // MARKETING templates me opt-out ka raasta dikhna chahiye. WhatsApp ki
+    // Business Messaging Policy yahi kehti hai, aur jo template ye nahi dikhata
+    // uske recipient ke paas Block/Report ke alawa kuch bachta hi nahi - wahi
+    // quality rating girata hai aur aakhir me number ban karwata hai.
+    //
+    // "STOP" isliye likhte hain kyunki wahi inbound par actually handle hota hai
+    // (contacts/optOut.ts). Footer wahi kehta hai jo sach me kaam karta hai.
+    const footerText = withOptOutNotice(t.category, t.footerText);
+    if (footerText) {
+        components.push({ type: 'FOOTER', text: footerText });
     }
     // ============================================
     // ✅ FIXED BUTTONS COMPONENT
@@ -585,10 +617,12 @@ class TemplatesService {
             language: input.language,
             category: input.category,
             headerType: input.headerType || null,
-            // ✅ CHANGED: Always store Cloudinary URL (permanent)
+            // ✅ Store Cloudinary URL (permanent - never expires)
             headerContent: finalCloudinaryUrl || mediaHeaderContent,
-            // ✅ CHANGED: Handle stored temporarily (will be null after approval)
-            headerMediaId: null, // Don't store handle - it expires
+            // ✅ FIX BUG #12: STORE the handle initially!
+            // Meta requires this for template creation.
+            // Set to null AFTER approval webhook comes.
+            headerMediaId: finalMetaId, // ← THIS IS THE FIX!
             headerMediaUploadedAt: finalMetaId ? new Date() : null,
             headerMediaLastVerified: null,
             bodyText: input.bodyText,
@@ -608,6 +642,53 @@ class TemplatesService {
         const template = await database_1.default.template.create({ data: templateData });
         console.log(`✅ Template created: ${template.id} (status: ${template.status})`);
         if (canSyncToMeta && waData) {
+            // ✅ FIX: WABA ID validate karo pehle
+            if (!waData.wabaId) {
+                console.error('❌ WABA ID missing - cannot submit template to Meta');
+                await database_1.default.template.update({
+                    where: { id: template.id },
+                    data: {
+                        status: 'DRAFT',
+                        rejectionReason: 'WhatsApp Business Account not properly connected. Please reconnect.',
+                    },
+                });
+                const latest = await database_1.default.template.findUnique({ where: { id: template.id } });
+                return formatTemplate(latest);
+            }
+            // ✅ FIX: WABA ID verify karo Meta pe
+            try {
+                const wabaVerifyUrl = `https://graph.facebook.com/v22.0/${waData.wabaId}`;
+                await axios_1.default.get(wabaVerifyUrl, {
+                    params: { access_token: waData.accessToken, fields: 'id,name' },
+                    timeout: 5000,
+                });
+            }
+            catch (wabaErr) {
+                const errCode = wabaErr.response?.data?.error?.code;
+                const errSubcode = wabaErr.response?.data?.error?.error_subcode;
+                if (errCode === 100 && errSubcode === 33) {
+                    console.error(`❌ WABA ${waData.wabaId} does not exist or no permissions`);
+                    await database_1.default.template.update({
+                        where: { id: template.id },
+                        data: {
+                            status: 'DRAFT',
+                            rejectionReason: 'WhatsApp Business Account (WABA) not found or permissions revoked. ' +
+                                'Please reconnect your WhatsApp account in Settings.',
+                        },
+                    });
+                    // ✅ Account ko disconnect mark karo
+                    if (waData.account?.id) {
+                        await database_1.default.whatsAppAccount.update({
+                            where: { id: waData.account.id },
+                            data: { status: 'DISCONNECTED' },
+                        }).catch(() => { });
+                    }
+                    const latest = await database_1.default.template.findUnique({ where: { id: template.id } });
+                    return formatTemplate(latest);
+                }
+                // Other errors - continue (non-fatal WABA check fail)
+                console.warn('⚠️ WABA verify failed (non-fatal):', wabaErr.message);
+            }
             try {
                 const metaHeaderMediaId = (() => {
                     if (!finalMetaId)
@@ -769,9 +850,15 @@ class TemplatesService {
                 const metaLang = String(mt.language);
                 foundMetaKeys.add(`${metaName}:${metaLang}`);
                 const metaStatusRaw = String(mt.status || 'PENDING').toUpperCase();
-                const mappedStatus = metaStatusRaw === 'APPROVED' ? 'APPROVED'
-                    : metaStatusRaw === 'REJECTED' ? 'REJECTED'
-                        : 'PENDING';
+                const mappedStatus = 
+                // PAUSED aur REJECTED bilkul alag hain. PAUSED quality gir jane par
+                // lagta hai aur apne aap wapas aa sakta hai; REJECTED hamesha ke liye
+                // hai. Pehle dono REJECTED ban jate the, isliye user chalne layak
+                // template chhod kar naya banata tha.
+                metaStatusRaw === 'APPROVED' ? 'APPROVED'
+                    : metaStatusRaw === 'PAUSED' ? 'PAUSED'
+                        : (metaStatusRaw === 'REJECTED' || metaStatusRaw === 'DISABLED') ? 'REJECTED'
+                            : 'PENDING';
                 const rejectionReason = mt.rejected_reason || mt.rejection_reason || null;
                 const bodyComponent = mt.components?.find((c) => c.type === 'BODY');
                 const headerComponent = mt.components?.find((c) => c.type === 'HEADER');

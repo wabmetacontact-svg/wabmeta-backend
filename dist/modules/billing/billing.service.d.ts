@@ -49,14 +49,14 @@ declare class BillingService {
         contactsUsed: number;
     } | {
         plan: {
-            name: string;
             id: string;
-            type: import(".prisma/client").$Enums.PlanType;
+            name: string;
+            slug: string;
             createdAt: Date;
             updatedAt: Date;
-            slug: string;
             isActive: boolean;
             description: string | null;
+            type: import(".prisma/client").$Enums.PlanType;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
             maxContacts: number;
@@ -79,8 +79,9 @@ declare class BillingService {
         status: import(".prisma/client").$Enums.SubscriptionStatus;
         createdAt: Date;
         updatedAt: Date;
-        messagesUsed: number;
+        planId: string;
         billingCycle: string;
+        messagesUsed: number;
         currentPeriodStart: Date;
         currentPeriodEnd: Date;
         contactsUsed: number;
@@ -88,7 +89,6 @@ declare class BillingService {
         lastPaymentAt: Date | null;
         nextPaymentAt: Date | null;
         cancelledAt: Date | null;
-        planId: string;
     }>;
     getPlans(): Promise<{
         features: string[];
@@ -116,14 +116,14 @@ declare class BillingService {
         monthlyPrice: number;
         yearlyPrice: number;
         features: import("@prisma/client/runtime/library").JsonArray;
-        name: string;
         id: string;
-        type: import(".prisma/client").$Enums.PlanType;
+        name: string;
+        slug: string;
         createdAt: Date;
         updatedAt: Date;
-        slug: string;
         isActive: boolean;
         description: string | null;
+        type: import(".prisma/client").$Enums.PlanType;
         maxContacts: number;
         maxMessages: number;
         maxTeamMembers: number;
@@ -188,8 +188,9 @@ declare class BillingService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
-            messagesUsed: number;
+            planId: string;
             billingCycle: string;
+            messagesUsed: number;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
             contactsUsed: number;
@@ -197,17 +198,16 @@ declare class BillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         };
         plan: {
-            name: string;
             id: string;
-            type: import(".prisma/client").$Enums.PlanType;
+            name: string;
+            slug: string;
             createdAt: Date;
             updatedAt: Date;
-            slug: string;
             isActive: boolean;
             description: string | null;
+            type: import(".prisma/client").$Enums.PlanType;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
             maxContacts: number;
@@ -238,8 +238,9 @@ declare class BillingService {
         status: import(".prisma/client").$Enums.SubscriptionStatus;
         createdAt: Date;
         updatedAt: Date;
-        messagesUsed: number;
+        planId: string;
         billingCycle: string;
+        messagesUsed: number;
         currentPeriodStart: Date;
         currentPeriodEnd: Date;
         contactsUsed: number;
@@ -247,7 +248,6 @@ declare class BillingService {
         lastPaymentAt: Date | null;
         nextPaymentAt: Date | null;
         cancelledAt: Date | null;
-        planId: string;
     }>;
     cancelSubscription(organizationId: string, reason?: string): Promise<{
         message: string;
@@ -257,8 +257,9 @@ declare class BillingService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
-            messagesUsed: number;
+            planId: string;
             billingCycle: string;
+            messagesUsed: number;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
             contactsUsed: number;
@@ -266,7 +267,6 @@ declare class BillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         };
     }>;
     resumeSubscription(organizationId: string): Promise<{
@@ -275,8 +275,9 @@ declare class BillingService {
         status: import(".prisma/client").$Enums.SubscriptionStatus;
         createdAt: Date;
         updatedAt: Date;
-        messagesUsed: number;
+        planId: string;
         billingCycle: string;
+        messagesUsed: number;
         currentPeriodStart: Date;
         currentPeriodEnd: Date;
         contactsUsed: number;
@@ -284,7 +285,6 @@ declare class BillingService {
         lastPaymentAt: Date | null;
         nextPaymentAt: Date | null;
         cancelledAt: Date | null;
-        planId: string;
     }>;
     getInvoices(organizationId: string, limit?: number, offset?: number): Promise<any[]>;
     getInvoice(invoiceId: string, organizationId: string): Promise<any>;
@@ -298,14 +298,14 @@ declare class BillingService {
         isActive: boolean;
         subscription: {
             plan: {
-                name: string;
                 id: string;
-                type: import(".prisma/client").$Enums.PlanType;
+                name: string;
+                slug: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
                 description: string | null;
+                type: import(".prisma/client").$Enums.PlanType;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
                 maxContacts: number;
@@ -329,8 +329,9 @@ declare class BillingService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
-            messagesUsed: number;
+            planId: string;
             billingCycle: string;
+            messagesUsed: number;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
             contactsUsed: number;
@@ -338,7 +339,6 @@ declare class BillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         };
         daysRemaining: number;
         message?: undefined;

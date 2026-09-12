@@ -340,7 +340,10 @@ class ContactsController {
             const organizationId = req.user?.organizationId;
             if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            const result = await contacts_service_1.contactsService.deleteGroup(organizationId, req.params.groupId);
+            // ✅ deleteContacts query param check karo
+            const deleteContacts = req.query.deleteContacts === 'true';
+            const result = await contacts_service_1.contactsService.deleteGroup(organizationId, req.params.groupId, deleteContacts // ✅ Pass to service
+            );
             (0, response_1.sendSuccess)(res, result, result.message);
         }
         catch (error) {
@@ -451,7 +454,6 @@ class ContactsController {
             const toRestore = existing
                 .filter(c => c.status === 'DELETED')
                 .map(c => c.id);
-            const existingActive = new Set(existing.filter(c => c.status !== 'DELETED').map(c => c.phone));
             const toCreate = valid.filter(p => !existingMap.has(p.fullNumber));
             // 2. Restore deleted
             let restoredCount = 0;
@@ -523,7 +525,7 @@ class ContactsController {
             next(error);
         }
     }
-    // ── CSV UPLOAD ──────────────────────────────────────────────
+    // ── CSV UPLOAD (OPTIMIZED) ──────────────────────────────────
     async csvUpload(req, res, next) {
         try {
             const organizationId = req.user?.organizationId;
@@ -538,8 +540,13 @@ class ContactsController {
             if (contacts.length > MAX_CSV) {
                 throw new errorHandler_1.AppError(`Maximum ${MAX_CSV} contacts per CSV upload`, 400);
             }
-            const results = { created: 0, updated: 0, skipped: 0, errors: [] };
-            // 1. Parse + validate phones
+            const results = {
+                created: 0,
+                updated: 0,
+                skipped: 0,
+                errors: []
+            };
+            // ─── 1. VALIDATE PHONES ─────────────────────────────────
             const phoneToData = new Map();
             const validPhones = [];
             for (const c of contacts) {
@@ -570,20 +577,34 @@ class ContactsController {
                     message: 'No valid contacts found',
                 });
             }
-            // 2. Fetch existing
+            console.log(`📊 Processing ${validPhones.length} valid contacts`);
+            // ─── 2. FETCH EXISTING (SINGLE QUERY) ───────────────────
             const existing = await database_1.default.contact.findMany({
                 where: { organizationId, phone: { in: validPhones } },
-                select: { id: true, phone: true, firstName: true, lastName: true, email: true },
+                select: {
+                    id: true,
+                    phone: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    status: true,
+                },
             });
             const existingMap = new Map(existing.map(c => [c.phone, c]));
+            // ─── 3. SEPARATE CREATE / UPDATE / RESTORE ──────────────
             const toCreate = [];
             const toUpdate = [];
+            const toRestore = []; // Deleted contact IDs
             for (const [phone, data] of phoneToData) {
                 const ex = existingMap.get(phone);
                 if (ex) {
+                    // Restore if deleted
+                    if (ex.status === 'DELETED') {
+                        toRestore.push(ex.id);
+                    }
                     toUpdate.push({
                         id: ex.id,
-                        firstName: data.firstName || data.first_name || ex.firstName,
+                        firstName: data.firstName || data.first_name || ex.firstName || 'Unknown',
                         lastName: data.lastName || data.last_name || ex.lastName,
                         email: data.email || ex.email,
                     });
@@ -602,7 +623,8 @@ class ContactsController {
                     });
                 }
             }
-            // 3. Bulk create
+            console.log(`📊 Create: ${toCreate.length}, Update: ${toUpdate.length}, Restore: ${toRestore.length}`);
+            // ─── 4. BULK CREATE (SINGLE QUERY) ──────────────────────
             if (toCreate.length > 0) {
                 const r = await database_1.default.contact.createMany({
                     data: toCreate,
@@ -610,48 +632,73 @@ class ContactsController {
                 });
                 results.created = r.count;
             }
-            // ✅ FIX Bug2: Sequential updates instead of parallel
-            // Batch size of 25 to prevent DB overload
+            // ─── 5. BULK RESTORE (SINGLE QUERY) ─────────────────────
+            if (toRestore.length > 0) {
+                await database_1.default.contact.updateMany({
+                    where: { id: { in: toRestore } },
+                    data: {
+                        status: 'ACTIVE',
+                        deletedAt: null,
+                        deletedBy: null,
+                        source: 'CSV_IMPORT',
+                    },
+                });
+                console.log(`♻️ Restored ${toRestore.length} deleted contacts`);
+            }
+            // ─── 6. ✅ PARALLEL UPDATES (MAJOR SPEED FIX) ───────────
             if (toUpdate.length > 0) {
-                const BATCH = 25;
+                const BATCH = 100;
                 for (let i = 0; i < toUpdate.length; i += BATCH) {
                     const batch = toUpdate.slice(i, i + BATCH);
-                    // Sequential in each batch
-                    for (const u of batch) {
-                        await database_1.default.contact.update({
-                            where: { id: u.id },
-                            data: {
-                                firstName: u.firstName,
-                                lastName: u.lastName || undefined,
-                                email: u.email || undefined,
-                                ...(tags.length > 0 ? { tags: { push: tags } } : {}),
-                            },
-                        }).catch(() => { results.errors.push(`Update failed: ${u.id}`); });
-                    }
+                    // ✅ ALL updates in batch run in PARALLEL
+                    await Promise.all(batch.map(u => database_1.default.contact.update({
+                        where: { id: u.id },
+                        data: {
+                            firstName: u.firstName,
+                            lastName: u.lastName || undefined,
+                            email: u.email || undefined,
+                            ...(tags.length > 0 ? { tags: { push: tags } } : {}),
+                        },
+                    }).catch((e) => {
+                        results.errors.push(`Update failed: ${u.id} - ${e.message}`);
+                    })));
+                    console.log(`✅ Updated batch ${Math.floor(i / BATCH) + 1}/${Math.ceil(toUpdate.length / BATCH)}`);
                 }
                 results.updated = toUpdate.length;
             }
-            // 4. Add to group
-            if (groupId && (results.created > 0 || results.updated > 0)) {
+            // ─── 7. ADD TO GROUP (SINGLE BULK QUERY) ────────────────
+            if (groupId && (results.created > 0 || results.updated > 0 || toRestore.length > 0)) {
                 const allIds = await database_1.default.contact.findMany({
                     where: { organizationId, phone: { in: validPhones } },
                     select: { id: true },
                 });
-                await database_1.default.contactGroupMember.createMany({
-                    data: allIds.map(c => ({ groupId, contactId: c.id })),
-                    skipDuplicates: true,
+                if (allIds.length > 0) {
+                    await database_1.default.contactGroupMember.createMany({
+                        data: allIds.map(c => ({ groupId, contactId: c.id })),
+                        skipDuplicates: true,
+                    }).catch(() => { });
+                }
+            }
+            // ─── 8. UPDATE SUBSCRIPTION COUNT ───────────────────────
+            const totalAdded = results.created + toRestore.length;
+            if (totalAdded > 0) {
+                await database_1.default.subscription.updateMany({
+                    where: { organizationId },
+                    data: { contactsUsed: { increment: totalAdded } },
                 }).catch(() => { });
             }
+            console.log(`✅ CSV Upload complete: Created=${results.created}, Updated=${results.updated}, Restored=${toRestore.length}`);
             return res.json({
                 success: true,
                 data: {
                     totalProcessed: contacts.length,
                     created: results.created,
                     updated: results.updated,
+                    restored: toRestore.length,
                     skipped: results.skipped,
                     errors: results.errors.slice(0, 10),
                 },
-                message: `${results.created} created, ${results.updated} updated`,
+                message: `${results.created} created, ${results.updated} updated${toRestore.length ? `, ${toRestore.length} restored` : ''}`,
             });
         }
         catch (error) {
@@ -679,7 +726,9 @@ class ContactsController {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             }
             const type = String(req.query.type || 'all');
-            const tags = req.query.tags ? String(req.query.tags).split(',').filter(Boolean) : [];
+            const tags = req.query.tags
+                ? String(req.query.tags).split(',').map(t => t.trim()).filter(Boolean)
+                : [];
             const groupId = req.query.groupId ? String(req.query.groupId) : undefined;
             let count = 0;
             if (type === 'all') {
@@ -702,7 +751,7 @@ class ContactsController {
             else if (type === 'group' && groupId) {
                 count = await database_1.default.contactGroupMember.count({
                     where: {
-                        groupId,
+                        groupId: String(groupId),
                         contact: {
                             organizationId,
                             status: 'ACTIVE',
@@ -723,50 +772,40 @@ class ContactsController {
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization context required', 400);
             }
-            const query = String(req.query.q || '').trim();
-            const limit = Math.min(50, parseInt(req.query.limit) || 30);
-            // Empty query returns first N contacts
-            const where = {
-                organizationId,
-                status: 'ACTIVE',
-            };
-            if (query.length >= 1) {
-                where.OR = [
-                    { phone: { contains: query, mode: 'insensitive' } },
-                    { firstName: { contains: query, mode: 'insensitive' } },
-                    { lastName: { contains: query, mode: 'insensitive' } },
-                    { email: { contains: query, mode: 'insensitive' } },
-                ];
-            }
+            const q = String(req.query.q || '').trim();
+            const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
             const contacts = await database_1.default.contact.findMany({
-                where,
-                take: limit,
+                where: {
+                    organizationId,
+                    status: 'ACTIVE',
+                    ...(q ? {
+                        OR: [
+                            { firstName: { contains: q, mode: 'insensitive' } },
+                            { lastName: { contains: q, mode: 'insensitive' } },
+                            { phone: { contains: q, mode: 'insensitive' } },
+                            { email: { contains: q, mode: 'insensitive' } },
+                        ],
+                    } : {}),
+                },
                 select: {
                     id: true,
                     firstName: true,
                     lastName: true,
                     phone: true,
-                    countryCode: true,
                     email: true,
                     tags: true,
-                    whatsappProfileName: true,
                 },
-                orderBy: [
-                    { firstName: 'asc' },
-                    { createdAt: 'desc' },
-                ],
+                take: limit,
+                orderBy: { firstName: 'asc' },
             });
-            // Format response
-            const formatted = contacts.map(c => ({
+            const mapped = contacts.map(c => ({
                 id: c.id,
-                name: c.whatsappProfileName ||
-                    [c.firstName, c.lastName].filter(Boolean).join(' ') ||
-                    c.phone,
+                name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.phone,
                 phone: c.phone,
-                email: c.email,
+                email: c.email || '',
                 tags: c.tags || [],
             }));
-            (0, response_1.sendSuccess)(res, { contacts: formatted, total: formatted.length }, 'Contacts found');
+            (0, response_1.sendSuccess)(res, { contacts: mapped, total: mapped.length }, 'Contacts found');
         }
         catch (error) {
             next(error);

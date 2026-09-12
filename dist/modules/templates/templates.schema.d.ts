@@ -441,7 +441,7 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
         page: z.ZodEffects<z.ZodOptional<z.ZodString>, number, string | undefined>;
         limit: z.ZodEffects<z.ZodOptional<z.ZodString>, number, string | undefined>;
         search: z.ZodOptional<z.ZodString>;
-        status: z.ZodOptional<z.ZodEnum<["PENDING", "APPROVED", "REJECTED"]>>;
+        status: z.ZodOptional<z.ZodEnum<["PENDING", "APPROVED", "REJECTED", "PAUSED"]>>;
         category: z.ZodOptional<z.ZodEnum<["MARKETING", "UTILITY", "AUTHENTICATION"]>>;
         language: z.ZodOptional<z.ZodString>;
         sortBy: z.ZodOptional<z.ZodString>;
@@ -450,16 +450,16 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         page: number;
         limit: number;
+        status?: "PAUSED" | "PENDING" | "APPROVED" | "REJECTED" | undefined;
         search?: string | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
         sortBy?: string | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }, {
+        status?: "PAUSED" | "PENDING" | "APPROVED" | "REJECTED" | undefined;
         search?: string | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
@@ -472,8 +472,8 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     query?: {
         page: number;
         limit: number;
+        status?: "PAUSED" | "PENDING" | "APPROVED" | "REJECTED" | undefined;
         search?: string | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;
@@ -482,8 +482,8 @@ export declare const getTemplatesQuerySchema: z.ZodObject<{
     } | undefined;
 }, {
     query?: {
+        status?: "PAUSED" | "PENDING" | "APPROVED" | "REJECTED" | undefined;
         search?: string | undefined;
-        status?: "PENDING" | "APPROVED" | "REJECTED" | undefined;
         whatsappAccountId?: string | undefined;
         language?: string | undefined;
         category?: "MARKETING" | "UTILITY" | "AUTHENTICATION" | undefined;

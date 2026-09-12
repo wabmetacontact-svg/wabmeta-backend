@@ -22,15 +22,33 @@ const sendError = (res, message = 'An error occurred', statusCode = 400, error) 
 };
 exports.sendError = sendError;
 // successResponse - Object based version
-const successResponse = (res, options) => {
-    const { data, message = 'Success', meta, statusCode = 200 } = options;
+const successResponse = (res, options = {}) => {
+    if (options && typeof options === 'object') {
+        if ('data' in options || 'meta' in options) {
+            const { data, message = 'Success', meta, statusCode = 200 } = options;
+            const response = {
+                success: true,
+                message,
+                data,
+                meta,
+            };
+            return res.status(statusCode).json(response);
+        }
+        if ('message' in options && !('items' in options) && !('count' in options)) {
+            const { message = 'Success', statusCode = 200 } = options;
+            const response = {
+                success: true,
+                message,
+            };
+            return res.status(statusCode).json(response);
+        }
+    }
     const response = {
         success: true,
-        message,
-        data,
-        meta,
+        message: 'Success',
+        data: options,
     };
-    return res.status(statusCode).json(response);
+    return res.status(200).json(response);
 };
 exports.successResponse = successResponse;
 // errorResponse - Object based version

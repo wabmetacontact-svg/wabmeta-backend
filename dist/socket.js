@@ -38,8 +38,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.closeSocketIO = exports.getIO = exports.emitForceLogout = exports.initializeSocket = void 0;
 const socket_io_1 = require("socket.io");
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const config_1 = require("./config");
+const jwt_1 = require("./utils/jwt");
+const database_1 = __importDefault(require("./config/database"));
 const campaigns_socket_1 = require("./modules/campaigns/campaigns.socket");
 let io;
 let webhookListenersAttached = false;
@@ -80,25 +80,37 @@ const initializeSocket = (server) => {
     const MAX_CONNECTIONS = 5000;
     // ✅ Auth middleware - same as before
     io.use((socket, next) => {
-        const token = socket.handshake.auth?.token ||
-            socket.handshake.headers?.authorization?.split(' ')[1];
-        const orgFromAuth = socket.handshake.auth?.organizationId;
-        if (token) {
-            try {
-                const decoded = jsonwebtoken_1.default.verify(token, config_1.config.jwt.secret);
-                socket.userId = decoded.userId || decoded.id;
-                socket.organizationId = decoded.organizationId || orgFromAuth;
-                socket.email = decoded.email;
-            }
-            catch (e) {
-                console.warn('⚠️ Invalid socket token - allowing as guest');
-                socket.organizationId = orgFromAuth;
-            }
+        // The client sends auth.token as "Bearer <jwt>" (and a bare auth.rawToken).
+        // Strip the scheme so jwt.verify sees the token itself.
+        const raw = socket.handshake.auth?.rawToken ||
+            socket.handshake.auth?.token ||
+            socket.handshake.headers?.authorization ||
+            '';
+        const token = String(raw).replace(/^Bearer\s+/i, '').trim();
+        if (!token) {
+            return next(new Error('Authentication required'));
         }
-        else {
-            socket.organizationId = orgFromAuth;
+        try {
+            // Access tokens are signed with JWT_ACCESS_SECRET (falling back to
+            // JWT_SECRET). This used to verify against config.jwt.secret only, so
+            // whenever the two env vars differed every valid access token passed the
+            // REST API and failed the socket handshake. verifyAccessToken tries both
+            // secrets, exactly like the HTTP auth middleware does.
+            const decoded = (0, jwt_1.verifyAccessToken)(token);
+            socket.userId = decoded.userId || decoded.id;
+            // Tenant comes from the verified token, never from the client handshake.
+            // Previously an invalid token still connected as a guest and the org was
+            // taken from handshake.auth, letting anyone join any org's room.
+            socket.organizationId = decoded.organizationId;
+            socket.email = decoded.email;
+            return next();
         }
-        next();
+        catch (e) {
+            console.error(`🔒 Socket auth rejected: ${e?.name || 'Error'} - ${e?.message || e}`);
+            return next(new Error(e?.name === 'TokenExpiredError'
+                ? 'Token expired'
+                : 'Invalid or expired token'));
+        }
     });
     io.on('connection', (socket) => {
         connectionCount++;
@@ -119,36 +131,36 @@ const initializeSocket = (server) => {
             socket.join(`user:${socket.userId}`);
             console.log(`👤 Auto-joined user room: user:${socket.userId}`);
         }
-        // ✅ Manual org join
-        socket.on('org:join', (orgId) => {
-            if (orgId && typeof orgId === 'string') {
-                socket.organizationId = orgId;
-                socket.join(`org:${orgId}`);
-                console.log(`📂 Manually joined org: org:${orgId}`);
-            }
-        });
-        // ✅ NEW: Manual user room join (agar userId token me na ho)
-        socket.on('user:join', (userId) => {
-            if (userId && typeof userId === 'string') {
-                socket.userId = userId;
-                socket.join(`user:${userId}`);
-                console.log(`👤 Manually joined user room: user:${userId}`);
-            }
-        });
-        // ✅ Conversation rooms
-        socket.on('join:conversation', (conversationId) => {
-            if (conversationId && typeof conversationId === 'string') {
+        // Org/user rooms are joined automatically from the verified token above.
+        // The old manual `org:join` / `user:join` handlers let a client join any
+        // room by id and have been removed.
+        // Conversation rooms — only if the conversation belongs to the socket's org.
+        socket.on('join:conversation', async (conversationId) => {
+            if (!conversationId || typeof conversationId !== 'string')
+                return;
+            if (!socket.organizationId)
+                return;
+            const conv = await database_1.default.conversation.findFirst({
+                where: { id: conversationId, organizationId: socket.organizationId },
+                select: { id: true },
+            });
+            if (conv)
                 socket.join(`conversation:${conversationId}`);
-            }
         });
         socket.on('leave:conversation', (conversationId) => {
             if (conversationId && typeof conversationId === 'string') {
                 socket.leave(`conversation:${conversationId}`);
             }
         });
-        // ✅ Campaign rooms
-        socket.on('campaign:join', (id) => {
-            if (id)
+        // Campaign rooms — only if the campaign belongs to the socket's org.
+        socket.on('campaign:join', async (id) => {
+            if (!id || !socket.organizationId)
+                return;
+            const camp = await database_1.default.campaign.findFirst({
+                where: { id, organizationId: socket.organizationId },
+                select: { id: true },
+            });
+            if (camp)
                 socket.join(`campaign:${id}`);
         });
         socket.on('campaign:leave', (id) => {

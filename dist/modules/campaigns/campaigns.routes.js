@@ -6,11 +6,17 @@ const express_1 = require("express");
 const campaigns_controller_1 = require("./campaigns.controller");
 const validate_1 = require("../../middleware/validate");
 const auth_1 = require("../../middleware/auth");
+const featureLock_1 = require("../../middleware/featureLock");
 const response_1 = require("../../utils/response");
+const requireRole_1 = require("../../middleware/requireRole");
 const planLimits_1 = require("../../middleware/planLimits");
 const campaigns_schema_1 = require("./campaigns.schema");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
+// Plan lock - client par locked screen dikhta hai, yahan API bhi band
+router.use((0, featureLock_1.featureLock)('campaigns'));
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use((0, requireRole_1.gateMutations)(...requireRole_1.OPERATOR_ROLES));
 // ─── Static routes (before /:id) ──────────────────────────────
 router.get('/stats', campaigns_controller_1.campaignsController.getStats.bind(campaigns_controller_1.campaignsController));
 router.post('/upload-contacts', campaigns_controller_1.csvUpload, campaigns_controller_1.campaignsController.uploadContacts.bind(campaigns_controller_1.campaignsController));

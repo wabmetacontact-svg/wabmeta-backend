@@ -693,8 +693,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -705,8 +705,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -1416,8 +1416,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -1428,8 +1428,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -2139,8 +2139,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -2151,8 +2151,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -2177,11 +2177,15 @@ export declare const createChatbotSchema: z.ZodObject<{
                 zoom: number;
             }>>;
         }, z.ZodTypeAny, "passthrough">>>;
+        channel: z.ZodOptional<z.ZodEnum<["WHATSAPP", "INSTAGRAM", "TELEGRAM"]>>;
+        telegramBotId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, "strip", z.ZodTypeAny, {
         name: string;
-        isDefault: boolean;
         triggerKeywords: string[];
+        isDefault: boolean;
         description?: string | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -2868,8 +2872,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -2880,8 +2884,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -2910,8 +2914,9 @@ export declare const createChatbotSchema: z.ZodObject<{
         fallbackMessage?: string | undefined;
     }, {
         name: string;
-        isDefault?: boolean | undefined;
         description?: string | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -3598,8 +3603,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -3610,8 +3615,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -3637,15 +3642,18 @@ export declare const createChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
         name: string;
-        isDefault: boolean;
         triggerKeywords: string[];
+        isDefault: boolean;
         description?: string | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -4332,8 +4340,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -4344,8 +4352,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -4376,8 +4384,9 @@ export declare const createChatbotSchema: z.ZodObject<{
 }, {
     body: {
         name: string;
-        isDefault?: boolean | undefined;
         description?: string | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -5064,8 +5073,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -5076,8 +5085,8 @@ export declare const createChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -5103,6 +5112,7 @@ export declare const createChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | undefined;
         fallbackMessage?: string | undefined;
     };
@@ -5808,8 +5818,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -5820,8 +5830,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -6531,8 +6541,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -6543,8 +6553,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -7254,8 +7264,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -7266,8 +7276,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -7297,11 +7307,14 @@ export declare const updateChatbotSchema: z.ZodObject<{
             ACTIVE: "ACTIVE";
             PAUSED: "PAUSED";
         }>>;
+        channel: z.ZodOptional<z.ZodEnum<["WHATSAPP", "INSTAGRAM", "TELEGRAM"]>>;
+        telegramBotId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, "strip", z.ZodTypeAny, {
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
-        isDefault?: boolean | undefined;
         description?: string | null | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -7988,8 +8001,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -8000,8 +8013,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -8027,13 +8040,15 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     }, {
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
-        isDefault?: boolean | undefined;
         description?: string | null | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -8720,8 +8735,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -8732,8 +8747,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -8759,15 +8774,17 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
-        isDefault?: boolean | undefined;
         description?: string | null | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectOutputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -9454,8 +9471,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -9466,8 +9483,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -9493,6 +9510,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     };
@@ -9501,10 +9519,11 @@ export declare const updateChatbotSchema: z.ZodObject<{
     };
 }, {
     body: {
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         name?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
-        isDefault?: boolean | undefined;
         description?: string | null | undefined;
+        channel?: "WHATSAPP" | "INSTAGRAM" | "TELEGRAM" | undefined;
+        telegramBotId?: string | null | undefined;
         flowData?: z.objectInputType<{
             nodes: z.ZodArray<z.ZodObject<{
                 id: z.ZodString;
@@ -10191,8 +10210,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -10203,8 +10222,8 @@ export declare const updateChatbotSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -10230,6 +10249,7 @@ export declare const updateChatbotSchema: z.ZodObject<{
             }>>;
         }, z.ZodTypeAny, "passthrough"> | undefined;
         triggerKeywords?: string[] | undefined;
+        isDefault?: boolean | undefined;
         welcomeMessage?: string | null | undefined;
         fallbackMessage?: string | null | undefined;
     };
@@ -10252,34 +10272,34 @@ export declare const getChatbotsSchema: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         page: number;
         limit: number;
-        sortBy: "name" | "status" | "createdAt";
+        sortBy: "status" | "name" | "createdAt";
         sortOrder: "asc" | "desc";
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         search?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
     }, {
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         search?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         page?: string | undefined;
         limit?: string | undefined;
-        sortBy?: "name" | "status" | "createdAt" | undefined;
+        sortBy?: "status" | "name" | "createdAt" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     }>;
 }, "strip", z.ZodTypeAny, {
     query: {
         page: number;
         limit: number;
-        sortBy: "name" | "status" | "createdAt";
+        sortBy: "status" | "name" | "createdAt";
         sortOrder: "asc" | "desc";
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         search?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
     };
 }, {
     query: {
+        status?: "DRAFT" | "PAUSED" | "ACTIVE" | undefined;
         search?: string | undefined;
-        status?: "ACTIVE" | "DRAFT" | "PAUSED" | undefined;
         page?: string | undefined;
         limit?: string | undefined;
-        sortBy?: "name" | "status" | "createdAt" | undefined;
+        sortBy?: "status" | "name" | "createdAt" | undefined;
         sortOrder?: "asc" | "desc" | undefined;
     };
 }>;
@@ -11099,8 +11119,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -11111,8 +11131,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -11822,8 +11842,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -11834,8 +11854,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -12545,8 +12565,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                     optionValue?: string | undefined;
                 }>>;
             }, "strip", z.ZodTypeAny, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -12557,8 +12577,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 sourceHandle?: string | undefined;
                 targetHandle?: string | undefined;
             }, {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -12808,8 +12828,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 }, z.ZodTypeAny, "passthrough">>;
             }, z.ZodTypeAny, "passthrough">[];
             edges: {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -13053,8 +13073,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 }, z.ZodTypeAny, "passthrough">>;
             }, z.ZodTypeAny, "passthrough">[];
             edges: {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -13300,8 +13320,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 }, z.ZodTypeAny, "passthrough">>;
             }, z.ZodTypeAny, "passthrough">[];
             edges: {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;
@@ -13550,8 +13570,8 @@ export declare const saveFlowSchema: z.ZodObject<{
                 }, z.ZodTypeAny, "passthrough">>;
             }, z.ZodTypeAny, "passthrough">[];
             edges: {
-                target: string;
                 id: string;
+                target: string;
                 source: string;
                 data?: {
                     condition?: string | undefined;

@@ -4,6 +4,7 @@ export interface TokenPayload {
     organizationId?: string;
     tokenVersion: number;
     type: 'access' | 'refresh';
+    jti?: string;
     iat?: number;
     exp?: number;
 }

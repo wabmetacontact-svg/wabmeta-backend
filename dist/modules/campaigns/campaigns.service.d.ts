@@ -1,5 +1,7 @@
 export declare class CampaignsService {
     private processingCampaigns;
+    private pausedCampaigns;
+    private cancelledCampaigns;
     private getQuickCounts;
     private syncCampaignCounters;
     private findWhatsAppAccount;
@@ -21,6 +23,8 @@ export declare class CampaignsService {
     resumePending(org: string, id: string): Promise<any>;
     estimateCost(organizationId: string, campaignId: string): Promise<any>;
     getAnalytics(organizationId: string, campaignId: string): Promise<any>;
+    private calculateSmartDisplay;
+    formatWithSmartDisplay(campaign: any): any;
     getDetailedStats(organizationId: string, campaignId: string): Promise<{
         totalContacts: number;
         pending: number;
@@ -29,13 +33,17 @@ export declare class CampaignsService {
         delivered: number;
         read: number;
         failed: number;
-        failureReasons: {
-            reason: string;
-            count: number;
-        }[];
+        failureReasons: any[];
         successRate: number;
         deliveryRate: number;
         readRate: number;
+        _internal: {
+            realDelivered: number;
+            realFailed: number;
+            hiddenFailures: number;
+            mode: "honest" | "smart";
+            reason: string;
+        };
     }>;
     getCampaignContacts(organizationId: string, campaignId: string, options: {
         page?: number;
@@ -48,8 +56,7 @@ export declare class CampaignsService {
             contactId: string;
             phone: string;
             name: string;
-            fullName: string;
-            status: import(".prisma/client").$Enums.MessageStatus;
+            status: string;
             waMessageId: string | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -64,8 +71,7 @@ export declare class CampaignsService {
             contactId: string;
             phone: string;
             name: string;
-            fullName: string;
-            status: import(".prisma/client").$Enums.MessageStatus;
+            status: string;
             waMessageId: string | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -82,7 +88,7 @@ export declare class CampaignsService {
             totalPages: number;
         };
     }>;
-    getAllRecipients(organizationId: string, campaignId: string, options: any): Promise<{
+    getAllRecipients(org: string, id: string, opts: any): Promise<{
         summary: {
             totalContacts: number;
             pending: number;
@@ -91,21 +97,24 @@ export declare class CampaignsService {
             delivered: number;
             read: number;
             failed: number;
-            failureReasons: {
-                reason: string;
-                count: number;
-            }[];
+            failureReasons: any[];
             successRate: number;
             deliveryRate: number;
             readRate: number;
+            _internal: {
+                realDelivered: number;
+                realFailed: number;
+                hiddenFailures: number;
+                mode: "honest" | "smart";
+                reason: string;
+            };
         };
         contacts: {
             id: string;
             contactId: string;
             phone: string;
             name: string;
-            fullName: string;
-            status: import(".prisma/client").$Enums.MessageStatus;
+            status: string;
             waMessageId: string | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -120,8 +129,7 @@ export declare class CampaignsService {
             contactId: string;
             phone: string;
             name: string;
-            fullName: string;
-            status: import(".prisma/client").$Enums.MessageStatus;
+            status: string;
             waMessageId: string | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -138,14 +146,13 @@ export declare class CampaignsService {
             totalPages: number;
         };
     }>;
-    getFailedContacts(organizationId: string, campaignId: string, page: number, limit: number): Promise<{
+    getFailedContacts(org: string, id: string, page: number, limit: number): Promise<{
         contacts: {
             id: string;
             contactId: string;
             phone: string;
             name: string;
-            fullName: string;
-            status: import(".prisma/client").$Enums.MessageStatus;
+            status: string;
             waMessageId: string | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -160,8 +167,7 @@ export declare class CampaignsService {
             contactId: string;
             phone: string;
             name: string;
-            fullName: string;
-            status: import(".prisma/client").$Enums.MessageStatus;
+            status: string;
             waMessageId: string | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
@@ -178,8 +184,8 @@ export declare class CampaignsService {
             totalPages: number;
         };
     }>;
-    exportFailedContactsCsv(organizationId: string, campaignId: string): Promise<string>;
-    exportRecipientsCsv(organizationId: string, campaignId: string, status?: string): Promise<string>;
+    exportFailedContactsCsv(org: string, campaignId: string): Promise<string>;
+    exportRecipientsCsv(org: string, campaignId: string, status?: string): Promise<string>;
     getStats(organizationId: string): Promise<any>;
     private ensureMetaMediaId;
     private processCampaignContacts;

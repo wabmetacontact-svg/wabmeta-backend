@@ -1,5 +1,38 @@
 "use strict";
 // src/modules/inbox/inbox.service.ts - COMPLETE FIXED
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -70,10 +103,14 @@ class InboxService {
      * Internal method to fetch conversations from DB
      */
     async fetchConversationsFromDB(organizationId, query = {}) {
-        const { page = 1, limit = 50, search, isArchived, isRead, assignedTo, labels, sortBy = 'lastMessageAt', sortOrder = 'desc', } = query;
+        const { page = 1, limit = 50, search, isArchived, isRead, assignedTo, labels, channel, sortBy = 'lastMessageAt', sortOrder = 'desc', } = query;
         const where = {
             organizationId,
         };
+        // Unified-inbox channel filter (WHATSAPP | INSTAGRAM | TELEGRAM). Omit for "All".
+        if (channel && ['WHATSAPP', 'INSTAGRAM', 'TELEGRAM'].includes(String(channel).toUpperCase())) {
+            where.channel = String(channel).toUpperCase();
+        }
         if (isArchived !== undefined && isArchived !== null && isArchived !== '') {
             where.isArchived = isArchived === true || isArchived === 'true';
         }
@@ -219,6 +256,23 @@ class InboxService {
                 isRead: true,
             },
         });
+        // Conversations list Redis mein cached hai. Pehle ye clear nahi hota tha,
+        // isliye chat kholne ke baad bhi list (aur pull-to-refresh) purana
+        // unreadCount hi dikhati rehti thi jab tak cache expire na ho.
+        this.clearCache(organizationId).catch((e) => console.error('markAsRead cache clear error:', e?.message));
+        // Clients ko batao ki badge clear ho gaya - warna list screen aur
+        // dusre devices par unread badge laga rehta hai.
+        Promise.resolve().then(() => __importStar(require('../webhooks/webhook.service'))).then(({ webhookEvents }) => {
+            webhookEvents.emit('conversationUpdated', {
+                organizationId,
+                conversation: {
+                    id: conversation.id,
+                    unreadCount: 0,
+                    isRead: true,
+                },
+            });
+        })
+            .catch((e) => console.error('markAsRead socket emit error:', e?.message));
         return conversation;
     }
     /**
@@ -237,10 +291,20 @@ class InboxService {
      */
     async assignConversation(organizationId, conversationId, userId) {
         await this.getConversationById(organizationId, conversationId);
+        // A conversation can only be assigned to a member of the same organization.
+        if (userId) {
+            const member = await database_1.default.organizationMember.findFirst({
+                where: { organizationId, userId },
+                select: { userId: true },
+            });
+            if (!member)
+                throw new AppError('That user is not a member of this organization', 400);
+        }
         const conversation = await database_1.default.conversation.update({
             where: { id: conversationId },
-            data: { assignedTo: userId },
+            data: { assignedTo: userId || null },
         });
+        this.clearCache(organizationId).catch(() => { });
         return conversation;
     }
     /**
@@ -269,6 +333,21 @@ class InboxService {
         const conversation = await this.getConversationById(organizationId, conversationId);
         const updatedLabels = conversation.labels.filter((l) => l !== label);
         return this.updateLabels(organizationId, conversationId, updatedLabels);
+    }
+    /**
+     * Human handoff: pause/resume channel automation for one conversation.
+     * Channel-agnostic — org-scoped so a caller can't touch another tenant.
+     */
+    async setAutomationPaused(organizationId, conversationId, paused) {
+        const result = await database_1.default.conversation.updateMany({
+            where: { id: conversationId, organizationId },
+            data: { automationPaused: paused },
+        });
+        if (result.count === 0) {
+            throw new AppError('Conversation not found', 404);
+        }
+        this.clearCache(organizationId).catch(() => { });
+        return database_1.default.conversation.findFirst({ where: { id: conversationId, organizationId } });
     }
     /**
      * Get inbox stats
@@ -358,11 +437,17 @@ class InboxService {
     /**
      * Search messages
      */
-    async searchMessages(organizationId, query, page = 1, limit = 20) {
+    async searchMessages(organizationId, query, page = 1, limit = 20, channel) {
+        // An empty query would otherwise match every message in the org.
+        if (!query || !query.trim()) {
+            return { messages: [], meta: { page, limit, total: 0, totalPages: 0 } };
+        }
+        const convWhere = { organizationId };
+        if (channel && ['WHATSAPP', 'INSTAGRAM', 'TELEGRAM'].includes(channel)) {
+            convWhere.channel = channel;
+        }
         const where = {
-            conversation: {
-                organizationId,
-            },
+            conversation: convWhere,
             content: {
                 contains: query,
                 mode: 'insensitive',
@@ -393,6 +478,50 @@ class InboxService {
                 totalPages: Math.ceil(total / limit),
             },
         };
+    }
+    /**
+     * Draft an AI reply suggestion for the agent, from the recent conversation
+     * history. Human-in-the-loop: the agent reviews/edits before sending.
+     */
+    async suggestReply(organizationId, conversationId, instruction) {
+        const conversation = await database_1.default.conversation.findFirst({
+            where: { id: conversationId, organizationId },
+            include: { contact: true, organization: { select: { name: true } } },
+        });
+        if (!conversation)
+            throw new AppError('Conversation not found', 404);
+        const recent = await database_1.default.message.findMany({
+            where: { conversationId },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+            select: { direction: true, content: true, type: true },
+        });
+        const ordered = recent.reverse().filter((m) => m.content && m.content.trim());
+        if (ordered.length === 0) {
+            throw new AppError('No conversation history to draft a reply from', 400);
+        }
+        // INBOUND (customer) → user; OUTBOUND (us) → model.
+        const history = ordered.map((m) => ({
+            role: (m.direction === 'INBOUND' ? 'user' : 'model'),
+            content: m.content,
+        }));
+        // The reply responds to the latest customer message; if the last turn was
+        // ours, still draft a helpful follow-up.
+        const lastInbound = [...ordered].reverse().find((m) => m.direction === 'INBOUND');
+        const userMessage = lastInbound?.content || ordered[ordered.length - 1].content || '';
+        const businessName = conversation.organization?.name || 'our business';
+        const contactName = [conversation.contact?.firstName, conversation.contact?.lastName].filter(Boolean).join(' ').trim() ||
+            conversation.contact?.whatsappProfileName || 'the customer';
+        const systemPrompt = [
+            `You are a helpful, professional customer-support agent for ${businessName}.`,
+            `You are drafting a reply to ${contactName} over ${conversation.channel} for a human agent to review.`,
+            `Write only the reply message text — no preamble, no quotes, no labels.`,
+            `Be concise, warm and clear. Reply in the same language the customer used.`,
+            instruction ? `Extra instruction from the agent: ${instruction}` : '',
+        ].filter(Boolean).join(' ');
+        const { aiService } = await Promise.resolve().then(() => __importStar(require('../chatbot/ai.service')));
+        const suggestion = await aiService.generateResponse(systemPrompt, userMessage, history.slice(0, -1));
+        return { suggestion: (suggestion || '').trim() };
     }
     /**
      * Bulk update conversations
@@ -455,9 +584,10 @@ class InboxService {
     async getOrCreateConversation(organizationId, contactId) {
         let conversation = await database_1.default.conversation.findUnique({
             where: {
-                organizationId_contactId: {
+                organizationId_contactId_channel: {
                     organizationId,
                     contactId,
+                    channel: 'WHATSAPP',
                 },
             },
             include: {
@@ -469,7 +599,9 @@ class InboxService {
                 data: {
                     organization: { connect: { id: organizationId } },
                     contact: { connect: { id: contactId } },
-                    isWindowOpen: true,
+                    // Nayi conversation business ki taraf se ban rahi hai - customer ne
+                    // abhi kuch bheja hi nahi, to 24h window khula nahi hai
+                    isWindowOpen: false,
                     unreadCount: 0,
                 },
                 include: {

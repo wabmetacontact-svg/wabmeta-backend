@@ -41,6 +41,8 @@ const automation_routes_1 = __importDefault(require("./modules/automation/automa
 const calling_routes_1 = __importDefault(require("./modules/calling/calling.routes"));
 const wallet_routes_1 = __importDefault(require("./modules/wallet/wallet.routes"));
 const instagram_routes_1 = __importDefault(require("./modules/instagram/instagram.routes"));
+const telegram_routes_1 = __importDefault(require("./modules/telegram/telegram.routes"));
+const notifications_routes_1 = __importDefault(require("./modules/notifications/notifications.routes"));
 const app = (0, express_1.default)();
 // ============================================
 // TRUST PROXY (Render/production ke liye)
@@ -76,12 +78,21 @@ const allowedOrigins = [
     'https://www.wabmeta.com',
     'http://localhost:5173',
     'http://localhost:3000',
+    'http://localhost:8081',
+    'http://localhost:8082',
+    'http://localhost:19006',
+    'http://localhost:19000',
 ];
 app.use((0, cors_1.default)({
     origin: (origin, callback) => {
+        // No origin = mobile app or Postman
         if (!origin)
             return callback(null, true);
-        const isVercel = origin.endsWith('.vercel.app') || origin.includes('vercel.app');
+        const isVercel = origin.endsWith('.vercel.app');
+        // Development mein sab allow
+        if (process.env.NODE_ENV === 'development') {
+            return callback(null, true);
+        }
         if (allowedOrigins.includes(origin) || isVercel) {
             callback(null, true);
         }
@@ -212,6 +223,8 @@ app.use('/api/calling', calling_routes_1.default);
 app.use('/api/chatbots', chatbot_routes_1.default);
 app.use('/api', wallet_routes_1.default);
 app.use('/api/instagram', instagram_routes_1.default);
+app.use('/api/telegram', telegram_routes_1.default);
+app.use('/api/notifications', notifications_routes_1.default);
 logger_1.logger.info('✅ All API routes registered');
 // ============================================
 // 404 HANDLER

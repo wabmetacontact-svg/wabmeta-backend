@@ -333,32 +333,54 @@ async function deductWalletForTemplate(params) {
                         : `Insufficient balance (₹${availableRupees.toFixed(2)} < ₹${rateRupees})`,
                 };
             }
-            const balanceBeforePaise = wallet.balancePaise;
-            let newBalancePaise;
-            let creditDeductedPaise;
-            if (wallet.balancePaise >= amountPaise) {
-                newBalancePaise = wallet.balancePaise - amountPaise;
-                creditDeductedPaise = 0;
+            // The balance must be changed by the database, not by writing back a
+            // value computed from the read above. Under READ COMMITTED (which this
+            // transaction uses) several concurrent sends read the same balance, and
+            // an absolute write means all but one of the debits is silently lost.
+            // Campaigns send up to 20 in parallel, so that path was undercharging.
+            //
+            // `updateMany` with the balance in the WHERE clause makes the check and
+            // the decrement one atomic statement: a racer that no longer has the
+            // funds simply matches no rows instead of overwriting someone else's
+            // result. This also removes any chance of a negative balance without
+            // needing SERIALIZABLE (which was removed here for causing deadlocks).
+            const fromBalancePaise = Math.min(wallet.balancePaise, amountPaise);
+            const creditDeductedPaise = amountPaise - fromBalancePaise;
+            const applied = await tx.wallet.updateMany({
+                where: {
+                    id: wallet.id,
+                    balancePaise: { gte: fromBalancePaise },
+                },
+                data: {
+                    balancePaise: { decrement: fromBalancePaise },
+                    creditUsedPaise: { increment: creditDeductedPaise },
+                    totalDebitedPaise: { increment: amountPaise },
+                    lastTransactionAt: new Date(),
+                },
+            });
+            if (applied.count === 0) {
+                // Another send spent the balance first. Report it rather than
+                // recording a charge that was never applied.
+                return {
+                    deducted: false,
+                    walletUsed: false,
+                    amount: rateRupees,
+                    reason: 'Insufficient balance (lost race with a concurrent send)',
+                };
             }
-            else {
-                creditDeductedPaise = amountPaise - wallet.balancePaise;
-                newBalancePaise = 0;
-            }
+            // Read the authoritative post-update values for the ledger row.
+            const after = await tx.wallet.findUniqueOrThrow({
+                where: { id: wallet.id },
+                select: { balancePaise: true, lowThresholdPaise: true },
+            });
+            const newBalancePaise = after.balancePaise;
+            const balanceBeforePaise = newBalancePaise + fromBalancePaise;
             const categoryLabel = getCategoryLabel(category, rateRupees);
             const description = automationId
                 ? `Automation charge - ${categoryLabel} [${countryName}] (${templateName}) → ${recipientPhone}`
                 : campaignId
                     ? `Campaign charge - ${categoryLabel} [${countryName}] (${templateName}) → ${recipientPhone}`
                     : `Template charge - ${categoryLabel} [${countryName}] (${templateName}) → ${recipientPhone}`;
-            await tx.wallet.update({
-                where: { id: wallet.id },
-                data: {
-                    balancePaise: newBalancePaise,
-                    creditUsedPaise: { increment: creditDeductedPaise },
-                    totalDebitedPaise: { increment: amountPaise },
-                    lastTransactionAt: new Date(),
-                },
-            });
             await tx.walletTransaction.create({
                 data: {
                     walletId: wallet.id,
@@ -379,9 +401,8 @@ async function deductWalletForTemplate(params) {
                                 : undefined,
                 },
             });
-            if (newBalancePaise < wallet.lowThresholdPaise) {
-                const updated = { ...wallet, balancePaise: newBalancePaise };
-                await triggerLowBalanceAlert(updated);
+            if (newBalancePaise < after.lowThresholdPaise) {
+                await triggerLowBalanceAlert({ ...wallet, balancePaise: newBalancePaise });
             }
             return { deducted: true, walletUsed: true, amount: rateRupees };
         }, {

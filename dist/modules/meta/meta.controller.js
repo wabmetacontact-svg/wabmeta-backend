@@ -8,30 +8,24 @@ exports.metaController = exports.MetaController = void 0;
 const errorHandler_1 = require("../../middleware/errorHandler");
 const response_1 = require("../../utils/response");
 const database_1 = __importDefault(require("../../config/database"));
+const config_1 = require("../../config");
 const meta_service_1 = require("./meta.service");
-// Helper to safely get organization ID from headers
-const getOrgId = (req) => {
-    const header = req.headers['x-organization-id'];
-    if (!header)
-        return '';
-    return Array.isArray(header) ? header[0] : header;
-};
+const resolveOrgId_1 = require("../../utils/resolveOrgId");
+// Was header-only, ignoring the verified JWT entirely.
+const getOrgId = (req) => (0, resolveOrgId_1.resolveOrganizationId)(req);
 class MetaController {
     // ============================================
-    // GET ACCOUNTS (OLD METHOD - WHATSAPPACCOUNT ONLY)
+    // GET ACCOUNTS (WHATSAPPACCOUNT ONLY - SANITIZED)
     // ============================================
     async getAccounts(req, res, next) {
         try {
-            const organizationId = getOrgId(req) || req.query.organizationId;
+            const organizationId = await getOrgId(req);
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization ID is required', 400);
             }
             const orgIdString = Array.isArray(organizationId) ? organizationId[0] : organizationId;
-            console.log('📋 Fetching accounts (old method) for org:', orgIdString);
-            const accounts = await database_1.default.whatsAppAccount.findMany({
-                where: { organizationId: orgIdString },
-                orderBy: { createdAt: 'desc' },
-            });
+            console.log('📋 Fetching sanitized accounts for org:', orgIdString);
+            const accounts = await meta_service_1.metaService.getAccounts(orgIdString);
             console.log('   Found accounts:', accounts.length);
             return (0, response_1.sendSuccess)(res, accounts, 'Accounts fetched successfully');
         }
@@ -40,18 +34,16 @@ class MetaController {
         }
     }
     // ============================================
-    // GET SINGLE ACCOUNT
+    // GET SINGLE ACCOUNT (SANITIZED)
     // ============================================
     async getAccount(req, res, next) {
         try {
             const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization ID is required', 400);
             }
-            const account = await database_1.default.whatsAppAccount.findFirst({
-                where: { id, organizationId },
-            });
+            const account = await meta_service_1.metaService.getAccount(id, organizationId);
             if (!account) {
                 throw new errorHandler_1.AppError('Account not found', 404);
             }
@@ -67,7 +59,7 @@ class MetaController {
     async disconnectAccount(req, res, next) {
         try {
             const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-            const organizationId = getOrgId(req);
+            const organizationId = await getOrgId(req);
             if (!organizationId) {
                 throw new errorHandler_1.AppError('Organization ID is required', 400);
             }
@@ -97,13 +89,19 @@ class MetaController {
     // ============================================
     async getEmbeddedSignupConfig(req, res, next) {
         try {
-            const config = {
-                appId: process.env.META_APP_ID,
-                configId: process.env.META_CONFIG_ID,
+            // Local naam "config" rakhne se imported app config shadow ho jati thi
+            const signupConfig = {
+                appId: config_1.config.meta.appId,
+                configId: config_1.config.meta.configId,
                 version: 'v25.0',
                 features: ['whatsapp_business_app_onboarding'],
+                // Mobile app ye values use karti hai OAuth dialog banane ke liye.
+                // Server se aate hain taaki client aur server kabhi alag na ho jayen.
+                mobileSignupUrl: config_1.config.meta.mobileSignupUrl,
+                mobileAppScheme: config_1.config.meta.mobileAppScheme,
+                graphApiVersion: config_1.config.meta.graphApiVersion,
             };
-            return (0, response_1.sendSuccess)(res, config, 'Config fetched successfully');
+            return (0, response_1.sendSuccess)(res, signupConfig, 'Config fetched successfully');
         }
         catch (error) {
             next(error);

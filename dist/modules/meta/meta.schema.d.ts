@@ -4,21 +4,21 @@ export declare const tokenExchangeSchema: z.ZodObject<{
         code: z.ZodString;
         organizationId: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        code: string;
         organizationId: string;
+        code: string;
     }, {
-        code: string;
         organizationId: string;
+        code: string;
     }>;
 }, "strip", z.ZodTypeAny, {
     body: {
-        code: string;
         organizationId: string;
+        code: string;
     };
 }, {
     body: {
-        code: string;
         organizationId: string;
+        code: string;
     };
 }>;
 export declare const getOAuthUrlSchema: z.ZodObject<{

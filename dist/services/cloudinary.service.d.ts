@@ -1,11 +1,5 @@
 export declare class CloudinaryService {
     isConfigured(): boolean;
-    /**
-     * ✅ Upload with automatic compression for WhatsApp
-     * - Videos: compressed to fit 16MB limit
-     * - Images: optimized to fit 5MB limit
-     * - Documents: uploaded as-is (100MB limit)
-     */
     uploadTemplateMedia(file: Buffer, filename: string, mimeType: string, organizationId: string): Promise<{
         url: string;
         secureUrl: string;
@@ -16,10 +10,24 @@ export declare class CloudinaryService {
         finalSize: number;
         compressionApplied: boolean;
     }>;
-    /**
-     * ✅ Verify compressed media size fits Meta limit
-     * Call this after upload to double-check
-     */
+    fixExistingTemplateUrl(url: string): Promise<string>;
+    uploadInboundMedia(params: {
+        buffer: Buffer;
+        mimeType: string;
+        organizationId: string;
+        messageId: string;
+    }): Promise<{
+        url: string;
+        publicId: string;
+        resourceType: string;
+        size: number;
+    } | null>;
+    verifyUrlAccessible(url: string): Promise<{
+        accessible: boolean;
+        status?: number;
+        contentType?: string;
+        size?: number;
+    }>;
     verifyMediaSize(secureUrl: string, mediaCategory: 'image' | 'video' | 'audio' | 'document'): Promise<{
         fits: boolean;
         size: number;

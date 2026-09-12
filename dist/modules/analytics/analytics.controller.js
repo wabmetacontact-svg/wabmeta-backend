@@ -4,6 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyticsController = void 0;
 const analytics_service_1 = require("./analytics.service");
 const response_1 = require("../../utils/response");
+const resolveOrgId_1 = require("../../utils/resolveOrgId");
 class AnalyticsController {
     async getOverview(req, res) {
         try {
@@ -25,7 +26,7 @@ class AnalyticsController {
     }
     async getUnifiedDashboard(req, res) {
         try {
-            const organizationId = req.user?.organizationId || req.headers['x-organization-id'];
+            const organizationId = await (0, resolveOrgId_1.resolveOrganizationId)(req);
             if (!organizationId) {
                 return (0, response_1.errorResponse)(res, 'Organization not found', 400);
             }

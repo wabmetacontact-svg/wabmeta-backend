@@ -15,6 +15,7 @@ exports.getConversationsSchema = zod_1.z.object({
         isRead: zod_1.z.string().transform(v => v === 'true').optional(),
         assignedTo: zod_1.z.string().optional(),
         labels: zod_1.z.string().optional(), // comma-separated
+        channel: zod_1.z.enum(['WHATSAPP', 'INSTAGRAM', 'TELEGRAM']).optional(),
         sortBy: zod_1.z.enum(['lastMessageAt', 'createdAt', 'unreadCount']).optional().default('lastMessageAt'),
         sortOrder: zod_1.z.enum(['asc', 'desc']).optional().default('desc'),
     }),

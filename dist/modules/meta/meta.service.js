@@ -53,6 +53,7 @@ const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
 const redis_1 = require("../../config/redis");
 const logger_1 = require("../../utils/logger");
+const accountView_1 = require("./accountView");
 async function extractStoredPin(webhookSecretEncrypted) {
     if (!webhookSecretEncrypted)
         return null;
@@ -73,15 +74,84 @@ async function extractStoredPin(webhookSecretEncrypted) {
     }
 }
 class MetaService {
-    sanitizeAccount(account) {
-        if (!account)
-            return null;
-        const { accessToken, webhookSecret, ...safe } = account;
+    // Ek hi account ke liye ek waqt mein ek hi background tier sync
+    tierSyncInFlight = new Set();
+    // 24h usage ka count. Ye groupBy poore Message table par chalta hai aur
+    // /meta/accounts har jagah se call hota hai (chat kholte waqt bhi), isliye
+    // bina cache ke har chat open par N accounts x 1 heavy query lag jaati thi.
+    // Usage ko second-level accuracy ki zarurat nahi hai.
+    usageCache = new Map();
+    USAGE_CACHE_TTL = 60 * 1000;
+    // Meta ke messaging tiers. Value = 24 ghante mein kitne UNIQUE customers
+    // ko business-initiated message bhej sakte ho. null = unlimited.
+    // Docs: https://developers.facebook.com/docs/whatsapp/messaging-limits
+    // Tier ka daily limit ab accountView se aata hai - ek hi jagah, taaki
+    // naya tier jodte waqt do jagah badalna na pade.
+    /**
+     * Account ka asli messaging limit + last 24h ka usage.
+     *
+     * Meta ki limit messages par nahi, UNIQUE customers par lagti hai jinse
+     * aapne 24 ghante ke rolling window mein conversation start ki. Isliye
+     * yahan distinct conversations gine jaate hain, raw message count nahi -
+     * warna number hamesha zyada dikhta aur galat hota.
+     */
+    async getMessagingUsage(account) {
+        const accountId = account.id;
+        const tier = account.messagingLimit;
+        const perDay = (0, accountView_1.tierDailyLimit)(tier);
+        // Tier na hone ke do bilkul alag matlab hote hain, aur UI ko dono alag
+        // dikhane chahiye:
+        //   ASSIGNED - Meta ne tier de diya hai
+        //   PENDING  - sync ho chuka hai (quality rating aa gayi), par Meta ne
+        //              abhi tier assign hi nahi kiya. Naye/unverified numbers par
+        //              aisa hota hai - yahan "Syncing..." dikhana jhooth hai.
+        //   SYNCING  - is account ka sync abhi tak chala hi nahi
+        const tierStatus = tier
+            ? 'ASSIGNED'
+            : account.qualityRating
+                ? 'PENDING'
+                : 'SYNCING';
+        let used = 0;
+        const cached = this.usageCache.get(accountId);
+        if (cached && cached.expiresAt > Date.now()) {
+            used = cached.used;
+        }
+        else {
+            try {
+                const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                // Meta ki limit sirf un unique customers ki hai jinhe 24 ghante mein
+                // SERVICE WINDOW KE BAHAR message bheja gaya - yaani template se shuru
+                // hui baatein. Window ke andar diye gaye jawab free hain aur limit mein
+                // nahi ginte. Pehle yahan har OUTBOUND message ginta tha, isliye
+                // "kitna use hua" asli se zyada dikhta tha.
+                const conversations = await database_1.default.message.groupBy({
+                    by: ['conversationId'],
+                    where: {
+                        whatsappAccountId: accountId,
+                        direction: 'OUTBOUND',
+                        createdAt: { gte: since },
+                        type: 'TEMPLATE',
+                    },
+                });
+                used = conversations.length;
+                this.usageCache.set(accountId, {
+                    used,
+                    expiresAt: Date.now() + this.USAGE_CACHE_TTL,
+                });
+            }
+            catch (e) {
+                console.error('Messaging usage count failed:', e?.message);
+            }
+        }
         return {
-            ...safe,
-            hasAccessToken: !!accessToken,
-            hasWebhookSecret: !!webhookSecret,
+            messagingLimitPerDay: perDay,
+            messagingUsed24h: used,
+            messagingRemaining: perDay === null ? null : Math.max(0, perDay - used),
+            messagingTierStatus: tierStatus,
         };
+    }
+    sanitizeAccount(account) {
+        return (0, accountView_1.toClientAccount)(account);
     }
     detectConnectionType(metaData) {
         if (!metaData)
@@ -148,7 +218,7 @@ class MetaService {
     // ============================================
     // CONNECTION FLOW
     // ============================================
-    async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress, embeddedSignup = false, sessionWabaId, sessionPhoneNumberId) {
+    async completeConnection(codeOrToken, organizationId, userId, connectionType = 'CLOUD_API', onProgress, embeddedSignup = false, sessionWabaId, sessionPhoneNumberId, redirectUriOverride) {
         try {
             logger_1.metaLog.info('Meta connection start', {
                 organizationId,
@@ -169,7 +239,7 @@ class MetaService {
             }
             else {
                 logger_1.metaLog.info('Exchanging code for token');
-                const tokenResponse = await meta_api_1.metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup);
+                const tokenResponse = await meta_api_1.metaApi.exchangeCodeForToken(codeOrToken, embeddedSignup, redirectUriOverride);
                 accessToken = tokenResponse.accessToken;
                 logger_1.metaLog.debug('Short-lived token obtained');
             }
@@ -210,14 +280,22 @@ class MetaService {
             else {
                 const granularScopes = debugInfo.data.granular_scopes || [];
                 logger_1.metaLog.debug('Granular scopes retrieved', { granularScopes });
+                const wabasFound = [];
                 for (const scope of granularScopes) {
                     if (scope.scope === 'whatsapp_business_management' && scope.target_ids?.length) {
-                        wabaId = scope.target_ids[0];
-                        logger_1.metaLog.info('Found WABA ID from granular scopes', { wabaId });
-                        break;
+                        wabasFound.push(...scope.target_ids);
                     }
                     if (scope.scope === 'business_management' && scope.target_ids?.length) {
                         businessId = scope.target_ids[0];
+                    }
+                }
+                if (wabasFound.length > 0) {
+                    wabaId = wabasFound[0];
+                    if (wabasFound.length > 1) {
+                        logger_1.metaLog.warn(`Multiple WABA IDs found in granular scopes: ${wabasFound.join(', ')}. Using primary: ${wabaId}`);
+                    }
+                    else {
+                        logger_1.metaLog.info('Found WABA ID from granular scopes', { wabaId });
                     }
                 }
                 if (!wabaId) {
@@ -225,6 +303,9 @@ class MetaService {
                     try {
                         const wabas = await meta_api_1.metaApi.getSharedWABAs(accessToken);
                         if (wabas.length > 0) {
+                            if (wabas.length > 1) {
+                                logger_1.metaLog.warn(`Multiple WABAs found from business API: ${wabas.map(w => w.id).join(', ')}. Using primary: ${wabas[0].id}`);
+                            }
                             wabaId = wabas[0].id;
                             businessId = wabas[0].owner_business_info?.id || businessId;
                             logger_1.metaLog.info('Found WABA from business API', { wabaId });
@@ -314,25 +395,27 @@ class MetaService {
                 status: 'in_progress',
                 message: 'Setting up webhooks...',
             });
-            try {
-                await meta_api_1.metaApi.subscribeToWebhooks(wabaId, accessToken);
-                logger_1.metaLog.info('Webhooks subscribed');
-            }
-            catch (webhookError) {
-                logger_1.metaLog.warn('Webhook subscription failed', { error: webhookError.message });
-            }
+            // Nothing below reads this call's result and a failure was already
+            // non-fatal, but it sat on the critical path — with the Meta client's
+            // retry backoff it could add many seconds before the user saw
+            // "connected". Start it and let it settle after the response goes out.
+            void meta_api_1.metaApi
+                .subscribeToWebhooks(wabaId, accessToken)
+                .then(() => logger_1.metaLog.info('Webhooks subscribed'))
+                .catch((webhookError) => logger_1.metaLog.warn('Webhook subscription failed', { error: webhookError.message }));
             onProgress?.({
                 step: 'SUBSCRIBE_WEBHOOK',
                 status: 'completed',
                 message: 'Webhooks configured',
             });
-            // STEP 4.5: Register Phone Number for Cloud API
+            // ============================================
+            // STEP 4.5: Register Phone (FIXED - decrypted token use karo)
+            // ============================================
             onProgress?.({
                 step: 'REGISTER_PHONE',
                 status: 'in_progress',
-                message: 'Registering phone number to Cloud API...',
+                message: 'Registering phone to Cloud API...',
             });
-            // ─── Register phone (with proper error handling) ─────────
             let phonePin;
             let registrationWarning;
             let registrationMessage;
@@ -343,41 +426,53 @@ class MetaService {
                 });
                 const reusedPin = await extractStoredPin(existingRecord?.webhookSecret ?? null);
                 phonePin = reusedPin || (0, meta_api_1.generatePhonePin)();
-                logger_1.metaLog.info('Registering phone pin', {
+                // ✅ CRITICAL FIX: accessToken already DECRYPTED hai yahan
+                // Kyunki abhi Meta se fresh aaya hai, encrypt nahi hua abhi
+                // Direct wahi use karo
+                logger_1.metaLog.info('Registering phone with fresh token', {
                     phoneNumberId: primaryPhone.id,
-                    pinType: reusedPin ? 'reused' : 'generated',
+                    tokenPrefix: accessToken.substring(0, 10),
+                    tokenLength: accessToken.length,
+                    isMetaFormat: accessToken.startsWith('EAA'),
                 });
-                const registerResult = await meta_api_1.metaApi.registerPhone(primaryPhone.id, phonePin, accessToken);
-                // ✅ FIX: Only log success if actually successful
+                // ✅ Verify token format before sending
+                if (!accessToken.startsWith('EAA')) {
+                    throw new Error(`Invalid token format. Expected EAA... got: ${accessToken.substring(0, 15)}...`);
+                }
+                const registerResult = await meta_api_1.metaApi.registerPhone(primaryPhone.id, phonePin, accessToken // ✅ PLAIN token - encryption abhi hui hi nahi
+                );
+                logger_1.metaLog.info('Register result', {
+                    phoneNumberId: primaryPhone.id,
+                    success: registerResult.success,
+                    alreadyRegistered: registerResult.alreadyRegistered,
+                    error: registerResult.error,
+                });
                 if (registerResult.success) {
-                    logger_1.metaLog.info('Phone registration result', {
-                        phoneNumberId: primaryPhone.id,
-                        alreadyRegistered: registerResult.alreadyRegistered,
-                    });
+                    logger_1.metaLog.info('✅ Phone registered successfully to Cloud API');
                 }
                 else {
-                    logger_1.metaLog.error('Phone registration failed', null, {
-                        phoneNumberId: primaryPhone.id,
-                        cause: '2FA PIN mismatch, pending verification, already registered elsewhere, or payment method missing',
-                    });
                     registrationWarning = 'PHONE_NOT_REGISTERED';
-                    registrationMessage =
-                        'Phone number connected but registration failed. ' +
-                            'Please verify phone number in Meta Business Manager first.';
+                    registrationMessage = registerResult.error ||
+                        'Phone registration failed. Check Meta Business Manager.';
+                    logger_1.metaLog.warn('⚠️ Phone registration failed', {
+                        error: registerResult.error,
+                    });
                 }
             }
             catch (registerError) {
-                logger_1.metaLog.error('Phone number registration failed', registerError, { phoneNumberId: primaryPhone.id });
-                phonePin = (0, meta_api_1.generatePhonePin)(); // ensure we still stashe a value to persist
+                logger_1.metaLog.error('Registration exception', registerError, {
+                    phoneNumberId: primaryPhone.id
+                });
+                phonePin = (0, meta_api_1.generatePhonePin)();
                 registrationWarning = 'PHONE_NOT_REGISTERED';
-                registrationMessage =
-                    'Phone number connected but registration failed. ' +
-                        'Please verify phone number in Meta Business Manager first.';
+                registrationMessage = registerError.message;
             }
             onProgress?.({
                 step: 'REGISTER_PHONE',
                 status: 'completed',
-                message: 'Phone number registered',
+                message: registrationWarning
+                    ? '⚠️ Phone connected but registration incomplete'
+                    : '✅ Phone registered',
             });
             // STEP 5: Save to Database
             onProgress?.({
@@ -385,17 +480,6 @@ class MetaService {
                 status: 'in_progress',
                 message: 'Saving account...',
             });
-            const existingConnectedInOrg = await database_1.default.whatsAppAccount.findFirst({
-                where: {
-                    organizationId,
-                    status: client_1.WhatsAppAccountStatus.CONNECTED,
-                    phoneNumberId: { not: primaryPhone.id },
-                },
-            });
-            if (existingConnectedInOrg) {
-                throw new errorHandler_1.AppError(`Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
-                    `Please disconnect it first before connecting a new one.`, 400);
-            }
             logger_1.metaLog.debug('Encrypting access token', { phoneNumberId: primaryPhone.id });
             const encryptedToken = (0, encryption_1.encrypt)(accessToken);
             const verifyDecrypt = (0, encryption_1.safeDecryptStrict)(encryptedToken);
@@ -411,9 +495,20 @@ class MetaService {
             const webhookVerifyToken = (0, uuid_1.v4)();
             const combinedSecret = `PIN::${phonePin}::WEBHOOK::${webhookVerifyToken}`;
             const encryptedWebhookSecret = (0, encryption_1.encrypt)(combinedSecret);
-            let savedAccount;
-            try {
-                const existingByPhone = await database_1.default.whatsAppAccount.findUnique({
+            // ✅ Atomic transaction to prevent race conditions with multiple connected accounts
+            const savedAccount = await database_1.default.$transaction(async (tx) => {
+                const existingConnectedInOrg = await tx.whatsAppAccount.findFirst({
+                    where: {
+                        organizationId,
+                        status: client_1.WhatsAppAccountStatus.CONNECTED,
+                        phoneNumberId: { not: primaryPhone.id },
+                    },
+                });
+                if (existingConnectedInOrg) {
+                    throw new errorHandler_1.AppError(`Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
+                        `Please disconnect it first before connecting a new one.`, 400);
+                }
+                const existingByPhone = await tx.whatsAppAccount.findUnique({
                     where: { phoneNumberId: primaryPhone.id },
                 });
                 if (existingByPhone) {
@@ -423,14 +518,14 @@ class MetaService {
                         previousOrgId: existingByPhone.organizationId,
                         newOrgId: organizationId,
                     });
-                    const hasDefault = await database_1.default.whatsAppAccount.findFirst({
+                    const hasDefault = await tx.whatsAppAccount.findFirst({
                         where: {
                             organizationId,
                             isDefault: true,
                             id: { not: existingByPhone.id },
                         },
                     });
-                    savedAccount = await database_1.default.whatsAppAccount.update({
+                    const updated = await tx.whatsAppAccount.update({
                         where: { id: existingByPhone.id },
                         data: {
                             organizationId,
@@ -447,16 +542,16 @@ class MetaService {
                             codeVerificationStatus: primaryPhone.codeVerificationStatus,
                             nameStatus: primaryPhone.nameStatus,
                             messagingLimit: primaryPhone.messagingLimitTier,
-                            // ✅ persist PIN + webhook secret together (encrypted)
                             webhookSecret: encryptedWebhookSecret,
                         },
                     });
                     logger_1.metaLog.info('Account updated successfully', { organizationId });
+                    return updated;
                 }
                 else {
                     logger_1.metaLog.info('Creating new WhatsApp account', { organizationId });
-                    const accountCount = await database_1.default.whatsAppAccount.count({ where: { organizationId } });
-                    savedAccount = await database_1.default.whatsAppAccount.create({
+                    const accountCount = await tx.whatsAppAccount.count({ where: { organizationId } });
+                    const created = await tx.whatsAppAccount.create({
                         data: {
                             organizationId,
                             wabaId,
@@ -477,45 +572,9 @@ class MetaService {
                         },
                     });
                     logger_1.metaLog.info('New account created successfully', { organizationId });
+                    return created;
                 }
-            }
-            catch (dbError) {
-                if (dbError.code === 'P2002' && dbError.meta?.target?.includes('phoneNumberId')) {
-                    logger_1.metaLog.warn('Unique constraint hit, doing force update', { organizationId, phoneNumberId: primaryPhone.id });
-                    const forceExisting = await database_1.default.whatsAppAccount.findFirst({
-                        where: { phoneNumberId: primaryPhone.id },
-                    });
-                    if (forceExisting) {
-                        savedAccount = await database_1.default.whatsAppAccount.update({
-                            where: { id: forceExisting.id },
-                            data: {
-                                organizationId,
-                                accessToken: encryptedToken,
-                                tokenExpiresAt,
-                                wabaId,
-                                phoneNumber: cleanPhoneNumber,
-                                displayName: primaryPhone.verifiedName || primaryPhone.displayPhoneNumber,
-                                verifiedName: primaryPhone.verifiedName,
-                                qualityRating: primaryPhone.qualityRating,
-                                status: client_1.WhatsAppAccountStatus.CONNECTED,
-                                connectionType: finalConnectionType,
-                                isDefault: true,
-                                codeVerificationStatus: primaryPhone.codeVerificationStatus,
-                                nameStatus: primaryPhone.nameStatus,
-                                messagingLimit: primaryPhone.messagingLimitTier,
-                                webhookSecret: encryptedWebhookSecret,
-                            },
-                        });
-                        logger_1.metaLog.info('Force-updated existing account successfully', { organizationId });
-                    }
-                    else {
-                        throw dbError;
-                    }
-                }
-                else {
-                    throw dbError;
-                }
-            }
+            });
             // STEP 5.5: MetaConnection & PhoneNumbers
             let savedMetaConnection = null;
             try {
@@ -610,7 +669,33 @@ class MetaService {
             where: { organizationId },
             orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
         });
-        return accounts.map((account) => this.sanitizeAccount(account));
+        return Promise.all(accounts.map(async (account) => {
+            const usage = await this.getMessagingUsage(account);
+            // Tier kabhi sync hi nahi hua to UI par "Not set" dikhta hai.
+            // Background mein Meta se laa lo - agli baar sahi dikhega.
+            this.ensureTierSynced(account);
+            // usage PEHLE merge karo, phir sanitize. Ulta karne par usage ka
+            // messagingLimitPerDay (Meta ke asli tier se) admin ke override par
+            // chad jata tha - card upar 100,000/day aur neeche "0 / 2,000 used"
+            // dikhata tha.
+            return this.sanitizeAccount({ ...account, ...usage });
+        }));
+    }
+    /**
+     * messagingLimit null ho to Meta se sync trigger karo (fire-and-forget).
+     * Response ko block nahi karta - ye sirf agli load ke liye data bharta hai.
+     */
+    ensureTierSynced(account) {
+        if (account?.messagingLimit)
+            return;
+        if (account?.status !== 'CONNECTED')
+            return;
+        if (this.tierSyncInFlight.has(account.id))
+            return;
+        this.tierSyncInFlight.add(account.id);
+        Promise.resolve().then(() => __importStar(require('../whatsapp/whatsapp.service'))).then(({ whatsappService }) => whatsappService.syncAccountQuality(account.id))
+            .catch((e) => console.error('Tier auto-sync failed:', e?.message))
+            .finally(() => this.tierSyncInFlight.delete(account.id));
     }
     async getAccount(accountId, organizationId) {
         const account = await database_1.default.whatsAppAccount.findFirst({
@@ -622,7 +707,9 @@ class MetaService {
         if (!account) {
             throw new errorHandler_1.AppError('WhatsApp account not found', 404);
         }
-        return this.sanitizeAccount(account);
+        const usage = await this.getMessagingUsage(account);
+        this.ensureTierSynced(account);
+        return this.sanitizeAccount({ ...account, ...usage });
     }
     /**
      * ✅ FIX: now delegates to the shared getAccountWithDecryptedToken() helper.
@@ -632,6 +719,97 @@ class MetaService {
      */
     async getAccountWithToken(accountId) {
         return (0, tokenDecryption_1.getAccountWithDecryptedToken)(accountId);
+    }
+    // ============================================
+    // BUSINESS PROFILE
+    // ============================================
+    /**
+     * Account + decrypted token nikalo, aur verify karo ki wo isi org ka hai.
+     * Business profile ke saare operations isse guzarte hain.
+     */
+    async getOwnedAccount(accountId, organizationId) {
+        const account = await database_1.default.whatsAppAccount.findFirst({
+            where: { id: accountId, organizationId },
+            select: { id: true, phoneNumberId: true, phoneNumber: true },
+        });
+        if (!account)
+            throw new errorHandler_1.AppError('WhatsApp account not found', 404);
+        const withToken = await (0, tokenDecryption_1.getAccountWithDecryptedToken)(accountId);
+        if (!withToken?.accessToken) {
+            throw new errorHandler_1.AppError('WhatsApp account is not connected', 400);
+        }
+        return { account, accessToken: withToken.accessToken };
+    }
+    async getBusinessProfile(accountId, organizationId) {
+        const { account, accessToken } = await this.getOwnedAccount(accountId, organizationId);
+        const profile = await meta_api_1.metaApi.getBusinessProfile(account.phoneNumberId, accessToken);
+        // Display name aur uska review status DB se - wo profile endpoint
+        // ka hissa nahi hai, phone number object par hota hai
+        const local = await database_1.default.whatsAppAccount.findUnique({
+            where: { id: accountId },
+            select: { verifiedName: true, displayName: true, nameStatus: true },
+        });
+        return {
+            ...profile,
+            displayName: local?.verifiedName || local?.displayName || null,
+            nameStatus: local?.nameStatus || null,
+        };
+    }
+    async updateBusinessProfile(accountId, organizationId, input) {
+        const { account, accessToken } = await this.getOwnedAccount(accountId, organizationId);
+        // Khaali strings Meta ko mat bhejo - wo "field clear karo" nahi samajhta,
+        // validation error deta hai. Undefined ka matlab "mat chhedo".
+        const payload = {};
+        for (const [key, value] of Object.entries(input)) {
+            if (value === undefined)
+                continue;
+            if (typeof value === 'string' && value.trim() === '')
+                continue;
+            if (Array.isArray(value) && value.length === 0)
+                continue;
+            payload[key] = value;
+        }
+        if (Object.keys(payload).length === 0) {
+            throw new errorHandler_1.AppError('Nothing to update', 400);
+        }
+        await meta_api_1.metaApi.updateBusinessProfile(account.phoneNumberId, accessToken, payload);
+        return this.getBusinessProfile(accountId, organizationId);
+    }
+    async updateProfilePicture(accountId, organizationId, file, mimeType, fileName) {
+        const { account, accessToken } = await this.getOwnedAccount(accountId, organizationId);
+        // Meta direct URL nahi leta - pehle resumable upload se handle lena hota hai
+        const handle = await meta_api_1.metaApi.uploadResumableFile(accessToken, file, mimeType, fileName || 'profile.jpg');
+        await meta_api_1.metaApi.updateBusinessProfile(account.phoneNumberId, accessToken, {
+            profile_picture_handle: handle,
+        });
+        return this.getBusinessProfile(accountId, organizationId);
+    }
+    /**
+     * Display name change request. Meta review karta hai (name_status
+     * PENDING_REVIEW -> APPROVED / DECLINED), aur approve hone ke baad number
+     * ko re-register karna padta hai tabhi naam actually badalta hai.
+     */
+    async requestDisplayNameChange(accountId, organizationId, newDisplayName) {
+        const name = (newDisplayName || '').trim();
+        if (name.length < 3) {
+            throw new errorHandler_1.AppError('Display name must be at least 3 characters', 400);
+        }
+        if (name.length > 75) {
+            throw new errorHandler_1.AppError('Display name is too long (max 75 characters)', 400);
+        }
+        const { account, accessToken } = await this.getOwnedAccount(accountId, organizationId);
+        await meta_api_1.metaApi.updateDisplayName(account.phoneNumberId, accessToken, name);
+        // Local copy PENDING_REVIEW par set kar do taaki UI turant sahi dikhaye.
+        // Asli status agla quality sync le aayega.
+        await database_1.default.whatsAppAccount.update({
+            where: { id: accountId },
+            data: { nameStatus: 'PENDING_REVIEW' },
+        });
+        return {
+            requestedName: name,
+            nameStatus: 'PENDING_REVIEW',
+            message: 'Display name submitted to Meta for review. Once approved you will need to reconnect the number for it to take effect.',
+        };
     }
     async disconnectAccount(accountId, organizationId) {
         const account = await database_1.default.whatsAppAccount.findFirst({
@@ -649,6 +827,7 @@ class MetaService {
                     status: client_1.WhatsAppAccountStatus.DISCONNECTED,
                     accessToken: null,
                     tokenExpiresAt: null,
+                    webhookSecret: null,
                     isDefault: false,
                 }
             });
@@ -743,15 +922,8 @@ class MetaService {
         }
         try {
             const debugInfo = await meta_api_1.metaApi.debugToken(accessToken);
-            if (!debugInfo.data.is_valid) {
-                await database_1.default.whatsAppAccount.update({
-                    where: { id: accountId },
-                    data: {
-                        status: client_1.WhatsAppAccountStatus.DISCONNECTED,
-                        accessToken: null,
-                        tokenExpiresAt: null,
-                    }
-                });
+            if (debugInfo?.data && debugInfo.data.is_valid === false) {
+                logger_1.metaLog.warn('debugToken returned is_valid: false', { accountId });
                 return { healthy: false, reason: 'Token expired', action: 'Reconnect' };
             }
             // ✅ Token valid - get phone info directly (faster than listing all phones)
@@ -760,12 +932,12 @@ class MetaService {
                 await database_1.default.whatsAppAccount.update({
                     where: { id: accountId },
                     data: {
-                        qualityRating: phoneInfo?.quality_rating,
+                        qualityRating: phoneInfo?.quality_rating || account.qualityRating,
                         displayName: phoneInfo?.verified_name || account.displayName,
-                        verifiedName: phoneInfo?.verified_name,
+                        verifiedName: phoneInfo?.verified_name || account.verifiedName,
                         status: client_1.WhatsAppAccountStatus.CONNECTED,
-                        codeVerificationStatus: phoneInfo?.code_verification_status,
-                        messagingLimit: phoneInfo?.messaging_limit_tier,
+                        codeVerificationStatus: phoneInfo?.code_verification_status || account.codeVerificationStatus,
+                        messagingLimit: phoneInfo?.messaging_limit_tier || account.messagingLimit,
                     },
                 });
                 return {
@@ -773,33 +945,30 @@ class MetaService {
                     qualityRating: phoneInfo?.quality_rating,
                     verifiedName: phoneInfo?.verified_name,
                     messagingLimit: phoneInfo?.messaging_limit_tier,
+                    codeVerificationStatus: phoneInfo?.code_verification_status,
                 };
             }
             catch (phoneErr) {
-                // Phone not found or deleted
-                await database_1.default.whatsAppAccount.update({
-                    where: { id: accountId },
-                    data: { status: client_1.WhatsAppAccountStatus.DISCONNECTED }
+                // Phone verification pending or temporary API warning - DO NOT disconnect
+                logger_1.metaLog.warn('Phone info check warning (number may need verification in Meta):', {
+                    error: phoneErr.message,
+                    phoneNumberId: account.phoneNumberId,
                 });
                 return {
-                    healthy: false,
-                    reason: 'Phone number not accessible',
-                    action: 'Reconnect'
+                    healthy: true,
+                    qualityRating: account.qualityRating || 'UNKNOWN',
+                    verifiedName: account.verifiedName || account.displayName,
+                    messagingLimit: account.messagingLimit || 'TIER_250',
+                    reason: 'Phone registration pending verification in Meta',
                 };
             }
         }
         catch (error) {
-            await database_1.default.whatsAppAccount.update({
-                where: { id: accountId },
-                data: {
-                    status: client_1.WhatsAppAccountStatus.DISCONNECTED,
-                    accessToken: null,
-                }
-            });
+            logger_1.metaLog.warn('Health check warning:', { error: error.message, accountId });
             return {
                 healthy: false,
-                reason: error.message,
-                action: 'Reconnect'
+                reason: error.message || 'Health check warning',
+                action: 'Check Meta Connection',
             };
         }
     }
@@ -823,22 +992,17 @@ class MetaService {
         }
         catch (error) {
             console.error(`❌ Template sync API call failed for account ${accountId}:`, error.message);
-            const isTokenError = error.message?.includes('token') ||
-                error.message?.includes('OAuth') ||
-                error.status === 401 ||
-                error.status === 403 ||
-                error.message?.includes('190') ||
-                error.message?.includes('133010') ||
-                error.message?.includes('not registered');
-            if (isTokenError) {
-                console.warn(`⚠️ Deactivating broken account ${accountId} due to template sync API error`);
+            // Only disconnect on confirmed OAuth session expiration (code 190)
+            const metaCode = error.response?.data?.error?.code;
+            const isTokenExpired = metaCode === 190 || error.message?.includes('Error validating access token: Session has expired');
+            if (isTokenExpired) {
+                console.warn(`⚠️ Token expired for account ${accountId} (code 190)`);
                 await database_1.default.whatsAppAccount.update({
                     where: { id: accountId },
                     data: {
                         status: client_1.WhatsAppAccountStatus.DISCONNECTED,
-                        accessToken: null,
                     },
-                }).catch((e) => console.error('Failed to disconnect account in template sync error path:', e));
+                }).catch((e) => console.error('Failed to update account status:', e));
             }
             throw error;
         }
@@ -873,12 +1037,28 @@ class MetaService {
                 const existing = existingMap.get(key);
                 const extractedHeaderHandle = this.extractHeaderHandle(metaTemplate.components);
                 const headerContent = this.extractHeaderContent(metaTemplate.components);
-                const isScontent = (url) => !!url && url.includes('scontent.whatsapp');
-                const finalHeaderContent = (headerContent && !isScontent(headerContent))
-                    ? headerContent
-                    : (existing && !isScontent(existing.headerContent)
-                        ? existing.headerContent
-                        : null);
+                // ✅ Detect Meta CDN URLs (these need auth headers to download)
+                const isMetaCdnUrl = (url) => {
+                    if (!url)
+                        return false;
+                    return (url.includes('scontent.whatsapp') ||
+                        url.includes('scontent-') ||
+                        url.includes('lookaside.fbsbx.com') ||
+                        url.includes('fbcdn.net'));
+                };
+                // ✅ Prefer non-CDN URLs (Cloudinary) but keep CDN URL if that's all we have
+                const finalHeaderContent = (() => {
+                    // If new URL from Meta is Cloudinary/user URL - use it
+                    if (headerContent && !isMetaCdnUrl(headerContent)) {
+                        return headerContent;
+                    }
+                    // If existing URL in DB is Cloudinary/user URL - keep it
+                    if (existing?.headerContent && !isMetaCdnUrl(existing.headerContent)) {
+                        return existing.headerContent;
+                    }
+                    // Fallback: use whatever we have (even if CDN URL)
+                    return headerContent || existing?.headerContent || null;
+                })();
                 const baseTemplateData = {
                     organizationId,
                     whatsappAccountId: accountId,
@@ -948,12 +1128,21 @@ class MetaService {
     async syncTemplatesBackground(accountId, wabaId, accessToken) {
         const redis = (0, redis_1.getRedis)();
         const lockKey = `sync:templates:${accountId}`;
-        const exists = await redis.get(lockKey);
-        if (exists) {
-            console.log(`⚠️ Template sync already running for ${accountId}`);
-            return;
+        let lockAcquired = false;
+        if (redis) {
+            try {
+                const exists = await redis.get(lockKey);
+                if (exists) {
+                    console.log(`⚠️ Template sync already running for ${accountId}`);
+                    return;
+                }
+                await redis.set(lockKey, '1', 'EX', 300);
+                lockAcquired = true;
+            }
+            catch (redisErr) {
+                console.warn('⚠️ Redis lock check failed, continuing template sync without lock:', redisErr.message);
+            }
         }
-        await redis.set(lockKey, '1', 'EX', 300);
         try {
             console.log(`🔄 Background template sync for account ${accountId}...`);
             const templates = await meta_api_1.metaApi.getTemplates(wabaId, accessToken);
@@ -980,12 +1169,28 @@ class MetaService {
                     });
                     const extractedHandle = this.extractHeaderHandle(template.components);
                     const headerContent = this.extractHeaderContent(template.components);
-                    const isScontent = (url) => !!url && url.includes('scontent.whatsapp');
-                    const finalHeaderContent = (headerContent && !isScontent(headerContent))
-                        ? headerContent
-                        : (existing && !isScontent(existing.headerContent)
-                            ? existing.headerContent
-                            : null);
+                    // ✅ Detect Meta CDN URLs (these need auth headers to download)
+                    const isMetaCdnUrl = (url) => {
+                        if (!url)
+                            return false;
+                        return (url.includes('scontent.whatsapp') ||
+                            url.includes('scontent-') ||
+                            url.includes('lookaside.fbsbx.com') ||
+                            url.includes('fbcdn.net'));
+                    };
+                    // ✅ Prefer non-CDN URLs (Cloudinary) but keep CDN URL if that's all we have
+                    const finalHeaderContent = (() => {
+                        // If new URL from Meta is Cloudinary/user URL - use it
+                        if (headerContent && !isMetaCdnUrl(headerContent)) {
+                            return headerContent;
+                        }
+                        // If existing URL in DB is Cloudinary/user URL - keep it
+                        if (existing?.headerContent && !isMetaCdnUrl(existing.headerContent)) {
+                            return existing.headerContent;
+                        }
+                        // Fallback: use whatever we have (even if CDN URL)
+                        return headerContent || existing?.headerContent || null;
+                    })();
                     const baseData = {
                         organizationId: account.organizationId,
                         whatsappAccountId: accountId,
@@ -1031,27 +1236,28 @@ class MetaService {
             console.log(`✅ Background sync: ${synced}/${templates.length} templates`);
         }
         catch (error) {
-            console.error('❌ Background template sync failed:', error);
-            const isTokenError = error.message?.includes('token') ||
-                error.message?.includes('OAuth') ||
-                error.status === 401 ||
-                error.status === 403 ||
-                error.message?.includes('190') ||
-                error.message?.includes('133010') ||
-                error.message?.includes('not registered');
-            if (isTokenError) {
-                console.warn(`⚠️ Deactivating broken account ${accountId} due to background sync API error`);
+            console.error('❌ Background template sync failed:', error.message || error);
+            const metaCode = error.response?.data?.error?.code;
+            const isTokenExpired = metaCode === 190 || error.message?.includes('Error validating access token: Session has expired');
+            if (isTokenExpired) {
+                console.warn(`⚠️ Token expired for account ${accountId} (code 190)`);
                 await database_1.default.whatsAppAccount.update({
                     where: { id: accountId },
                     data: {
                         status: client_1.WhatsAppAccountStatus.DISCONNECTED,
-                        accessToken: null,
                     },
-                }).catch((e) => console.error('Failed to disconnect account in background sync error path:', e));
+                }).catch((e) => console.error('Failed to update account status:', e));
             }
         }
         finally {
-            await redis.del(lockKey);
+            if (redis && lockAcquired) {
+                try {
+                    await redis.del(lockKey);
+                }
+                catch (delErr) {
+                    console.warn('⚠️ Failed to release template sync redis lock:', delErr.message);
+                }
+            }
         }
     }
     mapCategory(category) {
@@ -1072,7 +1278,7 @@ class MetaService {
             PENDING_DELETION: 'REJECTED',
             DELETED: 'REJECTED',
             DISABLED: 'REJECTED',
-            PAUSED: 'APPROVED',
+            PAUSED: 'REJECTED',
             LIMIT_EXCEEDED: 'REJECTED',
         };
         return map[status?.toUpperCase()] || 'PENDING';

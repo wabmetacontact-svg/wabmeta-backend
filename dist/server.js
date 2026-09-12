@@ -132,6 +132,14 @@ async function bootstrap() {
         catch (error) {
             logger_1.default.warn('Campaign recovery init failed', { error: error.message });
         }
+        // Step 10b: Resume any Telegram broadcasts interrupted by a restart
+        try {
+            const { resumeStuckBroadcasts } = await Promise.resolve().then(() => __importStar(require('./modules/telegram/telegram.service')));
+            await resumeStuckBroadcasts();
+        }
+        catch (error) {
+            logger_1.default.warn('Telegram broadcast recovery failed', { error: error.message });
+        }
         // Step 11: Redis
         try {
             const { initRedis } = await Promise.resolve().then(() => __importStar(require('./config/redis')));

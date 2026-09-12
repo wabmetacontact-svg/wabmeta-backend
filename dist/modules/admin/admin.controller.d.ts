@@ -45,6 +45,26 @@ export declare class AdminController {
     getSubscriptionStats(req: AdminRequest, res: Response): Promise<Response<any, Record<string, any>>>;
     getWhatsAppStats(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     updateConnectionType(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * Meta se account ki taaza haalat kheencho - quality rating, messaging
+     * tier, verification aur health (payment method, banned WABA, etc).
+     *
+     * Quality rating aur tier dono Meta assign karta hai; koi API unhe set
+     * nahi karne deti. Isliye admin sirf refresh kar sakta hai, badal nahi.
+     */
+    refreshWhatsAppAccount(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
+    /**
+     * Admin ke display overrides set/clear karo.
+     *
+     * Ye Meta par KUCH NAHI badalta - quality rating aur tier Meta assign
+     * karta hai aur koi API unhe set nahi karne deti. Ye sirf ye tay karta
+     * hai ki WabMeta me user ko kya dikhe.
+     *
+     * Sending par bhi koi asar nahi: campaign speed hamesha Meta ke asli
+     * tier se chalti hai. Agar override speed bhi badal deta to admin
+     * galti se TIER_100K dikha kar Meta ka rate limit tudwa sakta tha.
+     */
+    setAccountDisplayOverrides(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     getWhatsAppConnections(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     disconnectWhatsAppAccount(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
     adminGetAllWallets(req: AdminRequest, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;

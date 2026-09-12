@@ -24,6 +24,8 @@ export interface ImportContactsInput {
     groupId?: string;
     tags?: string[];
     skipDuplicates?: boolean;
+    /** Business ne confirm kiya ki in logon ne message paane ki permission di hai. */
+    optInConfirmed?: boolean;
 }
 export interface BulkUpdateContactsInput {
     contactIds: string[];
@@ -113,6 +115,7 @@ export interface ImportContactsResponse {
     skipped: number;
     failed: number;
     totalErrors?: number;
+    restored?: number;
     errors: {
         row?: number;
         phone?: string;

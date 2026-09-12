@@ -5,8 +5,11 @@ const whatsapp_controller_1 = require("./whatsapp.controller");
 const auth_1 = require("../../middleware/auth");
 const rateLimit_1 = require("../../middleware/rateLimit");
 const connectionLock_1 = require("../../middleware/connectionLock");
+const requireRole_1 = require("../../middleware/requireRole");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use((0, requireRole_1.gateMutations)(...requireRole_1.ADMIN_ROLES));
 // ============================================
 // ACCOUNTS APIs
 // ============================================

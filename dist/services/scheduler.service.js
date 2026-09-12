@@ -9,15 +9,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initializeScheduler = initializeScheduler;
 const node_cron_1 = __importDefault(require("node-cron"));
+const withLock_1 = require("../utils/withLock");
 const automation_engine_1 = require("../modules/automation/automation.engine");
 const database_1 = __importDefault(require("../config/database"));
 const client_1 = require("@prisma/client");
+const notifications_service_1 = require("../modules/notifications/notifications.service");
+const meta_service_1 = require("../modules/meta/meta.service");
+const accountHealth_service_1 = require("../modules/meta/accountHealth.service");
 // ✅ Global state tracking
 const state = {
     automation: false,
     inactivity: false,
     subscriptionExpiry: false,
     expiryWarnings: false,
+    webhookLogCleanup: false,
+    metaSync: false,
     lastPoolError: 0,
 };
 // ✅ Check if we should skip due to recent pool errors
@@ -45,7 +51,7 @@ function initializeScheduler() {
         }
         state.automation = true;
         try {
-            await automation_engine_1.automationEngine.triggerScheduled();
+            await (0, withLock_1.withAdvisoryLock)('scheduler:automation', () => automation_engine_1.automationEngine.triggerScheduled());
         }
         catch (error) {
             if (error?.code === 'P2024') {
@@ -70,7 +76,7 @@ function initializeScheduler() {
         state.inactivity = true;
         try {
             console.log('💤 Running inactivity check...');
-            await automation_engine_1.automationEngine.triggerInactivity();
+            await (0, withLock_1.withAdvisoryLock)('scheduler:inactivity', () => automation_engine_1.automationEngine.triggerInactivity());
         }
         catch (error) {
             if (error?.code === 'P2024') {
@@ -95,7 +101,7 @@ function initializeScheduler() {
             return;
         state.subscriptionExpiry = true;
         try {
-            await checkAndExpireSubscriptions();
+            await (0, withLock_1.withAdvisoryLock)('scheduler:subExpiry', () => checkAndExpireSubscriptions());
         }
         catch (error) {
             if (error?.code === 'P2024') {
@@ -117,7 +123,7 @@ function initializeScheduler() {
             return;
         state.expiryWarnings = true;
         try {
-            await sendExpiryWarnings();
+            await (0, withLock_1.withAdvisoryLock)('scheduler:expiryWarnings', () => sendExpiryWarnings());
         }
         catch (error) {
             if (error?.code !== 'P2024') {
@@ -128,7 +134,161 @@ function initializeScheduler() {
             state.expiryWarnings = false;
         }
     });
+    // ============================================
+    // 5. WEBHOOK LOG CLEANUP - Daily 3:30 AM
+    // WebhookLog par koi retention nahi tha - March se badhte badhte
+    // 7.9 lakh rows / 784 MB ho gayi thi, poore DB ka ~46%. Chhote RDS
+    // instance ke liye ye bhaari hai, aur 7 din se purane webhook logs
+    // ka koi istemaal nahi hai.
+    // ============================================
+    node_cron_1.default.schedule('30 3 * * *', async () => {
+        if (state.webhookLogCleanup)
+            return;
+        state.webhookLogCleanup = true;
+        try {
+            await (0, withLock_1.withAdvisoryLock)('scheduler:webhookLogCleanup', () => cleanupWebhookLogs());
+        }
+        catch (error) {
+            if (error?.code !== 'P2024') {
+                console.error('Webhook log cleanup error:', error.message);
+            }
+        }
+        finally {
+            state.webhookLogCleanup = false;
+        }
+    });
+    // ============================================
+    // 6. META SYNC - Daily 4:15 AM
+    // Meta apni taraf se cheezein badalta rehta hai aur hume kabhi khabar
+    // nahi hoti:
+    //   - messaging tier badhta hai (TIER_250 → TIER_100K)
+    //   - template ki category approval par badal jati hai
+    //     (UTILITY → MARKETING) - aur billing usi category se hoti hai
+    //   - template PAUSED ya REJECTED ho jate hain
+    //
+    // Pehle iska koi cron nahi tha, sirf manual sync tha. Isliye purana
+    // data mahino baitha rehta tha: accounts sabse dheemi speed par chalte
+    // the aur MARKETING templates UTILITY ke rate par charge hote the.
+    // ============================================
+    node_cron_1.default.schedule('15 4 * * *', async () => {
+        if (state.metaSync)
+            return;
+        state.metaSync = true;
+        try {
+            await (0, withLock_1.withAdvisoryLock)('scheduler:metaSync', () => syncAllAccountsFromMeta());
+        }
+        catch (error) {
+            if (error?.code !== 'P2024') {
+                console.error('Meta sync error:', error.message);
+            }
+        }
+        finally {
+            state.metaSync = false;
+        }
+    });
     console.log('✅ Scheduler initialized');
+}
+// ============================================
+// META SYNC
+// ============================================
+async function syncAllAccountsFromMeta() {
+    if (shouldSkipDueToPoolPressure())
+        return;
+    const started = Date.now();
+    const accounts = await database_1.default.whatsAppAccount.findMany({
+        where: { status: 'CONNECTED', isActive: true },
+        select: { id: true, organizationId: true, phoneNumber: true },
+    });
+    if (accounts.length === 0)
+        return;
+    console.log(`🔄 Meta sync: ${accounts.length} account(s)`);
+    let healthOk = 0;
+    let templatesOk = 0;
+    let failed = 0;
+    for (const acc of accounts) {
+        // Account health - tier, quality, verification status
+        try {
+            await meta_service_1.metaService.refreshAccountHealth(acc.id, acc.organizationId);
+            healthOk++;
+        }
+        catch (err) {
+            failed++;
+            console.warn(`⚠️ Health sync failed for ${acc.phoneNumber}: ${err?.message}`);
+        }
+        // Meta ka health_status - yahi batata hai ki number business-initiated
+        // messages bhej sakta hai ya nahi, aur na bhej sakne par asli wajah.
+        // Roz refresh hoti hai taaki UI par taaza haal dikhe aur campaign
+        // shuru hone se pehle sahi rok lag sake.
+        try {
+            const h = await accountHealth_service_1.accountHealthService.get(acc.id, { force: true });
+            if (h.blocked) {
+                console.warn(`🔴 [Health] ${acc.phoneNumber} BLOCKED: ${h.summary}`);
+            }
+        }
+        catch {
+            // health optional hai - baaki sync rukna nahi chahiye
+        }
+        // Templates - status aur category (billing isi par chalti hai)
+        try {
+            await meta_service_1.metaService.syncTemplates(acc.id, acc.organizationId);
+            templatesOk++;
+        }
+        catch (err) {
+            failed++;
+            console.warn(`⚠️ Template sync failed for ${acc.phoneNumber}: ${err?.message}`);
+        }
+        // Meta ki Graph API par rate limit hai, aur ye raat me chalta hai -
+        // jaldi karne ki koi wajah nahi.
+        await new Promise((r) => setTimeout(r, 400));
+        if (shouldSkipDueToPoolPressure()) {
+            console.warn('⚠️ Meta sync stopped early due to DB pool pressure');
+            break;
+        }
+    }
+    console.log(`✅ Meta sync done in ${Math.round((Date.now() - started) / 1000)}s - ` +
+        `health ${healthOk}, templates ${templatesOk}, failed ${failed}`);
+}
+// ============================================
+// WEBHOOK LOG CLEANUP
+// ============================================
+const WEBHOOK_LOG_RETENTION_DAYS = 7;
+const WEBHOOK_LOG_BATCH = 5000;
+// Ek run mein itne se zyada nahi - chhote instance ko der tak na daboye
+const WEBHOOK_LOG_MAX_PER_RUN = 200000;
+async function cleanupWebhookLogs() {
+    if (shouldSkipDueToPoolPressure())
+        return;
+    const started = Date.now();
+    let removed = 0;
+    try {
+        // Batches mein delete karo. Ek hi bade DELETE se lock lamba rehta hai
+        // aur WAL bhar jata hai.
+        while (removed < WEBHOOK_LOG_MAX_PER_RUN) {
+            const n = await database_1.default.$executeRawUnsafe(`DELETE FROM "WebhookLog"
+         WHERE id IN (
+           SELECT id FROM "WebhookLog"
+           WHERE "createdAt" < now() - interval '${WEBHOOK_LOG_RETENTION_DAYS} days'
+           LIMIT ${WEBHOOK_LOG_BATCH}
+         )`);
+            removed += n;
+            if (n < WEBHOOK_LOG_BATCH)
+                break;
+            // DB ko saans lene do
+            await new Promise((r) => setTimeout(r, 200));
+        }
+        if (removed > 0) {
+            // Dead space reusable banao, warna table ghatne ke bawajood
+            // disk par badhti rehti hai
+            await database_1.default.$executeRawUnsafe(`VACUUM (ANALYZE) "WebhookLog"`);
+            console.log(`🧹 Webhook logs cleaned: ${removed} rows in ${Math.round((Date.now() - started) / 1000)}s`);
+        }
+    }
+    catch (error) {
+        if (error?.code === 'P2024') {
+            markPoolError();
+        }
+        throw error;
+    }
 }
 // ============================================
 // SUBSCRIPTION EXPIRY (unchanged from before)
@@ -161,6 +321,10 @@ async function checkAndExpireSubscriptions() {
     if (expiredSubscriptions.length === 0)
         return;
     console.log(`⏰ Expiring ${expiredSubscriptions.length} subscription(s)`);
+    // Notifications transaction ke BAAHAR bhejte hain. Push bhejna ek network
+    // call hai - use DB transaction ke andar rakhne se transaction lamba khinchta
+    // hai aur connection pool par dabav padta hai.
+    const expiredNotifications = [];
     for (const subscription of expiredSubscriptions) {
         try {
             await database_1.default.$transaction(async (tx) => {
@@ -186,18 +350,20 @@ async function checkAndExpireSubscriptions() {
                         },
                     },
                 });
-                await tx.notification.create({
-                    data: {
-                        userId: subscription.organization.ownerId,
-                        organizationId: subscription.organizationId,
-                        type: 'billing',
-                        title: 'Subscription Expired',
-                        description: `Your ${subscription.plan.name} subscription has expired.`,
-                        actionUrl: '/dashboard/billing',
-                        metadata: {
-                            planName: subscription.plan.name,
-                            expiredAt: now.toISOString(),
-                        },
+                // Pehle yahan seedha prisma.notification.create tha - row ban jati
+                // thi par push kabhi nahi jata tha. Service se jaane par phone par
+                // bhi pahunchta hai.
+                expiredNotifications.push({
+                    userId: subscription.organization.ownerId,
+                    organizationId: subscription.organizationId,
+                    type: 'billing',
+                    title: 'Subscription Expired',
+                    description: `Your ${subscription.plan.name} subscription has expired.`,
+                    actionUrl: '/(app)/billing',
+                    metadata: {
+                        planName: subscription.plan.name,
+                        expiredAt: now.toISOString(),
+                        webUrl: '/dashboard/billing',
                     },
                 });
             });
@@ -212,6 +378,12 @@ async function checkAndExpireSubscriptions() {
             }
             console.error(`❌ Expire failed for ${subscription.id}:`, err.message);
         }
+    }
+    // Sab expiry ho jaane ke baad notifications bhejo
+    for (const n of expiredNotifications) {
+        await notifications_service_1.notificationsService
+            .create(n)
+            .catch((e) => console.error('Expiry notification failed:', e?.message));
     }
 }
 // ============================================
@@ -265,19 +437,18 @@ async function sendExpiryWarnings() {
                 });
                 if (alreadySent)
                     continue;
-                await database_1.default.notification.create({
-                    data: {
-                        userId: sub.organization.ownerId,
-                        organizationId: sub.organizationId,
-                        type: 'billing_warning',
-                        title: `Subscription Expiring in ${days} Day${days > 1 ? 's' : ''}`,
-                        description: `Your ${sub.plan.name} subscription expires soon.`,
-                        actionUrl: '/dashboard/billing',
-                        metadata: {
-                            planName: sub.plan.name,
-                            expiresAt: sub.currentPeriodEnd.toISOString(),
-                            warningDays: days,
-                        },
+                await notifications_service_1.notificationsService.create({
+                    userId: sub.organization.ownerId,
+                    organizationId: sub.organizationId,
+                    type: 'billing_warning',
+                    title: `Subscription Expiring in ${days} Day${days > 1 ? 's' : ''}`,
+                    description: `Your ${sub.plan.name} subscription expires soon.`,
+                    actionUrl: '/(app)/billing',
+                    metadata: {
+                        planName: sub.plan.name,
+                        expiresAt: sub.currentPeriodEnd.toISOString(),
+                        warningDays: days,
+                        webUrl: '/dashboard/billing',
                     },
                 });
                 await new Promise(r => setTimeout(r, 300));

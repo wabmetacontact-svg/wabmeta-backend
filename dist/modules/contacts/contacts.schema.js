@@ -67,6 +67,15 @@ exports.importContactsSchema = zod_1.z.object({
         groupName: zod_1.z.string().optional(),
         tags: zod_1.z.array(zod_1.z.string()).optional(),
         skipDuplicates: zod_1.z.boolean().optional().default(true),
+        // Business confirm karta hai ki in logon ne message paane ki permission di
+        // hai. WhatsApp ki policy iske bina messaging allow nahi karti, aur bina
+        // opt-in wali list hi block/report laati hai jo number ban karwata hai.
+        //
+        // Abhi optional rakha hai, required nahi: mobile app ka maujooda build ye
+        // field bhejta hi nahi, aur required karte hi uska import toot jata - store
+        // update aane me din lagte hain. Dono clients ke naye build nikal jane ke
+        // baad ise z.literal(true) kar dena.
+        optInConfirmed: zod_1.z.boolean().optional(),
     }),
 });
 exports.bulkUpdateSchema = zod_1.z.object({

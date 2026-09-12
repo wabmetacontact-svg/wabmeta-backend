@@ -554,7 +554,9 @@ class AdminService {
         const user = await database_1.default.user.findUnique({
             where: { id: userId },
             include: {
-                ownedOrganizations: true,
+                // Live orgs only — a soft-deleted org shouldn't count toward the
+                // "owns N organizations" guard or the transfer flow below.
+                ownedOrganizations: { where: { deletedAt: null } },
                 memberships: true,
                 createdCampaigns: true,
                 createdChatbots: true,
@@ -568,7 +570,10 @@ class AdminService {
             // ✅ OPTION A: Force delete (delete organizations too)
             if (options?.force) {
                 console.log(`⚠️ Force deleting user ${userId} and ${user.ownedOrganizations.length} owned organizations`);
-                // Delete all owned organizations (cascade will handle members, subscriptions, etc.)
+                // Full user erasure follows (tx.user.delete below), so owned orgs are
+                // hard-deleted here — a soft-deleted org would still reference the user
+                // via ownerId and block the delete. Org-only deletion stays soft
+                // (deleteOrganization) where the owner isn't being removed.
                 await database_1.default.organization.deleteMany({
                     where: { ownerId: userId },
                 });
@@ -764,8 +769,8 @@ class AdminService {
         if (!org) {
             throw new errorHandler_1.AppError('Organization not found', 404);
         }
-        // Delete organization and cascade
-        await database_1.default.organization.delete({ where: { id } });
+        // Soft delete: keep payments and the wallet ledger.
+        await database_1.default.organization.update({ where: { id }, data: { deletedAt: new Date() } });
         return { message: 'Organization deleted successfully' };
     }
     async updateSubscription(id, data) {

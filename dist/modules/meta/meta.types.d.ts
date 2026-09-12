@@ -227,6 +227,10 @@ export interface MetaApiError {
         error_user_title?: string;
         error_user_msg?: string;
         fbtrace_id: string;
+        error_data?: {
+            messaging_product?: string;
+            details?: string;
+        };
     };
 }
 export interface MetaErrorResponse {

@@ -5,6 +5,7 @@ exports.asyncHandler = exports.notFoundHandler = exports.errorHandler = exports.
 const config_1 = require("../config");
 const zod_1 = require("zod");
 const client_1 = require("@prisma/client");
+const logger_1 = require("../utils/logger");
 class AppError extends Error {
     statusCode;
     isOperational;
@@ -17,25 +18,52 @@ class AppError extends Error {
     }
 }
 exports.AppError = AppError;
-// ✅ Safe logger (prevents crash from logging)
+// Best-effort guess of the HTTP status an error maps to, so logging can tell a
+// normal client error (401/404/validation) apart from a real server fault.
+const statusOf = (err) => {
+    if (err instanceof AppError)
+        return err.statusCode;
+    if (err instanceof zod_1.ZodError)
+        return 400;
+    if (err instanceof client_1.Prisma.PrismaClientKnownRequestError) {
+        if (err.code === 'P2002')
+            return 409;
+        if (err.code === 'P2025')
+            return 404;
+        if (err.code === 'P2024')
+            return 503;
+    }
+    return 500;
+};
+// Log errors through the structured logger, at a level that matches severity.
+//
+// 4xx client errors (an expired token, a missing record, a validation failure)
+// are normal traffic — the request-response is already logged by requestLogger,
+// so re-logging them here as red errors just fills the console with noise. Only
+// 5xx server faults get an error-level entry, with the stack in development.
 const logErrorSafe = (err, req) => {
     try {
-        const timestamp = new Date().toISOString();
+        const status = statusOf(err);
         const method = req?.method || 'UNKNOWN';
         const url = req?.url || 'UNKNOWN';
-        console.error(`❌ [${timestamp}] ${method} ${url}`);
-        if (err instanceof Error) {
-            console.error(`   Error: ${err.message}`);
-            if (config_1.config.nodeEnv === 'development' && err.stack) {
-                console.error(`   Stack: ${err.stack}`);
-            }
+        const message = err instanceof Error ? err.message : String(err);
+        const log = logger_1.logger.category('HTTP');
+        // Client errors: quiet. Visible only when debugging.
+        if (status < 500) {
+            log.debug(`${method} ${url} → ${status}`, { status, error: message });
             return;
         }
-        // Fallback for non-Error objects
-        console.error('   Error:', typeof err === 'string' ? err : JSON.stringify(err));
+        // Server faults: this is the one that deserves attention.
+        log.error(`${method} ${url} → ${status}`, err instanceof Error ? err : undefined, {
+            status,
+            error: message,
+            ...(config_1.config.nodeEnv === 'development' && err instanceof Error && err.stack
+                ? { stack: err.stack.split('\n').slice(0, 4).join(' | ') }
+                : {}),
+        });
     }
     catch {
-        console.error('Unknown error (failed to log safely)');
+        logger_1.logger.category('HTTP').error('Failed to log an error safely');
     }
 };
 // ✅ Send JSON error response

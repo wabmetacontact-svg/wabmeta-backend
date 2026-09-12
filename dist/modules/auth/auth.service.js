@@ -11,6 +11,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.authService = exports.AuthService = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const config_1 = require("../../config");
+const featureLock_1 = require("../../middleware/featureLock");
 const logger_1 = require("../../utils/logger");
 const password_1 = require("../../utils/password");
 const jwt_1 = require("../../utils/jwt");
@@ -20,6 +21,8 @@ const errorHandler_1 = require("../../middleware/errorHandler");
 const google_auth_library_1 = require("google-auth-library");
 const redis_1 = require("../../config/redis");
 const whatsapp_api_1 = require("../whatsapp/whatsapp.api");
+const welcome_service_1 = require("../../services/welcome.service");
+const WABMETA_OWN_ORG_ID = process.env.WABMETA_OWN_ORG_ID || '';
 // ============================================
 // CONSTANTS
 // ============================================
@@ -243,7 +246,7 @@ const generateTokenPair = async (userId, email, organizationId) => {
 // ============================================
 // HELPER: Get default org
 // ============================================
-const getDefaultOrg = async (userId) => {
+const loadDefaultOrg = async (userId) => {
     const owned = await database_1.default.organization.findFirst({
         where: { ownerId: userId },
         select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true, featureConnectionLocked: true },
@@ -259,6 +262,24 @@ const getDefaultOrg = async (userId) => {
         },
     });
     return membership?.organization || null;
+};
+// Login/refresh response me bhi effective locks jayein - warna user ko
+// naya plan lene ke baad bhi purana lock dikhta rahega (aur ulta bhi).
+const getDefaultOrg = async (userId) => {
+    const org = await loadDefaultOrg(userId);
+    if (!org)
+        return null;
+    const locks = await (0, featureLock_1.getFeatureLocks)(org.id);
+    if (!locks)
+        return org;
+    return {
+        ...org,
+        featureInboxLocked: locks.inbox,
+        featureCampaignsLocked: locks.campaigns,
+        featureChatbotLocked: locks.chatbot,
+        featureAutomationLocked: locks.automation,
+        featureConnectionLocked: locks.connection,
+    };
 };
 // ============================================
 // HELPER: Create org with plan
@@ -394,6 +415,15 @@ class AuthService {
         });
         const tokens = await generateTokenPair(result.user.id, result.user.email, result.organization.id);
         sendWhatsAppTemplate(waPhone, config_1.config.platform.whatsapp.welcomeTemplate, [result.user.firstName]);
+        setImmediate(() => {
+            welcome_service_1.welcomeService.saveNewUserAsContact({
+                id: result.user.id,
+                firstName: result.user.firstName,
+                lastName: result.user.lastName,
+                email: result.user.email,
+                phone: phoneE164,
+            });
+        });
         sendEmailNonBlocking({
             to: normalizedEmail,
             subject: '🎉 Welcome to WabMeta!',
@@ -521,6 +551,14 @@ class AuthService {
         }
         // ── Step 2: User existence check ────────────────────
         if (!user) {
+            // Pehle ye path chup-chaap 401 deta tha. Wrong-password wala path log
+            // karta hai, ye nahi - to logs mein dono ek jaise dikhte the aur pata
+            // nahi chalta tha ki email galat thi ya password. Ab dono distinguish
+            // hote hain. API response wahi generic rehta hai (security), sirf
+            // server-side log detail deta hai.
+            logger_1.authLog.warn('Login attempt for unregistered email', {
+                email: normalizedEmail,
+            });
             // ✅ Timing attack prevention - same delay even for missing users
             await new Promise((r) => setTimeout(r, 200));
             throw new errorHandler_1.AppError('Invalid email or password', 401);
@@ -607,6 +645,17 @@ class AuthService {
         if (user.phone) {
             sendWhatsAppTemplate(user.phone, config_1.config.platform.whatsapp.welcomeTemplate, [user.firstName]);
             logger_1.authLog.info('Welcome WhatsApp sent during email verification', { phone: user.phone });
+        }
+        if (user.phone) {
+            setImmediate(() => {
+                welcome_service_1.welcomeService.saveNewUserAsContact({
+                    id: user.id,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    email: user.email,
+                    phone: user.phone,
+                });
+            });
         }
         logger_1.authLog.info('Email verified', { email: user.email });
         return {
@@ -775,6 +824,17 @@ class AuthService {
             else {
                 logger_1.authLog.info('WhatsApp welcome skipped - no phone on file');
             }
+            if (user.phone) {
+                setImmediate(() => {
+                    welcome_service_1.welcomeService.saveNewUserAsContact({
+                        id: user.id,
+                        firstName: user.firstName,
+                        lastName: user.lastName,
+                        email: user.email,
+                        phone: user.phone,
+                    });
+                });
+            }
             logger_1.authLog.info('Account activated', { email: normalizedEmail });
         }
         const updatedUser = await database_1.default.user.findUnique({
@@ -858,6 +918,9 @@ class AuthService {
     // ────────────────────────────────────────────
     // REFRESH TOKEN
     // ────────────────────────────────────────────
+    // ────────────────────────────────────────────
+    // REFRESH TOKEN
+    // ────────────────────────────────────────────
     async refreshToken(refreshToken) {
         let payload;
         try {
@@ -866,62 +929,118 @@ class AuthService {
         catch {
             throw new errorHandler_1.AppError('Invalid refresh token', 401);
         }
-        // ─── Try to find the token ────────────────────────────────
         const stored = await database_1.default.refreshToken.findUnique({
             where: { token: refreshToken },
             include: { user: true },
         });
-        // ─── TOKEN NOT FOUND - Investigate ────────────────────────
+        // ─── TOKEN NOT FOUND ───────────────────────────────────
         if (!stored) {
             if (!payload?.userId) {
                 throw new errorHandler_1.AppError('Invalid refresh token', 401);
             }
-            // ✅ CHECK 1: Race condition detection
-            // If another token was created VERY recently, this is likely
-            // a race condition from concurrent refresh attempts
-            const RACE_WINDOW_MS = 10 * 1000; // 10 seconds
+            // ✅ FIX 1: Race window 10s → 60s badhaya
+            // Frontend ke multiple tabs / retry logic ke liye enough time
+            const RACE_WINDOW_MS = 60 * 1000; // 60 seconds
+            // ✅ FIX 2: Sirf userId se check nahi, payload ka jti/iat bhi match karo
+            // Agar same user ka fresh token exist karta hai → race condition tha
             const recentTokens = await database_1.default.refreshToken.findMany({
                 where: {
                     userId: payload.userId,
-                    createdAt: { gte: new Date(Date.now() - RACE_WINDOW_MS) },
+                    createdAt: {
+                        gte: new Date(Date.now() - RACE_WINDOW_MS),
+                    },
                 },
                 orderBy: { createdAt: 'desc' },
-                take: 1,
+                take: 3, // Multiple tabs ke liye
                 include: { user: true },
             });
             if (recentTokens.length > 0) {
-                // ✅ Race condition - return the recent token instead
+                // ✅ Race condition confirmed - return latest token
                 console.warn(`⚠️ Token race condition for user ${payload.userId} ` +
-                    `(${recentTokens.length} recent tokens exist)`);
+                    `(${recentTokens.length} recent tokens found, window: ${RACE_WINDOW_MS / 1000}s)`);
                 const recentToken = recentTokens[0];
-                // ✅ Generate NEW tokens (rotate again for security)
+                // ✅ FIX 3: Race condition pe NEW token generate mat karo
+                // Sirf existing recent token return karo
+                // (Naya generate karne se chain ban jaati thi aur purane tokens orphan ho jaate the)
                 const org = await getDefaultOrg(recentToken.userId);
+                // ✅ Existing token ki expiry check
+                if (recentToken.expiresAt < new Date()) {
+                    throw new errorHandler_1.AppError('Session expired. Please login again.', 401);
+                }
+                // ✅ Rotate the recent token (security maintain karo).
+                // deleteMany, delete nahi: agar koi parallel refresh request wahi row
+                // pehle hata chuki ho to delete() P2025 throw karta hai, jo errorHandler
+                // mein 404 ban kar client tak jaata tha aur session wahin toot jaati thi.
+                await database_1.default.refreshToken.deleteMany({ where: { id: recentToken.id } });
                 return generateTokenPair(recentToken.userId, recentToken.user.email, org?.id);
             }
-            // ✅ CHECK 2: Genuine token reuse - security breach
-            // No recent tokens = someone is using an old token that was already rotated
-            console.error(`🚨 TOKEN REUSE ATTACK detected for user ${payload.userId}`);
-            // Revoke all tokens + invalidate access tokens
-            await database_1.default.$transaction([
+            // ✅ FIX 4: Attack detection ke pehle - 
+            // Check karo ki user ka koi bhi token exist karta hai
+            // Agar haan → probably legitimate old token, soft-fail karo
+            const anyExistingToken = await database_1.default.refreshToken.findFirst({
+                where: { userId: payload.userId },
+                select: { id: true, createdAt: true },
+            });
+            if (anyExistingToken) {
+                // User logged in hai kisi aur device pe
+                // Ye purana token invalidate ho gaya tha (rotate se)
+                // Attack nahi hai - sirf stale token hai
+                console.warn(`⚠️ Stale token for user ${payload.userId} ` +
+                    `(active session exists on another device/tab)`);
+                throw new errorHandler_1.AppError('Your session was refreshed on another tab/device. Please try again.', 401);
+            }
+            // ✅ FIX 5: Genuine attack = koi bhi token nahi + old token use ho raha hai
+            // Tabhi nuke karo
+            //
+            // updateMany, update nahi. User ka na hona yahan bilkul normal hai:
+            // account delete hone par row cascade me chali jati hai, par uske
+            // device par tokens pade rehte hain aur wo refresh maarta rehta hai.
+            // update() us case me P2025 phekta hai, poori transaction roll back
+            // hoti hai, aur neeche wala 401 kabhi chalta hi nahi - client ko 404
+            // milta hai. Client sirf 401 par logout karta hai, isliye deleted
+            // user ki app kabhi logout hoti hi nahi, bas har request fail karti
+            // rehti hai. updateMany 0 rows par chup-chaap nikal jata hai.
+            const [, bumped] = await database_1.default.$transaction([
                 database_1.default.refreshToken.deleteMany({
                     where: { userId: payload.userId },
                 }),
-                database_1.default.user.update({
+                database_1.default.user.updateMany({
                     where: { id: payload.userId },
                     data: { tokenVersion: { increment: 1 } },
                 }),
             ]);
+            // 0 rows ka matlab user hi nahi bacha - wo delete ho chuka account hai,
+            // attack nahi. Dono ka jawab same 401 hai, par log alag hona chahiye:
+            // har deleted user par "ATTACK" chhapega to asli attack us shor me kho
+            // jayega.
+            if (bumped.count === 0) {
+                console.warn(`Refresh from a deleted account (user ${payload.userId}) - asking the client to sign in again`);
+            }
+            else {
+                console.error(`🚨 TOKEN REUSE ATTACK detected for user ${payload.userId}`);
+            }
             throw new errorHandler_1.AppError('Session invalidated due to security concern. Please login again.', 401);
         }
-        // ─── Token expired ────────────────────────────────────────
+        // ─── Token expired ─────────────────────────────────────
         if (stored.expiresAt < new Date()) {
-            await database_1.default.refreshToken.delete({ where: { id: stored.id } });
-            throw new errorHandler_1.AppError('Refresh token expired', 401);
+            // deleteMany - ye sirf cleanup hai, iske fail hone se asli 401 message
+            // dab kar 404 nahi ban jana chahiye.
+            await database_1.default.refreshToken.deleteMany({ where: { id: stored.id } });
+            throw new errorHandler_1.AppError('Session expired. Please login again.', 401);
         }
-        // ─── Normal rotation flow ─────────────────────────────────
-        // Delete old token BEFORE creating new one (atomic)
-        await database_1.default.refreshToken.delete({ where: { id: stored.id } });
-        const org = await getDefaultOrg(stored.userId);
+        // ─── Normal rotation ───────────────────────────────────
+        // deleteMany kabhi throw nahi karta. count === 0 ka matlab: kisi parallel
+        // request ne isi token ko already rotate kar diya. Ye race hai, reuse
+        // attack nahi - token is request ke padhte waqt valid tha. Pehle yahan
+        // delete() tha jo aise case mein P2025 -> 404 deta tha.
+        // Dono queries independent hain, isliye parallel (DB cross-region hai).
+        const [rotated, org] = await Promise.all([
+            database_1.default.refreshToken.deleteMany({ where: { id: stored.id } }),
+            getDefaultOrg(stored.userId),
+        ]);
+        if (rotated.count === 0) {
+            console.warn(`⚠️ Concurrent rotation for user ${stored.userId} - token already rotated`);
+        }
         return generateTokenPair(stored.userId, stored.user.email, org?.id);
     }
     // ────────────────────────────────────────────

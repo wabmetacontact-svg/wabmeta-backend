@@ -14,12 +14,12 @@ export interface ApiResponse<T = any> {
 }
 export declare const sendSuccess: <T = any>(res: Response, data?: T, message?: string, statusCode?: number) => Response;
 export declare const sendError: (res: Response, message?: string, statusCode?: number, error?: any) => Response;
-export declare const successResponse: <T = any>(res: Response, options: {
+export declare const successResponse: <T = any>(res: Response, options?: {
     data?: T;
     message?: string;
     meta?: any;
     statusCode?: number;
-}) => Response;
+} | any) => Response;
 export declare const errorResponse: (res: Response, message?: string, statusCode?: number, error?: any) => Response;
 export declare const validationErrorResponse: (res: Response, errors: any[]) => Response;
 export declare const paginatedResponse: <T = any>(res: Response, options: {
@@ -35,12 +35,12 @@ export declare const sendPaginated: <T = any>(res: Response, data: T[], paginati
     total: number;
 }, message?: string) => Response;
 declare const _default: {
-    successResponse: <T = any>(res: Response, options: {
+    successResponse: <T = any>(res: Response, options?: {
         data?: T;
         message?: string;
         meta?: any;
         statusCode?: number;
-    }) => Response;
+    } | any) => Response;
     errorResponse: (res: Response, message?: string, statusCode?: number, error?: any) => Response;
     sendSuccess: <T = any>(res: Response, data?: T, message?: string, statusCode?: number) => Response;
     sendError: (res: Response, message?: string, statusCode?: number, error?: any) => Response;

@@ -1,12 +1,6 @@
 import { CreateContactInput, UpdateContactInput, ImportContactsInput, BulkUpdateContactsInput, ContactsQueryInput, ContactResponse, ContactWithGroups, ContactsListResponse, ImportContactsResponse, ContactStats, CreateContactGroupInput, UpdateContactGroupInput, ContactGroupResponse } from './contacts.types';
 export declare class ContactsService {
-    /**
-     * ✅ Validate and normalize phone (throws error if invalid)
-     */
     private validateAndNormalizePhone;
-    /**
-     * ✅ Try to normalize phone - returns full number if valid, returns null if invalid.
-     */
     private tryNormalizePhone;
     updateContactFromWebhook(phone: string, profileName: string, organizationId: string): Promise<ContactResponse | null>;
     refreshUnknownNames(organizationId: string): Promise<{
@@ -51,7 +45,7 @@ export declare class ContactsService {
         contacts: ContactResponse[];
     }>;
     updateGroup(organizationId: string, groupId: string, input: UpdateContactGroupInput): Promise<ContactGroupResponse>;
-    deleteGroup(organizationId: string, groupId: string): Promise<{
+    deleteGroup(organizationId: string, groupId: string, deleteContacts?: boolean): Promise<{
         message: string;
     }>;
     addContactsToGroup(organizationId: string, groupId: string, contactIds: string[]): Promise<{

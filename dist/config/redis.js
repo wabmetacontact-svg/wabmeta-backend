@@ -43,8 +43,15 @@ class InMemoryStore {
      * set(key, value, 'EX', seconds)
      * set(key, value, 'KEEPTTL')
      */
-    async set(key, value, mode, duration) {
+    async set(key, value, mode, duration, flag) {
         let expiresAt = null;
+        const isNX = flag === 'NX' || mode === 'NX';
+        if (isNX) {
+            const existing = this.store.get(key);
+            if (existing && (!existing.expiresAt || Date.now() <= existing.expiresAt)) {
+                return null;
+            }
+        }
         if (mode === 'EX' && typeof duration === 'number') {
             expiresAt = Date.now() + duration * 1000;
         }
@@ -57,7 +64,8 @@ class InMemoryStore {
         return 'OK';
     }
     async setex(key, seconds, value) {
-        return this.set(key, value, 'EX', seconds);
+        await this.set(key, value, 'EX', seconds);
+        return 'OK';
     }
     async del(...keys) {
         let deleted = 0;

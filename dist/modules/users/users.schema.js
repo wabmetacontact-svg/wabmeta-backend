@@ -8,33 +8,38 @@ const zod_1 = require("zod");
 // ============================================
 const nameSchema = zod_1.z
     .string()
-    .min(2, 'Name must be at least 2 characters')
-    .max(50, 'Name is too long')
+    .max(100, 'Name is too long')
     .trim();
 const phoneSchema = zod_1.z
     .string()
-    .regex(/^\+?[1-9]\d{9,14}$/, 'Invalid phone number')
+    .trim()
+    .transform((val) => val.replace(/[\s\-\(\)]/g, '')) // spaces hatao
+    .refine((val) => val === '' || /^\+?[1-9]\d{9,14}$/.test(val), 'Invalid phone number')
     .optional()
-    .nullable();
-const urlSchema = zod_1.z
+    .nullable()
+    .or(zod_1.z.literal(''));
+// Avatar: base64 mat allow karo profile update pe — URL only
+const avatarSchema = zod_1.z
     .string()
-    .url('Invalid URL')
+    .url('Avatar must be a valid URL')
+    .max(500)
     .optional()
-    .nullable();
+    .nullable()
+    .or(zod_1.z.literal(''));
 // ============================================
 // REQUEST SCHEMAS
 // ============================================
 exports.updateProfileSchema = zod_1.z.object({
     body: zod_1.z.object({
         firstName: nameSchema.optional(),
-        lastName: nameSchema.optional().nullable(),
+        lastName: nameSchema.optional().nullable().or(zod_1.z.literal('')),
         phone: phoneSchema,
-        avatar: urlSchema,
+        avatar: avatarSchema,
     }),
 });
 exports.updateAvatarSchema = zod_1.z.object({
     body: zod_1.z.object({
-        avatar: zod_1.z.string().url('Invalid avatar URL'),
+        avatar: zod_1.z.string().min(1, 'Avatar is required'),
     }),
 });
 exports.updateNotificationSettingsSchema = zod_1.z.object({

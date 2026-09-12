@@ -12,14 +12,14 @@ export declare class AdminBillingService {
     }): Promise<{
         subscription: {
             plan: {
-                name: string;
                 id: string;
-                type: import(".prisma/client").$Enums.PlanType;
+                name: string;
+                slug: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
                 description: string | null;
+                type: import(".prisma/client").$Enums.PlanType;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
                 maxContacts: number;
@@ -43,8 +43,9 @@ export declare class AdminBillingService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
-            messagesUsed: number;
+            planId: string;
             billingCycle: string;
+            messagesUsed: number;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
             contactsUsed: number;
@@ -52,17 +53,16 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         };
         plan: {
-            name: string;
             id: string;
-            type: import(".prisma/client").$Enums.PlanType;
+            name: string;
+            slug: string;
             createdAt: Date;
             updatedAt: Date;
-            slug: string;
             isActive: boolean;
             description: string | null;
+            type: import(".prisma/client").$Enums.PlanType;
             monthlyPrice: import("@prisma/client/runtime/library").Decimal;
             yearlyPrice: import("@prisma/client/runtime/library").Decimal;
             maxContacts: number;
@@ -98,17 +98,18 @@ export declare class AdminBillingService {
     }): Promise<{
         subscription: {
             organization: {
-                name: string;
                 id: string;
-                createdAt: Date;
-                updatedAt: Date;
+                name: string;
                 slug: string;
-                planType: import(".prisma/client").$Enums.PlanType;
                 logo: string | null;
                 website: string | null;
                 industry: string | null;
                 timezone: string;
                 ownerId: string;
+                planType: import(".prisma/client").$Enums.PlanType;
+                createdAt: Date;
+                updatedAt: Date;
+                deletedAt: Date | null;
                 featureCsvUpload: boolean;
                 featureOverrideByAdmin: boolean;
                 featureSimpleBulkUpload: boolean;
@@ -120,14 +121,14 @@ export declare class AdminBillingService {
                 customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
-                name: string;
                 id: string;
-                type: import(".prisma/client").$Enums.PlanType;
+                name: string;
+                slug: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
                 description: string | null;
+                type: import(".prisma/client").$Enums.PlanType;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
                 maxContacts: number;
@@ -151,8 +152,9 @@ export declare class AdminBillingService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
-            messagesUsed: number;
+            planId: string;
             billingCycle: string;
+            messagesUsed: number;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
             contactsUsed: number;
@@ -160,7 +162,6 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         };
         previousEndDate: Date;
         newEndDate: Date;
@@ -176,17 +177,18 @@ export declare class AdminBillingService {
     }): Promise<{
         subscription: {
             organization: {
-                name: string;
                 id: string;
-                createdAt: Date;
-                updatedAt: Date;
+                name: string;
                 slug: string;
-                planType: import(".prisma/client").$Enums.PlanType;
                 logo: string | null;
                 website: string | null;
                 industry: string | null;
                 timezone: string;
                 ownerId: string;
+                planType: import(".prisma/client").$Enums.PlanType;
+                createdAt: Date;
+                updatedAt: Date;
+                deletedAt: Date | null;
                 featureCsvUpload: boolean;
                 featureOverrideByAdmin: boolean;
                 featureSimpleBulkUpload: boolean;
@@ -198,14 +200,14 @@ export declare class AdminBillingService {
                 customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
-                name: string;
                 id: string;
-                type: import(".prisma/client").$Enums.PlanType;
+                name: string;
+                slug: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
                 description: string | null;
+                type: import(".prisma/client").$Enums.PlanType;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
                 maxContacts: number;
@@ -229,8 +231,9 @@ export declare class AdminBillingService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
-            messagesUsed: number;
+            planId: string;
             billingCycle: string;
+            messagesUsed: number;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
             contactsUsed: number;
@@ -238,7 +241,6 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         };
         message: string;
     }>;
@@ -261,17 +263,18 @@ export declare class AdminBillingService {
                     lastName: string | null;
                 };
             } & {
-                name: string;
                 id: string;
-                createdAt: Date;
-                updatedAt: Date;
+                name: string;
                 slug: string;
-                planType: import(".prisma/client").$Enums.PlanType;
                 logo: string | null;
                 website: string | null;
                 industry: string | null;
                 timezone: string;
                 ownerId: string;
+                planType: import(".prisma/client").$Enums.PlanType;
+                createdAt: Date;
+                updatedAt: Date;
+                deletedAt: Date | null;
                 featureCsvUpload: boolean;
                 featureOverrideByAdmin: boolean;
                 featureSimpleBulkUpload: boolean;
@@ -283,14 +286,14 @@ export declare class AdminBillingService {
                 customLabels: import("@prisma/client/runtime/library").JsonValue;
             };
             plan: {
-                name: string;
                 id: string;
-                type: import(".prisma/client").$Enums.PlanType;
+                name: string;
+                slug: string;
                 createdAt: Date;
                 updatedAt: Date;
-                slug: string;
                 isActive: boolean;
                 description: string | null;
+                type: import(".prisma/client").$Enums.PlanType;
                 monthlyPrice: import("@prisma/client/runtime/library").Decimal;
                 yearlyPrice: import("@prisma/client/runtime/library").Decimal;
                 maxContacts: number;
@@ -313,8 +316,9 @@ export declare class AdminBillingService {
             status: import(".prisma/client").$Enums.SubscriptionStatus;
             createdAt: Date;
             updatedAt: Date;
-            messagesUsed: number;
+            planId: string;
             billingCycle: string;
+            messagesUsed: number;
             currentPeriodStart: Date;
             currentPeriodEnd: Date;
             contactsUsed: number;
@@ -322,7 +326,6 @@ export declare class AdminBillingService {
             lastPaymentAt: Date | null;
             nextPaymentAt: Date | null;
             cancelledAt: Date | null;
-            planId: string;
         }[];
         meta: {
             page: number;
@@ -351,11 +354,11 @@ export declare class AdminBillingService {
             id: string;
             userAgent: string | null;
             createdAt: Date;
-            ipAddress: string | null;
-            metadata: import("@prisma/client/runtime/library").JsonValue;
-            action: import(".prisma/client").$Enums.ActivityAction | null;
             entity: string | null;
             entityId: string | null;
+            action: import(".prisma/client").$Enums.ActivityAction | null;
+            metadata: import("@prisma/client/runtime/library").JsonValue;
+            ipAddress: string | null;
         })[];
     }>;
 }

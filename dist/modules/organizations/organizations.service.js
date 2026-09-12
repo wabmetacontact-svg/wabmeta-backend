@@ -8,12 +8,19 @@ exports.organizationsService = exports.OrganizationsService = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const config_1 = require("../../config");
 const errorHandler_1 = require("../../middleware/errorHandler");
+const featureLock_1 = require("../../middleware/featureLock");
 const password_1 = require("../../utils/password");
 const otp_1 = require("../../utils/otp");
 const email_1 = require("../../utils/email");
+const r2_service_1 = require("../../services/r2.service");
+const cloudinary_1 = require("cloudinary");
+const cloudinary_service_1 = require("../../services/cloudinary.service");
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+// Plan ke limits (jaise FREE_DEMO par maxChatbots = 0) bhi feature lock
+// karte hain, sirf admin ke featureXLocked columns nahi. Client ko
+// effective lock chahiye, isliye yahin compute karke bhejte hain.
 const formatOrganization = (org) => ({
     id: org.id,
     name: org.name,
@@ -23,11 +30,16 @@ const formatOrganization = (org) => ({
     industry: org.industry,
     timezone: org.timezone,
     planType: org.planType,
-    featureInboxLocked: org.featureInboxLocked,
-    featureCampaignsLocked: org.featureCampaignsLocked,
-    featureChatbotLocked: org.featureChatbotLocked,
-    featureAutomationLocked: org.featureAutomationLocked,
-    featureConnectionLocked: org.featureConnectionLocked,
+    ...(() => {
+        const locks = (0, featureLock_1.computeFeatureLocks)(org);
+        return {
+            featureInboxLocked: locks.inbox,
+            featureCampaignsLocked: locks.campaigns,
+            featureChatbotLocked: locks.chatbot,
+            featureAutomationLocked: locks.automation,
+            featureConnectionLocked: locks.connection,
+        };
+    })(),
     createdAt: org.createdAt,
     updatedAt: org.updatedAt,
 });
@@ -129,6 +141,19 @@ class OrganizationsService {
                 _count: {
                     select: { members: true },
                 },
+                // Plan limits chahiye taaki effective feature locks compute ho sakein
+                subscription: {
+                    select: {
+                        plan: {
+                            select: {
+                                maxCampaigns: true,
+                                maxChatbots: true,
+                                maxAutomations: true,
+                                maxWhatsAppAccounts: true,
+                            },
+                        },
+                    },
+                },
             },
         });
         if (!organization) {
@@ -157,7 +182,7 @@ class OrganizationsService {
     // ==========================================
     async getUserOrganizations(userId) {
         const memberships = await database_1.default.organizationMember.findMany({
-            where: { userId },
+            where: { userId, organization: { deletedAt: null } },
             include: {
                 organization: true,
             },
@@ -181,11 +206,48 @@ class OrganizationsService {
         if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
             throw new errorHandler_1.AppError('Permission denied', 403);
         }
+        let finalLogo = input.logo;
+        if (finalLogo && finalLogo.startsWith('data:image/')) {
+            // 1. Try R2
+            if (r2_service_1.r2Service.isConfigured()) {
+                try {
+                    const parts = finalLogo.split(',');
+                    const buffer = Buffer.from(parts[1], 'base64');
+                    const mimeType = parts[0].split(';')[0].replace('data:', '') || 'image/png';
+                    const ext = mimeType.split('/')[1] || 'png';
+                    const filename = `logo_${organizationId}_${Date.now()}.${ext}`;
+                    const r2Res = await r2_service_1.r2Service.uploadMediaBuffer(buffer, filename, mimeType, `logos/${organizationId}`);
+                    if (r2Res?.url) {
+                        finalLogo = r2Res.url;
+                    }
+                }
+                catch (err) {
+                    console.warn('⚠️ R2 logo upload failed, trying Cloudinary:', err?.message);
+                }
+            }
+            // 2. Fallback to Cloudinary
+            if (finalLogo.startsWith('data:image/') && cloudinary_service_1.cloudinaryService.isConfigured()) {
+                try {
+                    const uploadRes = await cloudinary_1.v2.uploader.upload(finalLogo, {
+                        folder: `wabmeta/logos/${organizationId}`,
+                        transformation: [
+                            { width: 400, height: 400, crop: 'limit', quality: 'auto', fetch_format: 'auto' },
+                        ],
+                    });
+                    if (uploadRes?.secure_url) {
+                        finalLogo = uploadRes.secure_url;
+                    }
+                }
+                catch (err) {
+                    console.warn('⚠️ Cloudinary logo upload failed:', err?.message);
+                }
+            }
+        }
         const organization = await database_1.default.organization.update({
             where: { id: organizationId },
             data: {
                 name: input.name,
-                logo: input.logo,
+                logo: finalLogo,
                 website: input.website,
                 industry: input.industry,
                 timezone: input.timezone,
@@ -491,15 +553,22 @@ class OrganizationsService {
         const user = await database_1.default.user.findUnique({
             where: { id: userId },
         });
-        if (user?.password) {
-            const isValid = await (0, password_1.comparePassword)(password, user.password);
-            if (!isValid) {
-                throw new errorHandler_1.AppError('Invalid password', 400);
-            }
+        if (!user?.password) {
+            // Owners who only signed in with Google have no password. Deleting an
+            // organization removes access for the whole team and stops billing, so it
+            // must not proceed without a real confirmation. (The data itself is
+            // retained via soft delete; transferOwnership already rejects this case.)
+            throw new errorHandler_1.AppError('Set a password on your account before deleting the organization.', 400);
         }
-        // Delete organization (cascades to all related data)
-        await database_1.default.organization.delete({
+        const isValid = await (0, password_1.comparePassword)(password, user.password);
+        if (!isValid) {
+            throw new errorHandler_1.AppError('Invalid password', 400);
+        }
+        // Soft delete: retain the financial ledger. The org disappears from every
+        // read (auth drops the context, lists filter deletedAt).
+        await database_1.default.organization.update({
             where: { id: organizationId },
+            data: { deletedAt: new Date() },
         });
         return { message: 'Organization deleted successfully' };
     }

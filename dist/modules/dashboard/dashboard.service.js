@@ -67,7 +67,7 @@ class DashboardService {
             const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
             const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
             // ✅ OPTIMIZATION: Use raw SQL for grouped aggregations (1 query instead of 20+)
-            const [contactStats, messageStats, conversationStats, campaignStats, templateStats, whatsappStats,] = await Promise.all([
+            const [contactStats, messageStats, conversationStats, campaignStats, templateStats, whatsappStats, channelStats, telegramBotCount, instagramAccountCount,] = await Promise.all([
                 // ─── Contacts: 5 counts in 1 query ────────────────────────────
                 database_1.default.$queryRaw `
           SELECT
@@ -126,6 +126,20 @@ class DashboardService {
                 database_1.default.whatsAppAccount.count({
                     where: { organizationId, status: 'CONNECTED' },
                 }),
+                // ─── Per-channel breakdown (conversations + sent/received) ─────
+                database_1.default.$queryRaw `
+          SELECT c.channel::text AS channel,
+            COUNT(DISTINCT c.id)::bigint AS conversations,
+            COUNT(m.id) FILTER (WHERE m.direction = 'OUTBOUND')::bigint AS sent,
+            COUNT(m.id) FILTER (WHERE m.direction = 'INBOUND')::bigint AS received
+          FROM "Conversation" c
+          LEFT JOIN "Message" m ON m."conversationId" = c.id
+          WHERE c."organizationId" = ${organizationId}
+          GROUP BY c.channel
+        `,
+                // ─── Connected Telegram bots + Instagram accounts ─────────────
+                database_1.default.telegramBot.count({ where: { organizationId } }),
+                database_1.default.instagramAccount.count({ where: { organizationId, isActive: true } }),
             ]);
             // ✅ Convert BigInt to Number for JSON serialization
             const c = contactStats[0];
@@ -164,7 +178,23 @@ class DashboardService {
             const failureRate = totalMessagesSent > 0
                 ? Math.round((failedMessages / totalMessagesSent) * 100)
                 : 0;
+            // Per-channel breakdown for the unified dashboard.
+            const byChannel = {};
+            for (const row of channelStats) {
+                byChannel[row.channel] = {
+                    conversations: Number(row.conversations),
+                    sent: Number(row.sent),
+                    received: Number(row.received),
+                };
+            }
+            const chan = (k) => byChannel[k] || { conversations: 0, sent: 0, received: 0 };
+            const channels = {
+                whatsapp: { connected: whatsappStats, ...chan('WHATSAPP') },
+                instagram: { connected: instagramAccountCount, ...chan('INSTAGRAM') },
+                telegram: { connected: telegramBotCount, ...chan('TELEGRAM') },
+            };
             const result = {
+                channels,
                 contacts: {
                     total: totalContacts,
                     today: newContactsToday,

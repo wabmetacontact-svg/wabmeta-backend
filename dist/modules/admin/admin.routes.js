@@ -223,6 +223,11 @@ router.get('/whatsapp-stats', admin_controller_1.adminController.getWhatsAppStat
 router.patch('/whatsapp-connections/:accountId/connection-type', admin_controller_1.adminController.updateConnectionType.bind(admin_controller_1.adminController));
 router.get('/whatsapp-connections', admin_controller_1.adminController.getWhatsAppConnections.bind(admin_controller_1.adminController));
 router.post('/whatsapp-connections/:accountId/disconnect', admin_controller_1.adminController.disconnectWhatsAppAccount.bind(admin_controller_1.adminController));
+// Meta se taaza quality rating / tier / health kheencho
+router.post('/whatsapp-connections/:accountId/refresh', admin_controller_1.adminController.refreshWhatsAppAccount.bind(admin_controller_1.adminController));
+// Display overrides - user ko kya dikhe. Meta par kuch nahi badalta,
+// aur sending par bhi koi asar nahi.
+router.put('/whatsapp-connections/:accountId/display', admin_controller_1.adminController.setAccountDisplayOverrides.bind(admin_controller_1.adminController));
 // ============================================
 // WALLET MANAGEMENT ROUTES
 // ============================================

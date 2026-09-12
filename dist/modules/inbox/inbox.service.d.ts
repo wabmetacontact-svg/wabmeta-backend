@@ -21,23 +21,29 @@ export declare class InboxService {
             phone: string;
             email: string | null;
             id: string;
-            tags: string[];
-            firstName: string | null;
-            lastName: string | null;
-            avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
-            lastMessageAt: Date | null;
+            deletedAt: Date | null;
             countryCode: string;
+            telegramUserId: string | null;
+            telegramUsername: string | null;
+            instagramUserId: string | null;
+            instagramUsername: string | null;
+            firstName: string | null;
+            lastName: string | null;
+            avatar: string | null;
             whatsappProfileName: string | null;
+            whatsappAbout: string | null;
+            whatsappProfilePicUrl: string | null;
             whatsappProfileFetched: boolean;
             lastProfileFetchAt: Date | null;
             profileFetchAttempts: number;
             customFields: Prisma.JsonValue;
+            tags: string[];
+            lastMessageAt: Date | null;
             messageCount: number;
             source: string | null;
-            deletedAt: Date | null;
             deletedBy: string | null;
         };
     } & {
@@ -45,10 +51,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -57,8 +66,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Get messages for conversation
@@ -67,27 +78,29 @@ export declare class InboxService {
         messages: {
             timestamp: Date;
             id: string;
-            type: import(".prisma/client").$Enums.MessageType;
-            waMessageId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
-            whatsappAccountId: string | null;
-            templateName: string | null;
-            conversationId: string;
             metadata: Prisma.JsonValue | null;
-            content: string | null;
+            templateId: string | null;
+            whatsappAccountId: string | null;
+            channel: import(".prisma/client").$Enums.Channel;
+            conversationId: string;
+            type: import(".prisma/client").$Enums.MessageType;
             readAt: Date | null;
-            wamId: string | null;
-            direction: import(".prisma/client").$Enums.MessageDirection;
+            failedAt: Date | null;
             mediaUrl: string | null;
             mediaType: string | null;
+            waMessageId: string | null;
+            templateName: string | null;
+            content: string | null;
+            wamId: string | null;
+            telegramMessageId: string | null;
+            direction: import(".prisma/client").$Enums.MessageDirection;
             mediaMimeType: string | null;
-            templateId: string | null;
             templateParams: Prisma.JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
-            failedAt: Date | null;
             failureReason: string | null;
             replyToMessageId: string | null;
             retryCount: number;
@@ -111,10 +124,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -123,8 +139,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Archive/Unarchive conversation
@@ -134,10 +152,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -146,8 +167,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Assign conversation to user
@@ -157,10 +180,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -169,8 +195,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Update conversation labels
@@ -180,10 +208,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -192,8 +223,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Add labels to conversation (Now replaces to keep only 1 label)
@@ -203,10 +236,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -215,8 +251,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Remove label from conversation
@@ -226,10 +264,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -238,9 +279,40 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
+    /**
+     * Human handoff: pause/resume channel automation for one conversation.
+     * Channel-agnostic — org-scoped so a caller can't touch another tenant.
+     */
+    setAutomationPaused(organizationId: string, conversationId: string, paused: boolean): Promise<{
+        organizationId: string;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
+        lastMessageAt: Date | null;
+        contactId: string;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
+        lastMessagePreview: string | null;
+        lastCustomerMessageAt: Date | null;
+        windowExpiresAt: Date | null;
+        isWindowOpen: boolean;
+        lastBotMessageAt: Date | null;
+        isArchived: boolean;
+        isRead: boolean;
+        unreadCount: number;
+        isPinned: boolean;
+        assignedTo: string | null;
+        labels: string[];
+        automationPaused: boolean;
+    } | null>;
     /**
      * Get inbox stats
      */
@@ -274,7 +346,7 @@ export declare class InboxService {
     /**
      * Search messages
      */
-    searchMessages(organizationId: string, query: string, page?: number, limit?: number): Promise<{
+    searchMessages(organizationId: string, query: string, page?: number, limit?: number, channel?: 'WHATSAPP' | 'INSTAGRAM' | 'TELEGRAM'): Promise<{
         messages: ({
             conversation: {
                 contact: {
@@ -282,23 +354,29 @@ export declare class InboxService {
                     phone: string;
                     email: string | null;
                     id: string;
-                    tags: string[];
-                    firstName: string | null;
-                    lastName: string | null;
-                    avatar: string | null;
                     status: import(".prisma/client").$Enums.ContactStatus;
                     createdAt: Date;
                     updatedAt: Date;
-                    lastMessageAt: Date | null;
+                    deletedAt: Date | null;
                     countryCode: string;
+                    telegramUserId: string | null;
+                    telegramUsername: string | null;
+                    instagramUserId: string | null;
+                    instagramUsername: string | null;
+                    firstName: string | null;
+                    lastName: string | null;
+                    avatar: string | null;
                     whatsappProfileName: string | null;
+                    whatsappAbout: string | null;
+                    whatsappProfilePicUrl: string | null;
                     whatsappProfileFetched: boolean;
                     lastProfileFetchAt: Date | null;
                     profileFetchAttempts: number;
                     customFields: Prisma.JsonValue;
+                    tags: string[];
+                    lastMessageAt: Date | null;
                     messageCount: number;
                     source: string | null;
-                    deletedAt: Date | null;
                     deletedBy: string | null;
                 };
             } & {
@@ -306,10 +384,13 @@ export declare class InboxService {
                 id: string;
                 createdAt: Date;
                 updatedAt: Date;
-                phoneNumberId: string | null;
+                channel: import(".prisma/client").$Enums.Channel;
+                telegramBotId: string | null;
                 lastMessageAt: Date | null;
                 contactId: string;
-                isPinned: boolean;
+                phoneNumberId: string | null;
+                telegramChatId: string | null;
+                instagramAccountId: string | null;
                 lastMessagePreview: string | null;
                 lastCustomerMessageAt: Date | null;
                 windowExpiresAt: Date | null;
@@ -318,32 +399,36 @@ export declare class InboxService {
                 isArchived: boolean;
                 isRead: boolean;
                 unreadCount: number;
+                isPinned: boolean;
                 assignedTo: string | null;
                 labels: string[];
+                automationPaused: boolean;
             };
         } & {
             id: string;
-            type: import(".prisma/client").$Enums.MessageType;
-            waMessageId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
-            whatsappAccountId: string | null;
-            templateName: string | null;
-            conversationId: string;
             metadata: Prisma.JsonValue | null;
-            content: string | null;
+            templateId: string | null;
+            whatsappAccountId: string | null;
+            channel: import(".prisma/client").$Enums.Channel;
+            conversationId: string;
+            type: import(".prisma/client").$Enums.MessageType;
             readAt: Date | null;
-            wamId: string | null;
-            direction: import(".prisma/client").$Enums.MessageDirection;
+            failedAt: Date | null;
             mediaUrl: string | null;
             mediaType: string | null;
+            waMessageId: string | null;
+            templateName: string | null;
+            content: string | null;
+            wamId: string | null;
+            telegramMessageId: string | null;
+            direction: import(".prisma/client").$Enums.MessageDirection;
             mediaMimeType: string | null;
-            templateId: string | null;
             templateParams: Prisma.JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
-            failedAt: Date | null;
             failureReason: string | null;
             replyToMessageId: string | null;
             retryCount: number;
@@ -359,6 +444,13 @@ export declare class InboxService {
             total: number;
             totalPages: number;
         };
+    }>;
+    /**
+     * Draft an AI reply suggestion for the agent, from the recent conversation
+     * history. Human-in-the-loop: the agent reviews/edits before sending.
+     */
+    suggestReply(organizationId: string, conversationId: string, instruction?: string): Promise<{
+        suggestion: string;
     }>;
     /**
      * Bulk update conversations
@@ -397,10 +489,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -409,8 +504,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Get or create conversation
@@ -421,23 +518,29 @@ export declare class InboxService {
             phone: string;
             email: string | null;
             id: string;
-            tags: string[];
-            firstName: string | null;
-            lastName: string | null;
-            avatar: string | null;
             status: import(".prisma/client").$Enums.ContactStatus;
             createdAt: Date;
             updatedAt: Date;
-            lastMessageAt: Date | null;
+            deletedAt: Date | null;
             countryCode: string;
+            telegramUserId: string | null;
+            telegramUsername: string | null;
+            instagramUserId: string | null;
+            instagramUsername: string | null;
+            firstName: string | null;
+            lastName: string | null;
+            avatar: string | null;
             whatsappProfileName: string | null;
+            whatsappAbout: string | null;
+            whatsappProfilePicUrl: string | null;
             whatsappProfileFetched: boolean;
             lastProfileFetchAt: Date | null;
             profileFetchAttempts: number;
             customFields: Prisma.JsonValue;
+            tags: string[];
+            lastMessageAt: Date | null;
             messageCount: number;
             source: string | null;
-            deletedAt: Date | null;
             deletedBy: string | null;
         };
     } & {
@@ -445,10 +548,13 @@ export declare class InboxService {
         id: string;
         createdAt: Date;
         updatedAt: Date;
-        phoneNumberId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        telegramBotId: string | null;
         lastMessageAt: Date | null;
         contactId: string;
-        isPinned: boolean;
+        phoneNumberId: string | null;
+        telegramChatId: string | null;
+        instagramAccountId: string | null;
         lastMessagePreview: string | null;
         lastCustomerMessageAt: Date | null;
         windowExpiresAt: Date | null;
@@ -457,8 +563,10 @@ export declare class InboxService {
         isArchived: boolean;
         isRead: boolean;
         unreadCount: number;
+        isPinned: boolean;
         assignedTo: string | null;
         labels: string[];
+        automationPaused: boolean;
     }>;
     /**
      * Helper to check Free Demo chat limit
@@ -473,27 +581,29 @@ export declare class InboxService {
      */
     sendTemplateMessage(organizationId: string, conversationId: string, templateName: string, language: string, params: any[], bodyText: string): Promise<{
         id: string;
-        type: import(".prisma/client").$Enums.MessageType;
-        waMessageId: string | null;
         status: import(".prisma/client").$Enums.MessageStatus;
         createdAt: Date;
         updatedAt: Date;
-        whatsappAccountId: string | null;
-        templateName: string | null;
-        conversationId: string;
         metadata: Prisma.JsonValue | null;
-        content: string | null;
+        templateId: string | null;
+        whatsappAccountId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        conversationId: string;
+        type: import(".prisma/client").$Enums.MessageType;
         readAt: Date | null;
-        wamId: string | null;
-        direction: import(".prisma/client").$Enums.MessageDirection;
+        failedAt: Date | null;
         mediaUrl: string | null;
         mediaType: string | null;
+        waMessageId: string | null;
+        templateName: string | null;
+        content: string | null;
+        wamId: string | null;
+        telegramMessageId: string | null;
+        direction: import(".prisma/client").$Enums.MessageDirection;
         mediaMimeType: string | null;
-        templateId: string | null;
         templateParams: Prisma.JsonValue | null;
         sentAt: Date | null;
         deliveredAt: Date | null;
-        failedAt: Date | null;
         failureReason: string | null;
         replyToMessageId: string | null;
         retryCount: number;
@@ -509,27 +619,29 @@ export declare class InboxService {
     }>;
     editMessage(organizationId: string, conversationId: string, messageId: string, newContent: string): Promise<{
         id: string;
-        type: import(".prisma/client").$Enums.MessageType;
-        waMessageId: string | null;
         status: import(".prisma/client").$Enums.MessageStatus;
         createdAt: Date;
         updatedAt: Date;
-        whatsappAccountId: string | null;
-        templateName: string | null;
-        conversationId: string;
         metadata: Prisma.JsonValue | null;
-        content: string | null;
+        templateId: string | null;
+        whatsappAccountId: string | null;
+        channel: import(".prisma/client").$Enums.Channel;
+        conversationId: string;
+        type: import(".prisma/client").$Enums.MessageType;
         readAt: Date | null;
-        wamId: string | null;
-        direction: import(".prisma/client").$Enums.MessageDirection;
+        failedAt: Date | null;
         mediaUrl: string | null;
         mediaType: string | null;
+        waMessageId: string | null;
+        templateName: string | null;
+        content: string | null;
+        wamId: string | null;
+        telegramMessageId: string | null;
+        direction: import(".prisma/client").$Enums.MessageDirection;
         mediaMimeType: string | null;
-        templateId: string | null;
         templateParams: Prisma.JsonValue | null;
         sentAt: Date | null;
         deliveredAt: Date | null;
-        failedAt: Date | null;
         failureReason: string | null;
         replyToMessageId: string | null;
         retryCount: number;

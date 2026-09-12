@@ -51,10 +51,63 @@ const tokenDecryption_1 = require("../../utils/tokenDecryption"); // ✅ FIX: sh
 const database_1 = __importDefault(require("../../config/database"));
 const wallet_deduction_service_1 = require("../wallet/wallet.deduction.service");
 const logger_1 = require("../../utils/logger");
+const errorHandler_1 = require("../../middleware/errorHandler");
+const accountHealth_service_1 = require("../meta/accountHealth.service");
+const metaErrors_1 = require("../meta/metaErrors");
 // ============================================
 // WHATSAPP SERVICE CLASS
 // ============================================
 class WhatsAppService {
+    // Ek account ke liye ek waqt mein ek hi background template sync
+    templateSyncInFlight = new Set();
+    /**
+     * Template sync background mein trigger karo (fire-and-forget).
+     *
+     * Meta par delete ho chuke templates hamari DB mein bache reh jaate hain
+     * agar sync na chale - phir unhe bhejne par 132001 aata hai. Jab bhi wo
+     * error mile, sync chala kar stale rows saaf kar dete hain.
+     */
+    syncTemplatesInBackground(accountId, organizationId) {
+        if (this.templateSyncInFlight.has(accountId))
+            return;
+        this.templateSyncInFlight.add(accountId);
+        Promise.resolve().then(() => __importStar(require('../meta/meta.service'))).then(({ metaService }) => metaService.syncTemplates(accountId, organizationId))
+            .then(() => console.log(`✅ Stale templates cleaned for account ${accountId}`))
+            .catch((e) => console.error('Background template sync failed:', e?.message))
+            .finally(() => this.templateSyncInFlight.delete(accountId));
+    }
+    /**
+     * Meta ke send errors ko padhne layak message mein badlo.
+     *
+     * metaApi.handleError plain Error return karta hai, isliye errorHandler
+     * har Meta rejection ko 500 bana deta tha - user ko sirf "Request failed
+     * with status code 500" dikhta tha, jabki Meta ne exact wajah batayi hoti
+     * hai. Ye codes account/config ki dikkat hain, server crash nahi.
+     */
+    toSendError(err, phoneNumber) {
+        const meta = err?.metaError;
+        if (!meta)
+            return err;
+        // Meta ke test numbers "1555..." se shuru hote hain. Unke liye 131037 ka
+        // matlab display name pending hona nahi hai - test numbers sirf Meta ke
+        // console mein pehle se registered recipients ko hi bhej sakte hain.
+        const digits = String(phoneNumber || '').replace(/[^0-9]/g, '');
+        const isTestNumber = digits.startsWith('1555');
+        // Ab har code metaErrors.ts se aata hai - Meta ke poore documented
+        // list se. Pehle yahan sirf 6 codes the aur baaki sab 500 ban jate the.
+        const info = (0, metaErrors_1.describeMetaError)(meta);
+        // Meta ke test numbers "1555..." ke liye 131037 ka matlab alag hai -
+        // display name pending nahi, balki wo sirf console me registered
+        // recipients ko hi bhej sakte hain.
+        if (info.code === 131037 && isTestNumber) {
+            return new errorHandler_1.AppError('This is a Meta test number - it can only message recipients you have added in the Meta developer console. ' +
+                'Connect your own business number to message anyone.', 400);
+        }
+        if (!info.known) {
+            console.warn(`⚠️ [Meta] Undocumented error code ${info.code}: ${info.raw || '(no detail)'}`);
+        }
+        return new errorHandler_1.AppError(info.message, info.status);
+    }
     // ============================================
     // HELPER METHODS
     // ============================================
@@ -113,7 +166,7 @@ class WhatsAppService {
     formatPhoneNumber(phone) {
         const digits = phone.replace(/[^0-9]/g, '');
         if (digits.length <= 10 && !phone.startsWith('+')) {
-            throw new Error(`Phone number ${phone} is missing a country code. Messages cannot be sent without a country code.`);
+            throw new errorHandler_1.AppError(`Phone number ${phone} is missing a country code. Messages cannot be sent without a country code.`, 400);
         }
         return digits;
     }
@@ -146,7 +199,9 @@ class WhatsAppService {
             console.log(`👤 Created new contact: ${canonical}`);
         }
         else if (contact.phone !== canonical) {
-            await database_1.default.contact.update({
+            // Background write - value neeche locally set ho hi rahi hai, isliye
+            // iske DB round trip ka wait karne ka koi fayda nahi tha.
+            database_1.default.contact.update({
                 where: { id: contact.id },
                 data: { phone: canonical },
             }).catch(() => { });
@@ -165,9 +220,10 @@ class WhatsAppService {
         if (!conversation) {
             conversation = await database_1.default.conversation.findUnique({
                 where: {
-                    organizationId_contactId: {
+                    organizationId_contactId_channel: {
                         organizationId,
                         contactId,
+                        channel: 'WHATSAPP',
                     },
                 },
             });
@@ -190,7 +246,7 @@ class WhatsAppService {
             catch (err) {
                 conversation = await database_1.default.conversation.findUnique({
                     where: {
-                        organizationId_contactId: { organizationId, contactId },
+                        organizationId_contactId_channel: { organizationId, contactId, channel: 'WHATSAPP' },
                     },
                 });
                 if (!conversation)
@@ -199,7 +255,10 @@ class WhatsAppService {
         }
         else {
             if (messagePreview) {
-                await database_1.default.conversation.update({
+                // Background write: sendMessage ka setImmediate block bilkul yahi
+                // update dobara karta hai, aur caller sirf id/window fields padhta hai.
+                // Iska await seedha user ke "sent" tick mein add ho raha tha.
+                database_1.default.conversation.update({
                     where: { id: conversation.id },
                     data: {
                         lastMessageAt: new Date(),
@@ -207,7 +266,7 @@ class WhatsAppService {
                         isRead: true,
                         unreadCount: 0,
                     },
-                });
+                }).catch((e) => console.error('Conversation preview update error:', e?.message));
             }
         }
         return conversation;
@@ -357,6 +416,14 @@ class WhatsAppService {
                     status: 'APPROVED'
                 }
             });
+            // Meta ke liye language.code mandatory hai. Pehle seedha caller ka
+            // templateLanguage use hota tha - undefined hone par payload mein
+            // language: {} jata tha aur Meta "missing: code" error deta tha.
+            // Template row pehle se fetch ho chuki hai, usi se fallback lo.
+            const resolvedLanguage = templateLanguage || template?.language;
+            if (!resolvedLanguage) {
+                throw new Error(`Template "${templateName}" ki language nahi mili. Templates sync karke dobara try karein.`);
+            }
             let fullContent = templateName;
             if (template?.bodyText) {
                 fullContent = this.hydrateTemplate(template.bodyText, components || []);
@@ -365,10 +432,10 @@ class WhatsAppService {
             // ✅ FIX: wallet pre-check BEFORE hitting Meta. If wallet is empty/insufficient,
             // block here — otherwise we'd send the message, get billed by Meta, and then
             // fire-and-forget deduction would silently fail with no user-visible signal.
-            const walletCheck = await this.canAffordSingleTemplateSend(orgId, templateName, template?.category, templateLanguage, to);
+            const walletCheck = await this.canAffordSingleTemplateSend(orgId, templateName, template?.category, resolvedLanguage, to);
             if (!walletCheck.ok) {
                 console.warn(`💳 Blocking send: ${walletCheck.reason}`);
-                throw new Error(walletCheck.reason || 'Wallet balance insufficient for this message.');
+                throw new errorHandler_1.AppError(walletCheck.reason || 'Wallet balance insufficient for this message.', 402);
             }
             const formattedTo = this.formatPhoneNumber(to);
             const messagePayload = {
@@ -378,11 +445,73 @@ class WhatsAppService {
                 type: 'template',
                 template: {
                     name: templateName,
-                    language: { code: templateLanguage },
+                    language: { code: resolvedLanguage },
                     components: components || [],
                 },
             };
-            const response = await meta_api_1.metaApi.sendMessage(account.phoneNumberId, accessToken, formattedTo, messagePayload);
+            let response;
+            try {
+                response = await meta_api_1.metaApi.sendMessage(account.phoneNumberId, accessToken, formattedTo, messagePayload);
+            }
+            catch (sendErr) {
+                // Meta 132001 = "template name does not exist in the translation".
+                // Matlab template to hai, par is language mein nahi. Ye tab hota hai
+                // jab Meta par wo translation delete ho chuki ho aur hamari DB row
+                // purani reh gayi ho (sync na chala ho).
+                //
+                // Aise mein hard fail karne ka koi matlab nahi - usi naam ka koi aur
+                // APPROVED language version ho to usse bhej do, aur background mein
+                // sync trigger kar do taaki stale row saaf ho jaye.
+                const metaCode = sendErr?.metaError?.code ?? sendErr?.response?.data?.error?.code;
+                if (metaCode !== 132001) {
+                    // (#135000) jaise opaque errors me Meta koi wajah nahi deta.
+                    // health_status me wo wajah hoti hai - payment method, banned
+                    // WABA, business verification. Use error me jod do, warna user
+                    // ko sirf "Generic user error" dikhta hai.
+                    const why = await accountHealth_service_1.accountHealthService
+                        .explainFailure(accountId, metaCode)
+                        .catch(() => null);
+                    if (why)
+                        throw new errorHandler_1.AppError(why, 400);
+                    throw sendErr;
+                }
+                console.warn(`⚠️ Template "${templateName}" not found in ${resolvedLanguage} - trying other approved languages`);
+                // Stale data saaf karne ke liye sync (fire-and-forget)
+                this.syncTemplatesInBackground(accountId, orgId);
+                const alternatives = await database_1.default.template.findMany({
+                    where: {
+                        organizationId: account.organizationId,
+                        name: templateName,
+                        status: 'APPROVED',
+                        language: { not: resolvedLanguage },
+                    },
+                    select: { language: true },
+                    orderBy: { updatedAt: 'desc' },
+                });
+                if (alternatives.length === 0)
+                    throw sendErr;
+                let lastErr = sendErr;
+                response = null;
+                for (const alt of alternatives) {
+                    if (!alt.language)
+                        continue;
+                    console.log(`↻ Retry "${templateName}" with language ${alt.language}`);
+                    messagePayload.template.language = { code: alt.language };
+                    try {
+                        response = await meta_api_1.metaApi.sendMessage(account.phoneNumberId, accessToken, formattedTo, messagePayload);
+                        break;
+                    }
+                    catch (retryErr) {
+                        lastErr = retryErr;
+                        const retryCode = retryErr?.metaError?.code ?? retryErr?.response?.data?.error?.code;
+                        // Koi aur error hai to aur languages try karne ka fayda nahi
+                        if (retryCode !== 132001)
+                            throw retryErr;
+                    }
+                }
+                if (!response)
+                    throw lastErr;
+            }
             const waMessageId = response?.messages?.[0]?.id || response?.messageId;
             if (!waMessageId)
                 throw new Error('No message ID returned');
@@ -436,13 +565,19 @@ class WhatsAppService {
                         },
                     },
                 });
+                // 24-ghante ka customer service window SIRF customer ke reply se
+                // khulta hai - business ka apna message (template bhi) use nahi
+                // kholta. Pehle yahan isWindowOpen: true + windowExpiresAt +24h set
+                // hota tha, jiska matlab tha:
+                //   template bhejo -> DB ko lagta hai window khul gaya -> uske baad
+                //   normal text bhejne par hamara check pass ho jata -> Meta 131047
+                //   ("Re-engagement message") se reject kar deta.
+                // Window ab sirf webhook (inbound message) se khulta hai.
                 await database_1.default.conversation.update({
                     where: { id: conversationId },
                     data: {
                         lastMessageAt: now,
                         lastMessagePreview: fullContent.substring(0, 100),
-                        isWindowOpen: true,
-                        windowExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
                     },
                 });
                 const { webhookEvents } = await Promise.resolve().then(() => __importStar(require('../webhooks/webhook.service')));
@@ -511,23 +646,63 @@ class WhatsAppService {
                 })
                 : Promise.resolve(null),
         ]);
+        console.log(`⏱️ Account+conversation lookup: ${Date.now() - startTime}ms`);
         const { account, accessToken } = accountData;
         const orgId = organizationId || account.organizationId;
         const formattedTo = this.formatPhoneNumber(to);
-        if (type !== 'template' && !skipWindowCheck && conversationData) {
+        if (type !== 'template' && !skipWindowCheck) {
+            // conversationId na aaye to pehle poora window check hi skip ho jata
+            // tha - upar wali Promise.all sirf conversationId hone par lookup
+            // karti hai. Nateeja: band window par bhi plain text Meta tak chala
+            // jata tha aur Meta use "(#100) Invalid parameter" ke saath reject
+            // karta tha, jiska matlab na user samajh pata tha na logs se pata
+            // chalta tha.
+            //
+            // Ab bina conversationId ke bhi phone se conversation dhoondh lete
+            // hain. Ye extra query sirf usi soorat me chalti hai - jahan
+            // conversationId aata hai (mobile chat screen) wo path waisa hi tez hai.
+            let windowSource = conversationData;
+            if (!windowSource) {
+                const digits = formattedTo;
+                windowSource = await database_1.default.conversation.findFirst({
+                    where: {
+                        organizationId: orgId,
+                        contact: { phone: { in: [`+${digits}`, digits] } },
+                    },
+                    select: {
+                        id: true, contactId: true,
+                        isWindowOpen: true, windowExpiresAt: true,
+                        lastCustomerMessageAt: true,
+                    },
+                    orderBy: { lastMessageAt: 'desc' },
+                });
+            }
             const now = new Date();
             let expired = false;
-            if (conversationData.windowExpiresAt) {
-                expired = new Date(conversationData.windowExpiresAt) <= now;
+            if (windowSource) {
+                if (windowSource.windowExpiresAt) {
+                    expired = new Date(windowSource.windowExpiresAt) <= now;
+                }
+                else if (windowSource.isWindowOpen === false) {
+                    expired = true;
+                }
+                else if (windowSource.lastCustomerMessageAt) {
+                    expired = now.getTime() - new Date(windowSource.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
+                }
+                else {
+                    // Customer has never replied - session window is closed
+                    expired = true;
+                }
             }
-            else if (conversationData.isWindowOpen === false) {
+            else {
+                // New contact with no previous chat - must initiate with a template
                 expired = true;
             }
-            else if (conversationData.lastCustomerMessageAt) {
-                expired = now.getTime() - new Date(conversationData.lastCustomerMessageAt).getTime() > 24 * 60 * 60 * 1000;
-            }
             if (expired) {
-                throw new Error('User session expired (24h window closed). Send a Template Message to re-engage.');
+                // 400, 500 nahi - ye expected business rule hai. Plain Error throw
+                // karne par errorHandler ise 500 bana deta tha aur user ko sirf
+                // "Request failed with status code 500" dikhta tha, asli wajah nahi.
+                throw new errorHandler_1.AppError('This chat is outside the 24-hour messaging window. Send an approved template to start the conversation again.', 400);
             }
         }
         const metaStart = Date.now();
@@ -538,7 +713,21 @@ class WhatsAppService {
             type,
             ...content,
         };
-        const result = await meta_api_1.metaApi.sendMessage(account.phoneNumberId, accessToken, formattedTo, messagePayload);
+        // ⚡ Contact lookup Meta call ke result par depend nahi karta, lekin pehle
+        // uske BAAD chalta tha - yaani ek pura DB round trip seedha user ke "sent"
+        // tick mein add hota tha. Ab dono ek saath chalte hain.
+        // Note: agar Meta call fail ho jaye to bhi ye lookup complete hoga (naye
+        // number ke case mein contact ban jayega) - wo acceptable hai.
+        const contactPromise = this.getOrCreateContact(orgId, to);
+        contactPromise.catch(() => { }); // send fail ho to unhandled rejection na aaye
+        let result;
+        try {
+            result = await meta_api_1.metaApi.sendMessage(account.phoneNumberId, accessToken, formattedTo, messagePayload);
+        }
+        catch (err) {
+            // Meta ka reject 500 nahi hona chahiye - wajah user ko dikhni chahiye
+            throw this.toSendError(err, account.phoneNumber);
+        }
         console.log(`⏱️ Meta API: ${Date.now() - metaStart}ms`);
         const waMessageId = result.messageId;
         const now = new Date();
@@ -549,7 +738,8 @@ class WhatsAppService {
             mediaUrlForDB = content?.[type]?.link || content?.[type]?.url ||
                 content?.link || mediaUrl || null;
         }
-        const contact = await this.getOrCreateContact(orgId, to);
+        const dbStart = Date.now();
+        const contact = await contactPromise;
         let conversation = conversationData;
         if (!conversation) {
             conversation = await this.getOrCreateConversation(orgId, contact.id, account.phoneNumberId, messageContent.substring(0, 100), conversationId);
@@ -574,6 +764,7 @@ class WhatsAppService {
                 },
             },
         });
+        console.log(`⏱️ Contact+conversation+message insert: ${Date.now() - dbStart}ms`);
         setImmediate(async () => {
             try {
                 await database_1.default.conversation.update({
@@ -594,6 +785,30 @@ class WhatsAppService {
                         id: true, phone: true, firstName: true, lastName: true,
                         whatsappProfileName: true, avatar: true,
                     },
+                });
+                // message:new bhi emit karo, sirf conversationUpdated nahi.
+                //
+                // Conversation table mein lastMessageDirection / lastMessageStatus
+                // columns hain hi nahi - inbox list ye dono message:new aur
+                // message:status events se apne local state mein rakhti hai. Text
+                // send sirf conversationUpdated bhejta tha, isliye:
+                //   - list mein naya text turant nahi dikhta tha
+                //   - tick / double tick kabhi aate hi nahi the (direction OUTBOUND
+                //     set hi nahi hota tha)
+                // Template send pehle se ye event bhejta tha - isliye template wale
+                // messages theek dikhte the aur text wale nahi.
+                webhookEvents.emit('newMessage', {
+                    organizationId: orgId,
+                    conversationId: conversation.id,
+                    message: {
+                        ...savedMessage,
+                        createdAt: now.toISOString(),
+                        timestamp: now.toISOString(),
+                        sentAt: now.toISOString(),
+                        tempId,
+                        clientMsgId,
+                    },
+                    tempId,
                 });
                 webhookEvents.emit('conversationUpdated', {
                     organizationId: orgId,
@@ -658,7 +873,7 @@ class WhatsAppService {
                 });
                 if (contact) {
                     conv = await database_1.default.conversation.findUnique({
-                        where: { organizationId_contactId: { organizationId, contactId: contact.id } },
+                        where: { organizationId_contactId_channel: { organizationId, contactId: contact.id, channel: 'WHATSAPP' } },
                         select: {
                             id: true,
                             isWindowOpen: true,
@@ -993,32 +1208,70 @@ class WhatsAppService {
                 }
                 // Static text header - no component needed
             }
-            // ✅ MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT):
-            // SKIP! Meta already has approved media stored permanently.
-            // When template is sent by name, Meta auto-attaches the media.
+            // MEDIA HEADERS (IMAGE/VIDEO/DOCUMENT)
             //
-            // Exception: Dynamic media (rare) - only if user provides header_media variable
-            else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType) && variables.header_media) {
+            // Yahan pehle likha tha ki Meta approved media khud attach kar leta
+            // hai, isliye header component bhejna hi nahi chahiye. Wo galat tha -
+            // live test se:
+            //
+            //   header component ke bina -> 132012
+            //   details: header: Format mismatch, expected IMAGE, received UNKNOWN
+            //
+            // Approval wali image sirf review ka sample hoti hai; bhejte waqt
+            // media dobara dena padta hai.
+            else if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(hType)) {
                 const mediaType = hType.toLowerCase();
-                const mediaValue = variables.header_media;
-                const mediaParam = {
-                    type: mediaType,
-                    [mediaType]: {}
-                };
-                // Check if it's URL or media ID
-                if (mediaValue.startsWith('http')) {
-                    mediaParam[mediaType].link = mediaValue;
+                // Kram wahi jo campaigns me hai:
+                //   1. request ke saath aayi dynamic media
+                //   2. template ka Meta media handle (ek baar upload, baar baar use)
+                //   3. permanent URL - Meta ise HAR send par dobara download karta hai
+                const dynamic = variables.header_media;
+                const url = template.headerContent;
+                // Meta ke media handles ~30 din me expire ho jate hain. Expired handle
+                // bhejne par (#135000) Generic user error milta hai, jisme koi wajah
+                // nahi likhi hoti. Campaign path ensureMetaMediaId se taazgi check
+                // karta hai; yahan koi check nahi tha - aur DB me 43 templates aise
+                // hain jinka handle ya to 25 din se purana hai ya jiski upload date
+                // hi nahi pata.
+                const HANDLE_TTL_MS = 25 * 24 * 60 * 60 * 1000;
+                const uploadedAt = template.headerMediaUploadedAt
+                    ? new Date(template.headerMediaUploadedAt).getTime()
+                    : null;
+                const handleIsFresh = !!uploadedAt && Date.now() - uploadedAt < HANDLE_TTL_MS;
+                const handle = handleIsFresh ? template.headerMediaId : null;
+                if (template.headerMediaId && !handleIsFresh) {
+                    console.warn(`⚠️ Template "${template.name}": media handle is stale or undated - ` +
+                        `falling back to the permanent URL`);
+                }
+                const mediaParam = { type: mediaType, [mediaType]: {} };
+                if (dynamic) {
+                    if (String(dynamic).startsWith('http'))
+                        mediaParam[mediaType].link = dynamic;
+                    else
+                        mediaParam[mediaType].id = String(dynamic);
+                }
+                else if (handle && /^\d+$/.test(String(handle))) {
+                    mediaParam[mediaType].id = String(handle);
+                }
+                else if (url && String(url).startsWith('http')) {
+                    mediaParam[mediaType].link = String(url);
                 }
                 else {
-                    mediaParam[mediaType].id = mediaValue;
+                    throw new errorHandler_1.AppError(`Template "${template.name}" has a ${hType} header but no media is available. ` +
+                        `Re-upload the file in Templates and try again.`, 400);
+                }
+                if (mediaType === 'document') {
+                    const src = String(url || '');
+                    mediaParam.document.filename =
+                        src.split('/').pop()?.split('?')[0] || 'document.pdf';
                 }
                 components.push({
                     type: 'header',
                     parameters: [mediaParam]
                 });
-                console.log(`⚡ Using dynamic media for ${template.name}`);
+                console.log(`📎 Template ${template.name}: ${mediaType} header via ` +
+                    `${mediaParam[mediaType].id ? 'media handle' : 'link'}`);
             }
-            // else: Static media - Meta uses approved media automatically ✅
         }
         // ✅ BODY variables
         const bodyVarNames = this.extractVariablesFromText(template.bodyText);
@@ -1106,6 +1359,11 @@ class WhatsAppService {
             });
             if (!lastIncoming || !lastIncoming.wamId)
                 return { success: false, reason: 'No incoming message' };
+            // Meta Cloud API only retains / allows read receipts for messages sent within the active window (24h)
+            const ageMs = Date.now() - new Date(lastIncoming.createdAt).getTime();
+            if (ageMs > 24 * 60 * 60 * 1000) {
+                return { success: false, reason: 'Message too old for typing indicator' };
+            }
             const conversation = await database_1.default.conversation.findUnique({
                 where: { id: conversationId },
             });
@@ -1119,7 +1377,7 @@ class WhatsAppService {
             return { success: true };
         }
         catch (error) {
-            console.error('❌ Failed to send typing indicator:', error);
+            console.warn('⚠️ sendTypingIndicator ignored failure:', error.message || error);
             return { success: false, error: error.message };
         }
     }
@@ -1204,19 +1462,18 @@ class WhatsAppService {
             const errorData = error.response?.data?.error;
             const code = errorData?.code;
             const message = errorData?.message || '';
-            // ✅ FIX: Handle deleted phone (code 100, subcode 33)
+            // Handle phone explicitly deleted from Meta (code 100, subcode 33)
+            const subcode = errorData?.error_subcode;
             if (code === 100 &&
-                (message.includes('does not exist') ||
-                    message.includes('missing permissions'))) {
+                subcode === 33 &&
+                message.includes('does not exist')) {
                 console.warn(`⚠️ Phone no longer exists in Meta. ` +
                     `Marking account as DISCONNECTED.`);
-                // Mark account as disconnected
                 await database_1.default.whatsAppAccount.update({
                     where: { id: accountId },
                     data: {
                         status: 'DISCONNECTED',
-                        disconnectedAt: new Date(),
-                        disconnectReason: 'Phone number deleted from Meta',
+                        isActive: false,
                     },
                 });
                 return { success: false, error: 'Phone number deleted from Meta' };

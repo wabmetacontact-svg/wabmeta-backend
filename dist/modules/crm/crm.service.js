@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.crmService = exports.CRMService = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const errorHandler_1 = require("../../middleware/errorHandler");
+const notifications_service_1 = require("../notifications/notifications.service");
 class CRMService {
     // ==========================================
     // PIPELINE MANAGEMENT
@@ -87,10 +88,11 @@ class CRMService {
         return settings;
     }
     async updateSettings(organizationId, data) {
+        const { id: _id, organizationId: _org, ...safe } = data;
         return database_1.default.organizationSettings.upsert({
             where: { organizationId },
-            create: { organizationId, ...data },
-            update: data,
+            create: { ...safe, organizationId }, // organizationId last: not overridable
+            update: safe,
         });
     }
     // ==========================================
@@ -304,7 +306,7 @@ class CRMService {
         if (options.assignedToId)
             where.assignedToId = options.assignedToId;
         if (options.source)
-            where.source = options.source;
+            where.source = { contains: options.source, mode: 'insensitive' };
         if (options.chatbotQualified !== undefined) {
             where.chatbotQualified = options.chatbotQualified === true || String(options.chatbotQualified) === 'true';
         }
@@ -498,10 +500,12 @@ class CRMService {
                 metadata: { fromStatus: lead.status, toStatus: data.status },
             });
         }
+        // Never let the client set identity/tenant fields through the spread.
+        const { id: _id, organizationId: _org, createdAt: _c, ...safe } = data;
         return database_1.default.lead.update({
             where: { id: leadId },
             data: {
-                ...data,
+                ...safe,
                 lastActivityAt: new Date(),
                 ...(data.status === 'WON' || data.status === 'LOST'
                     ? { actualCloseDate: new Date() }
@@ -624,6 +628,32 @@ class CRMService {
             orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
         });
     }
+    async updateContactNote(organizationId, contactId, noteId, content) {
+        const contact = await database_1.default.contact.findFirst({
+            where: { id: contactId, organizationId },
+        });
+        if (!contact)
+            throw new errorHandler_1.AppError('Contact not found', 404);
+        // Scope the update by contactId so a note from another contact can't be edited.
+        const result = await database_1.default.contactNote.updateMany({
+            where: { id: noteId, contactId },
+            data: { content },
+        });
+        if (result.count === 0)
+            throw new errorHandler_1.AppError('Note not found', 404);
+        return database_1.default.contactNote.findFirst({ where: { id: noteId, contactId } });
+    }
+    async deleteContactNote(organizationId, contactId, noteId) {
+        const contact = await database_1.default.contact.findFirst({
+            where: { id: contactId, organizationId },
+        });
+        if (!contact)
+            throw new errorHandler_1.AppError('Contact not found', 404);
+        const result = await database_1.default.contactNote.deleteMany({ where: { id: noteId, contactId } });
+        if (result.count === 0)
+            throw new errorHandler_1.AppError('Note not found', 404);
+        return { id: noteId };
+    }
     // ==========================================
     // STATS - UPGRADED
     // ==========================================
@@ -662,6 +692,16 @@ class CRMService {
         const winRate = wonLeads + lostLeads > 0
             ? Math.round((wonLeads / (wonLeads + lostLeads)) * 100)
             : 0;
+        // Real per-source counts, so the dashboard's channel tiles show numbers.
+        const sourceRows = await database_1.default.lead.groupBy({
+            by: ['source'],
+            where: { organizationId },
+            _count: { _all: true },
+        });
+        const leadsBySource = sourceRows.map((r) => ({
+            source: r.source || 'unknown',
+            count: r._count._all,
+        }));
         return {
             totalLeads,
             newLeads,
@@ -670,6 +710,7 @@ class CRMService {
             chatbotLeads,
             adLeads,
             hotLeads,
+            leadsBySource,
             totalValue: totalValueAgg._sum.value || 0,
             wonValue: wonValueAgg._sum.value || 0,
             averageScore: Math.round(avgScoreAgg._avg?.score || 0),
@@ -738,20 +779,21 @@ class CRMService {
             }))?.ownerId;
         if (!notifyUserId)
             return;
-        await database_1.default.notification.create({
-            data: {
-                userId: notifyUserId,
-                organizationId,
-                type: 'new_lead',
-                title: '🎯 New Lead Created',
-                description: `${lead.title} has been added to your CRM pipeline.`,
-                actionUrl: `/dashboard/crm/leads/${lead.id}`,
-                metadata: {
-                    leadId: lead.id,
-                    score: lead.score,
-                    source: lead.source,
-                    chatbotQualified: lead.chatbotQualified,
-                },
+        // Service se jao, warna notification row to banti hai par phone par
+        // push kabhi nahi pahunchta
+        await notifications_service_1.notificationsService.create({
+            userId: notifyUserId,
+            organizationId,
+            type: 'new_lead',
+            title: '🎯 New Lead Created',
+            description: `${lead.title} has been added to your CRM pipeline.`,
+            actionUrl: `/(app)/crm/lead/${lead.id}`,
+            metadata: {
+                leadId: lead.id,
+                score: lead.score,
+                source: lead.source,
+                chatbotQualified: lead.chatbotQualified,
+                webUrl: `/dashboard/crm/leads/${lead.id}`,
             },
         });
         console.log(`🔔 Lead notification sent to user: ${notifyUserId}`);

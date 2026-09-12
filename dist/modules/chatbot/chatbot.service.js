@@ -58,6 +58,8 @@ class ChatbotService {
                 welcomeMessage: data.welcomeMessage,
                 fallbackMessage: data.fallbackMessage,
                 flowData: data.flowData || { nodes: [], edges: [] },
+                channel: data.channel || 'WHATSAPP',
+                telegramBotId: data.telegramBotId || null,
                 status: 'DRAFT',
             },
         });
@@ -101,7 +103,7 @@ class ChatbotService {
         const hasStart = nodes.some((n) => n.type === 'start');
         const hasOtherNode = nodes.filter((n) => n.type !== 'start').length > 0;
         if (!hasStart || !hasOtherNode) {
-            throw new errorHandler_1.AppError('Chatbot flow mein Start node aur kam se kam ek aur node hona zaroori hai', 400);
+            throw new errorHandler_1.AppError('A chatbot flow needs a Start node and at least one more node', 400);
         }
         return database_1.default.chatbot.update({
             where: { id: chatbotId },

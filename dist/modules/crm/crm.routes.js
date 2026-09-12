@@ -4,8 +4,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const crm_controller_1 = require("./crm.controller");
 const auth_1 = require("../../middleware/auth");
+const requireRole_1 = require("../../middleware/requireRole");
 const router = (0, express_1.Router)();
 router.use(auth_1.authenticate);
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use((0, requireRole_1.gateMutations)(...requireRole_1.OPERATOR_ROLES));
 // Stats
 router.get('/stats', crm_controller_1.crmController.getStats.bind(crm_controller_1.crmController));
 router.post('/sync-from-contacts', crm_controller_1.crmController.syncFromContacts.bind(crm_controller_1.crmController));
@@ -33,5 +36,7 @@ router.put('/tasks/:taskId/complete', crm_controller_1.crmController.completeTas
 // Contact Notes
 router.get('/contacts/:contactId/notes', crm_controller_1.crmController.getContactNotes.bind(crm_controller_1.crmController));
 router.post('/contacts/:contactId/notes', crm_controller_1.crmController.addContactNote.bind(crm_controller_1.crmController));
+router.put('/contacts/:contactId/notes/:noteId', crm_controller_1.crmController.updateContactNote.bind(crm_controller_1.crmController));
+router.delete('/contacts/:contactId/notes/:noteId', crm_controller_1.crmController.deleteContactNote.bind(crm_controller_1.crmController));
 exports.default = router;
 //# sourceMappingURL=crm.routes.js.map

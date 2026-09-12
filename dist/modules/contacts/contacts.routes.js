@@ -11,6 +11,8 @@ const auth_1 = require("../../middleware/auth");
 const validate_1 = require("../../middleware/validate");
 const planLimits_1 = require("../../middleware/planLimits");
 const contacts_schema_1 = require("./contacts.schema");
+const contacts_import_middleware_1 = require("./contacts.import.middleware");
+const requireRole_1 = require("../../middleware/requireRole");
 const router = (0, express_1.Router)();
 // Multer config for CSV upload
 const upload = (0, multer_1.default)({
@@ -31,6 +33,8 @@ const upload = (0, multer_1.default)({
 });
 // All routes require authentication
 router.use(auth_1.authenticate);
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use((0, requireRole_1.gateMutations)(...requireRole_1.OPERATOR_ROLES));
 // ============================================
 // FEATURE ACCESS & COMMON
 // ============================================
@@ -56,7 +60,15 @@ router.get('/groups/all', contacts_controller_1.contactsController.getGroups.bin
 router.post('/groups', (0, validate_1.validate)(contacts_schema_1.createContactGroupSchema), contacts_controller_1.contactsController.createGroup.bind(contacts_controller_1.contactsController));
 router.get('/groups/:groupId', contacts_controller_1.contactsController.getGroupById.bind(contacts_controller_1.contactsController));
 router.patch('/groups/:groupId', (0, validate_1.validate)(contacts_schema_1.updateContactGroupSchema), contacts_controller_1.contactsController.updateGroup.bind(contacts_controller_1.contactsController));
+// Group + contacts delete (frontend se deleteContacts=true query aayega)
 router.delete('/groups/:groupId', contacts_controller_1.contactsController.deleteGroup.bind(contacts_controller_1.contactsController));
+// ✅ NEW: Delete group AND its contacts
+// Frontend call karega: DELETE /groups/:id?deleteContacts=true
+// Ya separate endpoint:
+router.delete('/groups/:groupId/contacts-and-group', async (req, res, next) => {
+    req.query.deleteContacts = 'true';
+    contacts_controller_1.contactsController.deleteGroup(req, res, next);
+});
 router.get('/groups/:groupId/contacts', contacts_controller_1.contactsController.getGroupContacts.bind(contacts_controller_1.contactsController));
 router.post('/groups/:groupId/contacts', (0, validate_1.validate)(contacts_schema_1.addContactsToGroupSchema), contacts_controller_1.contactsController.addContactsToGroup.bind(contacts_controller_1.contactsController));
 router.delete('/groups/:groupId/contacts', (0, validate_1.validate)(contacts_schema_1.addContactsToGroupSchema), contacts_controller_1.contactsController.removeContactsFromGroup.bind(contacts_controller_1.contactsController));
@@ -66,9 +78,7 @@ router.delete('/groups/:groupId/contacts', (0, validate_1.validate)(contacts_sch
 router.get('/', contacts_controller_1.contactsController.getList.bind(contacts_controller_1.contactsController));
 router.post('/', (0, validate_1.validate)(contacts_schema_1.createContactSchema), planLimits_1.requireActiveSubscription, planLimits_1.checkContactLimit, contacts_controller_1.contactsController.create.bind(contacts_controller_1.contactsController));
 // Import contacts - with file upload
-router.post('/import', planLimits_1.requireActiveSubscription, upload.single('file'), (req, res, next) => {
-    contacts_controller_1.contactsController.import(req, res, next);
-});
+router.post('/import', planLimits_1.requireActiveSubscription, upload.single('file'), contacts_import_middleware_1.contactsImportMiddleware, (req, res, next) => contacts_controller_1.contactsController.import(req, res, next));
 // ✅ Simple Bulk Paste (₹2,500+)
 router.post('/bulk-paste', contacts_controller_1.contactsController.simpleBulkPaste.bind(contacts_controller_1.contactsController));
 // ✅ CSV Upload (₹899+)

@@ -6,6 +6,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.campaignRecoveryService = void 0;
 const database_1 = __importDefault(require("../../config/database"));
+const withLock_1 = require("../../utils/withLock");
 const campaigns_service_1 = require("./campaigns.service");
 class CampaignRecoveryService {
     async resetStuckContacts() {
@@ -57,8 +58,10 @@ class CampaignRecoveryService {
     }
     async initialize() {
         console.log('🚀 Campaign Recovery: Initializing...');
-        await this.resetStuckContacts();
-        await this.resumeStuckCampaigns();
+        await (0, withLock_1.withAdvisoryLock)('campaign:recovery', async () => {
+            await this.resetStuckContacts();
+            await this.resumeStuckCampaigns();
+        });
         console.log('✅ Campaign Recovery: Ready');
     }
 }

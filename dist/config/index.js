@@ -52,6 +52,15 @@ exports.config = {
         webhookVerifyToken: getEnv('META_WEBHOOK_VERIFY_TOKEN', getEnv('META_VERIFY_TOKEN', getEnv('WEBHOOK_VERIFY_TOKEN', 'webhook-token'))),
         configId: getEnv('META_CONFIG_ID'),
         redirectUri: getEnv('META_REDIRECT_URI', 'https://wabmeta.com/meta/callback'),
+        // Embedded Signup sirf Facebook ke JS SDK se chalta hai, jo React
+        // Native me nahi chal sakta. Isliye mobile app is chhote page ko
+        // apne in-app browser me kholti hai - ye page wahi FB.login flow
+        // chalata hai aur code ko app par deep-link kar deta hai.
+        // Page ka domain Meta App > Facebook Login > Allowed Domains me hona
+        // chahiye (wabmeta.com already hai, kyunki dashboard wahi use karta hai).
+        mobileSignupUrl: getEnv('META_MOBILE_SIGNUP_URL', 'https://wabmeta.com/mobile-connect.html'),
+        // In-app browser se app me wapas aane ke liye
+        mobileAppScheme: getEnv('META_MOBILE_APP_SCHEME', 'wabmeta://meta-callback'),
         graphApiVersion: getEnv('META_GRAPH_API_VERSION', 'v22.0'),
     },
     google: {
@@ -85,6 +94,14 @@ exports.config = {
         apiKey: process.env.CLOUDINARY_API_KEY || '',
         apiSecret: process.env.CLOUDINARY_API_SECRET || '',
         folder: process.env.CLOUDINARY_FOLDER || 'wabmeta-templates',
+    },
+    // ✅ Cloudflare R2 Storage Config
+    r2: {
+        accountId: getEnv('R2_ACCOUNT_ID'),
+        accessKeyId: getEnv('R2_ACCESS_KEY_ID'),
+        secretAccessKey: getEnv('R2_SECRET_ACCESS_KEY'),
+        bucketName: getEnv('R2_BUCKET_NAME', 'wabmeta-media'),
+        publicUrl: getEnv('R2_PUBLIC_URL', ''),
     },
     // ✅ NEW: Platform WhatsApp config
     platform: {

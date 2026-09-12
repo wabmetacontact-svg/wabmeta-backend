@@ -39,6 +39,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const crypto_1 = __importDefault(require("crypto"));
+const multer_1 = __importDefault(require("multer"));
 const meta_controller_1 = require("./meta.controller");
 const redis_1 = require("../../config/redis");
 const redis = (0, redis_1.getRedis)();
@@ -49,6 +50,7 @@ const errorHandler_1 = require("../../middleware/errorHandler");
 const database_1 = __importDefault(require("../../config/database"));
 const connectionLock_1 = require("../../middleware/connectionLock");
 const config_1 = require("../../config");
+const resolveOrgId_1 = require("../../utils/resolveOrgId");
 const router = (0, express_1.Router)();
 // ============================================
 // PUBLIC ROUTES (Webhook) - BEFORE authenticate
@@ -289,8 +291,10 @@ router.post('/connect', auth_1.authenticate, connectionLock_1.checkConnectionLoc
         // ✅ Use metaService.completeConnection with embeddedSignup=true
         // Pass wabaId + phoneNumberId from session info (if captured by frontend)
         const result = await meta_service_1.metaService.completeConnection(code, organizationId, userId, 'CLOUD_API', undefined, // no onProgress callback
-        true, // embeddedSignup = true → skipRedirectUri during token exchange
-        wabaId || undefined, // ✅ Session WABA ID from message event
+        // Web aur mobile dono FB.login (Embedded Signup) use karte hain -
+        // mobile bas use ek in-app browser page ke andar chalati hai.
+        // Us flow me redirect_uri hota hi nahi, isliye skip.
+        true, wabaId || undefined, // ✅ Session WABA ID from message event
         phoneNumberId || undefined // ✅ Session Phone Number ID from message event
         );
         if (result.success) {
@@ -585,7 +589,13 @@ router.delete('/organizations/:organizationId/disconnect', connectionLock_1.chec
         }
         const result = await database_1.default.whatsAppAccount.updateMany({
             where: { organizationId },
-            data: { status: 'DISCONNECTED' },
+            data: {
+                status: 'DISCONNECTED',
+                accessToken: null,
+                tokenExpiresAt: null,
+                webhookSecret: null,
+                isDefault: false,
+            },
         });
         try {
             await database_1.default.metaConnection.delete({ where: { organizationId } });
@@ -604,6 +614,74 @@ router.delete('/organizations/:organizationId/disconnect', connectionLock_1.chec
 // ============================================
 router.get('/accounts', meta_controller_1.metaController.getAccounts.bind(meta_controller_1.metaController));
 router.get('/accounts/:id', meta_controller_1.metaController.getAccount.bind(meta_controller_1.metaController));
+// ============================================
+// BUSINESS PROFILE
+// ============================================
+// Profile picture memory mein rakho - seedha Meta ke resumable upload par
+// jaati hai, disk par likhne ki zarurat nahi.
+const profilePictureUpload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        // Meta profile picture ke liye sirf JPEG/PNG accept karta hai
+        if (/^image\/(jpeg|jpg|png)$/.test(file.mimetype))
+            return cb(null, true);
+        cb(new errorHandler_1.AppError('Profile picture must be a JPEG or PNG image', 400));
+    },
+});
+router.get('/accounts/:id/business-profile', async (req, res, next) => {
+    try {
+        const organizationId = await (0, resolveOrgId_1.resolveOrganizationId)(req);
+        const profile = await meta_service_1.metaService.getBusinessProfile(String(req.params.id), organizationId);
+        return (0, response_1.sendSuccess)(res, profile, 'Business profile fetched');
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.put('/accounts/:id/business-profile', async (req, res, next) => {
+    try {
+        const organizationId = await (0, resolveOrgId_1.resolveOrganizationId)(req);
+        const profile = await meta_service_1.metaService.updateBusinessProfile(String(req.params.id), organizationId, {
+            about: req.body?.about,
+            address: req.body?.address,
+            description: req.body?.description,
+            email: req.body?.email,
+            websites: req.body?.websites,
+            vertical: req.body?.vertical,
+        });
+        return (0, response_1.sendSuccess)(res, profile, 'Business profile updated');
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/accounts/:id/business-profile/picture', profilePictureUpload.single('file'), async (req, res, next) => {
+    try {
+        const file = req.file;
+        if (!file?.buffer)
+            throw new errorHandler_1.AppError('Image file is required', 400);
+        const organizationId = await (0, resolveOrgId_1.resolveOrganizationId)(req);
+        const profile = await meta_service_1.metaService.updateProfilePicture(String(req.params.id), organizationId, file.buffer, file.mimetype, file.originalname);
+        return (0, response_1.sendSuccess)(res, profile, 'Profile picture updated');
+    }
+    catch (error) {
+        next(error);
+    }
+});
+router.post('/accounts/:id/display-name', async (req, res, next) => {
+    try {
+        const newName = req.body?.displayName ?? req.body?.name;
+        if (!newName)
+            throw new errorHandler_1.AppError('displayName is required', 400);
+        const organizationId = await (0, resolveOrgId_1.resolveOrganizationId)(req);
+        const result = await meta_service_1.metaService.requestDisplayNameChange(String(req.params.id), organizationId, String(newName));
+        return (0, response_1.sendSuccess)(res, result, result.message);
+    }
+    catch (error) {
+        next(error);
+    }
+});
 router.delete('/accounts/:id', connectionLock_1.checkConnectionLock, meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));
 // ✅ Also support POST /accounts/:id/disconnect (frontend uses this)
 router.post('/accounts/:id/disconnect', connectionLock_1.checkConnectionLock, meta_controller_1.metaController.disconnectAccount.bind(meta_controller_1.metaController));

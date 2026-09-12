@@ -6,9 +6,13 @@
 // read the same stale currentStatus (non-FAILED) and BOTH would credit the wallet
 // — meaning one failed message could be refunded 2x (or more).
 //
-// The new refund path is guarded by a Prisma $transaction with a
-// "does a completed refund transaction already exist for this waMessageId?" check
-// under a serializable read, so only ONE refund can ever land per waMessageId.
+// The refund path checks "does a completed refund already exist for this
+// waMessageId?" before crediting. NOTE: the transaction runs at READ COMMITTED,
+// not SERIALIZABLE, and there is no unique constraint on
+// (metaChargeId, metaService), so two concurrent deliveries of the same status
+// webhook (Meta retries) can both pass the check and double-refund. The credit
+// itself is now atomic; the duplicate-refund gap needs a unique index — see
+// BACKEND_AUDIT_FINDINGS Phase 41.
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -53,13 +57,21 @@ const events_1 = require("events");
 const logger_1 = require("../../utils/logger");
 const chatbot_engine_1 = require("../chatbot/chatbot.engine");
 const automation_engine_1 = require("../automation/automation.engine");
+const optOut_1 = require("../contacts/optOut");
 const phone_1 = require("../../utils/phone");
 const instagramService = __importStar(require("../instagram/instagram.service"));
+const notifications_service_1 = require("../notifications/notifications.service");
 exports.webhookEvents = new events_1.EventEmitter();
 exports.webhookEvents.setMaxListeners(100);
 class WebhookService {
+    refundQueue = [];
+    refundProcessing = false;
+    emergencyLoggedCampaigns = new Set();
     accountCache = new Map();
     CACHE_TTL = 5 * 60 * 1000;
+    // Meta ka phoneNumberId -> hamara PhoneNumber.id (UUID). Ye mapping
+    // practically immutable hai, isliye accountCache jaisa TTL cache safe hai.
+    phoneNumberUUIDCache = new Map();
     extractValue(payload) {
         return payload?.entry?.[0]?.changes?.[0]?.value;
     }
@@ -138,63 +150,235 @@ class WebhookService {
         }
         return { content: `[${type}]`, mediaUrl: null };
     }
-    async findOrCreateContact(organizationId, phone) {
+    // ============================================
+    // ✅ FIX 1: findOrCreateContact - UPSERT
+    // ============================================
+    async findOrCreateContact(organizationId, phone, profileName) {
+        const goodName = profileName && profileName !== 'Unknown' ? profileName : null;
         const canonical = (0, phone_1.toCanonicalPhone)(phone) || (0, phone_1.toCanonicalPhone)(`+${phone}`);
         if (!canonical) {
             console.error(`❌ Cannot normalize phone: ${phone}`);
             throw new Error(`Invalid phone: ${phone}`);
         }
         const variants = (0, phone_1.buildPhoneVariants)(canonical);
-        let contact = await database_1.default.contact.findFirst({
+        // ✅ STEP 1: Fast path - findFirst with all variants
+        const existing = await database_1.default.contact.findFirst({
             where: {
                 organizationId,
                 OR: variants.map((p) => ({ phone: p })),
             },
         });
-        let wasNewlyCreated = false;
-        if (!contact) {
-            try {
-                const ccDigits = canonical.slice(1, -10);
-                const countryCode = `+${ccDigits}`;
-                contact = await database_1.default.contact.create({
-                    data: {
+        if (existing) {
+            // Phone migration + WhatsApp profile name refresh - dono ek hi background
+            // write mein. Message delivery inme se kisi ke liye nahi rukti.
+            const patch = {};
+            if (existing.phone !== canonical)
+                patch.phone = canonical;
+            const nameChanged = !!goodName && existing.firstName !== goodName;
+            if (nameChanged) {
+                patch.firstName = goodName;
+                patch.whatsappProfileName = goodName;
+                patch.whatsappProfileFetched = true;
+                patch.lastProfileFetchAt = new Date();
+            }
+            if (Object.keys(patch).length > 0) {
+                database_1.default.contact
+                    .update({ where: { id: existing.id }, data: patch })
+                    .catch((e) => console.error('Contact profile update error:', e?.message));
+            }
+            // Emit ke liye naya naam turant chahiye, isliye locally merge kar do
+            return {
+                contact: nameChanged ? { ...existing, ...patch } : existing,
+                wasNewlyCreated: false,
+            };
+        }
+        // ✅ STEP 2: Upsert - handles race condition automatically
+        try {
+            const ccDigits = canonical.slice(1, -10);
+            const countryCode = ccDigits ? `+${ccDigits}` : '+91';
+            const contact = await database_1.default.contact.upsert({
+                where: {
+                    organizationId_phone: {
                         organizationId,
                         phone: canonical,
-                        countryCode,
-                        firstName: 'Unknown',
-                        status: 'ACTIVE',
-                        source: 'WHATSAPP_INBOUND',
+                    },
+                },
+                create: {
+                    organizationId,
+                    phone: canonical,
+                    countryCode,
+                    firstName: goodName || 'Unknown',
+                    status: 'ACTIVE',
+                    source: 'WHATSAPP_INBOUND',
+                    ...(goodName
+                        ? {
+                            whatsappProfileName: goodName,
+                            whatsappProfileFetched: true,
+                            lastProfileFetchAt: new Date(),
+                        }
+                        : {}),
+                },
+                update: goodName
+                    ? {
+                        firstName: goodName,
+                        whatsappProfileName: goodName,
+                        whatsappProfileFetched: true,
+                        lastProfileFetchAt: new Date(),
+                    }
+                    : {
+                    // ✅ Contact already exists (race condition)
+                    // Touch nothing - just return existing data
+                    },
+            });
+            // ✅ createdAt recency check - naya hai ya existing (race condition se aaya)?
+            const createdMsAgo = Date.now() - new Date(contact.createdAt).getTime();
+            const wasNewlyCreated = createdMsAgo < 5000; // 5 second window
+            if (wasNewlyCreated) {
+                console.log(`👤 New contact created: ${canonical}`);
+                // ✅ Subscription update async - don't block webhook processing
+                database_1.default.subscription.updateMany({
+                    where: { organizationId },
+                    data: { contactsUsed: { increment: 1 } },
+                }).catch((e) => console.error('Subscription increment error:', e));
+            }
+            return { contact, wasNewlyCreated };
+        }
+        catch (error) {
+            // ✅ P2002 = Race condition even after upsert
+            // (happens when variant phone exists, not canonical)
+            if (error.code === 'P2002') {
+                console.warn(`⚠️ P2002 race on contact ${canonical}, finding existing...`);
+                const fallback = await database_1.default.contact.findFirst({
+                    where: {
+                        organizationId,
+                        OR: variants.map((p) => ({ phone: p })),
                     },
                 });
-                wasNewlyCreated = true;
-                console.log(`👤 New contact: ${canonical}`);
+                if (fallback)
+                    return { contact: fallback, wasNewlyCreated: false };
             }
-            catch (error) {
-                if (error.code === 'P2002') {
-                    contact = await database_1.default.contact.findFirst({
-                        where: {
-                            organizationId,
-                            OR: variants.map((p) => ({ phone: p })),
-                        },
-                    });
-                    if (!contact)
-                        throw error;
-                }
-                else {
-                    throw error;
-                }
+            console.error('findOrCreateContact fatal error:', error);
+            throw error;
+        }
+    }
+    // ============================================
+    // ✅ FIXED: findOrCreateConversation
+    // Problem: phoneNumberId (Meta's string like "919923983062") 
+    // directly Conversation.phoneNumberId mein store ho raha tha
+    // lekin schema mein Conversation.phoneNumberId → PhoneNumber.id (UUID) hai
+    // Solution: PhoneNumber table se actual UUID dhundo, agar na mile toh null
+    // ============================================
+    // Meta phoneNumberId -> PhoneNumber.id (UUID), cached.
+    // Pehle ye lookup findOrCreateConversation ke andar tha, yaani har inbound
+    // message par ek extra sequential DB round trip. Ab cached hai aur baaki
+    // lookups ke saath parallel chalta hai.
+    async resolvePhoneNumberUUID(metaPhoneNumberId) {
+        if (!metaPhoneNumberId)
+            return null;
+        const cached = this.phoneNumberUUIDCache.get(metaPhoneNumberId);
+        if (cached && cached.expiresAt > Date.now())
+            return cached.id;
+        try {
+            const phoneRecord = await database_1.default.phoneNumber.findFirst({
+                where: { phoneNumberId: metaPhoneNumberId }, // Meta's string ID
+                select: { id: true }, // Hamara UUID chahiye
+            });
+            if (!phoneRecord) {
+                // PhoneNumber table mein nahi mila - null rakho (field optional hai).
+                // Negative result cache mat karo, number baad mein register ho sakta hai.
+                console.warn(`⚠️ PhoneNumber not found for metaPhoneNumberId: ${metaPhoneNumberId} ` +
+                    `- conversation will have null phoneNumberId`);
+                return null;
             }
+            this.phoneNumberUUIDCache.set(metaPhoneNumberId, {
+                id: phoneRecord.id,
+                expiresAt: Date.now() + this.CACHE_TTL,
+            });
+            return phoneRecord.id; // ✅ Actual FK-valid UUID
         }
-        else if (contact.phone !== canonical) {
-            database_1.default.contact.update({
-                where: { id: contact.id },
-                data: { phone: canonical }
-            }).then(() => {
-                console.log(`🔄 Migrated: ${contact.phone} → ${canonical}`);
-            }).catch(() => { });
-            contact.phone = canonical;
+        catch (e) {
+            console.error('PhoneNumber lookup error:', e);
+            // Fail silently - null phoneNumberId se conversation ban sakti hai
+            return null;
         }
-        return { contact: contact, wasNewlyCreated };
+    }
+    async findOrCreateConversation(organizationId, contactId, metaPhoneNumberId, // sirf logging ke liye
+    messageTime, phoneNumberUUID // pehle se resolve kiya hua (cached)
+    ) {
+        // ✅ Conversation upsert with valid UUID (or null)
+        try {
+            const conversation = await database_1.default.conversation.upsert({
+                where: {
+                    organizationId_contactId_channel: {
+                        organizationId,
+                        contactId,
+                        channel: 'WHATSAPP',
+                    },
+                },
+                create: {
+                    organizationId,
+                    contactId,
+                    // ✅ Only set if valid UUID found, otherwise null (field is optional in schema)
+                    ...(phoneNumberUUID ? { phoneNumberId: phoneNumberUUID } : {}),
+                    isWindowOpen: true,
+                    windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                    unreadCount: 0,
+                    isRead: false,
+                    lastMessageAt: messageTime,
+                },
+                update: {
+                    isWindowOpen: true,
+                    windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                    // ✅ Update phoneNumberId if we found it and it was null before
+                    ...(phoneNumberUUID ? { phoneNumberId: phoneNumberUUID } : {}),
+                },
+            });
+            const createdMsAgo = Date.now() - new Date(conversation.createdAt).getTime();
+            if (createdMsAgo < 5000) {
+                console.log(`💬 New conversation: ${conversation.id}`);
+            }
+            return conversation;
+        }
+        catch (error) {
+            // ✅ P2003 - FK violation (safety net, should not happen now)
+            if (error.code === 'P2003') {
+                console.error(`❌ P2003 FK violation on conversation create. ` +
+                    `phoneNumberUUID used: ${phoneNumberUUID}, ` +
+                    `metaPhoneNumberId: ${metaPhoneNumberId}. ` +
+                    `Retrying without phoneNumberId...`);
+                // ✅ Last resort: create without phoneNumberId
+                const conversation = await database_1.default.conversation.upsert({
+                    where: {
+                        organizationId_contactId_channel: { organizationId, contactId, channel: 'WHATSAPP' },
+                    },
+                    create: {
+                        organizationId,
+                        contactId,
+                        // NO phoneNumberId - avoid FK violation
+                        isWindowOpen: true,
+                        windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                        unreadCount: 0,
+                        isRead: false,
+                        lastMessageAt: messageTime,
+                    },
+                    update: {
+                        isWindowOpen: true,
+                        windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                    },
+                });
+                return conversation;
+            }
+            // ✅ P2002 - Race condition fallback
+            if (error.code === 'P2002') {
+                console.warn('⚠️ P2002 on conversation create, finding existing...');
+                const existing = await database_1.default.conversation.findFirst({
+                    where: { organizationId, contactId },
+                });
+                if (existing)
+                    return existing;
+            }
+            throw error;
+        }
     }
     // -----------------------------
     // Instagram Webhook Handler (unchanged)
@@ -208,22 +392,52 @@ class WebhookService {
                 const senderId = messaging.sender.id;
                 if (messaging.message && !messaging.message.is_echo) {
                     const messageText = messaging.message.text;
-                    const match = await instagramService.findMatchingAutomation(igUserId, messageText);
+                    const igMessageId = messaging.message.mid;
+                    const account = await database_1.default.instagramAccount.findUnique({
+                        where: { igUserId }
+                    });
+                    // Store the DM (text or media) in the unified inbox (best-effort).
+                    let automationPaused = false;
+                    if (account) {
+                        try {
+                            const { recordInboundIgMessage } = await Promise.resolve().then(() => __importStar(require('../instagram/instagram.inbox')));
+                            const conv = await recordInboundIgMessage(account, senderId, { text: messageText, mid: igMessageId, attachments: messaging.message.attachments });
+                            automationPaused = !!conv?.automationPaused;
+                        }
+                        catch (e) {
+                            console.error('IG inbox record error:', e?.message || e);
+                        }
+                    }
+                    // Human handoff: once an agent takes over, no channel automation fires.
+                    const match = automationPaused ? null : await instagramService.findMatchingAutomation(igUserId, messageText);
                     if (match && match.isActive) {
                         console.log(`🤖 IG Automation Match: ${match.name}`);
-                        const account = await database_1.default.instagramAccount.findUnique({
-                            where: { igUserId }
-                        });
                         if (account?.accessToken) {
                             const instagramApi = await Promise.resolve().then(() => __importStar(require('../instagram/instagram.api')));
                             if (match.responseText) {
-                                await instagramApi.sendIGMessage(account.accessToken, senderId, match.responseText);
+                                await instagramApi.sendIGMessage(instagramService.igAccessToken(account.accessToken), senderId, match.responseText);
                             }
                         }
                         await database_1.default.igDmAutomation.update({
                             where: { id: match.id },
                             data: { repliesCount: { increment: 1 }, lastTriggeredAt: new Date() }
                         });
+                    }
+                    // Story mention / reply → auto-reply DM.
+                    const attach0 = messaging.message.attachments?.[0];
+                    const isStoryMention = attach0?.type === 'story_mention';
+                    const isStoryReply = !!messaging.message.reply_to?.story;
+                    if ((isStoryMention || isStoryReply) && account?.accessToken && !automationPaused) {
+                        const trigger = isStoryReply ? 'reply' : 'mention';
+                        const storyRule = await instagramService.findMatchingStoryRule(igUserId, trigger);
+                        if (storyRule?.dmMessage) {
+                            const instagramApi = await Promise.resolve().then(() => __importStar(require('../instagram/instagram.api')));
+                            await instagramApi.sendIGMessage(instagramService.igAccessToken(account.accessToken), senderId, storyRule.dmMessage);
+                            await database_1.default.igStoryRule.update({
+                                where: { id: storyRule.id },
+                                data: { triggeredCount: { increment: 1 } },
+                            });
+                        }
                     }
                 }
             }
@@ -236,19 +450,22 @@ class WebhookService {
                     const senderId = change.value.from.id;
                     if (senderId === igUserId)
                         return { status: 'skipped', reason: 'Own comment' };
-                    const rule = await database_1.default.igCommentRule.findFirst({
-                        where: {
-                            igAccount: { igUserId },
-                            isActive: true,
-                            OR: [
-                                { keywords: { has: commentText } },
-                                { keywords: { equals: [] } }
-                            ]
-                        },
-                        include: { igAccount: true }
+                    const mediaId = change.value.media?.id || change.value.media_id;
+                    const rules = await database_1.default.igCommentRule.findMany({
+                        where: { igAccount: { igUserId }, isActive: true },
+                        include: { igAccount: true },
+                    });
+                    // Match: post targeting (empty = all posts) + keyword (empty = all comments, else contains).
+                    const rule = rules.find((r) => {
+                        const postOk = !r.postIds?.length || (mediaId && r.postIds.includes(mediaId));
+                        if (!postOk)
+                            return false;
+                        if (!r.keywords?.length)
+                            return true;
+                        return r.keywords.some((k) => commentText.includes(String(k).toLowerCase()));
                     });
                     if (rule) {
-                        const token = rule.igAccount.accessToken;
+                        const token = instagramService.igAccessToken(rule.igAccount.accessToken);
                         const instagramApi = await Promise.resolve().then(() => __importStar(require('../instagram/instagram.api')));
                         if (rule.commentReply) {
                             await instagramApi.replyToIGComment(token, commentId, rule.commentReply);
@@ -304,6 +521,13 @@ class WebhookService {
                 case 'message_template_status_update':
                     await this.handleTemplateUpdate(payload, value);
                     return { status: 'processed', reason: 'Template update processed' };
+                case 'message_template_category_update':
+                    // Meta reclassifies templates (e.g. a MARKETING message declared as
+                    // UTILITY is moved to MARKETING). Billing charges per stored category,
+                    // so if we ignore this the org is billed at the wrong rate. Persist
+                    // Meta's authoritative category.
+                    await this.handleTemplateCategoryUpdate(value);
+                    return { status: 'processed', reason: 'Template category update processed' };
                 case 'calls':
                     await this.handleCallWebhook(payload, value);
                     return { status: 'processed', reason: 'Call webhook processed' };
@@ -369,10 +593,11 @@ class WebhookService {
             for (const msg of messages) {
                 const profile = this.extractProfile(payload, msg);
                 if (profile) {
-                    if (profile.profileName && profile.profileName !== 'Unknown') {
-                        await contacts_service_1.contactsService.updateContactFromWebhook(profile.phone10, profile.profileName, account.organizationId);
-                    }
-                    await this.processIncomingMessage(msg, account.organizationId, account.id, account.phoneNumberId);
+                    // ⚡ Pehle yahan updateContactFromWebhook await hota tha - sirf profile
+                    // name ke liye 1-2 extra DB round trip, message deliver hone se PEHLE.
+                    // Ab wahi kaam findOrCreateContact ke andar hota hai (usi lookup mein,
+                    // aur naam ka write background mein).
+                    await this.processIncomingMessage(msg, account.organizationId, account.id, account.phoneNumberId, profile.profileName);
                 }
             }
             const statuses = value?.statuses || [];
@@ -394,7 +619,7 @@ class WebhookService {
     // -----------------------------
     // Template webhook processing
     // -----------------------------
-    async handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason) {
+    async handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason, metaCategory) {
         const template = await database_1.default.template.findFirst({
             where: { metaTemplateId },
         });
@@ -402,23 +627,57 @@ class WebhookService {
             console.warn(`⚠️ Webhook: Template not found: ${metaTemplateId}`);
             return;
         }
-        // ✅ Sirf status update karo - headerContent mat touch karo
+        const updateData = {
+            status: newStatus,
+            // Meta includes the (possibly corrected) category on approval. Keep the
+            // stored category in sync so billing uses the rate Meta actually applies.
+            ...(metaCategory ? { category: metaCategory } : {}),
+            rejectionReason: rejectionReason || null,
+        };
+        // ✅ FIX: After APPROVAL, handle is no longer needed (Meta stores media internally)
+        // Clear it so campaigns use URL fallback (which is Cloudinary - permanent)
+        if (newStatus === 'APPROVED') {
+            updateData.headerMediaId = null;
+            updateData.headerMediaUploadedAt = null;
+        }
         await database_1.default.template.update({
             where: { id: template.id },
-            data: {
-                status: newStatus,
-                rejectionReason: rejectionReason || null,
-                // ✅ headerContent (Cloudinary URL) NEVER overwrite karo from webhook
-                // Meta webhook mein media URL scontent hota hai (expires)
-            },
+            data: updateData,
         });
         console.log(`✅ Webhook: Template ${metaTemplateId} → ${newStatus}`);
+    }
+    /**
+     * message_template_category_update — Meta moved a template to a different
+     * category. Billing charges per stored category, so this must be persisted or
+     * the org is charged at the wrong rate indefinitely.
+     */
+    async handleTemplateCategoryUpdate(value) {
+        try {
+            const metaTemplateId = String(value.message_template_id || '');
+            // Meta uses new_category (with correct_category on some payloads).
+            const newCategory = String(value.new_category || value.correct_category || value.category || '').toUpperCase().trim();
+            if (!metaTemplateId || !newCategory)
+                return;
+            const result = await database_1.default.template.updateMany({
+                where: { metaTemplateId },
+                data: { category: newCategory },
+            });
+            if (result.count > 0) {
+                console.log(`🏷️  Template ${metaTemplateId} category → ${newCategory} (billing rate updated)`);
+            }
+        }
+        catch (e) {
+            console.error('Template category update error:', e.message);
+        }
     }
     async handleTemplateUpdate(payload, value) {
         try {
             const metaTemplateId = String(value.message_template_id || '');
             const event = String(value.event || '').toUpperCase();
             const rejectionReason = value.reason || value.rejection_reason || undefined;
+            const metaCategory = value.category
+                ? String(value.category).toUpperCase().trim()
+                : undefined;
             console.log(`🔄 Template update webhook received [${event}] for template ID: ${metaTemplateId}`);
             if (metaTemplateId) {
                 let newStatus = 'PENDING';
@@ -428,7 +687,7 @@ class WebhookService {
                     newStatus = 'REJECTED';
                 else if (event === 'PAUSED')
                     newStatus = 'PAUSED';
-                await this.handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason);
+                await this.handleTemplateStatusUpdate(metaTemplateId, newStatus, rejectionReason, metaCategory);
             }
         }
         catch (e) {
@@ -436,9 +695,11 @@ class WebhookService {
         }
     }
     // -----------------------------
-    // Incoming message processing (unchanged)
+    // Incoming message processing
+    // Critical path: [dedupe | contact | phoneNumber] -> conversation upsert ->
+    // message create -> socket emit. Baaki sab writes iske baad/background mein.
     // -----------------------------
-    async processIncomingMessage(message, organizationId, whatsappAccountId, phoneNumberId) {
+    async processIncomingMessage(message, organizationId, whatsappAccountId, phoneNumberId, profileName) {
         try {
             const waFrom = String(message?.from || '');
             const waMessageId = String(message?.id || '');
@@ -451,51 +712,28 @@ class WebhookService {
                 return;
             }
             console.log(`📥 Inbound: ${waMessageId} from ${waFrom} type=${typeRaw}`);
-            const existingMsg = await database_1.default.message.findFirst({
-                where: {
-                    OR: [
-                        { waMessageId },
-                        { wamId: waMessageId },
-                    ],
-                },
-                select: { id: true },
-            });
+            // ⚡ Ye teen queries ek dusre pe depend nahi karti. Pehle sequential
+            // chalti thi = 3 alag DB round trip. App server aur DB alag region mein
+            // hain, isliye har round trip mehnga hai - ek saath fire karo.
+            const [existingMsg, contactResult, phoneNumberUUID] = await Promise.all([
+                database_1.default.message.findFirst({
+                    where: {
+                        OR: [
+                            { waMessageId },
+                            { wamId: waMessageId },
+                        ],
+                    },
+                    select: { id: true },
+                }),
+                this.findOrCreateContact(organizationId, waFrom, profileName),
+                this.resolvePhoneNumberUUID(phoneNumberId),
+            ]);
             if (existingMsg) {
                 console.log(`⏭️ Duplicate message skipped: ${waMessageId}`);
                 return;
             }
-            const { contact, wasNewlyCreated } = await this.findOrCreateContact(organizationId, waFrom);
-            let conversation = await database_1.default.conversation.findFirst({
-                where: { organizationId, contactId: contact.id },
-            });
-            if (!conversation) {
-                try {
-                    conversation = await database_1.default.conversation.create({
-                        data: {
-                            organization: { connect: { id: organizationId } },
-                            contact: { connect: { id: contact.id } },
-                            isWindowOpen: true,
-                            windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-                            unreadCount: 0,
-                            isRead: false,
-                            lastMessageAt: messageTime,
-                        },
-                    });
-                    console.log(`💬 New conversation: ${conversation.id}`);
-                }
-                catch (err) {
-                    if (err.code === 'P2002') {
-                        conversation = await database_1.default.conversation.findFirst({
-                            where: { organizationId, contactId: contact.id },
-                        });
-                        if (!conversation)
-                            throw err;
-                    }
-                    else {
-                        throw err;
-                    }
-                }
-            }
+            const { contact, wasNewlyCreated } = contactResult;
+            let conversation = await this.findOrCreateConversation(organizationId, contact.id, phoneNumberId, messageTime, phoneNumberUUID);
             let content = '';
             let mediaUrl = null;
             let mediaType = null;
@@ -644,16 +882,89 @@ class WebhookService {
                     },
                 },
             });
+            // Media backup neeche backupInboundMediaAsync() se hota hai.
+            //
+            // Pehle yahan inboxMediaService.mirrorInboundMedia() bhi call hota tha,
+            // yaani ek hi media do baar Meta se download hoti thi aur dono paths
+            // same message row ka mediaUrl likhte the. Upar se mirrorInboundMedia
+            // token ke liye findFirst({ organizationId, isActive }) karta hai - yaani
+            // org ka *koi bhi* account, wo nahi jis par message aaya. Jis org ke
+            // ek se zyada WhatsApp accounts hain wahan Meta us media id ke liye
+            // galat account ka token dekh kar har baar 400 deta tha:
+            // "❌ Failed to mirror media to R2/Cloudinary: status code 400".
+            //
+            // backupInboundMediaAsync sahi account ka token use karta hai
+            // (findUnique by whatsappAccountId), isliye wahi rakha hai.
+            // ⚡ Socket emit ab DB update se PEHLE hota hai. Pehle ye emit
+            // conversation.update ke round trip ke BAAD tha, yaani har inbound
+            // message client tak ek pura DB round trip late pahunchta tha.
+            // Update ki nayi values hume pehle se pata hain, isliye wahi payload
+            // locally bana kar turant emit karo - DB write peeche chalti rahegi.
+            const preview = (content || `[${typeRaw}]`).substring(0, 100);
+            const windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            const contactName = contact.whatsappProfileName ||
+                (contact.firstName
+                    ? `${contact.firstName} ${contact.lastName || ''}`.trim()
+                    : contact.phone);
+            const contactWithName = {
+                id: contact.id,
+                phone: contact.phone,
+                firstName: contact.firstName,
+                lastName: contact.lastName,
+                avatar: contact.avatar,
+                whatsappProfileName: contact.whatsappProfileName,
+                name: contactName,
+            };
+            const messagePayload = {
+                ...savedMessage,
+                createdAt: savedMessage.createdAt instanceof Date ? savedMessage.createdAt.toISOString() : savedMessage.createdAt,
+                sentAt: savedMessage.sentAt instanceof Date ? savedMessage.sentAt.toISOString() : savedMessage.sentAt,
+                deliveredAt: savedMessage.deliveredAt instanceof Date ? savedMessage.deliveredAt.toISOString() : savedMessage.deliveredAt,
+                timestamp: savedMessage.timestamp instanceof Date ? savedMessage.timestamp.toISOString() : savedMessage.timestamp,
+            };
+            const conversationPayload = {
+                ...conversation,
+                lastMessageAt: messageTime.toISOString(),
+                lastMessagePreview: preview,
+                lastCustomerMessageAt: messageTime.toISOString(),
+                unreadCount: (conversation.unreadCount ?? 0) + 1,
+                isRead: false,
+                isWindowOpen: true,
+                windowExpiresAt: windowExpiresAt.toISOString(),
+                contact: contactWithName,
+            };
+            exports.webhookEvents.emit('newMessage', {
+                organizationId,
+                conversationId: conversation.id,
+                message: messagePayload,
+                conversation: conversationPayload,
+            });
+            exports.webhookEvents.emit('conversationUpdated', {
+                organizationId,
+                conversation: conversationPayload,
+            });
+            // Phone par push notification. Socket sirf tab kaam karta hai jab app
+            // khula ho - band app tak message pahunchane ka yahi ek raasta hai.
+            // Jaan-bujh kar await nahi kiya: push bhejne me lagne wala waqt
+            // webhook ka jawab dene me der na kare, warna Meta retry karega.
+            notifications_service_1.notificationsService
+                .notifyNewMessage({
+                organizationId,
+                conversationId: conversation.id,
+                contactName,
+                preview,
+            })
+                .catch((err) => console.error('New message notification failed:', err?.message));
             const updatedConversation = await database_1.default.conversation.update({
                 where: { id: conversation.id },
                 data: {
                     lastMessageAt: messageTime,
-                    lastMessagePreview: (content || `[${typeRaw}]`).substring(0, 100),
+                    lastMessagePreview: preview,
                     lastCustomerMessageAt: messageTime,
                     unreadCount: { increment: 1 },
                     isRead: false,
                     isWindowOpen: true,
-                    windowExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                    windowExpiresAt,
                 },
                 include: {
                     contact: {
@@ -677,50 +988,27 @@ class WebhookService {
             }).catch((e) => console.error('Contact update error:', e));
             Promise.resolve().then(() => __importStar(require('../inbox/inbox.service'))).then(({ inboxService }) => inboxService.clearCache(organizationId))
                 .catch((e) => console.error('Cache clear error:', e));
-            const contactName = updatedConversation.contact.whatsappProfileName ||
-                (updatedConversation.contact.firstName
-                    ? `${updatedConversation.contact.firstName} ${updatedConversation.contact.lastName || ''}`.trim()
-                    : updatedConversation.contact.phone);
-            const contactWithName = {
-                ...updatedConversation.contact,
-                name: contactName,
-            };
-            const messagePayload = {
-                ...savedMessage,
-                createdAt: savedMessage.createdAt instanceof Date ? savedMessage.createdAt.toISOString() : savedMessage.createdAt,
-                sentAt: savedMessage.sentAt instanceof Date ? savedMessage.sentAt.toISOString() : savedMessage.sentAt,
-                deliveredAt: savedMessage.deliveredAt instanceof Date ? savedMessage.deliveredAt.toISOString() : savedMessage.deliveredAt,
-                timestamp: savedMessage.timestamp instanceof Date ? savedMessage.timestamp.toISOString() : savedMessage.timestamp,
-            };
-            exports.webhookEvents.emit('newMessage', {
-                organizationId,
-                conversationId: updatedConversation.id,
-                message: messagePayload,
-                conversation: {
-                    ...updatedConversation,
-                    contact: contactWithName,
-                    lastMessageAt: updatedConversation.lastMessageAt instanceof Date
-                        ? updatedConversation.lastMessageAt.toISOString()
-                        : updatedConversation.lastMessageAt,
-                    windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
-                        ? updatedConversation.windowExpiresAt.toISOString()
-                        : updatedConversation.windowExpiresAt,
-                },
-            });
-            exports.webhookEvents.emit('conversationUpdated', {
-                organizationId,
-                conversation: {
-                    ...updatedConversation,
-                    contact: contactWithName,
-                    lastMessageAt: updatedConversation.lastMessageAt instanceof Date
-                        ? updatedConversation.lastMessageAt.toISOString()
-                        : updatedConversation.lastMessageAt,
-                    windowExpiresAt: updatedConversation.windowExpiresAt instanceof Date
-                        ? updatedConversation.windowExpiresAt.toISOString()
-                        : updatedConversation.windowExpiresAt,
-                },
-            });
-            this.runAutomations(wasNewlyCreated, organizationId, contact, content, waFrom, updatedConversation, message, msgType).catch((e) => console.error('Automation error:', e));
+            // Authoritative unreadCount DB se aata hai. Agar optimistic value se
+            // alag nikla (do message ek saath aane par possible hai), to sirf tabhi
+            // ek correction emit bhejo - warna dobara emit karne ki zarurat nahi.
+            if (updatedConversation.unreadCount !== conversationPayload.unreadCount) {
+                conversationPayload.unreadCount = updatedConversation.unreadCount;
+                exports.webhookEvents.emit('conversationUpdated', {
+                    organizationId,
+                    conversation: conversationPayload,
+                });
+            }
+            // Opt-out sabse pehle. "STOP" par contact UNSUBSCRIBED ho jata hai
+            // (campaigns pehle se sirf ACTIVE ko bhejte hain), aur uske baad na
+            // automation chalti hai na chatbot - ruk jane ko kehne ke baad bot ka
+            // jawab aana sabse kharab cheez hai, aur wahi Block/Report karwata hai.
+            const optSignal = (0, optOut_1.detectOptSignal)(content);
+            const suppressBot = optSignal
+                ? await (0, optOut_1.applyOptSignal)(optSignal, contact.id, organizationId)
+                : false;
+            if (!suppressBot) {
+                this.runAutomations(wasNewlyCreated, organizationId, contact, content, waFrom, updatedConversation, message, msgType).catch((e) => console.error('Automation error:', e));
+            }
             database_1.default.organization.findUnique({
                 where: { id: organizationId },
                 select: { ownerId: true },
@@ -735,7 +1023,7 @@ class WebhookService {
                     }).catch((err) => console.error('Push Notification error:', err));
                 }
             }).catch((err) => console.error('Error fetching org owner for push:', err));
-            if (msgType === 'TEXT' || msgType === 'INTERACTIVE') {
+            if (!suppressBot && (msgType === 'TEXT' || msgType === 'INTERACTIVE')) {
                 let chatbotContent = content;
                 if (msgType === 'INTERACTIVE') {
                     const iType = message?.interactive?.type;
@@ -747,6 +1035,13 @@ class WebhookService {
                 }
                 const isNewConversation = wasNewlyCreated || updatedConversation.unreadCount <= 1;
                 chatbot_engine_1.chatbotEngine.processMessage(updatedConversation.id, organizationId, chatbotContent, waFrom, isNewConversation, message).catch((e) => console.error('Chatbot error:', e));
+            }
+            // ✅ Auto-backup inbound media to Cloudinary (fire-and-forget)
+            const MEDIA_TYPES_TO_BACKUP = ['image', 'video', 'audio', 'document', 'sticker'];
+            if (MEDIA_TYPES_TO_BACKUP.includes(typeRaw) && mediaId) {
+                this.backupInboundMediaAsync(mediaId, mediaMimeType || 'application/octet-stream', organizationId, savedMessage.id, whatsappAccountId).catch(err => {
+                    console.error('Async media backup error:', err.message);
+                });
             }
             console.log(`✅ Inbound message processed: ${savedMessage.id}`);
         }
@@ -858,6 +1153,25 @@ class WebhookService {
         }
     }
     async updateChatMessageStatus(message, newStatus, statusTime, statusObj, organizationId) {
+        // ✅ FIX: Prevent status regression
+        const STATUS_PRIORITY = {
+            'PENDING': 0,
+            'QUEUED': 1,
+            'SENT': 2,
+            'DELIVERED': 3,
+            'READ': 4,
+            'FAILED': 5, // Terminal state
+        };
+        const currentPriority = STATUS_PRIORITY[message.status] ?? 0;
+        const newPriority = STATUS_PRIORITY[newStatus] ?? 0;
+        // Skip downgrades (except FAILED which is terminal)
+        if (newStatus !== 'FAILED' && newPriority <= currentPriority) {
+            return;
+        }
+        // Skip if already FAILED (terminal)
+        if (message.status === 'FAILED' && newStatus !== 'FAILED') {
+            return;
+        }
         const updatedMessage = await database_1.default.message.update({
             where: { id: message.id },
             data: {
@@ -876,7 +1190,27 @@ class WebhookService {
         });
         console.log(`✅ Message status updated: ${message.id} -> ${newStatus}`);
         if (newStatus === 'FAILED') {
+            const firstError = statusObj?.errors?.[0];
+            const errorCode = firstError?.code;
             console.error(`❌ Message ${message.id} failed. Meta Error:`, JSON.stringify(statusObj?.errors || [], null, 2));
+            // 131047: Re-engagement message -> customer service window is closed
+            if (errorCode === 131047 && message.conversationId) {
+                database_1.default.conversation.update({
+                    where: { id: message.conversationId },
+                    data: {
+                        isWindowOpen: false,
+                        windowExpiresAt: new Date(),
+                    },
+                }).catch((err) => console.error('Failed to update conversation window state:', err?.message));
+                exports.webhookEvents.emit('conversationUpdated', {
+                    organizationId: message.conversation?.organizationId || organizationId,
+                    conversation: {
+                        id: message.conversationId,
+                        isWindowOpen: false,
+                        windowExpiresAt: new Date().toISOString(),
+                    },
+                });
+            }
         }
         const metadata = message.metadata || {};
         exports.webhookEvents.emit('messageStatus', {
@@ -985,56 +1319,28 @@ class WebhookService {
                 },
             });
             console.log(`✅ Campaign contact ${campaignContact.id}: ${currentStatus} → ${newStatus}`);
-            // ✅ REFUND ON FAILURE (idempotent)
+            // ✅ SMART REFUND ON FAILURE (queued)
             if (newStatus === 'FAILED' && currentStatus !== 'FAILED') {
                 if (campaignContact.campaign?.template) {
-                    try {
-                        const template = campaignContact.campaign.template;
-                        const { getRateForCategory } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.deduction.service')));
-                        const rateRupees = getRateForCategory(template.category || 'MARKETING', campaignContact.contact?.phone || '', template.language);
-                        const refundPaise = Math.round(rateRupees * 100);
-                        if (refundPaise > 0) {
-                            await database_1.default.$transaction(async (tx) => {
-                                const existingRefund = await tx.walletTransaction.findFirst({
-                                    where: {
-                                        metaChargeId: waMessageId,
-                                        metaService: 'template_message_refund',
-                                    },
-                                    select: { id: true },
-                                });
-                                if (existingRefund)
-                                    return;
-                                const wallet = await tx.wallet.findUnique({
-                                    where: { organizationId: campaignContact.campaign.organizationId },
-                                });
-                                if (!wallet)
-                                    return;
-                                const balanceBefore = wallet.balancePaise;
-                                const balanceAfter = balanceBefore + refundPaise;
-                                await tx.wallet.update({
-                                    where: { id: wallet.id },
-                                    data: { balancePaise: balanceAfter },
-                                });
-                                await tx.walletTransaction.create({
-                                    data: {
-                                        walletId: wallet.id,
-                                        type: 'credit',
-                                        amountPaise: refundPaise,
-                                        balanceBeforePaise: balanceBefore,
-                                        balanceAfterPaise: balanceAfter,
-                                        description: `Refund: Failed msg (${campaignContact.contact?.phone}) - ${template.name}`,
-                                        status: 'completed',
-                                        metaChargeId: waMessageId,
-                                        metaService: 'template_message_refund',
-                                        note: `Refund (Campaign: ${campaignContact.campaign.id})`,
-                                    },
-                                });
-                                console.log(`💰 Refunded ₹${rateRupees.toFixed(2)} for failed msg to ${campaignContact.contact?.phone}`);
-                            });
-                        }
+                    // ✅ NEW: Smart refund logic - only refund if within threshold
+                    const shouldRefund = await this.shouldRefundFailure(campaignContact.campaignId, campaignContact.campaign.totalContacts);
+                    if (shouldRefund) {
+                        // Queue mein daalo (parallel nahi)
+                        this.refundQueue.push({
+                            waMessageId,
+                            organizationId: campaignContact.campaign.organizationId,
+                            campaignId: campaignContact.campaign.id,
+                            contactPhone: campaignContact.contact?.phone || '',
+                            template: campaignContact.campaign.template,
+                        });
+                        // ✅ Process queue (idempotent - safe to call multiple times)
+                        this.processRefundQueue().catch(err => {
+                            console.error('Queue processor error:', err);
+                        });
                     }
-                    catch (refundErr) {
-                        console.error('❌ Refund error:', refundErr.message);
+                    else {
+                        console.log(`⏭️  Skipping refund (threshold reached): ${waMessageId} ` +
+                            `(Campaign: ${campaignContact.campaignId})`);
                     }
                 }
             }
@@ -1112,6 +1418,201 @@ class WebhookService {
         catch (e) {
             console.error('updateCampaignContactStatus error:', e);
         }
+    }
+    // ============================================
+    // ✅ Process refunds sequentially (not parallel)
+    // ============================================
+    async processRefundQueue() {
+        if (this.refundProcessing || this.refundQueue.length === 0)
+            return;
+        this.refundProcessing = true;
+        while (this.refundQueue.length > 0) {
+            const item = this.refundQueue.shift();
+            try {
+                await this.processRefundWithRetry(item.waMessageId, item.organizationId, item.campaignId, item.contactPhone, item.template);
+                // ✅ Small gap between refunds to avoid DB pressure
+                await new Promise(r => setTimeout(r, 100));
+            }
+            catch (err) {
+                console.error('Refund queue item failed:', err.message);
+                await this.storeFailedRefund(item.waMessageId, item.organizationId);
+            }
+        }
+        this.refundProcessing = false;
+    }
+    // ============================================
+    // ✅ NEW METHOD: Refund with retry + timeout fix
+    // ============================================
+    async processRefundWithRetry(waMessageId, organizationId, campaignId, contactPhone, template, attempt = 1) {
+        const MAX_ATTEMPTS = 3;
+        const RETRY_DELAY_MS = [1000, 3000, 5000]; // 1s, 3s, 5s
+        try {
+            const { getRateForCategory } = await Promise.resolve().then(() => __importStar(require('../wallet/wallet.deduction.service')));
+            const rateRupees = getRateForCategory(template.category || 'MARKETING', contactPhone, template.language);
+            const refundPaise = Math.round(rateRupees * 100);
+            if (refundPaise <= 0)
+                return;
+            // ✅ FIX: 30-second timeout (was 5s default)
+            await database_1.default.$transaction(async (tx) => {
+                // Check for duplicate refund
+                const existingRefund = await tx.walletTransaction.findFirst({
+                    where: {
+                        metaChargeId: waMessageId,
+                        metaService: 'template_message_refund',
+                    },
+                    select: { id: true },
+                });
+                if (existingRefund) {
+                    console.log(`⏭️  Refund already exists for ${waMessageId}`);
+                    return;
+                }
+                const wallet = await tx.wallet.findUnique({
+                    where: { organizationId },
+                });
+                if (!wallet) {
+                    throw new Error('Wallet not found');
+                }
+                // Atomic credit, same reasoning as the debit fix: an absolute
+                // balance write here can be lost when a debit runs concurrently under
+                // READ COMMITTED. Increment in the database and read the result back.
+                const before = wallet.balancePaise;
+                const updatedWallet = await tx.wallet.update({
+                    where: { id: wallet.id },
+                    data: {
+                        balancePaise: { increment: refundPaise },
+                        totalCreditedPaise: { increment: refundPaise },
+                    },
+                    select: { balancePaise: true },
+                });
+                const balanceBefore = updatedWallet.balancePaise - refundPaise;
+                const balanceAfter = updatedWallet.balancePaise;
+                void before;
+                await tx.walletTransaction.create({
+                    data: {
+                        walletId: wallet.id,
+                        type: 'credit',
+                        amountPaise: refundPaise,
+                        balanceBeforePaise: balanceBefore,
+                        balanceAfterPaise: balanceAfter,
+                        description: `Refund: Failed msg (${contactPhone}) - ${template.name}`,
+                        status: 'completed',
+                        metaChargeId: waMessageId,
+                        metaService: 'template_message_refund',
+                        note: `Refund (Campaign: ${campaignId})`,
+                    },
+                });
+                console.log(`💰 Refunded ₹${rateRupees.toFixed(2)} to ${contactPhone}`);
+            }, {
+                maxWait: 10000, // ✅ 10s wait for connection
+                timeout: 30000, // ✅ 30s transaction timeout (was default 5s)
+                isolationLevel: 'ReadCommitted', // ✅ Reduce contention
+            });
+        }
+        catch (err) {
+            // The unique index on (metaChargeId, metaService) is the authoritative
+            // idempotency guard. A concurrent duplicate refund now fails the insert
+            // with P2002 -- that means the refund already landed, so treat it as
+            // success rather than an error.
+            if (err?.code === 'P2002') {
+                console.log(`⏭️  Refund already recorded for ${waMessageId} (unique guard)`);
+                return;
+            }
+            const isTimeoutError = err.message?.includes('Transaction already closed') ||
+                err.message?.includes('timeout');
+            // ✅ Retry on timeout errors
+            if (isTimeoutError && attempt < MAX_ATTEMPTS) {
+                const delay = RETRY_DELAY_MS[attempt - 1];
+                console.warn(`⚠️  Refund attempt ${attempt}/${MAX_ATTEMPTS} timed out, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return this.processRefundWithRetry(waMessageId, organizationId, campaignId, contactPhone, template, attempt + 1);
+            }
+            // ✅ Final failure - throw so caller can store for manual retry
+            console.error(`❌ Refund failed after ${attempt} attempts:`, err.message);
+            throw err;
+        }
+    }
+    // ============================================
+    // ✅ NEW METHOD: Store failed refunds for manual/cron retry
+    // ============================================
+    async storeFailedRefund(waMessageId, organizationId) {
+        try {
+            // Option A: Store in webhook logs
+            await database_1.default.webhookLog.create({
+                data: {
+                    organizationId,
+                    source: 'refund_retry_queue',
+                    eventType: 'FAILED_REFUND',
+                    payload: {
+                        waMessageId,
+                        reason: 'Transaction timeout',
+                        needsRetry: true,
+                        createdAt: new Date().toISOString(),
+                    },
+                    status: 'FAILED',
+                    errorMessage: 'Refund failed after 3 attempts - needs manual retry',
+                },
+            });
+            console.log(`📝 Stored failed refund for manual retry: ${waMessageId}`);
+        }
+        catch (e) {
+            console.error('Failed to store failed refund:', e);
+        }
+    }
+    // ============================================
+    // ✅ NEW: Determine if failure should be refunded
+    // ============================================
+    async shouldRefundFailure(campaignId, totalContacts) {
+        const HONEST_THRESHOLD = 300;
+        // Small campaign - always refund
+        if (totalContacts <= HONEST_THRESHOLD) {
+            return true;
+        }
+        // ✅ NEW: Check real delivery rate
+        const campaign = await database_1.default.campaign.findUnique({
+            where: { id: campaignId },
+            select: {
+                deliveredCount: true,
+                readCount: true,
+                totalContacts: true,
+            },
+        });
+        if (campaign) {
+            const realDelivered = campaign.deliveredCount + campaign.readCount;
+            const deliveryRate = campaign.totalContacts > 0
+                ? (realDelivered / campaign.totalContacts) * 100
+                : 0;
+            // ✅ Emergency mode - refund all failures
+            if (deliveryRate < 40) {
+                // ✅ FIX: Log only ONCE per campaign, not per message
+                if (!this.emergencyLoggedCampaigns.has(campaignId)) {
+                    console.log(`💰 Emergency refund mode for campaign ${campaignId}: Delivery ${deliveryRate.toFixed(1)}%`);
+                    this.emergencyLoggedCampaigns.add(campaignId);
+                    // Clear after 5 mins to allow re-logging
+                    setTimeout(() => this.emergencyLoggedCampaigns.delete(campaignId), 5 * 60 * 1000);
+                }
+                return true;
+            }
+        }
+        // Calculate max refundable (normal smart mode)
+        let maxFailRate = 0.10;
+        if (totalContacts > 5000)
+            maxFailRate = 0.05;
+        else if (totalContacts > 1000)
+            maxFailRate = 0.06;
+        else if (totalContacts > 500)
+            maxFailRate = 0.08;
+        const maxRefundable = Math.ceil(totalContacts * maxFailRate);
+        const alreadyRefunded = await database_1.default.walletTransaction.count({
+            where: {
+                metaService: 'template_message_refund',
+                note: { contains: campaignId },
+            },
+        });
+        const canRefundMore = alreadyRefunded < maxRefundable;
+        if (!canRefundMore) {
+            console.log(`💰 Refund limit reached for campaign ${campaignId}: ${alreadyRefunded}/${maxRefundable}`);
+        }
+        return canRefundMore;
     }
     // -----------------------------
     // Verify webhook
@@ -1381,6 +1882,106 @@ class WebhookService {
         }
         catch (e) {
             console.error('handleCallWebhook error:', e);
+        }
+    }
+    // ============================================
+    // ✅ NEW: Auto-backup inbound media to Cloudinary
+    // Meta media 30 din baad expire hoti hai
+    // ============================================
+    async backupInboundMediaAsync(mediaId, mimeType, organizationId, messageId, whatsappAccountId) {
+        try {
+            // Small delay - let message save complete
+            await new Promise(r => setTimeout(r, 1000));
+            const axios = (await Promise.resolve().then(() => __importStar(require('axios')))).default;
+            const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
+            const { config } = await Promise.resolve().then(() => __importStar(require('../../config')));
+            const account = await database_1.default.whatsAppAccount.findUnique({
+                where: { id: whatsappAccountId },
+                select: { accessToken: true }
+            });
+            if (!account?.accessToken)
+                return;
+            const accessToken = safeDecryptStrict(account.accessToken);
+            if (!accessToken)
+                return;
+            // Step 1: Get media URL from Meta
+            const version = config.meta?.graphApiVersion || 'v22.0';
+            const infoRes = await axios.get(`https://graph.facebook.com/${version}/${mediaId}`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                timeout: 10000,
+            });
+            const metaDownloadUrl = infoRes.data?.url;
+            const actualMime = infoRes.data?.mime_type || mimeType;
+            if (!metaDownloadUrl)
+                return;
+            // Step 2: Download from Meta CDN
+            const mediaRes = await axios.get(metaDownloadUrl, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                responseType: 'arraybuffer',
+                timeout: 60000,
+                maxContentLength: 100 * 1024 * 1024,
+            });
+            const buffer = Buffer.from(mediaRes.data);
+            if (buffer.length === 0)
+                return;
+            // Step 3: Upload to Cloudflare R2 (or fallback to Cloudinary)
+            let mediaUrl = '';
+            let storageKey = '';
+            const { r2Service } = await Promise.resolve().then(() => __importStar(require('../../services/r2.service')));
+            if (r2Service.isConfigured()) {
+                try {
+                    const r2Res = await r2Service.uploadInboundMedia({
+                        buffer,
+                        organizationId,
+                        mediaId,
+                        mimeType: actualMime,
+                    });
+                    mediaUrl = r2Res.url;
+                    storageKey = r2Res.key;
+                }
+                catch (e) {
+                    console.error('❌ R2 inbound upload failed:', e.message);
+                }
+            }
+            if (!mediaUrl) {
+                const { cloudinaryService } = await Promise.resolve().then(() => __importStar(require('../../services/cloudinary.service')));
+                const result = await cloudinaryService.uploadInboundMedia({
+                    buffer,
+                    mimeType: actualMime,
+                    organizationId,
+                    messageId,
+                });
+                if (result) {
+                    mediaUrl = result.url;
+                    storageKey = result.publicId;
+                }
+            }
+            if (!mediaUrl)
+                return;
+            // Step 4: Update message with media URL
+            const existingMsg = await database_1.default.message.findUnique({
+                where: { id: messageId },
+                select: { metadata: true }
+            });
+            const existingMeta = existingMsg?.metadata || {};
+            await database_1.default.message.update({
+                where: { id: messageId },
+                data: {
+                    mediaUrl: mediaUrl,
+                    metadata: {
+                        ...existingMeta,
+                        storageUrl: mediaUrl,
+                        storageKey: storageKey,
+                        backedUpAt: new Date().toISOString(),
+                        originalMetaMediaId: mediaId,
+                    },
+                },
+            });
+            console.log(`☁️ Auto-backed up inbound media: ${messageId}`);
+        }
+        catch (err) {
+            // Silently fail - media will backup on first user access
+            console.error(`Inbound backup failed for ${messageId}:`, err.message);
         }
     }
 }

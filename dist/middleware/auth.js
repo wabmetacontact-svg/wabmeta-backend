@@ -1,8 +1,40 @@
 "use strict";
-// src/middleware/auth.ts - PRODUCTION READY
-// ✅ Cache TTL increased to 5 minutes (paid plan)
-// ✅ Better error handling
-// ✅ Pool timeout graceful degradation
+// src/middleware/auth.ts - FINAL FIX
+// ✅ FIX: Token expired pe SEEDHA refresh karo, auto-heal complex logic hatao
+// ✅ FIX: Race condition prevent karo - simple aur reliable
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -15,7 +47,7 @@ const redis_1 = require("../config/redis");
 const auth_service_1 = require("../modules/auth/auth.service");
 const cookies_1 = require("../utils/cookies");
 const USER_CACHE_PREFIX = 'user:auth:';
-const CACHE_TTL = 300; // ✅ 5 minutes (paid plan can afford longer cache)
+const CACHE_TTL = 300;
 // ============================================
 // SAFE REDIS HELPERS
 // ============================================
@@ -37,9 +69,7 @@ const safeRedisSet = async (key, value, ttl) => {
             return;
         await redis.set(key, value, 'EX', ttl);
     }
-    catch {
-        // Silent
-    }
+    catch { }
 };
 const safeRedisDel = async (key) => {
     try {
@@ -48,9 +78,7 @@ const safeRedisDel = async (key) => {
             return;
         await redis.del(key);
     }
-    catch {
-        // Silent
-    }
+    catch { }
 };
 const fetchUser = async (userId, forceRefresh = false) => {
     const cacheKey = `${USER_CACHE_PREFIX}${userId}`;
@@ -60,20 +88,15 @@ const fetchUser = async (userId, forceRefresh = false) => {
             try {
                 return JSON.parse(cached);
             }
-            catch {
-                // Cache corrupt
-            }
+            catch { }
         }
     }
     try {
         const user = await database_1.default.user.findUnique({
             where: { id: userId },
             select: {
-                id: true,
-                email: true,
-                status: true,
-                emailVerified: true,
-                tokenVersion: true,
+                id: true, email: true, status: true,
+                emailVerified: true, tokenVersion: true,
             },
         });
         if (user) {
@@ -83,16 +106,12 @@ const fetchUser = async (userId, forceRefresh = false) => {
     }
     catch (err) {
         if (err?.code === 'P2024') {
-            console.warn('⚠️  Auth middleware: DB pool busy, trying cache fallback');
             const cached = await safeRedisGet(cacheKey);
             if (cached) {
                 try {
-                    console.log('✅ Auth: Serving from cache during pool pressure');
                     return JSON.parse(cached);
                 }
-                catch {
-                    return null;
-                }
+                catch { }
             }
             throw new errorHandler_1.AppError('Service temporarily busy. Please retry.', 503);
         }
@@ -100,44 +119,109 @@ const fetchUser = async (userId, forceRefresh = false) => {
     }
 };
 // ============================================
-// MAIN AUTH MIDDLEWARE
+// ✅ SIMPLE TOKEN EXTRACTOR
+// ============================================
+const extractToken = (req) => {
+    // 1. Authorization header
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (authHeader && /^Bearer /i.test(authHeader)) {
+        return authHeader.split(' ')[1];
+    }
+    // 2. x-access-token header
+    if (req.headers['x-access-token']) {
+        return req.headers['x-access-token'];
+    }
+    // 3. Cookie
+    if (req.cookies?.accessToken)
+        return req.cookies.accessToken;
+    if (req.cookies?.token)
+        return req.cookies.token;
+    // 4. Query param
+    if (req.query.token)
+        return req.query.token;
+    return '';
+};
+// ============================================
+// ✅ REFRESH LOCK (prevent concurrent refresh)
+// ============================================
+const acquireRefreshLock = async (userId) => {
+    try {
+        const redis = (0, redis_1.getRedis)();
+        if (!redis)
+            return true;
+        const result = await redis.set(`refresh:lock:${userId}`, '1', 'EX', 15, 'NX');
+        return result === 'OK';
+    }
+    catch {
+        return true;
+    }
+};
+const releaseRefreshLock = async (userId) => {
+    try {
+        const redis = (0, redis_1.getRedis)();
+        if (!redis)
+            return;
+        await redis.del(`refresh:lock:${userId}`);
+    }
+    catch { }
+};
+// ============================================
+// MAIN AUTH MIDDLEWARE - CLEAN VERSION
 // ============================================
 const authenticate = async (req, res, next) => {
     try {
-        let token = '';
-        const authHeader = req.headers.authorization || req.headers.Authorization;
-        if (authHeader && /^Bearer /i.test(authHeader)) {
-            token = authHeader.split(' ')[1];
-        }
-        else if (req.headers['x-access-token']) {
-            token = req.headers['x-access-token'];
-        }
-        else if (req.cookies?.accessToken || req.cookies?.token) {
-            token = req.cookies.accessToken || req.cookies.token;
-        }
-        else if (req.query.token) {
-            token = req.query.token;
-        }
-        // Auto-heal via refresh token
+        let token = extractToken(req);
+        // ✅ FIX: Sirf tab refresh karo jab token bilkul nahi hai
+        // Agar token hai (chahe expired ho) toh pehle verify karo
+        // Expired hone pe interceptor handle karega frontend pe
         if (!token && req.cookies?.refreshToken) {
+            // ✅ No token at all - try auto-refresh
+            let userId = null;
             try {
-                console.log('🛡️ Auto-healing: Attempting token refresh...');
-                const newTokens = await auth_service_1.authService.refreshToken(req.cookies.refreshToken);
-                res.cookie('refreshToken', newTokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
-                res.cookie('accessToken', newTokens.accessToken, (0, cookies_1.getCookieOptions)(false));
-                res.setHeader('x-new-access-token', newTokens.accessToken);
-                res.setHeader('x-token-refreshed', 'true');
-                res.setHeader('Access-Control-Expose-Headers', 'x-new-access-token, x-token-refreshed');
-                token = newTokens.accessToken;
-                console.log('✅ Auto-healing: Session restored.');
+                const { verifyRefreshToken } = await Promise.resolve().then(() => __importStar(require('../utils/jwt')));
+                const payload = verifyRefreshToken(req.cookies.refreshToken);
+                userId = payload.userId;
             }
-            catch (refreshError) {
-                console.warn('❌ Auto-healing failed:', refreshError.message);
+            catch {
+                // Invalid refresh token
+                throw new errorHandler_1.AppError('Access token required', 401);
+            }
+            if (!userId) {
+                throw new errorHandler_1.AppError('Access token required', 401);
+            }
+            // ✅ Lock prevent karo concurrent refresh
+            const lockAcquired = await acquireRefreshLock(userId);
+            if (!lockAcquired) {
+                // Dusri request refresh kar rahi hai - 1 second wait karo
+                await new Promise(r => setTimeout(r, 1000));
+                token = req.cookies?.accessToken || '';
+                if (!token) {
+                    throw new errorHandler_1.AppError('Access token expired', 401);
+                }
+            }
+            else {
+                try {
+                    const newTokens = await auth_service_1.authService.refreshToken(req.cookies.refreshToken);
+                    res.cookie('refreshToken', newTokens.refreshToken, (0, cookies_1.getCookieOptions)(true));
+                    res.cookie('accessToken', newTokens.accessToken, (0, cookies_1.getCookieOptions)(false));
+                    res.setHeader('x-new-access-token', newTokens.accessToken);
+                    res.setHeader('x-token-refreshed', 'true');
+                    res.setHeader('Access-Control-Expose-Headers', 'x-new-access-token, x-token-refreshed');
+                    token = newTokens.accessToken;
+                }
+                catch (refreshError) {
+                    console.warn('❌ Auto-refresh failed:', refreshError.message);
+                    throw new errorHandler_1.AppError('Access token expired', 401);
+                }
+                finally {
+                    await releaseRefreshLock(userId);
+                }
             }
         }
         if (!token) {
             throw new errorHandler_1.AppError('Access token required', 401);
         }
+        // ✅ Verify token
         let decoded;
         try {
             decoded = (0, jwt_1.verifyAccessToken)(token);
@@ -148,31 +232,26 @@ const authenticate = async (req, res, next) => {
             }
             throw new errorHandler_1.AppError('Invalid access token', 401);
         }
+        // ✅ Fetch user
         let user = await fetchUser(decoded.userId);
-        if (!user) {
+        if (!user)
             throw new errorHandler_1.AppError('User not found', 401);
-        }
-        // tokenVersion check with DB fallback
+        // ✅ TokenVersion check
         if (decoded.tokenVersion !== undefined &&
             user.tokenVersion !== undefined &&
             decoded.tokenVersion !== user.tokenVersion) {
-            console.warn(`⚠️  tokenVersion mismatch for ${decoded.userId}: ` +
-                `token=${decoded.tokenVersion}, cache=${user.tokenVersion} → refreshing from DB`);
             user = await fetchUser(decoded.userId, true);
-            if (!user) {
+            if (!user)
                 throw new errorHandler_1.AppError('User not found', 401);
-            }
             if (decoded.tokenVersion !== user.tokenVersion) {
-                console.warn(`🚨 tokenVersion CONFIRMED mismatch for ${decoded.userId}: ` +
-                    `token=${decoded.tokenVersion}, DB=${user.tokenVersion}`);
                 await safeRedisDel(`${USER_CACHE_PREFIX}${decoded.userId}`);
                 throw new errorHandler_1.AppError('Session expired. Please login again.', 401);
             }
-            console.log(`✅ tokenVersion verified from DB for ${decoded.userId}`);
         }
         if (user.status === 'SUSPENDED') {
             throw new errorHandler_1.AppError('Account suspended. Please contact support.', 403);
         }
+        // ✅ Organization
         let organizationId = decoded.organizationId;
         if (!organizationId) {
             try {
@@ -185,14 +264,20 @@ const authenticate = async (req, res, next) => {
             catch (err) {
                 if (err?.code !== 'P2024')
                     throw err;
-                console.warn('⚠️  Could not fetch organizationId: pool busy');
             }
         }
-        req.user = {
-            id: user.id,
-            email: user.email,
-            organizationId,
-        };
+        // A soft-deleted organization must behave as if it no longer exists: drop
+        // the org context so every org-scoped route rejects. This is the single
+        // gate that blocks access to a deleted org's data.
+        if (organizationId) {
+            const org = await database_1.default.organization.findFirst({
+                where: { id: organizationId, deletedAt: null },
+                select: { id: true },
+            });
+            if (!org)
+                organizationId = undefined;
+        }
+        req.user = { id: user.id, email: user.email, organizationId };
         next();
     }
     catch (error) {
@@ -205,9 +290,8 @@ exports.authenticate = authenticate;
 // ============================================
 const requireEmailVerified = async (req, res, next) => {
     try {
-        if (!req.user) {
+        if (!req.user)
             throw new errorHandler_1.AppError('Authentication required', 401);
-        }
         const user = await database_1.default.user.findUnique({
             where: { id: req.user.id },
             select: { emailVerified: true },
@@ -232,17 +316,10 @@ const requireOrganization = async (req, res, next) => {
         }
         const organization = await database_1.default.organization.findUnique({
             where: { id: req.user.organizationId },
-            select: {
-                id: true,
-                name: true,
-                slug: true,
-                planType: true,
-                ownerId: true,
-            },
+            select: { id: true, name: true, slug: true, planType: true, ownerId: true },
         });
-        if (!organization) {
+        if (!organization)
             throw new errorHandler_1.AppError('Organization not found', 404);
-        }
         req.organization = organization;
         next();
     }
@@ -264,15 +341,12 @@ const optionalAuth = async (req, res, next) => {
                 const user = await fetchUser(decoded.userId);
                 if (user && user.status !== 'SUSPENDED') {
                     req.user = {
-                        id: user.id,
-                        email: user.email,
+                        id: user.id, email: user.email,
                         organizationId: decoded.organizationId,
                     };
                 }
             }
-            catch {
-                // Invalid token - continue without user
-            }
+            catch { }
         }
         next();
     }

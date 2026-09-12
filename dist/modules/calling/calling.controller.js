@@ -26,7 +26,7 @@ class CallingController {
                     success: true,
                     data: {
                         callingEnabled: false,
-                        inboundCallsEnabled: true,
+                        showCallButton: true,
                         callbackEnabled: true,
                         callHoursEnabled: false,
                         message: 'No WhatsApp account found',
@@ -36,9 +36,10 @@ class CallingController {
             // Get token safely
             let settings = {
                 callingEnabled: false,
-                inboundCallsEnabled: true,
+                showCallButton: true,
                 callbackEnabled: true,
                 callHoursEnabled: false,
+                restrictToCountries: [],
             };
             try {
                 const accountWithToken = await meta_service_1.metaService.getAccountWithToken(account.id);
@@ -70,7 +71,7 @@ class CallingController {
             const organizationId = req.user?.organizationId;
             if (!organizationId)
                 throw new errorHandler_1.AppError('Organization required', 400);
-            const { callingEnabled, inboundCallsEnabled, callbackEnabled, callHoursEnabled, whatsappAccountId, 
+            const { callingEnabled, showCallButton, callbackEnabled, callHoursEnabled, whatsappAccountId, 
             // New fields
             restrictToCountries, timezone, weeklyHours, holidaySchedule, } = req.body;
             // Get account
@@ -91,18 +92,44 @@ class CallingController {
             const accountWithToken = await meta_service_1.metaService.getAccountWithToken(account.id);
             if (!accountWithToken)
                 throw new errorHandler_1.AppError('Token decryption failed', 500);
+            // Meta ke errors plain Error hote hain, isliye errorHandler unhe 500
+            // bana deta tha aur asli wajah (eligibility, invalid field waghera)
+            // kabhi user tak pahunchti hi nahi thi.
+            const asClientError = (err) => {
+                const meta = err?.metaError;
+                if (!meta)
+                    return err;
+                const code = meta.code;
+                const detail = meta.error_user_msg || meta.message || 'Meta rejected the request';
+                // Eligibility - wahi message jo initiateCall deta hai, taaki dono
+                // jagah user ko ek hi baat sunai de
+                if (code === 141000 || /2000|limit/i.test(detail)) {
+                    return new errorHandler_1.AppError('WhatsApp Calling requires a daily messaging limit of at least 2,000 unique recipients. ' +
+                        'Your number is below that tier right now. ' +
+                        'Send more campaigns to raise your tier, then try again.', 403);
+                }
+                // 190 = token problem, baaki sab client-side galti maani jaati hai
+                const status = code === 190 ? 401 : 400;
+                return new errorHandler_1.AppError(`WhatsApp Calling: ${detail}`, status);
+            };
             // Update calling settings with full schema
             const result = await meta_api_1.metaApi.enableCalling(account.phoneNumberId, accountWithToken.accessToken, {
                 callingEnabled: callingEnabled ?? true,
-                inboundCallsEnabled: inboundCallsEnabled ?? true,
+                showCallButton: showCallButton ?? true,
                 callbackEnabled: callbackEnabled ?? true,
                 callHoursEnabled: callHoursEnabled ?? false,
-                // Country restriction (default: India only)
-                restrictToCountries: restrictToCountries ?? ['IN'],
-                // Business hours (default: Mon-Fri 9AM-6PM IST)
+                // Default: koi country restriction nahi.
+                // Pehle yahan ['IN'] tha - yaani agar client ye field na bheje to
+                // account chup-chaap India-only ho jata tha aur baaki duniya ke
+                // customers ko call button dikhna band ho jata. UK/US numbers ke
+                // liye ye seedha bug tha.
+                restrictToCountries: restrictToCountries ?? [],
                 timezone: timezone || 'Asia/Kolkata',
                 weeklyHours: weeklyHours || [],
                 holidaySchedule: holidaySchedule || [],
+            }).catch((err) => {
+                console.error('[Calling] Meta rejected settings update:', err?.metaError || err?.message);
+                throw asClientError(err);
             });
             // Subscribe to calls webhook if enabling
             if (callingEnabled) {
@@ -153,7 +180,6 @@ class CallingController {
             try {
                 await meta_api_1.metaApi.enableCalling(account.phoneNumberId, accountWithToken.accessToken, {
                     callingEnabled: true,
-                    inboundCallsEnabled: true,
                     callbackEnabled: true,
                 });
                 console.log('[Calling] ✅ Calling settings enabled for:', account.phoneNumberId);

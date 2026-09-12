@@ -1,104 +1,185 @@
 "use strict";
-// src/utils/phone.ts - COMPLETE REWRITE
-// ✅ SINGLE SOURCE OF TRUTH - Har jagah se yahi use hoga
+// src/utils/phone.ts - FINAL FIXED
+// ✅ Strict validation - Unknown country codes REJECT
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.toWhatsAppRecipientIN = exports.toWhatsAppRecipient = exports.formatFullPhone = exports.buildINPhoneVariants = exports.buildPhoneVariants = exports.normalizeINNational10 = exports.toCanonicalPhone = exports.digitsOnly = void 0;
+exports.normalizeINNational10 = exports.toWhatsAppRecipientIN = exports.toWhatsAppRecipient = exports.formatFullPhone = exports.buildINPhoneVariants = exports.buildPhoneVariants = exports.extractCountryCode = exports.toCanonicalPhone = exports.extractCountryCodeFromDigits = exports.digitsOnly = void 0;
 const digitsOnly = (p) => String(p || '').replace(/\D/g, '');
 exports.digitsOnly = digitsOnly;
+// ============================================
+// KNOWN COUNTRY CODES DATABASE
+// ============================================
+const KNOWN_COUNTRY_CODES = [
+    // 3-digit codes
+    '971', '966', '974', '973', '968', '967', '965', '962', '972',
+    '880', '852', '853', '855', '856', '886', '850', '870', '960',
+    '977', '992', '993', '994', '995', '996', '998',
+    '212', '213', '216', '218', '220', '221', '222', '223', '224',
+    '225', '226', '227', '228', '229', '230', '231', '232', '233',
+    '234', '235', '236', '237', '238', '239', '240', '241', '242',
+    '243', '244', '245', '246', '248', '249', '250', '251', '252',
+    '253', '254', '255', '256', '257', '258', '260', '261', '262',
+    '263', '264', '265', '266', '267', '268', '269', '290', '291',
+    '297', '298', '299',
+    '350', '351', '352', '353', '354', '355', '356', '357', '358',
+    '359', '370', '371', '372', '373', '374', '375', '376', '377',
+    '378', '379', '380', '381', '382', '385', '386', '387', '389',
+    '420', '421', '423',
+    '500', '501', '502', '503', '504', '505', '506', '507', '508',
+    '509', '590', '591', '592', '593', '594', '595', '596', '597',
+    '598', '599',
+    '670', '672', '673', '674', '675', '676', '677', '678', '679',
+    '680', '681', '682', '683', '685', '686', '687', '688', '689',
+    '690', '691', '692',
+    // 2-digit codes
+    '20', '27', '30', '31', '32', '33', '34', '36', '39',
+    '40', '41', '43', '44', '45', '46', '47', '48', '49',
+    '51', '52', '53', '54', '55', '56', '57', '58',
+    '60', '61', '62', '63', '64', '65', '66',
+    '81', '82', '84', '86',
+    '90', '91', '92', '93', '94', '95', '98',
+    // 1-digit codes
+    '1', '7',
+].sort((a, b) => b.length - a.length); // Longest first
 /**
- * ✅ CANONICAL FORMAT: +91XXXXXXXXXX (E.164 with + prefix)
- * Yahi ek format DB mein store hoga - koi exception nahi
+ * ✅ Extract country code from digits (without +)
+ */
+const extractCountryCodeFromDigits = (digits) => {
+    for (const cc of KNOWN_COUNTRY_CODES) {
+        if (digits.startsWith(cc)) {
+            const national = digits.slice(cc.length);
+            // National number must be 6-12 digits
+            if (national.length >= 6 && national.length <= 12) {
+                return { countryCode: cc, national };
+            }
+        }
+    }
+    return null;
+};
+exports.extractCountryCodeFromDigits = extractCountryCodeFromDigits;
+/**
+ * ✅ Validate if digits string has known country code
+ */
+const hasValidCountryCode = (digits) => {
+    return (0, exports.extractCountryCodeFromDigits)(digits) !== null;
+};
+/**
+ * ✅ CANONICAL FORMAT: E.164 with + prefix
  *
- * Accepts:
- *  - "9876543210"       → "+919876543210"
- *  - "+919876543210"    → "+919876543210"
- *  - "919876543210"     → "+919876543210"
- *  - "+91 98765 43210"  → "+919876543210"
- *  - "09876543210"      → "+919876543210"
- *  - "+1 650 555 1234"  → "+16505551234"
+ * Indian formats accepted:
+ *  "9876543210"       → "+919876543210"
+ *  "+919876543210"    → "+919876543210"
+ *  "919876543210"     → "+919876543210"
+ *  "09876543210"      → "+919876543210"
+ *  "+91 98765 43210"  → "+919876543210"
+ *
+ * International formats accepted:
+ *  "+14155551234"     → "+14155551234"
+ *  "+447911123456"    → "+447911123456"
+ *  "+971501234567"    → "+971501234567"
+ *
+ * REJECTED (returns null):
+ *  "73940941156"      → null (11 digits, no valid prefix)
+ *  "1234567890"       → null (10 digits, not Indian mobile)
+ *  "91123456789"      → null (91 prefix but invalid)
  */
 const toCanonicalPhone = (input) => {
     if (!input)
         return null;
-    // Remove spaces, dashes, brackets, dots
-    const cleaned = String(input).replace(/[\s\-\(\)\.]/g, '').trim();
+    // Clean
+    const cleaned = String(input)
+        .replace(/[\s\-\(\)\.]/g, '')
+        .trim();
     if (!cleaned)
         return null;
     const digits = (0, exports.digitsOnly)(cleaned);
-    if (!digits)
-        return null;
-    // Already has + prefix - validate and return
+    if (!digits || digits.length < 10)
+        return null; // Min 10 digits
+    // ─── HAS + PREFIX ──────────────────────────────────
     if (cleaned.startsWith('+')) {
-        // Must be 10-15 digits after +
-        if (digits.length >= 10 && digits.length <= 15) {
-            // Indian number special handling
-            if (digits.startsWith('91') && digits.length === 12) {
-                const national = digits.slice(2);
-                // Valid Indian mobile: starts with 6-9
-                if (/^[6-9]\d{9}$/.test(national)) {
-                    return `+${digits}`;
-                }
+        if (digits.length < 10 || digits.length > 15)
+            return null;
+        // Indian double-91 fix (9191XXXXXXXXXX)
+        if (digits.startsWith('9191') && digits.length === 14) {
+            const national = digits.slice(4);
+            if (/^[6-9]\d{9}$/.test(national)) {
+                return `+91${national}`;
             }
+        }
+        // Indian +91 validation
+        if (digits.startsWith('91') && digits.length === 12) {
+            const national = digits.slice(2);
+            if (!/^[6-9]\d{9}$/.test(national))
+                return null;
             return `+${digits}`;
         }
-        return null;
+        // ✅ International with + - MUST have known country code
+        if (hasValidCountryCode(digits)) {
+            return `+${digits}`;
+        }
+        return null; // Unknown country code
     }
-    // No + prefix - detect country code
-    // Indian 10-digit mobile (6-9 start)
+    // ─── NO + PREFIX ────────────────────────────────────
+    // Indian 10-digit (6-9 start)
     if (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) {
         return `+91${digits}`;
     }
-    // Indian with 91 prefix (12 digits)
+    // Indian 0-prefix: 09876543210 (11 digits)
+    if (digits.length === 11 && digits.startsWith('0')) {
+        const national = digits.slice(1);
+        if (/^[6-9]\d{9}$/.test(national)) {
+            return `+91${national}`;
+        }
+        return null; // 0-prefix but not valid Indian
+    }
+    // Indian 91 prefix: 919876543210 (12 digits)
     if (digits.length === 12 && digits.startsWith('91')) {
         const national = digits.slice(2);
         if (/^[6-9]\d{9}$/.test(national)) {
-            return `+${digits}`;
+            return `+91${national}`;
         }
+        return null; // 91 prefix but invalid Indian
     }
-    // Indian with 091 prefix (13 digits)
+    // Indian 091 prefix: 0919876543210 (13 digits)
     if (digits.length === 13 && digits.startsWith('091')) {
         const national = digits.slice(3);
         if (/^[6-9]\d{9}$/.test(national)) {
             return `+91${national}`;
         }
     }
-    // Double 91 prefix (e.g., 9191XXXXXXXXXX - 14 digits)
+    // Indian double-91: 9191XXXXXXXXXX (14 digits)
     if (digits.length === 14 && digits.startsWith('9191')) {
         const national = digits.slice(4);
         if (/^[6-9]\d{9}$/.test(national)) {
             return `+91${national}`;
         }
     }
-    // Indian 0-prefix (011 digits)
-    if (digits.length === 11 && digits.startsWith('0')) {
-        const national = digits.slice(1);
-        if (/^[6-9]\d{9}$/.test(national)) {
-            return `+91${national}`;
-        }
+    // ✅ 11 digits without valid prefix = REJECT
+    if (digits.length === 11) {
+        return null;
     }
-    // International number without + (10-15 digits)
-    if (digits.length >= 10 && digits.length <= 15) {
-        return `+${digits}`;
+    // ✅ 12-15 digits without + = MUST have known country code
+    if (digits.length >= 12 && digits.length <= 15) {
+        if (hasValidCountryCode(digits)) {
+            return `+${digits}`;
+        }
+        return null; // Unknown country code
     }
     return null;
 };
 exports.toCanonicalPhone = toCanonicalPhone;
 /**
- * ✅ BACKWARD COMPAT - purane code ke liye
- * @deprecated Use toCanonicalPhone instead
+ * ✅ Extract country code from canonical E.164
  */
-const normalizeINNational10 = (input) => {
-    const canonical = (0, exports.toCanonicalPhone)(input);
-    if (!canonical)
-        return null;
-    const digits = (0, exports.digitsOnly)(canonical);
-    // Return last 10 digits
-    return digits.length >= 10 ? digits.slice(-10) : null;
+const extractCountryCode = (canonical) => {
+    if (!canonical || !canonical.startsWith('+'))
+        return '+91';
+    const digits = canonical.slice(1);
+    const result = (0, exports.extractCountryCodeFromDigits)(digits);
+    return result ? `+${result.countryCode}` : '+91';
 };
-exports.normalizeINNational10 = normalizeINNational10;
+exports.extractCountryCode = extractCountryCode;
 /**
- * ✅ Build ALL possible variants of a phone number for DB lookup
- * Yeh use hoga duplicate check ke liye - saare purane formats cover karta hai
+ * ✅ Build all variants for DB duplicate lookup
  */
 const buildPhoneVariants = (input) => {
     if (!input)
@@ -106,41 +187,37 @@ const buildPhoneVariants = (input) => {
     const canonical = (0, exports.toCanonicalPhone)(input);
     if (!canonical)
         return [];
-    const digits = (0, exports.digitsOnly)(canonical); // e.g., "919876543210"
-    const national = digits.slice(-10); // e.g., "9876543210"
+    const digits = (0, exports.digitsOnly)(canonical);
+    const national = digits.slice(-10);
     const variants = new Set([
-        canonical, // +919876543210 ✅ NEW FORMAT
-        digits, // 919876543210
-        national, // 9876543210
-        `+${digits}`, // +919876543210 (same as canonical for Indian)
-        `91${national}`, // 919876543210
-        `+91${national}`, // +919876543210
-        `9191${national}`, // 9191... (wrong double-cc legacy)
+        canonical,
+        digits,
+        national,
+        `+${digits}`,
     ]);
+    // Indian specific variants
+    if (digits.startsWith('91') && digits.length === 12) {
+        variants.add(`91${national}`);
+        variants.add(`+91${national}`);
+        variants.add(`9191${national}`);
+        variants.add(`0${national}`);
+    }
     return Array.from(variants).filter(Boolean);
 };
 exports.buildPhoneVariants = buildPhoneVariants;
-/**
- * ✅ BACKWARD COMPAT - purane code ke liye
- * @deprecated Use buildPhoneVariants instead
- */
 exports.buildINPhoneVariants = exports.buildPhoneVariants;
 /**
- * ✅ Display format: +91 98765 43210
+ * ✅ Display format
  */
 const formatFullPhone = (countryCode, phone) => {
-    // Phone field mein canonical format hai (+919876543210)
-    // Ya phir national format (9876543210) with countryCode (+91)
     const phoneStr = String(phone || '').trim();
     if (!phoneStr)
         return '';
-    // Already canonical E.164
     if (phoneStr.startsWith('+'))
         return phoneStr;
     const cc = String(countryCode || '+91').trim();
     const digits = (0, exports.digitsOnly)(phoneStr);
     const ccDigits = (0, exports.digitsOnly)(cc);
-    // Phone already has country code digits
     if (ccDigits && digits.startsWith(ccDigits) && digits.length > 10) {
         return `+${digits}`;
     }
@@ -148,27 +225,32 @@ const formatFullPhone = (countryCode, phone) => {
 };
 exports.formatFullPhone = formatFullPhone;
 /**
- * ✅ WhatsApp API ke liye recipient number
- * Returns digits only without + (e.g., "919876543210")
+ * ✅ WhatsApp API recipient (digits only, no +)
  */
 const toWhatsAppRecipient = (phoneOrCanonical) => {
     const canonical = (0, exports.toCanonicalPhone)(phoneOrCanonical);
     if (!canonical)
         return null;
-    return (0, exports.digitsOnly)(canonical); // Remove + for WhatsApp API
+    return (0, exports.digitsOnly)(canonical);
 };
 exports.toWhatsAppRecipient = toWhatsAppRecipient;
-/**
- * ✅ BACKWARD COMPAT
- * @deprecated Use toWhatsAppRecipient instead
- */
 const toWhatsAppRecipientIN = (countryCode, phone) => {
     const combined = phone
-        ? (phone.startsWith('+') ? phone : `${countryCode || '+91'}${phone}`)
+        ? phone.startsWith('+')
+            ? phone
+            : `${countryCode || '+91'}${phone}`
         : null;
     if (!combined)
         return null;
     return (0, exports.toWhatsAppRecipient)(combined);
 };
 exports.toWhatsAppRecipientIN = toWhatsAppRecipientIN;
+const normalizeINNational10 = (input) => {
+    const canonical = (0, exports.toCanonicalPhone)(input);
+    if (!canonical)
+        return null;
+    const d = (0, exports.digitsOnly)(canonical);
+    return d.length >= 10 ? d.slice(-10) : null;
+};
+exports.normalizeINNational10 = normalizeINNational10;
 //# sourceMappingURL=phone.js.map

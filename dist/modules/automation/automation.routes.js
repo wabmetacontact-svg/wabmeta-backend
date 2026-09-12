@@ -3,10 +3,16 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const automation_controller_1 = require("./automation.controller");
 const auth_1 = require("../../middleware/auth");
+const featureLock_1 = require("../../middleware/featureLock");
 const planLimits_1 = require("../../middleware/planLimits");
+const requireRole_1 = require("../../middleware/requireRole");
 const router = (0, express_1.Router)();
 // All routes require authentication
 router.use(auth_1.authenticate);
+// Plan lock - client par locked screen dikhta hai, yahan API bhi band
+router.use((0, featureLock_1.featureLock)('automation'));
+// Writes are role-gated; reads stay open to every member including VIEWER.
+router.use((0, requireRole_1.gateMutations)(...requireRole_1.OPERATOR_ROLES));
 /**
  * @route   GET /api/v1/automations/stats
  * @desc    Get automation statistics

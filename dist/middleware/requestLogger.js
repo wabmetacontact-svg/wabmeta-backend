@@ -6,23 +6,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requestLogger = void 0;
 const logger_1 = require("../utils/logger");
 const crypto_1 = __importDefault(require("crypto"));
-// ─── Skip these paths ────────────────────────────────────
-const SKIP_PATHS = [
-    '/',
-    '/health',
-    '/api/health',
-    '/favicon.ico',
-];
-const SKIP_PREFIXES = [
-    '/api/webhooks',
-    '/uploads',
-];
+const SKIP_PATHS = ['/', '/health', '/api/health', '/favicon.ico'];
+const SKIP_PREFIXES = ['/api/webhooks', '/uploads'];
 const shouldSkip = (path) => {
     if (SKIP_PATHS.includes(path))
         return true;
     return SKIP_PREFIXES.some(prefix => path.startsWith(prefix));
 };
-// ─── Get status color ────────────────────────────────────
 const getStatusEmoji = (status) => {
     if (status >= 500)
         return '🔴';
@@ -41,18 +31,23 @@ const getDurationLabel = (ms) => {
         return '⚠️  medium';
     return 'fast';
 };
-// ─── Main middleware ─────────────────────────────────────
+// ✅ Ye 401s expected hain - refresh flow ka part hain
+// Inhe warn level pe log karne ki zaroorat nahi
+const isExpectedRefreshFlow = (status, _method, path) => {
+    if (status !== 401)
+        return false;
+    // A 401 on any authenticated route is the normal token-refresh flow: the
+    // access token expired mid-session, the client refreshes and retries. It is
+    // not worth a warning on every route. Auth routes are the exception — a 401
+    // there is a real sign-in failure worth seeing.
+    return !path.startsWith('/api/auth/');
+};
 const requestLogger = (req, res, next) => {
-    // Skip health checks etc.
-    if (shouldSkip(req.path)) {
+    if (shouldSkip(req.path))
         return next();
-    }
-    // Generate request ID for tracking
     req.requestId = crypto_1.default.randomBytes(8).toString('hex');
     req.startTime = Date.now();
-    // Add request ID to response headers
     res.setHeader('X-Request-Id', req.requestId);
-    // Log incoming request (debug level)
     logger_1.logger.http('Request', {
         requestId: req.requestId,
         method: req.method,
@@ -60,7 +55,6 @@ const requestLogger = (req, res, next) => {
         ip: req.ip,
         userAgent: req.headers['user-agent']?.substring(0, 50),
     });
-    // Capture response
     res.on('finish', () => {
         const duration = Date.now() - (req.startTime || Date.now());
         const status = res.statusCode;
@@ -71,23 +65,26 @@ const requestLogger = (req, res, next) => {
             status,
             duration,
         };
-        // Add user info if authenticated
         const user = req.user;
         if (user?.id)
             context.userId = user.id;
         if (user?.organizationId)
             context.organizationId = user.organizationId;
-        // Slow request warning
         if (duration > 3000)
             context.perf = getDurationLabel(duration);
         const emoji = getStatusEmoji(status);
         const message = `${emoji} ${req.method} ${req.path} → ${status}`;
-        // Log based on status
         if (status >= 500) {
             logger_1.logger.category('HTTP').error(message, null, context);
         }
         else if (status >= 400) {
-            logger_1.logger.category('HTTP').warn(message, context);
+            // ✅ FIX: Expected refresh flow 401s ko debug level pe log karo
+            if (isExpectedRefreshFlow(status, req.method, req.path)) {
+                logger_1.logger.category('HTTP').debug(message, context);
+            }
+            else {
+                logger_1.logger.category('HTTP').warn(message, context);
+            }
         }
         else {
             logger_1.logger.category('HTTP').http(message, context);

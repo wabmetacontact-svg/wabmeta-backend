@@ -33,6 +33,24 @@ interface ContactCheckResult {
     status: string;
 }
 declare class WhatsAppService {
+    private templateSyncInFlight;
+    /**
+     * Template sync background mein trigger karo (fire-and-forget).
+     *
+     * Meta par delete ho chuke templates hamari DB mein bache reh jaate hain
+     * agar sync na chale - phir unhe bhejne par 132001 aata hai. Jab bhi wo
+     * error mile, sync chala kar stale rows saaf kar dete hain.
+     */
+    private syncTemplatesInBackground;
+    /**
+     * Meta ke send errors ko padhne layak message mein badlo.
+     *
+     * metaApi.handleError plain Error return karta hai, isliye errorHandler
+     * har Meta rejection ko 500 bana deta tha - user ko sirf "Request failed
+     * with status code 500" dikhta tha, jabki Meta ne exact wajah batayi hoti
+     * hai. Ye codes account/config ki dikkat hain, server crash nahi.
+     */
+    private toSendError;
     private extractMessageContent;
     /**
      * ✅ FIX: delegates to the shared getAccountWithDecryptedToken() helper.
@@ -62,27 +80,29 @@ declare class WhatsAppService {
             tempId: string | undefined;
             clientMsgId: string | undefined;
             id: string;
-            type: import(".prisma/client").$Enums.MessageType;
-            waMessageId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
-            whatsappAccountId: string | null;
-            templateName: string | null;
-            conversationId: string;
             metadata: import("@prisma/client/runtime/library").JsonValue | null;
-            content: string | null;
+            templateId: string | null;
+            whatsappAccountId: string | null;
+            channel: import(".prisma/client").$Enums.Channel;
+            conversationId: string;
+            type: import(".prisma/client").$Enums.MessageType;
             readAt: Date | null;
-            wamId: string | null;
-            direction: import(".prisma/client").$Enums.MessageDirection;
+            failedAt: Date | null;
             mediaUrl: string | null;
             mediaType: string | null;
+            waMessageId: string | null;
+            templateName: string | null;
+            content: string | null;
+            wamId: string | null;
+            telegramMessageId: string | null;
+            direction: import(".prisma/client").$Enums.MessageDirection;
             mediaMimeType: string | null;
-            templateId: string | null;
             templateParams: import("@prisma/client/runtime/library").JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
-            failedAt: Date | null;
             failureReason: string | null;
             replyToMessageId: string | null;
             retryCount: number;
@@ -107,27 +127,29 @@ declare class WhatsAppService {
             tempId: string | undefined;
             clientMsgId: string | undefined;
             id: string;
-            type: import(".prisma/client").$Enums.MessageType;
-            waMessageId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
-            whatsappAccountId: string | null;
-            templateName: string | null;
-            conversationId: string;
             metadata: import("@prisma/client/runtime/library").JsonValue | null;
-            content: string | null;
+            templateId: string | null;
+            whatsappAccountId: string | null;
+            channel: import(".prisma/client").$Enums.Channel;
+            conversationId: string;
+            type: import(".prisma/client").$Enums.MessageType;
             readAt: Date | null;
-            wamId: string | null;
-            direction: import(".prisma/client").$Enums.MessageDirection;
+            failedAt: Date | null;
             mediaUrl: string | null;
             mediaType: string | null;
+            waMessageId: string | null;
+            templateName: string | null;
+            content: string | null;
+            wamId: string | null;
+            telegramMessageId: string | null;
+            direction: import(".prisma/client").$Enums.MessageDirection;
             mediaMimeType: string | null;
-            templateId: string | null;
             templateParams: import("@prisma/client/runtime/library").JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
-            failedAt: Date | null;
             failureReason: string | null;
             replyToMessageId: string | null;
             retryCount: number;
@@ -145,27 +167,29 @@ declare class WhatsAppService {
             tempId: string | undefined;
             clientMsgId: string | undefined;
             id: string;
-            type: import(".prisma/client").$Enums.MessageType;
-            waMessageId: string | null;
             status: import(".prisma/client").$Enums.MessageStatus;
             createdAt: Date;
             updatedAt: Date;
-            whatsappAccountId: string | null;
-            templateName: string | null;
-            conversationId: string;
             metadata: import("@prisma/client/runtime/library").JsonValue | null;
-            content: string | null;
+            templateId: string | null;
+            whatsappAccountId: string | null;
+            channel: import(".prisma/client").$Enums.Channel;
+            conversationId: string;
+            type: import(".prisma/client").$Enums.MessageType;
             readAt: Date | null;
-            wamId: string | null;
-            direction: import(".prisma/client").$Enums.MessageDirection;
+            failedAt: Date | null;
             mediaUrl: string | null;
             mediaType: string | null;
+            waMessageId: string | null;
+            templateName: string | null;
+            content: string | null;
+            wamId: string | null;
+            telegramMessageId: string | null;
+            direction: import(".prisma/client").$Enums.MessageDirection;
             mediaMimeType: string | null;
-            templateId: string | null;
             templateParams: import("@prisma/client/runtime/library").JsonValue | null;
             sentAt: Date | null;
             deliveredAt: Date | null;
-            failedAt: Date | null;
             failureReason: string | null;
             replyToMessageId: string | null;
             retryCount: number;
@@ -206,27 +230,37 @@ declare class WhatsAppService {
     getDefaultAccount(organizationId: string): Promise<{
         organizationId: string;
         id: string;
-        phoneNumber: string;
         status: import(".prisma/client").$Enums.WhatsAppAccountStatus;
+        phoneNumber: string;
         createdAt: Date;
         updatedAt: Date;
+        isActive: boolean;
+        isDefault: boolean;
         phoneNumberId: string;
-        accessToken: string | null;
         wabaId: string;
         displayName: string;
         qualityRating: string | null;
+        accessToken: string | null;
         tokenExpiresAt: Date | null;
         webhookSecret: string | null;
         codeVerificationStatus: string | null;
         nameStatus: string | null;
+        healthCanSend: string | null;
+        healthBlockedReason: string | null;
+        healthStatus: import("@prisma/client/runtime/library").JsonValue | null;
+        healthCheckedAt: Date | null;
+        qualityRatingOverride: string | null;
+        codeVerificationOverride: string | null;
+        healthCanSendOverride: string | null;
+        messagingLimitOverride: string | null;
+        overrideSetBy: string | null;
+        overrideSetAt: Date | null;
         verifiedName: string | null;
         messagingLimit: string | null;
         dailyMessageLimit: number;
         dailyMessagesUsed: number;
         lastLimitReset: Date;
         businessProfile: import("@prisma/client/runtime/library").JsonValue | null;
-        isDefault: boolean;
-        isActive: boolean;
         connectionType: string;
     } | null>;
     validateAccount(accountId: string): Promise<{

@@ -4,6 +4,39 @@
 // - Cloudinary: permanent storage
 // - Meta Resumable: handle for template creation only
 // - No dual upload, no confusion
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -141,23 +174,47 @@ const uploadTemplateMedia = async (req, res, next) => {
         if (!accountWithToken?.accessToken) {
             throw new errorHandler_1.AppError('Failed to decrypt WhatsApp token. Please reconnect.', 500);
         }
-        // ── Step 2: Upload to Cloudinary (PERMANENT) ─────────────
-        // Ye URL hamesha DB mein rahega
-        // Campaign send ke time ye URL se fresh Meta ID ban sakti hai
-        const cloudinary = getCloudinary();
-        console.log('☁️ Uploading to Cloudinary...');
-        let cloudinaryResult;
-        try {
-            cloudinaryResult = await cloudinary.uploadTemplateMedia(file.buffer, file.originalname, file.mimetype, organizationId);
+        // ── Step 2: Upload to Cloudflare R2 (or fallback to Cloudinary) ─────────────
+        let permanentUrl = '';
+        let finalSize = file.size;
+        let compressionApplied = false;
+        const { r2Service } = await Promise.resolve().then(() => __importStar(require('../../services/r2.service')));
+        if (r2Service.isConfigured()) {
+            console.log('☁️ Uploading to Cloudflare R2...');
+            try {
+                const r2Result = await r2Service.uploadTemplateMedia({
+                    file: {
+                        buffer: file.buffer,
+                        mimetype: file.mimetype,
+                        originalname: file.originalname,
+                        size: file.size,
+                    },
+                    organizationId,
+                    headerType: req.body.headerType || 'IMAGE',
+                    templateName: req.body.templateName,
+                });
+                permanentUrl = r2Result.url;
+                finalSize = r2Result.size;
+                console.log('✅ Cloudflare R2 done:', permanentUrl);
+            }
+            catch (err) {
+                console.error('❌ R2 upload failed, falling back to Cloudinary:', err.message);
+            }
         }
-        catch (err) {
-            throw new errorHandler_1.AppError(`Cloudinary upload failed: ${err.message}. Please try again.`, 500);
+        if (!permanentUrl) {
+            const cloudinary = getCloudinary();
+            console.log('☁️ Uploading to Cloudinary...');
+            try {
+                const cloudinaryResult = await cloudinary.uploadTemplateMedia(file.buffer, file.originalname, file.mimetype, organizationId);
+                permanentUrl = cloudinaryResult.secureUrl;
+                finalSize = cloudinaryResult.finalSize || file.size;
+                compressionApplied = !!cloudinaryResult.compressionApplied;
+                console.log('✅ Cloudinary done:', permanentUrl.substring(0, 60));
+            }
+            catch (err) {
+                throw new errorHandler_1.AppError(`Media storage upload failed: ${err.message}. Please try again.`, 500);
+            }
         }
-        const permanentUrl = cloudinaryResult.secureUrl;
-        if (!permanentUrl?.startsWith('http')) {
-            throw new errorHandler_1.AppError('Cloudinary did not return a valid URL', 500);
-        }
-        console.log('✅ Cloudinary done:', permanentUrl.substring(0, 60));
         // ── Step 3: Upload to Meta (handle for template creation) ─
         // Handle sirf ek baar use hoga - template create karte waqt
         // Approve hone ke baad Meta khud media store karta hai
@@ -194,9 +251,9 @@ const uploadTemplateMedia = async (req, res, next) => {
                 // Metadata
                 filename: file.originalname,
                 mimeType: file.mimetype,
-                size: cloudinaryResult.finalSize || file.size,
+                size: finalSize || file.size,
                 originalSize: file.size,
-                compressionApplied: !!(cloudinaryResult.compressionApplied),
+                compressionApplied: compressionApplied,
                 wabaId: account.wabaId,
                 whatsappAccountId: account.id,
             },

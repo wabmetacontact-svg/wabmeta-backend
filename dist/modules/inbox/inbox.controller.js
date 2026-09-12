@@ -48,6 +48,8 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const fluent_ffmpeg_1 = __importDefault(require("fluent-ffmpeg"));
 const ffmpeg_1 = __importDefault(require("@ffmpeg-installer/ffmpeg"));
+const r2_service_1 = require("../../services/r2.service");
+const cloudinary_service_1 = require("../../services/cloudinary.service");
 // Set ffmpeg path
 fluent_ffmpeg_1.default.setFfmpegPath(ffmpeg_1.default.path);
 class InboxController {
@@ -72,6 +74,7 @@ class InboxController {
                         : undefined,
                 assignedTo: req.query.assignedTo,
                 labels: req.query.labels ? req.query.labels.split(',') : undefined,
+                channel: req.query.channel,
                 sortBy: req.query.sortBy || 'lastMessageAt',
                 sortOrder: req.query.sortOrder || 'desc',
             };
@@ -277,6 +280,26 @@ class InboxController {
         }
     }
     // ==========================================
+    // SET AUTOMATION PAUSED (human handoff)
+    // ==========================================
+    async setAutomationPaused(req, res, next) {
+        try {
+            const organizationId = req.user.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { id } = req.params;
+            const { paused } = req.body;
+            if (typeof paused !== 'boolean') {
+                throw new errorHandler_1.AppError('paused must be a boolean', 400);
+            }
+            const conversation = await inbox_service_1.inboxService.setAutomationPaused(organizationId, id, paused);
+            return (0, response_1.sendSuccess)(res, conversation, paused ? 'Automation paused' : 'Automation resumed');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
     // REMOVE LABEL
     // ==========================================
     async removeLabel(req, res, next) {
@@ -366,12 +389,29 @@ class InboxController {
             const organizationId = req.user?.organizationId;
             if (!organizationId)
                 throw new errorHandler_1.AppError('Organization context required', 400);
-            const searchParams = req.query.search ? String(req.query.search) : undefined;
-            const query = req.query.q ? String(req.query.q) : '';
+            const query = (req.query.q ? String(req.query.q) : (req.query.search ? String(req.query.search) : '')).trim();
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 20;
-            const result = await inbox_service_1.inboxService.searchMessages(organizationId, query, page, limit);
+            const channel = req.query.channel ? String(req.query.channel).toUpperCase() : undefined;
+            const result = await inbox_service_1.inboxService.searchMessages(organizationId, query, page, limit, channel);
             return (0, response_1.sendSuccess)(res, result, 'Search completed');
+        }
+        catch (error) {
+            next(error);
+        }
+    }
+    // ==========================================
+    // AI SUGGESTED REPLY
+    // ==========================================
+    async suggestReply(req, res, next) {
+        try {
+            const organizationId = req.user?.organizationId;
+            if (!organizationId)
+                throw new errorHandler_1.AppError('Organization context required', 400);
+            const { id } = req.params;
+            const instruction = req.body?.instruction ? String(req.body.instruction).slice(0, 500) : undefined;
+            const result = await inbox_service_1.inboxService.suggestReply(organizationId, id, instruction);
+            return (0, response_1.sendSuccess)(res, result, 'Reply drafted');
         }
         catch (error) {
             next(error);
@@ -554,7 +594,65 @@ class InboxController {
                         finalMime = 'audio/mpeg';
                 }
             }
-            const url = `${proto}://${host}/uploads/media/${finalFilename}`;
+            // ── Permanent storage par bhejo ───────────────────────
+            //
+            // Pehle yahan sirf local disk ka URL lautaya jata tha:
+            //   https://api.wabmeta.com/uploads/media/xxx.ogg
+            //
+            // Render ka filesystem ephemeral hai - har deploy/restart par
+            // uploads/ mit jata hai, aur multiple instances ek dusre ki files
+            // nahi dekh sakte. Meta us URL ko download karta hai, isliye file
+            // gayab hote hi voice message bhejna fail ho jata tha. DB me aise
+            // 2,000+ messages hain jinke URL ab 404 dete hain.
+            //
+            // Inbound media pehle se Cloudinary/R2 par jata hai - outbound bhi
+            // wahi karta hai ab.
+            const localPath = path_1.default.join(path_1.default.dirname(req.file.path), finalFilename);
+            let url = `${proto}://${host}/uploads/media/${finalFilename}`;
+            let uploadedPermanently = false;
+            try {
+                const buffer = fs_1.default.readFileSync(fs_1.default.existsSync(localPath) ? localPath : req.file.path);
+                const cleanMime = finalMime.split(';')[0].trim();
+                if (r2_service_1.r2Service.isConfigured()) {
+                    const r2 = await r2_service_1.r2Service.uploadMediaBuffer(buffer, finalFilename, cleanMime, `outbound/${organizationId}`);
+                    if (r2?.url) {
+                        url = r2.url;
+                        uploadedPermanently = true;
+                    }
+                }
+                if (!uploadedPermanently && cloudinary_service_1.cloudinaryService.isConfigured()) {
+                    const cl = await cloudinary_service_1.cloudinaryService.uploadInboundMedia({
+                        buffer,
+                        mimeType: cleanMime,
+                        organizationId,
+                        messageId: `outbound_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    });
+                    if (cl?.url) {
+                        url = cl.url;
+                        uploadedPermanently = true;
+                    }
+                }
+            }
+            catch (err) {
+                console.error('❌ Permanent media upload failed:', err?.message);
+            }
+            if (!uploadedPermanently) {
+                // Local URL sirf kuch der zinda rehta hai. Bhejna fail ho sakta hai,
+                // isliye saaf log rakhte hain - warna wajah dhoondhni mushkil hoti hai.
+                console.warn('⚠️ Media stored on local disk only - it will disappear on the next ' +
+                    'deploy or restart, and WhatsApp may fail to fetch it. ' +
+                    'Configure R2 or Cloudinary to fix this permanently.');
+            }
+            else {
+                // Permanent copy ban gayi - local file ki ab zaroorat nahi
+                for (const f of [localPath, req.file.path]) {
+                    try {
+                        if (fs_1.default.existsSync(f))
+                            fs_1.default.unlinkSync(f);
+                    }
+                    catch { /* best effort */ }
+                }
+            }
             const mediaType = finalMime.startsWith('image/') ? 'image'
                 : finalMime.startsWith('video/') ? 'video'
                     : finalMime.startsWith('audio/') ? 'audio'
@@ -636,7 +734,7 @@ class InboxController {
         }
     }
     // ==========================================
-    // ✅ NEW: PROXY WHATSAPP MEDIA
+    // ✅ ENHANCED: PROXY WHATSAPP MEDIA WITH CLOUDINARY FALLBACK
     // GET /inbox/media/:mediaId
     // ==========================================
     async getMedia(req, res, next) {
@@ -651,11 +749,22 @@ class InboxController {
             }
             // ✅ Local uploads - direct serve
             if (idToFetch.startsWith('/uploads/') || idToFetch.includes('uploads/media/')) {
-                const filePath = path_1.default.join(process.cwd(), idToFetch.startsWith('/') ? idToFetch : `/${idToFetch}`);
-                if (fs_1.default.existsSync(filePath)) {
+                // Contain the path inside the uploads directory. Without this,
+                // `?url=/uploads/../package.json` resolves outside it and serves any
+                // file under the working directory to an unauthenticated caller.
+                const uploadsRoot = path_1.default.resolve(process.cwd(), 'uploads');
+                const requested = path_1.default.resolve(uploadsRoot, idToFetch.replace(/^\/?uploads\//, '').replace(/^.*uploads\/media\//, 'media/'));
+                if (requested !== uploadsRoot && !requested.startsWith(uploadsRoot + path_1.default.sep)) {
+                    return this.sendMediaPlaceholder(res, 'Invalid media path');
+                }
+                if (fs_1.default.existsSync(requested)) {
                     res.setHeader('Access-Control-Allow-Origin', '*');
                     res.setHeader('Cache-Control', 'public, max-age=86400');
-                    return res.sendFile(filePath);
+                    res.setHeader('X-Content-Type-Options', 'nosniff');
+                    // Defence in depth: never let a stored file render inline in our
+                    // origin. Images/video still display fine when referenced by <img>/<video>.
+                    res.setHeader('Content-Disposition', 'inline; filename="media"');
+                    return res.sendFile(requested);
                 }
                 return this.sendMediaPlaceholder(res, 'Local file not found');
             }
@@ -668,15 +777,14 @@ class InboxController {
                 return res.redirect(302, idToFetch);
             }
             // ============================================
-            // ✅ HARDCODED ACCOUNT - Direct se token lo
-            // Only one account hai system mein
+            // ✅ NEW: SMART DB LOOKUP - Cloudinary check FIRST
             // ============================================
-            // Step 1: Is mediaId se message ka account dhundo
-            let accessToken = null;
+            let messageRecord = null;
             let phoneNumberId = null;
+            let accessToken = null;
             if (/^\d+$/.test(idToFetch)) {
-                // ✅ Message se directly account dhundo
-                const message = await database_1.default.message.findFirst({
+                // ✅ Message find karo - saath mein metadata bhi
+                messageRecord = await database_1.default.message.findFirst({
                     where: {
                         OR: [
                             { mediaId: idToFetch },
@@ -685,15 +793,65 @@ class InboxController {
                     },
                     select: {
                         id: true,
+                        mediaUrl: true,
+                        mediaMimeType: true,
+                        createdAt: true,
+                        metadata: true,
                         whatsappAccountId: true,
                         conversationId: true,
                     },
                 });
-                console.log('🔍 Message found:', message?.id, '| AccountId:', message?.whatsappAccountId);
-                // ✅ Specific account se token lo
-                if (message?.whatsappAccountId) {
+                console.log('🔍 Message found:', messageRecord?.id, '| AccountId:', messageRecord?.whatsappAccountId);
+                // ============================================
+                // ✅ PRIORITY 1: Cloudinary URL exists in mediaUrl?
+                // ============================================
+                if (messageRecord?.mediaUrl && this.isCloudinaryUrl(messageRecord.mediaUrl)) {
+                    console.log(`✅ Redirecting to Cloudinary: ${messageRecord.mediaUrl.substring(0, 60)}...`);
+                    return res.redirect(302, messageRecord.mediaUrl);
+                }
+                // ============================================
+                // ✅ PRIORITY 2: Cloudinary URL in metadata?
+                // ============================================
+                const meta = messageRecord?.metadata || {};
+                if (meta.cloudinaryUrl && this.isCloudinaryUrl(meta.cloudinaryUrl)) {
+                    console.log(`✅ Redirecting to Cloudinary (metadata): ${meta.cloudinaryUrl.substring(0, 60)}...`);
+                    return res.redirect(302, meta.cloudinaryUrl);
+                }
+                // ============================================
+                // ✅ PRIORITY 3: Media already marked expired?
+                // ============================================
+                if (meta.mediaExpired === true) {
+                    console.log(`⏭️ Media marked expired: ${messageRecord?.id}`);
+                    return this.sendMediaPlaceholder(res, 'Media expired (>30 days old)');
+                }
+                // ============================================
+                // ✅ PRIORITY 4: Check age - >30 days old, skip Meta call
+                // ============================================
+                if (messageRecord?.createdAt) {
+                    const ageMs = Date.now() - new Date(messageRecord.createdAt).getTime();
+                    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+                    if (ageMs > THIRTY_DAYS_MS) {
+                        console.log(`⏰ Media >30 days old (${Math.floor(ageMs / (24 * 60 * 60 * 1000))} days) - skipping Meta call`);
+                        // Auto-mark as expired (non-blocking)
+                        database_1.default.message.update({
+                            where: { id: messageRecord.id },
+                            data: {
+                                metadata: {
+                                    ...meta,
+                                    mediaExpired: true,
+                                    expiredCheckedAt: new Date().toISOString(),
+                                },
+                            },
+                        }).catch(() => { });
+                        return this.sendMediaPlaceholder(res, 'Media expired (>30 days old)');
+                    }
+                }
+                // ============================================
+                // ✅ PRIORITY 5: Get token for Meta fetch
+                // ============================================
+                if (messageRecord?.whatsappAccountId) {
                     const account = await database_1.default.whatsAppAccount.findUnique({
-                        where: { id: message.whatsappAccountId },
+                        where: { id: messageRecord.whatsappAccountId },
                         select: {
                             accessToken: true,
                             phoneNumberId: true,
@@ -708,8 +866,6 @@ class InboxController {
                                 accessToken = decrypted;
                                 phoneNumberId = account.phoneNumberId;
                                 console.log('✅ Token from message account:', account.id);
-                                console.log('✅ PhoneNumberId:', phoneNumberId);
-                                console.log('✅ Token preview:', decrypted.substring(0, 15) + '...');
                             }
                         }
                         catch (decryptErr) {
@@ -717,71 +873,46 @@ class InboxController {
                         }
                     }
                 }
-                // ✅ Fallback: Org ki koi bhi active account
+                // Fallback: Org's active account
                 if (!accessToken) {
                     const orgId = req.user?.organizationId
-                        || req.query.organizationId
-                        || 'cmn1m8f7n0096kfj8dflnhoyv'; // Fallback hardcoded
-                    console.log('🔍 Fallback: searching accounts for org:', orgId);
-                    const accounts = await database_1.default.whatsAppAccount.findMany({
-                        where: {
-                            organizationId: orgId,
-                            isActive: true,
-                            status: 'CONNECTED',
-                        },
-                        select: {
-                            id: true,
-                            accessToken: true,
-                            phoneNumberId: true,
-                        },
-                        orderBy: { updatedAt: 'desc' },
-                    });
-                    console.log(`🔍 Found ${accounts.length} accounts`);
-                    for (const acc of accounts) {
-                        if (!acc.accessToken)
-                            continue;
-                        try {
-                            const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
-                            const decrypted = safeDecryptStrict(acc.accessToken);
-                            console.log('🔑 Decrypted token preview:', decrypted?.substring(0, 15));
-                            if (decrypted && decrypted.length > 50) {
-                                accessToken = decrypted;
-                                phoneNumberId = acc.phoneNumberId;
-                                console.log('✅ Using fallback account:', acc.id);
-                                break;
+                        || req.query.organizationId;
+                    if (orgId) {
+                        const accounts = await database_1.default.whatsAppAccount.findMany({
+                            where: {
+                                organizationId: orgId,
+                                isActive: true,
+                                status: 'CONNECTED',
+                            },
+                            select: {
+                                id: true,
+                                accessToken: true,
+                                phoneNumberId: true,
+                            },
+                            orderBy: { updatedAt: 'desc' },
+                        });
+                        for (const acc of accounts) {
+                            if (!acc.accessToken)
+                                continue;
+                            try {
+                                const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
+                                const decrypted = safeDecryptStrict(acc.accessToken);
+                                if (decrypted && decrypted.length > 50) {
+                                    accessToken = decrypted;
+                                    phoneNumberId = acc.phoneNumberId;
+                                    console.log('✅ Using fallback account:', acc.id);
+                                    break;
+                                }
+                            }
+                            catch (e) {
+                                continue;
                             }
                         }
-                        catch (e) {
-                            console.error('❌ Decrypt error for account:', acc.id, e.message);
-                            continue;
-                        }
-                    }
-                }
-                // ✅ Last resort: MetaConnection
-                if (!accessToken) {
-                    const orgId = req.user?.organizationId || 'cmn1m8f7n0096kfj8dflnhoyv';
-                    const metaConn = await database_1.default.metaConnection.findFirst({
-                        where: { organizationId: orgId },
-                        select: { accessToken: true },
-                        orderBy: { updatedAt: 'desc' },
-                    });
-                    if (metaConn?.accessToken) {
-                        try {
-                            const { safeDecryptStrict } = await Promise.resolve().then(() => __importStar(require('../../utils/encryption')));
-                            const decrypted = safeDecryptStrict(metaConn.accessToken);
-                            if (decrypted && decrypted.length > 50) {
-                                accessToken = decrypted;
-                                console.log('✅ Using MetaConnection token');
-                            }
-                        }
-                        catch (e) { }
                     }
                 }
             }
-            console.log('🔐 Final token status:', accessToken ? `Found (${accessToken.substring(0, 10)}...)` : 'NOT FOUND');
-            console.log('📞 PhoneNumberId:', phoneNumberId);
             if (!accessToken) {
-                console.error('❌ No access token found after all attempts');
+                console.error('❌ No access token found');
                 return this.sendMediaPlaceholder(res, 'Authentication failed');
             }
             // ============================================
@@ -789,13 +920,12 @@ class InboxController {
             // ============================================
             const version = 'v22.0';
             let downloadUrl = null;
+            let metaMimeType = null;
             if (/^\d+$/.test(idToFetch)) {
                 console.log(`🔄 Calling Meta API: graph.facebook.com/${version}/${idToFetch}`);
                 try {
                     const metaRes = await axios_1.default.get(`https://graph.facebook.com/${version}/${idToFetch}`, {
-                        headers: {
-                            Authorization: `Bearer ${accessToken}`,
-                        },
+                        headers: { Authorization: `Bearer ${accessToken}` },
                         timeout: 15000,
                     });
                     console.log('✅ Meta API response:', {
@@ -804,6 +934,7 @@ class InboxController {
                         fileSize: metaRes.data?.file_size,
                     });
                     downloadUrl = metaRes.data?.url;
+                    metaMimeType = metaRes.data?.mime_type;
                 }
                 catch (e) {
                     const errData = e.response?.data?.error;
@@ -812,17 +943,28 @@ class InboxController {
                         code: errData?.code,
                         subcode: errData?.error_subcode,
                         message: errData?.message,
-                        tokenUsed: accessToken.substring(0, 20) + '...',
                     });
-                    // ✅ Subcode 33 = Media expired (>30 days) ya wrong token
+                    // ✅ Subcode 33 = Media expired - MARK IN DB (permanent)
                     if (errData?.error_subcode === 33) {
-                        console.error('💡 DIAGNOSIS: Media ID invalid/expired OR wrong token');
-                        console.error('💡 Token starts with:', accessToken.substring(0, 10));
-                        console.error('💡 Expected EAA... token format');
+                        console.warn(`⚠️ Media ${idToFetch} expired on Meta - marking permanently`);
+                        if (messageRecord?.id) {
+                            const existingMeta = messageRecord.metadata || {};
+                            database_1.default.message.update({
+                                where: { id: messageRecord.id },
+                                data: {
+                                    metadata: {
+                                        ...existingMeta,
+                                        mediaExpired: true,
+                                        expiredAt: new Date().toISOString(),
+                                        metaErrorCode: errData.code,
+                                        metaErrorSubcode: errData.error_subcode,
+                                    },
+                                },
+                            }).catch(() => { });
+                        }
+                        return this.sendMediaPlaceholder(res, 'Media expired (>30 days old)');
                     }
-                    return this.sendMediaPlaceholder(res, errData?.error_subcode === 33
-                        ? 'Media expired (>30 days old)'
-                        : errData?.message || 'Meta API error');
+                    return this.sendMediaPlaceholder(res, errData?.message || 'Meta API error');
                 }
             }
             else if (idToFetch.startsWith('http')) {
@@ -833,37 +975,32 @@ class InboxController {
                 return this.sendMediaPlaceholder(res, 'No download URL');
             }
             // ============================================
-            // ✅ Stream media to client
+            // ✅ Download & Stream + BACKUP TO CLOUDINARY
             // ============================================
             console.log('📥 Downloading from CDN...');
+            // ✅ Download to buffer (needed for both streaming AND backup)
             const mediaRes = await axios_1.default.get(downloadUrl, {
-                headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                },
-                responseType: 'stream',
+                headers: { Authorization: `Bearer ${accessToken}` },
+                responseType: 'arraybuffer', // ✅ Buffer instead of stream
                 timeout: 30000,
-                maxContentLength: 50 * 1024 * 1024, // 50MB max
+                maxContentLength: 100 * 1024 * 1024, // 100MB max
             });
-            const contentType = mediaRes.headers['content-type'] || 'image/jpeg';
+            const buffer = Buffer.from(mediaRes.data);
+            const contentType = mediaRes.headers['content-type'] || metaMimeType || 'image/jpeg';
+            // ✅ Background: Backup to Cloudinary (non-blocking)
+            if (messageRecord?.id && buffer.length > 0) {
+                this.backupMediaAsync(buffer, contentType, messageRecord.id, messageRecord.conversationId).catch(err => {
+                    console.error('Async backup error:', err.message);
+                });
+            }
+            // ✅ Stream response to client
             res.setHeader('Content-Type', contentType);
             res.setHeader('Cache-Control', 'private, max-age=3600');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-            if (mediaRes.headers['content-length']) {
-                res.setHeader('Content-Length', mediaRes.headers['content-length']);
-            }
-            // Handle stream errors
-            req.on('close', () => {
-                mediaRes.data.destroy();
-            });
-            mediaRes.data.on('error', (err) => {
-                console.error('❌ Media stream error:', err.message);
-                if (!res.headersSent) {
-                    res.status(500).end();
-                }
-            });
-            mediaRes.data.pipe(res);
-            console.log(`✅ Streaming ${contentType} to client`);
+            res.setHeader('Content-Length', buffer.length.toString());
+            res.status(200).send(buffer);
+            console.log(`✅ Served ${contentType} (${(buffer.length / 1024).toFixed(1)} KB)`);
         }
         catch (error) {
             console.error('❌ getMedia fatal error:', {
@@ -871,6 +1008,70 @@ class InboxController {
                 stack: error.stack?.split('\n')[1],
             });
             return this.sendMediaPlaceholder(res, error.message);
+        }
+    }
+    // ==========================================
+    // ✅ NEW HELPER: Check if URL is Cloudinary
+    // ==========================================
+    isCloudinaryUrl(url) {
+        if (!url)
+            return false;
+        return url.includes('cloudinary.com') || url.includes('res.cloudinary');
+    }
+    // ==========================================
+    // ✅ NEW HELPER: Async backup to Cloudinary
+    // ==========================================
+    async backupMediaAsync(buffer, mimeType, messageId, conversationId) {
+        try {
+            // Check message still exists and needs backup
+            const message = await database_1.default.message.findUnique({
+                where: { id: messageId },
+                select: {
+                    mediaUrl: true,
+                    metadata: true,
+                    conversation: {
+                        select: { organizationId: true }
+                    }
+                }
+            });
+            if (!message)
+                return;
+            // Already backed up?
+            if (message.mediaUrl && this.isCloudinaryUrl(message.mediaUrl))
+                return;
+            const meta = message.metadata || {};
+            if (meta.cloudinaryUrl)
+                return;
+            const orgId = message.conversation?.organizationId;
+            if (!orgId)
+                return;
+            // Import lazily
+            const { cloudinaryService } = await Promise.resolve().then(() => __importStar(require('../../services/cloudinary.service')));
+            const result = await cloudinaryService.uploadInboundMedia({
+                buffer,
+                mimeType,
+                organizationId: orgId,
+                messageId,
+            });
+            if (!result)
+                return;
+            // ✅ Update message with permanent Cloudinary URL
+            await database_1.default.message.update({
+                where: { id: messageId },
+                data: {
+                    mediaUrl: result.url,
+                    metadata: {
+                        ...meta,
+                        cloudinaryUrl: result.url,
+                        cloudinaryPublicId: result.publicId,
+                        backedUpAt: new Date().toISOString(),
+                    },
+                },
+            });
+            console.log(`☁️ Auto-backed up: ${messageId}`);
+        }
+        catch (err) {
+            console.error(`Backup failed for ${messageId}:`, err.message);
         }
     }
     sendMediaPlaceholder(res, reason) {

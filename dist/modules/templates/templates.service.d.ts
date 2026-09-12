@@ -1,5 +1,14 @@
 import { TemplateStatus } from '@prisma/client';
 import { CreateTemplateInput, UpdateTemplateInput, TemplatesQueryInput, TemplateResponse, TemplatesListResponse, TemplateStats, TemplatePreview, TemplateButton } from './templates.types';
+/**
+ * MARKETING template ke footer me opt-out ki line jodta hai.
+ *
+ * - UTILITY / AUTHENTICATION ko chhod deta hai - unme opt-out expected nahi hai
+ * - Agar footer me pehle se stop/unsubscribe/opt out likha hai to haath nahi lagata
+ * - Business ka apna footer kabhi kaatta nahi: jodne se 60 char paar hote hon
+ *   to unka footer waisa hi rehne deta hai
+ */
+export declare function withOptOutNotice(category: string | null | undefined, footerText: string | null | undefined): string | null;
 export declare class TemplatesService {
     validateTemplate(input: CreateTemplateInput): {
         valid: boolean;

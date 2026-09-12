@@ -2,9 +2,9 @@ import { z } from 'zod';
 export declare const updateProfileSchema: z.ZodObject<{
     body: z.ZodObject<{
         firstName: z.ZodOptional<z.ZodString>;
-        lastName: z.ZodNullable<z.ZodOptional<z.ZodString>>;
-        phone: z.ZodNullable<z.ZodOptional<z.ZodString>>;
-        avatar: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+        lastName: z.ZodUnion<[z.ZodNullable<z.ZodOptional<z.ZodString>>, z.ZodLiteral<"">]>;
+        phone: z.ZodUnion<[z.ZodNullable<z.ZodOptional<z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, string, string>>>, z.ZodLiteral<"">]>;
+        avatar: z.ZodUnion<[z.ZodNullable<z.ZodOptional<z.ZodString>>, z.ZodLiteral<"">]>;
     }, "strip", z.ZodTypeAny, {
         phone?: string | null | undefined;
         firstName?: string | undefined;

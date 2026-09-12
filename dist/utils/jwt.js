@@ -4,10 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTokenRemainingTime = exports.isTokenExpired = exports.getTokenExpiry = exports.parseExpiryTime = exports.decodeToken = exports.generateTokens = exports.verifyRefreshToken = exports.verifyAccessToken = exports.generateRefreshToken = exports.generateAccessToken = void 0;
-// src/utils/jwt.ts - FIXED
+// src/utils/jwt.ts - PRODUCTION FIX
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const crypto_1 = require("crypto");
 const config_1 = require("../config");
-// ─── Helper: Parse expiry ────────────────────────────────
 const getExpirySeconds = (expiryString) => {
     const match = expiryString.match(/^(\d+)([smhdw])$/);
     if (!match)
@@ -23,63 +23,96 @@ const getExpirySeconds = (expiryString) => {
         default: return 7 * 24 * 60 * 60;
     }
 };
-// ─── Generate Access Token ──────────────────────────────
 const generateAccessToken = (payload) => {
-    const secret = config_1.config.jwt.secret;
+    // ✅ FIX: JWT_ACCESS_SECRET use karo agar available ho
+    const secret = config_1.config.jwt.accessSecret || config_1.config.jwt.secret;
     const options = {
         expiresIn: getExpirySeconds(config_1.config.jwt.accessExpiresIn),
-        issuer: 'wabmeta', // ✅ Add issuer
-        audience: 'wabmeta-users', // ✅ Add audience
+        // ✅ NO issuer/audience - backward compatible
     };
     return jsonwebtoken_1.default.sign({ ...payload, type: 'access' }, secret, options);
 };
 exports.generateAccessToken = generateAccessToken;
-// ─── Generate Refresh Token ─────────────────────────────
 const generateRefreshToken = (payload) => {
-    const secret = config_1.config.jwt.refreshSecret;
+    const secret = config_1.config.jwt.refreshSecret || config_1.config.jwt.secret;
     const options = {
         expiresIn: getExpirySeconds(config_1.config.jwt.refreshExpiresIn),
-        issuer: 'wabmeta',
-        audience: 'wabmeta-refresh',
+        // ✅ NO issuer/audience - backward compatible
     };
-    return jsonwebtoken_1.default.sign({ ...payload, type: 'refresh' }, secret, options);
+    // jti har token ko alag banata hai.
+    //
+    // Iske bina payload sirf { userId, email, organizationId, tokenVersion }
+    // tha, aur JWT me iat/exp seconds me hote hain - to ek hi user ke do
+    // refresh same second me hone par bilkul same string banti thi. Phir
+    // refreshToken.create() unique constraint (token @unique) par P2002
+    // deta tha, jo errorHandler me 409 "This token already exists" ban kar
+    // client tak jaata tha aur us request ko fail kar deta tha.
+    //
+    // Ye aasani se hota hai: dashboard ek saath 4 call karta hai, aur user
+    // ke kai devices/tabs ek saath logged in ho sakte hain.
+    return jsonwebtoken_1.default.sign({ ...payload, type: 'refresh', jti: (0, crypto_1.randomUUID)() }, secret, options);
 };
 exports.generateRefreshToken = generateRefreshToken;
-// ─── Verify Access Token (with type check) ──────────────
 const verifyAccessToken = (token) => {
-    const secret = config_1.config.jwt.secret;
-    const payload = jsonwebtoken_1.default.verify(token, secret, {
-        issuer: 'wabmeta',
-        audience: 'wabmeta-users',
-    });
-    // ✅ CRITICAL: Verify token type
-    if (payload.type !== 'access') {
-        throw new Error('Invalid token type - expected access token');
+    // ✅ FIX: Try multiple secrets for backward compatibility
+    const secrets = [
+        config_1.config.jwt.accessSecret,
+        config_1.config.jwt.secret,
+    ].filter(Boolean);
+    let lastError;
+    for (const secret of secrets) {
+        try {
+            // ✅ NO issuer/audience check - purane tokens ke saath compatible
+            const payload = jsonwebtoken_1.default.verify(token, secret);
+            if (payload.type && payload.type !== 'access') {
+                throw new Error('Invalid token type');
+            }
+            return payload;
+        }
+        catch (err) {
+            lastError = err;
+            // TokenExpiredError pe retry mat karo - ye actual expiry hai
+            if (err.name === 'TokenExpiredError')
+                throw err;
+            // Agar secret mismatch hai toh next secret try karo
+            continue;
+        }
     }
-    return payload;
+    throw lastError;
 };
 exports.verifyAccessToken = verifyAccessToken;
-// ─── Verify Refresh Token (with type check) ─────────────
 const verifyRefreshToken = (token) => {
-    const secret = config_1.config.jwt.refreshSecret;
-    const payload = jsonwebtoken_1.default.verify(token, secret, {
-        issuer: 'wabmeta',
-        audience: 'wabmeta-refresh',
-    });
-    // ✅ CRITICAL: Verify token type
-    if (payload.type !== 'refresh') {
-        throw new Error('Invalid token type - expected refresh token');
+    const secrets = [
+        config_1.config.jwt.refreshSecret,
+        config_1.config.jwt.secret,
+    ].filter(Boolean);
+    let lastError;
+    for (const secret of secrets) {
+        try {
+            const payload = jsonwebtoken_1.default.verify(token, secret);
+            if (payload.type && payload.type !== 'refresh') {
+                // ✅ Purane tokens mein type field nahi tha - allow karo
+                if (payload.type !== undefined) {
+                    throw new Error('Invalid token type');
+                }
+            }
+            return payload;
+        }
+        catch (err) {
+            lastError = err;
+            if (err.name === 'TokenExpiredError')
+                throw err;
+            continue;
+        }
     }
-    return payload;
+    throw lastError;
 };
 exports.verifyRefreshToken = verifyRefreshToken;
-// ─── Generate both tokens ───────────────────────────────
 const generateTokens = (payload) => ({
     accessToken: (0, exports.generateAccessToken)(payload),
     refreshToken: (0, exports.generateRefreshToken)(payload),
 });
 exports.generateTokens = generateTokens;
-// ─── Decode without verify (debugging only) ─────────────
 const decodeToken = (token) => {
     try {
         return jsonwebtoken_1.default.decode(token);
@@ -89,13 +122,10 @@ const decodeToken = (token) => {
     }
 };
 exports.decodeToken = decodeToken;
-// ─── Parse expiry to ms ─────────────────────────────────
 const parseExpiryTime = (expiryString) => getExpirySeconds(expiryString) * 1000;
 exports.parseExpiryTime = parseExpiryTime;
-// ─── Get expiry Date ────────────────────────────────────
 const getTokenExpiry = (expiryString) => new Date(Date.now() + (0, exports.parseExpiryTime)(expiryString));
 exports.getTokenExpiry = getTokenExpiry;
-// ─── Check expiry ───────────────────────────────────────
 const isTokenExpired = (token) => {
     try {
         const decoded = jsonwebtoken_1.default.decode(token);
@@ -108,7 +138,6 @@ const isTokenExpired = (token) => {
     }
 };
 exports.isTokenExpired = isTokenExpired;
-// ─── Get remaining time ─────────────────────────────────
 const getTokenRemainingTime = (token) => {
     try {
         const decoded = jsonwebtoken_1.default.decode(token);

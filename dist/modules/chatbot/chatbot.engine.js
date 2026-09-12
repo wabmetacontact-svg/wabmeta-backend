@@ -42,6 +42,7 @@ exports.chatbotEngine = exports.ChatbotEngine = void 0;
 const database_1 = __importDefault(require("../../config/database"));
 const whatsapp_service_1 = require("../whatsapp/whatsapp.service");
 const ai_service_1 = require("./ai.service");
+const ai_ratelimit_1 = require("./ai.ratelimit");
 const logger_1 = require("../../utils/logger");
 // ============================================
 // REDIS SESSION MANAGER - ioredis compatible
@@ -916,15 +917,25 @@ class ChatbotEngine {
         }
         // ✅ FIXED: Rich system prompt with context
         const enhancedPrompt = this.buildEnhancedSystemPrompt(systemPrompt, session);
-        // ✅ Generate AI response
+        // ✅ Generate AI response — but only within the org's daily AI quota. This
+        // bounds abuse of the shared Gemini key; over the cap we serve the fallback
+        // without calling the model.
         let aiResponse;
-        try {
-            aiResponse = await ai_service_1.aiService.generateResponse(enhancedPrompt, userMessage, session.chatHistory);
-        }
-        catch (error) {
-            console.error('❌ AI generation failed:', error);
+        const allowed = await (0, ai_ratelimit_1.consumeAiQuota)(organizationId);
+        if (!allowed) {
+            console.warn(`⚠️ AI daily limit reached for org ${organizationId}; serving fallback`);
             aiResponse = fallbackMessage ||
-                'I apologize, but I did not understand that. Please try again.';
+                'Our assistant is taking a short break. Please try again later.';
+        }
+        else {
+            try {
+                aiResponse = await ai_service_1.aiService.generateResponse(enhancedPrompt, userMessage, session.chatHistory);
+            }
+            catch (error) {
+                console.error('❌ AI generation failed:', error);
+                aiResponse = fallbackMessage ||
+                    'I apologize, but I did not understand that. Please try again.';
+            }
         }
         // ✅ FIXED: Add to history BEFORE clearing lastInput
         session.chatHistory.push({

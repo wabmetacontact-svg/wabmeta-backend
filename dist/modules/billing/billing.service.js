@@ -8,6 +8,7 @@ exports.billingService = void 0;
 const client_1 = require("@prisma/client");
 const crypto_1 = __importDefault(require("crypto"));
 const database_1 = __importDefault(require("../../config/database"));
+const featureLock_1 = require("../../middleware/featureLock");
 // ============================================
 // RAZORPAY INITIALIZATION
 // ============================================
@@ -774,6 +775,9 @@ class BillingService {
                 where: { id: organizationId },
                 data: { planType: plan.type }
             });
+            // Plan badla hai - featureLock ka cache clear karo taaki naye plan ke
+            // locks turant effective ho jayein (warna 60s tak purane dikhenge)
+            (0, featureLock_1.invalidateFeatureLocks)(organizationId);
             // ✅ Create Payment record for revenue tracking
             await database_1.default.payment.create({
                 data: {
@@ -848,6 +852,9 @@ class BillingService {
             where: { id: organizationId },
             data: { planType: plan.type },
         });
+        // Plan badla hai - featureLock ka cache clear karo taaki naye plan ke
+        // locks turant effective ho jayein (warna 60s tak purane dikhenge)
+        (0, featureLock_1.invalidateFeatureLocks)(organizationId);
         return subscription;
     }
     // ============================================
@@ -870,6 +877,9 @@ class BillingService {
                 cancelledAt: new Date(),
             }
         });
+        // Plan badla hai - featureLock ka cache clear karo taaki naye plan ke
+        // locks turant effective ho jayein (warna 60s tak purane dikhenge)
+        (0, featureLock_1.invalidateFeatureLocks)(organizationId);
         console.log('Subscription cancelled:', { organizationId, reason });
         return {
             message: 'Subscription cancelled. You will have access until the end of your billing period.',

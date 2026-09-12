@@ -68,7 +68,25 @@ class MetaApiClient {
             const metaError = error.response?.data?.error;
             const isRestricted = metaError?.code === 100 && metaError?.error_subcode === 33;
             const isSmbRestriction = metaError?.code === 100 && metaError?.message?.includes('SMB');
-            const isHandledError = isRestricted || isSmbRestriction;
+            let isReadOrTyping = false;
+            if (url.endsWith('/messages') && error.config?.data) {
+                try {
+                    const body = typeof error.config.data === 'string'
+                        ? JSON.parse(error.config.data)
+                        : error.config.data;
+                    if (body?.status === 'read' || body?.typing_indicator) {
+                        isReadOrTyping = true;
+                    }
+                }
+                catch { }
+            }
+            const detailsStr = String(metaError?.error_data?.details ||
+                metaError?.error_user_msg ||
+                metaError?.message ||
+                '');
+            const isMessageNotExist = metaError?.code === 100 && detailsStr.toLowerCase().includes('does not exist');
+            const isSilent = error.config?.silent || isReadOrTyping || isMessageNotExist;
+            const isHandledError = isRestricted || isSmbRestriction || isSilent;
             const errorContext = {
                 method,
                 url,
@@ -79,7 +97,40 @@ class MetaApiClient {
                 errorContext.metaCode = metaError.code;
                 errorContext.metaSubcode = metaError.error_subcode;
                 errorContext.fbtraceId = metaError.fbtrace_id;
-                if (isHandledError) {
+                // Meta ka asli jawab yahan hota hai. Bina iske "(#100) Invalid
+                // parameter" bilkul bekaar hai - pata hi nahi chalta ki kaunsa
+                // parameter galat hai.
+                errorContext.metaDetails =
+                    metaError.error_data?.details ||
+                        metaError.error_user_msg ||
+                        undefined;
+                errorContext.metaType = metaError.type;
+                // Message send fail ho to payload ka dhaancha bhi chahiye
+                // (content nahi - wo private hai).
+                if (url.endsWith('/messages') && error.config?.data) {
+                    try {
+                        const body = typeof error.config.data === 'string'
+                            ? JSON.parse(error.config.data)
+                            : error.config.data;
+                        errorContext.sentType = body?.type;
+                        errorContext.toLength = String(body?.to || '').length;
+                        errorContext.hasContext = !!body?.context;
+                        if (body?.type === 'template') {
+                            errorContext.templateName = body?.template?.name;
+                            errorContext.templateLang = body?.template?.language?.code;
+                            errorContext.componentTypes = (body?.template?.components || [])
+                                .map((c) => c?.type)
+                                .join(',');
+                        }
+                    }
+                    catch {
+                        // payload parse na ho to baaki log phir bhi jaana chahiye
+                    }
+                }
+                if (isSilent) {
+                    logger_1.metaLog.debug(`API handled note (silent): ${metaError.message}`, errorContext);
+                }
+                else if (isHandledError) {
                     logger_1.metaLog.warn(`API handled note: ${metaError.message}`, errorContext);
                 }
                 else {
@@ -96,7 +147,7 @@ class MetaApiClient {
     // ============================================
     // TOKEN MANAGEMENT
     // ============================================
-    async exchangeCodeForToken(code, skipRedirectUri = false) {
+    async exchangeCodeForToken(code, skipRedirectUri = false, redirectUriOverride) {
         try {
             console.log('[Meta API] Exchanging code for token...');
             const params = {
@@ -105,8 +156,10 @@ class MetaApiClient {
                 code: code,
             };
             if (!skipRedirectUri) {
-                params.redirect_uri = config_1.config.meta.redirectUri;
-                console.log('[Meta API] Redirect URI:', config_1.config.meta.redirectUri);
+                // Token exchange ka redirect_uri authorize wale se HUBAHU match
+                // hona chahiye, warna Meta code reject kar deta hai.
+                params.redirect_uri = redirectUriOverride || config_1.config.meta.redirectUri;
+                console.log('[Meta API] Redirect URI:', params.redirect_uri);
             }
             else {
                 console.log('[Meta API] ⚠️  Skipping redirect_uri (FB.login Embedded Signup flow)');
@@ -281,7 +334,13 @@ class MetaApiClient {
             const response = await this.client.get(`${wabaId}/phone_numbers`, {
                 params: {
                     access_token: accessToken,
-                    fields: 'id,verified_name,display_phone_number,quality_rating,code_verification_status,platform_type,throughput,status,name_status,messaging_limit_tier',
+                    // whatsapp_business_manager_messaging_limit hi ab asli tier deta hai.
+                    // messaging_limit_tier deprecated hai aur null lautata hai - usi ki
+                    // wajah se saare accounts "no tier" dikhte the aur campaigns sabse
+                    // dheemi speed par chalti thi. Dono maang lete hain.
+                    fields: 'id,verified_name,display_phone_number,quality_rating,' +
+                        'code_verification_status,platform_type,throughput,status,name_status,' +
+                        'messaging_limit_tier,whatsapp_business_manager_messaging_limit',
                 },
             });
             const phoneNumbers = (response.data.data || []).map((phone) => ({
@@ -291,7 +350,9 @@ class MetaApiClient {
                 qualityRating: phone.quality_rating,
                 codeVerificationStatus: phone.code_verification_status,
                 nameStatus: phone.name_status,
-                messagingLimitTier: phone.messaging_limit_tier,
+                messagingLimitTier: phone.whatsapp_business_manager_messaging_limit ||
+                    phone.messaging_limit_tier ||
+                    null,
                 platformType: phone.platform_type,
                 throughput: phone.throughput,
                 status: phone.status,
@@ -302,6 +363,20 @@ class MetaApiClient {
         catch (error) {
             throw this.handleError(error, 'Failed to get phone numbers');
         }
+    }
+    /**
+     * Meta ka health_status - wahi batata hai ki ye number business-initiated
+     * messages bhej sakta hai ya nahi, aur na bhej sakne par asli wajah kya hai
+     * (payment method, banned WABA, business verification, quality).
+     *
+     * Iske bina har rok (#135000) Generic user error ban kar aati hai.
+     */
+    async getHealthStatus(phoneNumberId, accessToken) {
+        const response = await this.client.get(phoneNumberId, {
+            params: { access_token: accessToken, fields: 'health_status' },
+            timeout: 15000,
+        });
+        return response.data?.health_status || null;
     }
     async getPhoneNumberDetails(phoneNumberId, accessToken) {
         try {
@@ -646,6 +721,81 @@ class MetaApiClient {
         }
     }
     // ============================================
+    // PROFILE PICTURE (resumable upload)
+    // ============================================
+    /**
+     * Meta profile picture ke liye direct URL nahi leta - pehle file ko
+     * resumable upload API par bhejna padta hai, jo ek handle deta hai, aur
+     * wahi handle business profile mein set hota hai.
+     *
+     *   1. POST /{app-id}/uploads?file_name&file_length&file_type
+     *        -> { id: "upload:<SESSION_ID>" }
+     *   2. POST /{upload:SESSION_ID}  (header file_offset: 0, body = binary)
+     *        -> { h: "<HANDLE>" }
+     */
+    async uploadResumableFile(accessToken, file, mimeType, fileName = 'profile.jpg') {
+        try {
+            const appId = config_1.config.meta.appId;
+            if (!appId)
+                throw new Error('META_APP_ID is not configured');
+            // Step 1: session
+            const sessionRes = await this.client.post(`${appId}/uploads`, null, {
+                params: {
+                    file_name: fileName,
+                    file_length: file.length,
+                    file_type: mimeType,
+                    access_token: accessToken,
+                },
+            });
+            const sessionId = sessionRes.data?.id;
+            if (!sessionId)
+                throw new Error('Upload session not created');
+            // Step 2: binary upload
+            const uploadRes = await this.client.post(sessionId, file, {
+                headers: {
+                    Authorization: `OAuth ${accessToken}`,
+                    file_offset: '0',
+                    'Content-Type': 'application/octet-stream',
+                },
+                maxBodyLength: Infinity,
+                maxContentLength: Infinity,
+            });
+            const handle = uploadRes.data?.h;
+            if (!handle)
+                throw new Error('Upload handle not returned');
+            console.log('[Meta API] Profile picture uploaded, handle received');
+            return handle;
+        }
+        catch (error) {
+            throw this.handleError(error, 'Failed to upload profile picture');
+        }
+    }
+    // ============================================
+    // DISPLAY NAME
+    // ============================================
+    /**
+     * Display name change karo. Ye Meta ke review se guzarta hai -
+     * name_status PENDING_REVIEW ho jata hai, phir APPROVED / DECLINED.
+     *
+     * Approve hone ke BAAD number ko dobara register karna padta hai tabhi
+     * naya naam apply hota hai. Meta 30 din mein 10 changes allow karta hai.
+     */
+    async updateDisplayName(phoneNumberId, accessToken, newDisplayName) {
+        try {
+            console.log(`[Meta API] Requesting display name change for ${phoneNumberId}...`);
+            const response = await this.client.post(`${phoneNumberId}`, null, {
+                params: {
+                    new_display_name: newDisplayName,
+                    access_token: accessToken,
+                },
+            });
+            return response.data?.success === true;
+        }
+        catch (error) {
+            throw this.handleError(error, 'Failed to update display name');
+        }
+    }
+    // ============================================
     // MESSAGING
     // ============================================
     async sendMessage(phoneNumberId, accessToken, to, message) {
@@ -677,8 +827,9 @@ class MetaApiClient {
                 params: {
                     // ✅ FIX: name_status add kiya + status field
                     fields: 'verified_name,code_verification_status,display_phone_number,' +
-                        'quality_rating,messaging_limit_tier,platform_type,throughput,' +
-                        'name_status,status,id',
+                        'quality_rating,messaging_limit_tier,' +
+                        'whatsapp_business_manager_messaging_limit,' +
+                        'platform_type,throughput,name_status,status,id',
                     access_token: accessToken,
                 },
                 timeout: 30000,
@@ -686,11 +837,20 @@ class MetaApiClient {
             console.log('📊 Phone Info from Meta:', {
                 verified_name: response.data?.verified_name,
                 quality_rating: response.data?.quality_rating,
-                messaging_limit_tier: response.data?.messaging_limit_tier,
+                messaging_limit_tier: response.data?.whatsapp_business_manager_messaging_limit ||
+                    response.data?.messaging_limit_tier,
                 code_verification_status: response.data?.code_verification_status,
                 name_status: response.data?.name_status,
             });
-            return response.data;
+            // Meta naya field bhejta hai; purana null hota hai. Consumers
+            // messaging_limit_tier padhte hain, isliye yahin normalize kar dete
+            // hain - warna har account tier-less dikhta hai.
+            return {
+                ...response.data,
+                messaging_limit_tier: response.data?.whatsapp_business_manager_messaging_limit ||
+                    response.data?.messaging_limit_tier ||
+                    null,
+            };
         }
         catch (error) {
             console.error('Failed to get phone info:', error?.response?.data);
@@ -725,22 +885,68 @@ class MetaApiClient {
         }
     }
     async markMessageAsRead(phoneNumberId, accessToken, messageId, typing = false) {
+        // ✅ VALIDATION LAYER - invalid IDs or missing params pe API call hi mat karo
+        // Check 1: Empty/null/invalid phoneNumberId
+        if (!phoneNumberId ||
+            typeof phoneNumberId !== 'string' ||
+            phoneNumberId === 'null' ||
+            phoneNumberId === 'undefined' ||
+            phoneNumberId.trim() === '') {
+            return false;
+        }
+        // Check 2: Empty/null/invalid accessToken
+        if (!accessToken ||
+            typeof accessToken !== 'string' ||
+            accessToken === 'null' ||
+            accessToken === 'undefined' ||
+            accessToken.trim() === '') {
+            return false;
+        }
+        // Check 3: Empty/null messageId
+        if (!messageId || typeof messageId !== 'string' || messageId.trim() === '') {
+            return false;
+        }
+        // Check 4: Must be valid WhatsApp (wamid.) or Instagram/Messenger (mid.) format
+        const isWamid = messageId.startsWith('wamid.');
+        const isMid = messageId.startsWith('mid.') || messageId.startsWith('a_mid.') || messageId.startsWith('m_mid.');
+        if (!isWamid && !isMid) {
+            return false; // Silent - DB cuid or unrecognized format
+        }
+        // Check 5: Minimum length
+        if (messageId.length < 15) {
+            return false;
+        }
         const payload = {
             messaging_product: 'whatsapp',
             status: 'read',
             message_id: messageId,
         };
-        if (typing)
+        if (typing) {
             payload.typing_indicator = { type: 'text' };
+        }
         try {
-            const response = await this.withRetry(() => this.client.post(`/${phoneNumberId}/messages`, payload, {
+            const response = await this.client.post(`/${phoneNumberId}/messages`, payload, {
                 headers: { Authorization: `Bearer ${accessToken}` },
-                timeout: 10000,
-            }), { label: 'markMessageAsRead', maxRetries: 1 });
+                timeout: 8000, // ✅ Reduced from 10s - non-critical operation
+            });
             return response.data.success === true;
         }
         catch (error) {
-            console.warn('[Meta API] markMessageAsRead failed (non-fatal):', error.message);
+            const metaErr = error?.response?.data?.error;
+            const code = metaErr?.code;
+            // ✅ Code 100 = Invalid parameter
+            // Ye most common hai - message already read ya ID wrong
+            // NO logging needed - ye expected hai
+            if (code === 100)
+                return false;
+            // ✅ Code 131026 = Message too old
+            if (code === 131026)
+                return false;
+            // ✅ Code 131047 = Re-engagement message restrictions
+            if (code === 131047)
+                return false;
+            // ✅ Only log genuinely unexpected errors
+            console.warn(`[Meta API] markMessageAsRead unexpected: code=${code ?? 'N/A'} msg=${messageId.substring(0, 20)}...`);
             return false;
         }
     }
@@ -1024,6 +1230,13 @@ class MetaApiClient {
                 callback_permission_status: options.callbackEnabled !== false ? 'ENABLED' : 'DISABLED',
                 sip: { status: 'DISABLED' },
             };
+            // call_icon_visibility sirf tab bhejo jab user ne actually button
+            // chhupaya ho. 'DEFAULT' bhejne se kuch badalta nahi hai, par purane
+            // Graph API versions / kuch numbers is field ko reject kar dete hain -
+            // aur us wajah se poora save fail ho jata tha.
+            if (options.showCallButton === false) {
+                callingSettings.call_icon_visibility = 'DISABLE_ALL';
+            }
             if (options.restrictToCountries && options.restrictToCountries.length > 0) {
                 callingSettings.call_icons = {
                     restrict_to_user_countries: options.restrictToCountries,
@@ -1066,7 +1279,11 @@ class MetaApiClient {
             const calling = response.data?.calling || response.data?.calling_settings || {};
             return {
                 callingEnabled: calling.status === 'ENABLED' || calling.calling_enabled === true || false,
-                inboundCallsEnabled: calling.inbound_calls_enabled ?? true,
+                // Pehle yahan calling.inbound_calls_enabled padha jata tha - Meta aisa
+                // koi field bhejta hi nahi, isliye hamesha true aata tha aur UI ka
+                // toggle hamesha ON dikhta tha chahe kuch bhi set ho.
+                showCallButton: calling.call_icon_visibility !== 'DISABLE_ALL',
+                restrictToCountries: calling.call_icons?.restrict_to_user_countries ?? [],
                 callbackEnabled: calling.callback_permission_status === 'ENABLED' ||
                     calling.callback_enabled === true ||
                     true,
@@ -1079,7 +1296,8 @@ class MetaApiClient {
             console.error('[Meta API] ❌ Get calling settings failed');
             return {
                 callingEnabled: false,
-                inboundCallsEnabled: false,
+                showCallButton: true,
+                restrictToCountries: [],
                 callbackEnabled: false,
                 callHoursEnabled: false,
             };

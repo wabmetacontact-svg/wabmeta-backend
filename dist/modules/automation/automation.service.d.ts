@@ -28,9 +28,9 @@ export declare class AutomationService {
     getAll(organizationId: string): Promise<{
         actions: AutomationAction[];
         triggerConfig: any;
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         isActive: boolean;
@@ -44,9 +44,9 @@ export declare class AutomationService {
     getById(organizationId: string, automationId: string): Promise<{
         actions: AutomationAction[];
         triggerConfig: any;
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         isActive: boolean;
@@ -60,9 +60,9 @@ export declare class AutomationService {
     create(organizationId: string, input: CreateAutomationInput): Promise<{
         actions: AutomationAction[];
         triggerConfig: any;
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         isActive: boolean;
@@ -76,9 +76,9 @@ export declare class AutomationService {
     update(organizationId: string, automationId: string, input: UpdateAutomationInput): Promise<{
         actions: AutomationAction[];
         triggerConfig: any;
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         isActive: boolean;
@@ -95,9 +95,9 @@ export declare class AutomationService {
     toggle(organizationId: string, automationId: string): Promise<{
         actions: AutomationAction[];
         triggerConfig: any;
-        name: string;
         organizationId: string;
         id: string;
+        name: string;
         createdAt: Date;
         updatedAt: Date;
         isActive: boolean;

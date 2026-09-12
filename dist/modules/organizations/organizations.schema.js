@@ -12,15 +12,18 @@ const nameSchema = zod_1.z
     .min(2, 'Organization name must be at least 2 characters')
     .max(100, 'Organization name is too long')
     .trim();
-const urlSchema = zod_1.z
-    .string()
-    .url('Invalid URL')
-    .optional()
-    .nullable();
-const timezoneSchema = zod_1.z
+// HTML forms khaali field ko '' bhejte hain, undefined nahi. Pehle
+// website: '' par .url() fail ho jata tha aur poora settings save 400 ban
+// jata tha - jabki matlab sirf itna tha ki website di hi nahi gayi.
+// Nullable fields ke liye '' -> null (taaki user value clear bhi kar sake),
+// baaki ke liye '' -> undefined (yaani is field ko mat chhedo).
+const emptyToNull = (v) => typeof v === 'string' && v.trim() === '' ? null : v;
+const emptyToUndefined = (v) => typeof v === 'string' && v.trim() === '' ? undefined : v;
+const urlSchema = zod_1.z.preprocess(emptyToNull, zod_1.z.string().url('Invalid URL').optional().nullable());
+const timezoneSchema = zod_1.z.preprocess(emptyToUndefined, zod_1.z
     .string()
     .regex(/^[A-Za-z_\/]+$/, 'Invalid timezone format')
-    .optional();
+    .optional());
 const roleSchema = zod_1.z.nativeEnum(client_1.UserRole);
 // ============================================
 // REQUEST SCHEMAS
@@ -36,9 +39,9 @@ exports.createOrganizationSchema = zod_1.z.object({
 exports.updateOrganizationSchema = zod_1.z.object({
     body: zod_1.z.object({
         name: nameSchema.optional(),
-        logo: urlSchema,
+        logo: zod_1.z.string().optional().nullable().or(zod_1.z.literal('')),
         website: urlSchema,
-        industry: zod_1.z.string().max(50).optional().nullable(),
+        industry: zod_1.z.preprocess(emptyToNull, zod_1.z.string().max(50).optional().nullable()),
         timezone: timezoneSchema,
     }),
 });

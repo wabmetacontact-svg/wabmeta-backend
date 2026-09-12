@@ -8,13 +8,21 @@ declare class MetaApiClient {
     private client;
     private graphVersion;
     constructor();
-    exchangeCodeForToken(code: string, skipRedirectUri?: boolean): Promise<TokenExchangeResponse>;
+    exchangeCodeForToken(code: string, skipRedirectUri?: boolean, redirectUriOverride?: string): Promise<TokenExchangeResponse>;
     getLongLivedToken(shortLivedToken: string): Promise<TokenExchangeResponse>;
     debugToken(accessToken: string): Promise<DebugTokenResponse>;
     validateToken(accessToken: string): Promise<boolean>;
     getSharedWABAs(accessToken: string): Promise<SharedWABAInfo[]>;
     getWABADetails(wabaId: string, accessToken: string): Promise<SharedWABAInfo>;
     getPhoneNumbers(wabaId: string, accessToken: string): Promise<PhoneNumberInfo[]>;
+    /**
+     * Meta ka health_status - wahi batata hai ki ye number business-initiated
+     * messages bhej sakta hai ya nahi, aur na bhej sakne par asli wajah kya hai
+     * (payment method, banned WABA, business verification, quality).
+     *
+     * Iske bina har rok (#135000) Generic user error ban kar aati hai.
+     */
+    getHealthStatus(phoneNumberId: string, accessToken: string): Promise<any>;
     getPhoneNumberDetails(phoneNumberId: string, accessToken: string): Promise<{
         id: string;
         verifiedName: string;
@@ -77,7 +85,27 @@ declare class MetaApiClient {
         email?: string;
         websites?: string[];
         vertical?: string;
+        profile_picture_handle?: string;
     }): Promise<boolean>;
+    /**
+     * Meta profile picture ke liye direct URL nahi leta - pehle file ko
+     * resumable upload API par bhejna padta hai, jo ek handle deta hai, aur
+     * wahi handle business profile mein set hota hai.
+     *
+     *   1. POST /{app-id}/uploads?file_name&file_length&file_type
+     *        -> { id: "upload:<SESSION_ID>" }
+     *   2. POST /{upload:SESSION_ID}  (header file_offset: 0, body = binary)
+     *        -> { h: "<HANDLE>" }
+     */
+    uploadResumableFile(accessToken: string, file: Buffer, mimeType: string, fileName?: string): Promise<string>;
+    /**
+     * Display name change karo. Ye Meta ke review se guzarta hai -
+     * name_status PENDING_REVIEW ho jata hai, phir APPROVED / DECLINED.
+     *
+     * Approve hone ke BAAD number ko dobara register karna padta hai tabhi
+     * naya naam apply hota hai. Meta 30 din mein 10 changes allow karta hai.
+     */
+    updateDisplayName(phoneNumberId: string, accessToken: string, newDisplayName: string): Promise<boolean>;
     sendMessage(phoneNumberId: string, accessToken: string, to: string, message: any): Promise<{
         messageId: string;
         contacts?: any[];
@@ -136,7 +164,7 @@ declare class MetaApiClient {
     private isRetryable;
     enableCalling(phoneNumberId: string, accessToken: string, options?: {
         callingEnabled: boolean;
-        inboundCallsEnabled?: boolean;
+        showCallButton?: boolean;
         callbackEnabled?: boolean;
         restrictToCountries?: string[];
         callHoursEnabled?: boolean;
@@ -157,9 +185,10 @@ declare class MetaApiClient {
     }>;
     getCallingSettings(phoneNumberId: string, accessToken: string): Promise<{
         callingEnabled: boolean;
-        inboundCallsEnabled: boolean;
+        showCallButton: boolean;
         callbackEnabled: boolean;
         callHoursEnabled: boolean;
+        restrictToCountries: string[];
     }>;
     initiateCall(phoneNumberId: string, accessToken: string, to: string, options?: {
         callbackData?: string;

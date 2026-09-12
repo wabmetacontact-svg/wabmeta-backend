@@ -56,6 +56,7 @@ exports.creditWalletFromWebhook = creditWalletFromWebhook;
 const database_1 = __importDefault(require("../../config/database"));
 const crypto_1 = __importDefault(require("crypto"));
 const errorHandler_1 = require("../../middleware/errorHandler");
+const notifications_service_1 = require("../notifications/notifications.service");
 const db = database_1.default;
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAISE_MULTIPLIER = 100;
@@ -495,8 +496,24 @@ async function processTopUp(organizationId, data) {
     catch (err) {
         if (err instanceof errorHandler_1.AppError)
             throw err;
-        console.error('⚠️ Razorpay API error, using claimed amount:', err.message);
-        actualAmountPaise = toPaise(data.amount);
+        // Razorpay is unreachable, so the authoritative amount is unknown. Falling
+        // back to the client-supplied `data.amount` here would let a real ₹100
+        // payment be presented as any amount at all -- the signature is valid
+        // either way, so it offers no protection.
+        //
+        // Use the amount this server recorded when it created the order. If even
+        // that is missing, credit nothing: the webhook and the reconciliation job
+        // both settle from Razorpay's own figure, and creditWalletAtomic is
+        // idempotent, so failing closed only delays the credit.
+        console.error('⚠️ Razorpay API unreachable during verify:', err.message);
+        const storedOrder = await database_1.default.walletTopUpOrder.findFirst({
+            where: { razorpayOrderId: data.razorpayOrderId, organizationId },
+            select: { amountPaise: true },
+        });
+        if (!storedOrder) {
+            throw new errorHandler_1.AppError('Could not confirm the payment amount right now. It will be credited automatically once verified.', 503);
+        }
+        actualAmountPaise = storedOrder.amountPaise;
     }
     // ── Step 3: Credit atomically (idempotent) ───────────────────────────────
     try {
@@ -728,6 +745,22 @@ async function triggerLowBalanceAlert(wallet) {
     });
     console.log(`🔔 Low balance alert: org ${wallet.organizationId}, ` +
         `balance ₹${toRupees(wallet.balancePaise)}`);
+    // Pehle ye alert sirf server ke log me jata tha - user ko pata hi nahi
+    // chalta tha ki paisa khatam ho raha hai, jab tak campaign fail na ho jaye.
+    const available = toRupees(wallet.balancePaise - wallet.reservedPaise);
+    await notifications_service_1.notificationsService
+        .notifyOrganization(wallet.organizationId, {
+        type: 'wallet',
+        title: 'Wallet balance is low',
+        description: `Only ₹${available.toFixed(2)} left. Top up to keep your campaigns running.`,
+        actionUrl: '/(app)/wallet',
+        metadata: {
+            availableBalance: available,
+            threshold: toRupees(wallet.lowThresholdPaise),
+            webUrl: '/dashboard/wallet',
+        },
+    })
+        .catch((e) => console.error('Low balance notification failed:', e?.message));
 }
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN FUNCTIONS (same as original - no changes needed)

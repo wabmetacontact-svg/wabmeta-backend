@@ -144,7 +144,7 @@ exports.getTemplatesQuerySchema = zod_1.z.object({
         page: zod_1.z.string().optional().transform(val => val ? parseInt(val) : 1),
         limit: zod_1.z.string().optional().transform(val => val ? parseInt(val) : 20),
         search: zod_1.z.string().optional(),
-        status: zod_1.z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+        status: zod_1.z.enum(['PENDING', 'APPROVED', 'REJECTED', 'PAUSED']).optional(),
         category: zod_1.z.enum(['MARKETING', 'UTILITY', 'AUTHENTICATION']).optional(),
         language: zod_1.z.string().optional(),
         sortBy: zod_1.z.string().optional(),
