@@ -15,10 +15,43 @@ import { config } from './index';
 
 let enabled = false;
 
+/**
+ * DSN dekhne me Sentry ka DSN lagta hai ya nahi: https://<key>@<host>/<projectId>
+ *
+ * Alag se export isliye ki test ho sake - ye wahi jagah hai jahan galti karne
+ * par poora API neeche ja sakta hai.
+ */
+export const isValidSentryDsn = (dsn: string): boolean =>
+  /^https:\/\/[^@\s]+@[^/\s]+\/\d+$/.test((dsn || '').trim());
+
 export const initMonitoring = (): boolean => {
   const dsn = (process.env.SENTRY_DSN || '').trim();
   if (!dsn) return false;
 
+  // Shape ka check pehle. Sentry galat DSN par throw karta hai, aur ye
+  // bootstrap() ke try block se bulaya jata hai - wahan se throw hone ka
+  // matlab hai process.exit(1). Monitoring set up na hone se poora API
+  // neeche nahi jaana chahiye.
+  if (!isValidSentryDsn(dsn)) {
+    console.error(
+      '🚨 SENTRY_DSN does not look like a Sentry DSN (https://<key>@<host>/<project-id>) - monitoring disabled'
+    );
+    return false;
+  }
+
+  try {
+    initSentry(dsn);
+    enabled = true;
+    return true;
+  } catch (err: any) {
+    // Yahan crash nahi hona chahiye. Monitoring optional hai, API nahi.
+    console.error('🚨 Sentry init failed, continuing without monitoring:', err?.message || err);
+    enabled = false;
+    return false;
+  }
+};
+
+const initSentry = (dsn: string): void => {
   Sentry.init({
     dsn,
     environment: config.app.env,
@@ -43,9 +76,6 @@ export const initMonitoring = (): boolean => {
       return event;
     },
   });
-
-  enabled = true;
-  return true;
 };
 
 export const monitoringEnabled = (): boolean => enabled;
