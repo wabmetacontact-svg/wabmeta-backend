@@ -20,6 +20,7 @@ const state = {
   subscriptionExpiry: false,
   expiryWarnings: false,
   webhookLogCleanup: false,
+  securityEventCleanup: false,
   metaSync: false,
   automationJobs: false,
   noReply: false,
@@ -149,6 +150,26 @@ export function initializeScheduler() {
       }
     } finally {
       state.webhookLogCleanup = false;
+    }
+  });
+
+  // ============================================
+  // SECURITY EVENT CLEANUP - roz 3:45 AM
+  // Webhook cleanup ke 15 min baad, taaki dono ek saath DB par na padein.
+  // ============================================
+  cron.schedule('45 3 * * *', async () => {
+    if (state.securityEventCleanup) return;
+    state.securityEventCleanup = true;
+    try {
+      await withAdvisoryLock('scheduler:securityEventCleanup', () =>
+        cleanupSecurityEvents()
+      );
+    } catch (error: any) {
+      if (error?.code !== 'P2024') {
+        console.error('Security event cleanup error:', error.message);
+      }
+    } finally {
+      state.securityEventCleanup = false;
     }
   });
 
@@ -365,6 +386,60 @@ async function cleanupWebhookLogs() {
 
       console.log(
         `🧹 Webhook logs cleaned: ${removed} rows in ${Math.round(
+          (Date.now() - started) / 1000
+        )}s`
+      );
+    }
+  } catch (error: any) {
+    if (error?.code === 'P2024') {
+      markPoolError();
+    }
+    throw error;
+  }
+}
+
+// ============================================
+// SECURITY EVENT RETENTION
+// ============================================
+// SecurityEvent me failed logins, lockouts aur org-header mismatches jate
+// hain. Aam din me ye kam hote hain - par attack ke waqt theek wahi spike
+// karta hai, aur us waqt table ka bharna sabse bura hota hai.
+//
+// Retention webhook logs se lamba hai: security investigation hamesha baad
+// me hoti hai ("pichhle mahine kya hua tha?"), 7 din me jawab nahi milta.
+const SECURITY_EVENT_RETENTION_DAYS = 90;
+const SECURITY_EVENT_BATCH = 5000;
+const SECURITY_EVENT_MAX_PER_RUN = 200000;
+
+async function cleanupSecurityEvents() {
+  if (shouldSkipDueToPoolPressure()) return;
+
+  const started = Date.now();
+  let removed = 0;
+
+  try {
+    // Webhook logs jaisa hi batched delete - ek bada DELETE lock lamba rakhta
+    // hai aur WAL bhar deta hai.
+    while (removed < SECURITY_EVENT_MAX_PER_RUN) {
+      const n: number = await prisma.$executeRawUnsafe(
+        `DELETE FROM "SecurityEvent"
+         WHERE id IN (
+           SELECT id FROM "SecurityEvent"
+           WHERE "createdAt" < now() - interval '${SECURITY_EVENT_RETENTION_DAYS} days'
+           LIMIT ${SECURITY_EVENT_BATCH}
+         )`
+      );
+
+      removed += n;
+      if (n < SECURITY_EVENT_BATCH) break;
+
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    if (removed > 0) {
+      await prisma.$executeRawUnsafe(`VACUUM (ANALYZE) "SecurityEvent"`);
+      console.log(
+        `🧹 Security events cleaned: ${removed} rows in ${Math.round(
           (Date.now() - started) / 1000
         )}s`
       );
