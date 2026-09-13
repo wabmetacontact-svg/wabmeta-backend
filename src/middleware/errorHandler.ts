@@ -5,6 +5,7 @@ import { config } from '../config';
 import { ZodError } from 'zod';
 import { Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { captureError } from '../config/monitoring';
 
 export class AppError extends Error {
   statusCode: number;
@@ -53,7 +54,11 @@ const logErrorSafe = (err: unknown, req?: Request) => {
       return;
     }
 
-    // Server faults: this is the one that deserves attention.
+    // Server faults: this is the one that deserves attention. The log line goes
+    // to Render where nobody is watching, so it also goes to Sentry (a no-op
+    // until SENTRY_DSN is set).
+    captureError(err, { method, url, status });
+
     log.error(`${method} ${url} → ${status}`, err instanceof Error ? err : undefined, {
       status,
       error: message,

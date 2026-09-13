@@ -3,6 +3,8 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../config/database';
 import { AppError } from './errorHandler';
+import { resolveGateOrganizationId, claimsAnotherOrg } from './resolveOrg';
+import { recordSecurityEvent, requestOrigin } from '../utils/securityLog';
 
 /**
  * Feature Lock
@@ -146,19 +148,29 @@ export const withFeatureLocks = async <T extends { id: string }>(
   };
 };
 
-const resolveOrganizationId = (req: Request): string =>
-  (req.header('X-Organization-Id') || req.header('x-organization-id') || '').trim() ||
-  ((req as any).user?.organizationId as string) ||
-  (req.body?.organizationId as string) ||
-  (req.params?.organizationId as string) ||
-  (typeof req.query?.organizationId === 'string' ? req.query.organizationId : '') ||
-  '';
+// Verified token pehle, header baad me - warna locked plan wala user kisi
+// unlocked org ka id bhej kar ye gate paar kar leta tha.
+const resolveOrganizationId = resolveGateOrganizationId;
 
 export const featureLock =
   (feature: LockableFeature) =>
   async (req: Request, _res: Response, next: NextFunction) => {
     try {
       const organizationId = resolveOrganizationId(req);
+
+      if (claimsAnotherOrg(req)) {
+        console.warn(
+          `⚠️ X-Organization-Id (${req.header('X-Organization-Id') || req.header('x-organization-id')}) ` +
+          `does not match the token's org (${organizationId}) - header ignored`
+        );
+        recordSecurityEvent({
+          type: 'ORG_HEADER_MISMATCH',
+          userId: (req as any).user?.id || null,
+          organizationId,
+          ...requestOrigin(req),
+          detail: { gate: 'featureLock', claimed: req.header('X-Organization-Id') || req.header('x-organization-id') },
+        });
+      }
 
       // Org id na mile toh skip - downstream handler khud decide karega
       if (!organizationId) return next();

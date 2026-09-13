@@ -3,6 +3,8 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../config/database';
 import { AppError } from './errorHandler';
+import { resolveGateOrganizationId, claimsAnotherOrg } from './resolveOrg';
+import { recordSecurityEvent, requestOrigin } from '../utils/securityLog';
 
 /**
  * Connection Lock Middleware
@@ -20,14 +22,22 @@ export const checkConnectionLock = async (
   next: NextFunction
 ) => {
   try {
-    // Get orgId from header / body / query / user
-    const organizationId =
-      (req.header('X-Organization-Id') || req.header('x-organization-id') || '').trim() ||
-      (req.body?.organizationId as string) ||
-      (req.params?.organizationId as string) ||
-      (typeof req.query?.organizationId === 'string' ? req.query.organizationId : '') ||
-      ((req as any).user?.organizationId as string) ||
-      '';
+    // Verified token pehle, header sirf unauthenticated fallback ke liye.
+    const organizationId = resolveGateOrganizationId(req);
+
+    if (claimsAnotherOrg(req)) {
+      console.warn(
+        `⚠️ connectionLock: X-Organization-Id does not match the token's org ` +
+        `(${organizationId}) - header ignored`
+      );
+        recordSecurityEvent({
+          type: 'ORG_HEADER_MISMATCH',
+          userId: (req as any).user?.id || null,
+          organizationId,
+          ...requestOrigin(req),
+          detail: { gate: 'connectionLock', claimed: req.header('X-Organization-Id') || req.header('x-organization-id') },
+        });
+    }
 
     if (!organizationId) {
       // Agar org id nahi mila toh skip (downstream handler decide karega)

@@ -89,22 +89,50 @@ const allowedOrigins = [
   'http://localhost:8082',
   'http://localhost:19006',
   'http://localhost:19000',
+  // Extra exact origins, comma-separated. Deploy-time addition without a code change.
+  ...(process.env.CORS_EXTRA_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean),
 ];
+
+/**
+ * Vercel preview deployments.
+ *
+ * This used to be `origin.endsWith('.vercel.app')`, which trusted EVERY site
+ * ever deployed to Vercel. Combined with credentials:true and SameSite=None
+ * cookies, anyone could deploy a page, get a logged-in user to open it, and
+ * read that user's entire API with their cookies attached.
+ *
+ * Now previews are opt-in: set CORS_VERCEL_PATTERN to an anchored regex for
+ * your own project, e.g.
+ *   CORS_VERCEL_PATTERN=^https://wabmeta-[a-z0-9-]+-myteam\.vercel\.app$
+ * Include your team/account slug - that part is unique to you, the project
+ * name alone is not. Unset = no preview origins allowed at all.
+ */
+const vercelPreviewPattern: RegExp | null = (() => {
+  const raw = (process.env.CORS_VERCEL_PATTERN || '').trim();
+  if (!raw) return null;
+  try {
+    return new RegExp(raw);
+  } catch {
+    console.error('🚨 CORS_VERCEL_PATTERN is not a valid regex - preview origins disabled');
+    return null;
+  }
+})();
 
 app.use(
   cors({
     origin: (origin, callback) => {
       // No origin = mobile app or Postman
       if (!origin) return callback(null, true);
-      
-      const isVercel = origin.endsWith('.vercel.app');
-      
+
       // Development mein sab allow
       if (process.env.NODE_ENV === 'development') {
         return callback(null, true);
       }
-      
-      if (allowedOrigins.includes(origin) || isVercel) {
+
+      if (allowedOrigins.includes(origin) || vercelPreviewPattern?.test(origin)) {
         callback(null, true);
       } else {
         console.warn(`⚠️ CORS blocked: ${origin}`);

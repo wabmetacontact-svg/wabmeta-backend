@@ -11,6 +11,7 @@ import { webhookEvents } from '../webhooks/webhook.service';
 import { withAdvisoryLock } from '../../utils/withLock';
 import { maybeCreateSocialLead } from '../crm/crm.social';
 import * as tg from './telegram.api';
+import { headerString } from '../../utils/httpHeaders';
 
 // Public base URL Telegram will call our webhook on. Must be https and reachable.
 const webhookBaseUrl = (): string =>
@@ -754,7 +755,7 @@ export const streamMedia = async (organizationId: string, messageId: string) => 
 
   return {
     stream: download.data as NodeJS.ReadableStream,
-    contentType: message.mediaMimeType || download.headers['content-type'] || 'application/octet-stream',
+    contentType: message.mediaMimeType || headerString(download.headers['content-type'], 'application/octet-stream'),
     fileName: message.fileName || undefined,
   };
 };

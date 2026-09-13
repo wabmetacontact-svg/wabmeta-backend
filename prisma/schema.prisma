@@ -27,6 +27,12 @@ model User {
   otpSecret            String?
   otpEnabled           Boolean    @default(false)
   lastLoginAt          DateTime?
+
+  // Per-account brute force ka bandh. IP rate limit alag-alag IPs se aane
+  // wale attempts nahi rokta - ye account par hi ginta hai.
+  failedLoginAttempts  Int        @default(0)
+  lastFailedLoginAt    DateTime?
+  lockedUntil          DateTime?
   lastLoginIp          String?
 
   // ✅ NEW: Token version for force logout
@@ -961,6 +967,31 @@ model Webhook {
 
   @@index([organizationId])
   @@index([isActive])
+}
+
+/// Security-relevant events. Pehle sirf console.log tha, jo Render ke logs me
+/// ja kar kho jata tha - "kya kisi ne ye account attack kiya tha?" ka koi
+/// jawab hi nahi tha. Ye table wahi jawab rakhti hai.
+///
+/// Yahan kabhi bhi password, token ya secret na likhein - ye rows support ke
+/// liye padhi jayengi.
+model SecurityEvent {
+  id             String   @id @default(cuid())
+  type           String // LOGIN_FAILED | LOGIN_LOCKED | LOGIN_SUCCESS | ORG_HEADER_MISMATCH
+  email          String? // login attempts par - user na bhi ho to
+  userId         String?
+  organizationId String?
+  ip             String?
+  userAgent      String?
+  /// Chhota structured context: attempt count, lock duration. Koi secret nahi.
+  detail         Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([email, createdAt])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([createdAt])
 }
 
 model WebhookLog {

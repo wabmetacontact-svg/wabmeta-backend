@@ -4,6 +4,7 @@ import { safeDecryptStrict } from '../../utils/encryption';
 import { config } from '../../config';
 import { r2Service } from '../../services/r2.service';
 import { cloudinaryService } from '../../services/cloudinary.service';
+import { headerString } from '../../utils/httpHeaders';
 
 export class InboxMediaService {
   /**
@@ -187,7 +188,7 @@ export class InboxMediaService {
 
             // Step 3: Convert to base64
             const base64 = Buffer.from(response.data).toString('base64');
-            const contentType = response.headers['content-type'] || mimeType || 'application/octet-stream';
+            const contentType = headerString(response.headers['content-type'], mimeType || 'application/octet-stream');
 
             return {
                 base64: `data:${contentType};base64,${base64}`,
