@@ -30,6 +30,8 @@ import { OAuth2Client } from 'google-auth-library';
 import { getRedis } from '../../config/redis';
 import { whatsappApi } from '../whatsapp/whatsapp.api';
 import { welcomeService } from '../../services/welcome.service';
+import { lockStatus, lockoutMessage, nextStateAfterFailure, clearedState, LOCKOUT_MINUTES } from './loginLockout';
+import { recordSecurityEvent } from '../../utils/securityLog';
 
 const WABMETA_OWN_ORG_ID = process.env.WABMETA_OWN_ORG_ID || '';
 
@@ -724,7 +726,12 @@ export class AuthService {
   // ────────────────────────────────────────────
   // LOGIN
   // ────────────────────────────────────────────
-  async login(input: LoginInput): Promise<AuthResponse> {
+  async login(
+    input: LoginInput,
+    // Kahan se aaya - SecurityEvent me jata hai. Optional, taaki purane callers
+    // (tests, scripts) waise hi chalte rahein.
+    origin: { ip?: string | null; userAgent?: string | null } = {}
+  ): Promise<AuthResponse> {
     const normalizedEmail = input.email.trim().toLowerCase();
     authLog.info('Login attempt', { email: normalizedEmail });
 
@@ -795,6 +802,25 @@ export class AuthService {
       throw new AppError('Account suspended. Please contact support.', 403);
     }
 
+    // ── Step 4b: Account lockout ────────────────────────
+    // bcrypt se pehle: locked account par CPU kharch karne ka koi matlab nahi,
+    // aur wahi timing attacker ko signal bhi deti hai.
+    const lock = lockStatus(user as any);
+    if (lock.locked) {
+      authLog.warn('Login attempt on locked account', {
+        email: normalizedEmail,
+        secondsRemaining: lock.secondsRemaining,
+      });
+      recordSecurityEvent({
+        type: 'LOGIN_ON_LOCKED_ACCOUNT',
+        email: normalizedEmail,
+        userId: user.id,
+        ...origin,
+        detail: { secondsRemaining: lock.secondsRemaining },
+      });
+      throw new AppError(lockoutMessage(lock.secondsRemaining), 429);
+    }
+
     // ── Step 5: Password compare ─────────────────────────
     let isValid = false;
     try {
@@ -808,7 +834,49 @@ export class AuthService {
     }
 
     if (!isValid) {
-      authLog.warn('Wrong password during login', { email: normalizedEmail });
+      const next = nextStateAfterFailure({
+        failedLoginAttempts: (user as any).failedLoginAttempts ?? 0,
+        lockedUntil: (user as any).lockedUntil ?? null,
+        lastFailedAt: (user as any).lastFailedLoginAt ?? null,
+      });
+
+      // Await kiya jaa raha hai: agar ye fire-and-forget hota to ek hi waqt me
+      // bheje gaye attempts counter badhne se pehle hi nikal jate.
+      await prisma.user
+        .update({
+          where: { id: user.id },
+          data: {
+            failedLoginAttempts: next.failedLoginAttempts,
+            lastFailedLoginAt: new Date(),
+            lockedUntil: next.lockedUntil,
+          },
+        })
+        .catch((e: any) => authLog.error('Could not record failed login', e));
+
+      authLog.warn('Wrong password during login', {
+        email: normalizedEmail,
+        attempts: next.failedLoginAttempts,
+        locked: !!next.lockedUntil,
+      });
+      recordSecurityEvent({
+        type: next.lockedUntil ? 'LOGIN_LOCKED' : 'LOGIN_FAILED',
+        email: normalizedEmail,
+        userId: user.id,
+        ...origin,
+        detail: {
+          attempts: next.failedLoginAttempts,
+          lockedForMinutes: next.lockedUntil ? LOCKOUT_MINUTES : undefined,
+        },
+      });
+
+      if (next.lockedUntil) {
+        throw new AppError(
+          lockoutMessage(Math.ceil((next.lockedUntil.getTime() - Date.now()) / 1000)),
+          429
+        );
+      }
+
+      // Warna wahi generic message - kaunsa email exist karta hai ye na bataye.
       throw new AppError('Invalid email or password', 401);
     }
 
@@ -825,10 +893,12 @@ export class AuthService {
 
     // ── Step 7: Update lastLoginAt (non-blocking) ───────
     // ✅ Await nahi karo - login slow nahi karega
+    // Kamyab login failed-attempt counter bhi saaf karta hai, warna pichhli
+    // galtiyan window ke andar jud kar sahi password wale ko lock kar detin.
     prisma.user
       .update({
         where: { id: user.id },
-        data: { lastLoginAt: new Date() },
+        data: { lastLoginAt: new Date(), ...clearedState() },
       })
       .catch((err) => {
         if (err?.code !== 'P2024') {
