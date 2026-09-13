@@ -5,14 +5,19 @@ const isProd = config.nodeEnv === 'production';
 
 /**
  * Cookie options for auth tokens
- * 
- * ✅ Refresh Token: httpOnly=true (JS can't access, secure from XSS)
- * ✅ Access Token: httpOnly=false (JS needs to read for Authorization header)
- * ✅ Both: secure=true in prod, sameSite=none for cross-domain
+ *
+ * Both tokens are httpOnly. The access-token cookie used to be readable by JS
+ * "so the client could build the Authorization header" - but the web app never
+ * reads it: it keeps its own copy in localStorage (services/api.ts) and these
+ * cookies are only ever consumed server-side by middleware/auth.ts. Leaving it
+ * readable just handed any XSS a live token.
+ *
+ * sameSite=none is required because the API and the app are on different
+ * domains. That makes the CORS allowlist in app.ts the only thing standing
+ * between a hostile page and an authenticated request - keep it exact.
  */
 export const getCookieOptions = (isRefresh: boolean = false) => ({
-  // ✅ FIX: Only refresh token should be httpOnly
-  httpOnly: isRefresh,
+  httpOnly: true,
   secure:   isProd,
   sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
   maxAge:   isRefresh
@@ -25,8 +30,8 @@ export const getCookieOptions = (isRefresh: boolean = false) => ({
 /**
  * Options for clearing cookies (must match set options except maxAge)
  */
-export const getClearCookieOptions = (isRefresh: boolean = false) => ({
-  httpOnly: isRefresh,
+export const getClearCookieOptions = (_isRefresh: boolean = false) => ({
+  httpOnly: true,
   secure:   isProd,
   sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
   path:     '/',
