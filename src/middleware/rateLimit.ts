@@ -8,6 +8,7 @@ import rateLimit, {
   ipKeyGenerator,
 } from 'express-rate-limit';
 import { Request, Response } from 'express';
+import { getRateLimitStore } from './rateLimitStore';
 
 // ============================================
 // ✅ IPv6-safe key generator
@@ -45,6 +46,11 @@ export const createRateLimiter = (options: {
     max,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
+
+    // Redis ho to wahan, warna express-rate-limit ka memory store (undefined).
+    // Memory store restart par reset hota hai aur instances me share nahi
+    // hota - dekho rateLimitStore.ts.
+    store: getRateLimitStore(),
 
     keyGenerator: safeKeyGenerator,
 
