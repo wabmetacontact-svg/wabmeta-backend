@@ -37,20 +37,19 @@ export const config = {
   },
 
   jwt: {
-    secret: getEnv('JWT_SECRET', 'your-secret-key-change-in-production'),
-    accessSecret: getEnv(
-      'JWT_ACCESS_SECRET',
-      getEnv('JWT_SECRET', 'access-secret')
-    ),
-    refreshSecret: getEnv(
-      'JWT_REFRESH_SECRET',
-      getEnv('JWT_SECRET', 'refresh-secret')
-    ),
+    // No hardcoded fallback. These used to default to
+    // 'your-secret-key-change-in-production' / 'access-secret', so a missing or
+    // misspelled JWT_SECRET in the environment meant the server silently signed
+    // tokens with a value published in this repository - anyone could mint one.
+    // validateJwtSecrets() below refuses to start production without them.
+    secret: getEnv('JWT_SECRET'),
+    accessSecret: getEnv('JWT_ACCESS_SECRET', getEnv('JWT_SECRET')),
+    refreshSecret: getEnv('JWT_REFRESH_SECRET', getEnv('JWT_SECRET')),
     accessExpiresIn: getEnv('JWT_ACCESS_EXPIRES_IN', '15m'),
     refreshExpiresIn: getEnv('JWT_REFRESH_EXPIRES_IN', '7d'),
     expiresIn: getEnv('JWT_EXPIRES_IN', '7d'),
   },
-  jwtSecret: getEnv('JWT_SECRET', 'your-secret-key-change-in-production'),
+  jwtSecret: getEnv('JWT_SECRET'),
 
   encryption: {
     key: getEnv('ENCRYPTION_KEY', 'your-32-character-encryption-key!'),
@@ -143,5 +142,85 @@ export const config = {
     },
   },
 } as const;
+
+/**
+ * Signing secrets must exist, and must be long enough to be worth having.
+ *
+ * Mirrors validateEncryptionKey(): the caller (server.ts) exits in production
+ * and only warns in development, so a local checkout still runs.
+ *
+ * A short secret is reported as a failure too - a 6-character JWT_SECRET is
+ * brute-forceable offline from a single captured token, which is the same
+ * outcome as having no secret at all.
+ */
+export const MIN_JWT_SECRET_LENGTH = 32;
+
+export interface JwtSecretInput {
+  secret: string;
+  accessSecret: string;
+  refreshSecret: string;
+  /** JWT_ACCESS_SECRET / JWT_REFRESH_SECRET apne aap set hain, ya JWT_SECRET se aaye hain. */
+  accessExplicit: boolean;
+  refreshExplicit: boolean;
+}
+
+export interface JwtSecretReport {
+  /** false = production ko start nahi hona chahiye. */
+  ok: boolean;
+  problems: string[];
+}
+
+/**
+ * Pure check - config aur process.env dono se aazad, isliye seedha test hota
+ * hai. dotenv config import par .env padh leta hai, to env ko test me hilana
+ * bharosemand nahi.
+ */
+export function checkJwtSecrets(input: JwtSecretInput): JwtSecretReport {
+  const problems: string[] = [];
+  let fatal = 0;
+
+  const checks: [string, string][] = [
+    ['JWT_SECRET', input.secret],
+    ['JWT_ACCESS_SECRET (or JWT_SECRET)', input.accessSecret],
+    ['JWT_REFRESH_SECRET (or JWT_SECRET)', input.refreshSecret],
+  ];
+
+  for (const [name, value] of checks) {
+    if (!value) {
+      problems.push(`${name} is not set`);
+      fatal++;
+    } else if (value.length < MIN_JWT_SECRET_LENGTH) {
+      problems.push(
+        `${name} is only ${value.length} chars, need at least ${MIN_JWT_SECRET_LENGTH}`
+      );
+      fatal++;
+    }
+  }
+
+  // Access aur refresh ek hi secret par hon to refresh token wahan bhi chal
+  // jata hai jahan access token chahiye. Batane layak hai, rokne layak nahi.
+  if (
+    input.accessSecret &&
+    input.accessSecret === input.refreshSecret &&
+    !input.accessExplicit &&
+    !input.refreshExplicit
+  ) {
+    problems.push(
+      'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET both fall back to JWT_SECRET - set them separately'
+    );
+  }
+
+  return { ok: fatal === 0, problems };
+}
+
+export function validateJwtSecrets(): JwtSecretReport {
+  return checkJwtSecrets({
+    secret: config.jwt.secret,
+    accessSecret: config.jwt.accessSecret,
+    refreshSecret: config.jwt.refreshSecret,
+    accessExplicit: !!process.env.JWT_ACCESS_SECRET,
+    refreshExplicit: !!process.env.JWT_REFRESH_SECRET,
+  });
+}
 
 export default config;

@@ -1,7 +1,7 @@
 // src/server.ts - CLEAN STARTUP
 import http from 'http';
 import app from './app';
-import { config } from './config';
+import { config, validateJwtSecrets } from './config';
 import prisma from './config/database';
 import { initializeSocket } from './socket';
 import { validateEncryptionKey } from './utils/encryption';
@@ -60,6 +60,23 @@ async function bootstrap() {
       logger.warn('No encryption key - development mode only');
     } else {
       logger.info('Encryption validated');
+    }
+
+    // Step 1b: JWT signing secrets. Same rule as the encryption key - refuse to
+    // start production rather than fall back to something guessable, because a
+    // weak signing secret means anyone can mint an admin token.
+    const jwt = validateJwtSecrets();
+    for (const problem of jwt.problems) {
+      config.app.isProduction ? logger.error(`JWT config: ${problem}`) : logger.warn(`JWT config: ${problem}`);
+    }
+    if (!jwt.ok) {
+      if (config.app.isProduction) {
+        logger.error('Refusing to start: JWT signing secrets are missing or too weak');
+        process.exit(1);
+      }
+      logger.warn('Weak JWT secrets - development mode only');
+    } else if (jwt.problems.length === 0) {
+      logger.info('JWT secrets validated');
     }
 
     // Step 2: Database
