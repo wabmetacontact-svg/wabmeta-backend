@@ -6,6 +6,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService } from './auth.service';
 import { sendSuccess } from '../../utils/response';
+import { requestOrigin } from '../../utils/securityLog';
 import { getCookieOptions, getClearCookieOptions } from '../../utils/cookies'; // ✅ FIX
 import {
   RegisterInput,
@@ -142,7 +143,7 @@ export class AuthController {
   async login(req: Request, res: Response, next: NextFunction) {
     try {
       const input: LoginInput = req.body;
-      const result = await authService.login(input);
+      const result = await authService.login(input, requestOrigin(req));
 
       res.cookie('refreshToken', result.tokens.refreshToken, getCookieOptions(true));
       res.cookie('accessToken', result.tokens.accessToken, getCookieOptions(false));

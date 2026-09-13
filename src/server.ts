@@ -8,6 +8,7 @@ import { validateEncryptionKey } from './utils/encryption';
 import { initializeScheduler } from './services/scheduler.service';
 import { walletReconciliationService } from './modules/wallet/wallet.reconciliation.service';
 import logger, { cronLog, socketLog } from './utils/logger';
+import { initMonitoring } from './config/monitoring';
 
 let webhookService: any = null;
 
@@ -49,6 +50,14 @@ function printReady(port: number, encryption: boolean) {
 async function bootstrap() {
   try {
     printBanner();
+
+    // Step 0: Monitoring. Sabse pehle, taaki startup ke errors bhi pakde jayen.
+    // SENTRY_DSN na ho to ye no-op hai.
+    if (initMonitoring()) {
+      logger.info('Error monitoring enabled (Sentry)');
+    } else {
+      logger.warn('SENTRY_DSN not set - errors only go to the logs, nobody is alerted');
+    }
 
     // Step 1: Encryption
     const encryptionValid = validateEncryptionKey();
