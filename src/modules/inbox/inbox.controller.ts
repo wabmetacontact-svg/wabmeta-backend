@@ -21,6 +21,7 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { r2Service } from '../../services/r2.service';
 import { cloudinaryService } from '../../services/cloudinary.service';
+import { headerString, mimeFromHeader } from '../../utils/httpHeaders';
 
 // Set ffmpeg path
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
@@ -1071,7 +1072,7 @@ export class InboxController {
       });
 
       const buffer = Buffer.from(mediaRes.data);
-      const contentType = mediaRes.headers['content-type'] || metaMimeType || 'image/jpeg';
+      const contentType = headerString(mediaRes.headers['content-type'], metaMimeType || 'image/jpeg');
 
       // ✅ Background: Backup to Cloudinary (non-blocking)
       if (messageRecord?.id && buffer.length > 0) {
@@ -1391,7 +1392,7 @@ export class InboxController {
         'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
       ];
 
-      const rawCT = (dlResponse.headers['content-type'] || '').split(';')[0].trim();
+      const rawCT = mimeFromHeader(dlResponse.headers['content-type']);
       const finalMime = (rawCT && !INVALID_MIMES.includes(rawCT) && META_VALID_MIMES.includes(rawCT))
         ? rawCT
         : preMime;

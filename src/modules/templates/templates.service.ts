@@ -27,6 +27,7 @@ import { whatsappApi } from '../whatsapp/whatsapp.api';
 import { metaService } from '../meta/meta.service';
 import { metaApi } from '../meta/meta.api';
 import { safeDecryptStrict } from '../../utils/encryption';
+import { mimeFromHeader } from '../../utils/httpHeaders';
 
 // ============================================
 // TYPES
@@ -147,7 +148,7 @@ const uploadMediaToMeta = async (
     const buffer = Buffer.from(response.data);
 
     const INVALID_MIME_TYPES = ['application/octet-stream', 'binary/octet-stream', 'application/binary'];
-    const rawContentType = (response.headers['content-type'] || '').split(';')[0].trim();
+    const rawContentType = mimeFromHeader(response.headers['content-type']);
     const isValidResponseMime = rawContentType && !INVALID_MIME_TYPES.includes(rawContentType);
     const finalMime = isValidResponseMime ? rawContentType : preMime;
     const finalFilename = detectFilename(cloudinaryUrl, finalMime);

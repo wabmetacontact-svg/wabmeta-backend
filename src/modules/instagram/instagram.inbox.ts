@@ -10,6 +10,7 @@ import { webhookEvents } from '../webhooks/webhook.service';
 import { sendIGMessage, sendIGAttachment } from './instagram.api';
 import { igAccessToken } from './instagram.service';
 import { maybeCreateSocialLead } from '../crm/crm.social';
+import { headerString } from '../../utils/httpHeaders';
 
 type IgAccount = { id: string; organizationId: string; accessToken: string; username?: string | null };
 
@@ -305,7 +306,7 @@ export const streamMedia = async (organizationId: string, messageId: string) => 
   const download = await axios.get(url, { responseType: 'stream', timeout: 60000 });
   return {
     stream: download.data as NodeJS.ReadableStream,
-    contentType: message.mediaMimeType || download.headers['content-type'] || 'application/octet-stream',
+    contentType: message.mediaMimeType || headerString(download.headers['content-type'], 'application/octet-stream'),
   };
 };
 

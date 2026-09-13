@@ -6,6 +6,7 @@ import { TemplateStatus, TemplateCategory } from '@prisma/client';
 import prisma from '../../config/database';
 import { metaService } from '../meta/meta.service';
 import { metaApi } from '../meta/meta.api';
+import { mimeFromHeader } from '../../utils/httpHeaders';
 
 interface AuthRequest extends Request {
   user?: { id: string; email: string; organizationId: string };
@@ -415,8 +416,7 @@ class TemplatesController {
       });
 
       const buffer      = Buffer.from(response.data);
-      const contentType = (response.headers['content-type'] || '')
-        .split(';')[0].trim();
+      const contentType = mimeFromHeader(response.headers['content-type']);
       const finalMime   = (contentType && contentType !== 'application/octet-stream')
         ? contentType
         : (mimeType || 'image/jpeg');
@@ -495,8 +495,7 @@ class TemplatesController {
       });
 
       const buffer = Buffer.from(response.data);
-      const mime   = (response.headers['content-type'] || 'image/jpeg')
-        .split(';')[0].trim();
+      const mime   = mimeFromHeader(response.headers['content-type'], 'image/jpeg');
       const fname  = cloudinaryUrl.split('/').pop()?.split('?')[0] || 'media';
 
       // Upload to Meta
