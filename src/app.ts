@@ -44,6 +44,11 @@ import notificationRoutes from './modules/notifications/notifications.routes';
 import aiAgentRoutes from './modules/aiagent/aiagent.routes';
 import paymentsRoutes from './modules/payments/payments.routes';
 import clientPaymentsWebhook from './modules/payments/payments.webhook';
+import {
+  buildVercelPattern,
+  parseVercelPattern,
+  isAllowedOrigin,
+} from './config/corsOrigins';
 
 const app: Application = express();
 
@@ -104,35 +109,35 @@ const allowedOrigins = [
  * cookies, anyone could deploy a page, get a logged-in user to open it, and
  * read that user's entire API with their cookies attached.
  *
- * Now previews are opt-in: set CORS_VERCEL_PATTERN to an anchored regex for
- * your own project, e.g.
- *   CORS_VERCEL_PATTERN=^https://wabmeta-[a-z0-9-]+-myteam\.vercel\.app$
- * Include your team/account slug - that part is unique to you, the project
- * name alone is not. Unset = no preview origins allowed at all.
+ * Previews are opt-in now. Two ways, both off by default:
+ *
+ *   CORS_VERCEL_TEAM=your-team-slug   (plus CORS_VERCEL_PROJECT, default wabmeta)
+ *     Builds the pattern for you. Prefer this.
+ *
+ *   CORS_VERCEL_PATTERN=^https://...$
+ *     Your own regex, and it must be anchored - see parseVercelPattern.
+ *
+ * The team slug is not optional in the built form. A pattern matching only
+ * the project name is not safe: anyone can create a Vercel project called
+ * wabmeta-something and get a matching hostname.
  */
-const vercelPreviewPattern: RegExp | null = (() => {
-  const raw = (process.env.CORS_VERCEL_PATTERN || '').trim();
-  if (!raw) return null;
-  try {
-    return new RegExp(raw);
-  } catch {
-    console.error('🚨 CORS_VERCEL_PATTERN is not a valid regex - preview origins disabled');
-    return null;
-  }
-})();
+const vercelPreviewPattern: RegExp | null =
+  parseVercelPattern(process.env.CORS_VERCEL_PATTERN) ??
+  buildVercelPattern(
+    process.env.CORS_VERCEL_PROJECT || 'wabmeta',
+    process.env.CORS_VERCEL_TEAM || ''
+  );
+
+const corsPolicy = {
+  allowed: allowedOrigins,
+  vercelPattern: vercelPreviewPattern,
+  isDevelopment: process.env.NODE_ENV === 'development',
+};
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // No origin = mobile app or Postman
-      if (!origin) return callback(null, true);
-
-      // Development mein sab allow
-      if (process.env.NODE_ENV === 'development') {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin) || vercelPreviewPattern?.test(origin)) {
+      if (isAllowedOrigin(origin, corsPolicy)) {
         callback(null, true);
       } else {
         console.warn(`⚠️ CORS blocked: ${origin}`);
