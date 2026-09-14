@@ -964,53 +964,94 @@ export async function reviewWalletRequest(
   action: 'approve' | 'reject',
   note?: string
 ) {
+  // Kaunsa action kis status se chalega - rules wallet.review.ts me hain.
+  // Rejected request ab baad me approve ho sakta hai; approved ko reject nahi.
+  const { canReview, reviewBlockedMessage, defaultReviewNote } = await import('./wallet.review');
+
   const request = await prisma.walletAccessRequest.findUnique({
     where: { id: requestId },
     include: { organization: true },
   });
 
   if (!request) throw new AppError('Request not found', 404);
-  if (request.status !== 'pending') {
-    throw new AppError('Request has already been reviewed', 400);
+  if (!canReview(request.status, action)) {
+    throw new AppError(reviewBlockedMessage(request.status, action), 400);
   }
 
-  await prisma.walletAccessRequest.update({
-    where: { id: requestId },
-    data: {
-      status: action === 'approve' ? 'approved' : 'rejected',
-      reviewedBy: adminId,
-      reviewNote: note,
-      reviewedAt: new Date(),
-    },
-  });
+  const fromStatus = request.status;
+  const reapproving = fromStatus === 'rejected' && action === 'approve';
+  const reviewNote = note?.trim() || defaultReviewNote(fromStatus, action);
+  const now = new Date();
 
-  if (action === 'approve') {
+  // Request ka status aur wallet ek hi transaction me - pehle ye do alag
+  // writes the, to wallet upsert fail hone par request "approved" dikhta tha
+  // aur wallet band rehta tha.
+  await prisma.$transaction(async (tx) => {
+    // Status-guarded update: do admin ek saath review karein to sirf ek jeete.
+    const claimed = await tx.walletAccessRequest.updateMany({
+      where: { id: requestId, status: fromStatus },
+      data: {
+        status: action === 'approve' ? 'approved' : 'rejected',
+        reviewedBy: adminId,
+        reviewNote,
+        reviewedAt: now,
+      },
+    });
+    if (claimed.count !== 1) {
+      throw new AppError(
+        'This request was just reviewed by someone else. Refresh and try again.',
+        409
+      );
+    }
+
+    if (action !== 'approve') return;
+
     const nextMonthReset = new Date();
     nextMonthReset.setMonth(nextMonthReset.getMonth() + 1, 1);
     nextMonthReset.setHours(0, 0, 0, 0);
 
-    await prisma.wallet.upsert({
+    await tx.wallet.upsert({
       where: { organizationId: request.organizationId },
       create: {
         organizationId: request.organizationId,
         userId: request.userId,
         isActive: true,
-        accessGrantedAt: new Date(),
+        accessGrantedAt: now,
         accessGrantedBy: adminId,
         monthResetDate: nextMonthReset,
       },
       update: {
         isActive: true,
-        accessGrantedAt: new Date(),
+        accessGrantedAt: now,
         accessGrantedBy: adminId,
       },
     });
-  }
+
+    // Purana rejected request approve hua aur isi org ka koi naya request
+    // pending pada ho, to wo ab bekaar hai - wallet chalu ho chuka. Use
+    // khula chhodna matlab baad me koi use "reject" kar de aur list jhooth bole.
+    await tx.walletAccessRequest.updateMany({
+      where: {
+        organizationId: request.organizationId,
+        status: 'pending',
+        id: { not: requestId },
+      },
+      data: {
+        status: 'approved',
+        reviewedBy: adminId,
+        reviewNote: `Closed: wallet already approved via request ${requestId}`,
+        reviewedAt: now,
+      },
+    });
+  });
 
   return {
     success: true,
     action,
-    message: `Wallet access request ${action}d successfully`,
+    reapproved: reapproving,
+    message: reapproving
+      ? 'Previously rejected request approved - wallet is now active'
+      : `Wallet access request ${action}d successfully`,
   };
 }
 
