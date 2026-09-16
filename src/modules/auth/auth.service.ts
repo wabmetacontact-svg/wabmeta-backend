@@ -6,7 +6,7 @@
 
 import prisma from '../../config/database';
 import { config } from '../../config';
-import { getFeatureLocks } from '../../middleware/featureLock';
+import { getFeatureLocks, lockColumns } from '../../middleware/featureLock';
 import { authLog } from '../../utils/logger';
 import { hashPassword, comparePassword } from '../../utils/password';
 import {
@@ -344,7 +344,28 @@ const generateTokenPair = async (
 const loadDefaultOrg = async (userId: string) => {
   const owned = await prisma.organization.findFirst({
     where: { ownerId: userId },
-    select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true, featureConnectionLocked: true },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      planType: true,
+      // featureLock.ts ke FEATURE_REGISTRY se mel khate hain - naya lock
+      // add karo to yahan bhi column jodna hoga (Prisma select literal
+      // maangta hai, spread se inference toot jaata hai).
+      featureInboxLocked: true,
+      featureContactsLocked: true,
+      featureCrmLocked: true,
+      featureCampaignsLocked: true,
+      featureTemplatesLocked: true,
+      featureChatbotLocked: true,
+      featureAutomationLocked: true,
+      featureAiAgentLocked: true,
+      featureTelegramLocked: true,
+      featureInstagramLocked: true,
+      featureReportsLocked: true,
+      featureWalletLocked: true,
+      featureConnectionLocked: true,
+    },
   });
   if (owned) return owned;
 
@@ -352,7 +373,28 @@ const loadDefaultOrg = async (userId: string) => {
     where: { userId },
     include: {
       organization: {
-        select: { id: true, name: true, slug: true, planType: true, featureInboxLocked: true, featureCampaignsLocked: true, featureChatbotLocked: true, featureAutomationLocked: true, featureConnectionLocked: true },
+        select: {
+      id: true,
+      name: true,
+      slug: true,
+      planType: true,
+      // featureLock.ts ke FEATURE_REGISTRY se mel khate hain - naya lock
+      // add karo to yahan bhi column jodna hoga (Prisma select literal
+      // maangta hai, spread se inference toot jaata hai).
+      featureInboxLocked: true,
+      featureContactsLocked: true,
+      featureCrmLocked: true,
+      featureCampaignsLocked: true,
+      featureTemplatesLocked: true,
+      featureChatbotLocked: true,
+      featureAutomationLocked: true,
+      featureAiAgentLocked: true,
+      featureTelegramLocked: true,
+      featureInstagramLocked: true,
+      featureReportsLocked: true,
+      featureWalletLocked: true,
+      featureConnectionLocked: true,
+    },
       },
     },
   });
@@ -368,14 +410,7 @@ const getDefaultOrg = async (userId: string) => {
   const locks = await getFeatureLocks(org.id);
   if (!locks) return org;
 
-  return {
-    ...org,
-    featureInboxLocked: locks.inbox,
-    featureCampaignsLocked: locks.campaigns,
-    featureChatbotLocked: locks.chatbot,
-    featureAutomationLocked: locks.automation,
-    featureConnectionLocked: locks.connection,
-  };
+  return { ...org, ...lockColumns(locks) };
 };
 
 // ============================================

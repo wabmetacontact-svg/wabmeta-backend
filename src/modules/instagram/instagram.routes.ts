@@ -24,6 +24,7 @@ import {
 } from "./instagram.controller";
 import { checkConnectionLock } from '../../middleware/connectionLock';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { asyncHandler } from '../../middleware/errorHandler';
 
 import { gateMutations, ADMIN_ROLES, OPERATOR_ROLES } from '../../middleware/requireRole';
@@ -32,6 +33,10 @@ const router = Router();
 // Every Instagram route is tenant data. Without this the module was reachable
 // without a token, and the controllers trusted an `x-organization-id` header.
 router.use(authenticate);
+
+// Naye accounts par Instagram locked aata hai - admin Feature Access Control
+// se khole.
+router.use(featureLock('instagram'));
 
 // Agent inbox reply — operator-level (before the admin gate below). Sending a
 // DM is a working-data action, not a channel-management one.

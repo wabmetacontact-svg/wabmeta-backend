@@ -96,6 +96,17 @@ model Organization {
   featureChatbotLocked    Boolean               @default(false)
   featureAutomationLocked Boolean               @default(false)
   featureConnectionLocked Boolean               @default(false)
+  featureContactsLocked   Boolean               @default(false)
+  featureCrmLocked        Boolean               @default(false)
+  featureTemplatesLocked  Boolean               @default(false)
+  featureAiAgentLocked    Boolean               @default(false)
+  featureReportsLocked    Boolean               @default(false)
+  featureWalletLocked     Boolean               @default(false)
+  // Naye accounts par Telegram aur Instagram band rehte hain - admin
+  // Feature Access Control se hi khole. Purane orgs ko migration ne
+  // false par chhoda hai, unka access chhina nahi.
+  featureTelegramLocked   Boolean               @default(true)
+  featureInstagramLocked  Boolean               @default(true)
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]

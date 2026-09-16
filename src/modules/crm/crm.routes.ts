@@ -3,11 +3,15 @@
 import { Router } from 'express';
 import { crmController } from './crm.controller';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 
 import { gateMutations, OPERATOR_ROLES } from '../../middleware/requireRole';
 const router = Router();
 
 router.use(authenticate);
+
+// Admin Feature Access Control se CRM band ho sakta hai
+router.use(featureLock('crm'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));

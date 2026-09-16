@@ -10,7 +10,7 @@ async function main() {
     WHERE table_schema = 'public'
     AND (
       (table_name = 'User' AND column_name = 'tokenVersion')
-      OR (table_name = 'Organization' AND column_name IN ('featureConnectionLocked', 'customLabels', 'featureInboxLocked'))
+      OR (table_name = 'Organization' AND column_name IN ('featureConnectionLocked', 'customLabels', 'featureInboxLocked', 'featureTelegramLocked', 'featureInstagramLocked', 'featureAiAgentLocked'))
     )
     ORDER BY table_name, column_name;
   `);

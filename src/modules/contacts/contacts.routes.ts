@@ -4,6 +4,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { contactsController } from './contacts.controller';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { validate } from '../../middleware/validate';
 import { requireActiveSubscription, checkContactLimit } from '../../middleware/planLimits';
 import {
@@ -40,6 +41,9 @@ const upload = multer({
 
 // All routes require authentication
 router.use(authenticate);
+
+// Admin Feature Access Control se Contacts band ho sakta hai
+router.use(featureLock('contacts'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));

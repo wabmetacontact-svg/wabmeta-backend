@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { templatesController } from './templates.controller';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { validate } from '../../middleware/validate';
 import { checkPlanLimit } from '../../middleware/planLimits';
 import { uploadMiddleware, uploadTemplateMedia } from './templates.media';
@@ -21,6 +22,9 @@ const router = Router();
 
 // All routes require auth
 router.use(authenticate);
+
+// Admin Feature Access Control se Templates band ho sakte hain
+router.use(featureLock('templates'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));
