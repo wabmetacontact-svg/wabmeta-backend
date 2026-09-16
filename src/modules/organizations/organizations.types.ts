@@ -49,9 +49,17 @@ export interface OrganizationResponse {
   timezone: string;
   planType: PlanType;
   featureInboxLocked?: boolean;
+  featureContactsLocked?: boolean;
+  featureCrmLocked?: boolean;
   featureCampaignsLocked?: boolean;
+  featureTemplatesLocked?: boolean;
   featureChatbotLocked?: boolean;
   featureAutomationLocked?: boolean;
+  featureAiAgentLocked?: boolean;
+  featureTelegramLocked?: boolean;
+  featureInstagramLocked?: boolean;
+  featureReportsLocked?: boolean;
+  featureWalletLocked?: boolean;
   featureConnectionLocked?: boolean;
   createdAt: Date;
   updatedAt: Date;

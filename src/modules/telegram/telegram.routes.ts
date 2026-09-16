@@ -22,6 +22,7 @@ import {
   getWebhookHealth,
 } from './telegram.controller';
 import { authenticate } from '../../middleware/auth';
+import { featureLock } from '../../middleware/featureLock';
 import { checkConnectionLock } from '../../middleware/connectionLock';
 import { gateMutations, requireAdmin, OPERATOR_ROLES } from '../../middleware/requireRole';
 import { asyncHandler } from '../../middleware/errorHandler';
@@ -37,6 +38,9 @@ router.post('/webhook/:botUserId', asyncHandler(webhook));
 
 // ── Everything else is tenant data behind the JWT ──────────────────────────
 router.use(authenticate);
+// Naye accounts par Telegram locked aata hai - admin Feature Access Control
+// se khole. Webhook upar hai, wo is gate ke peeche nahi aata.
+router.use(featureLock('telegram'));
 // Writes need at least an operator; connect/disconnect additionally need admin.
 router.use(gateMutations(...OPERATOR_ROLES));
 

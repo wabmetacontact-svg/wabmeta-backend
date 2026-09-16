@@ -10,8 +10,9 @@ const router = Router();
 
 router.use(authenticate);
 
-// AI agent chatbot feature ka hissa hai - jis plan me chatbot band, wahan ye bhi
-router.use(featureLock('chatbot'));
+// AI agent ka apna admin lock hai; plan limit abhi bhi chatbot wali hai
+// (FEATURE_REGISTRY me aiAgent.planLimit = maxChatbots).
+router.use(featureLock('aiAgent'));
 
 // Writes are role-gated; reads stay open to every member including VIEWER.
 router.use(gateMutations(...OPERATOR_ROLES));

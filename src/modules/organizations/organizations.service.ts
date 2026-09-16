@@ -3,7 +3,7 @@
 import prisma from '../../config/database';
 import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
-import { computeFeatureLocks } from '../../middleware/featureLock';
+import { computeFeatureLocks, lockColumns } from '../../middleware/featureLock';
 import { comparePassword } from '../../utils/password';
 import { generateSlug } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
@@ -36,16 +36,7 @@ const formatOrganization = (org: any): OrganizationResponse => ({
   industry: org.industry,
   timezone: org.timezone,
   planType: org.planType,
-  ...(() => {
-    const locks = computeFeatureLocks(org);
-    return {
-      featureInboxLocked: locks.inbox,
-      featureCampaignsLocked: locks.campaigns,
-      featureChatbotLocked: locks.chatbot,
-      featureAutomationLocked: locks.automation,
-      featureConnectionLocked: locks.connection,
-    };
-  })(),
+  ...lockColumns(computeFeatureLocks(org)),
   createdAt: org.createdAt,
   updatedAt: org.updatedAt,
 });

@@ -1,7 +1,12 @@
 // src/modules/admin/admin.controller.ts
 
 import { Request, Response, NextFunction } from 'express';
-import { invalidateFeatureLocks } from '../../middleware/featureLock';
+import {
+  invalidateFeatureLocks,
+  FEATURE_REGISTRY,
+  LOCKABLE_FEATURES,
+  LockableFeature,
+} from '../../middleware/featureLock';
 import { adminService } from './admin.service';
 import { adminBillingService } from './admin.billing.service';
 import { AppError } from '../../middleware/errorHandler';
@@ -82,6 +87,73 @@ const getParamId = (id: string | string[] | undefined): string => {
     return id[0];
   }
   return id || '';
+};
+
+// ============================================
+// FEATURE LOCK HELPERS
+// ============================================
+//
+// Panel ek hi shakl janta hai: `<feature>Locked` (inboxLocked, aiAgentLocked,
+// telegramLocked ...). DB column ka naam featureLock ke registry me hai.
+// Naya feature add karne par yahan kuch nahi badalta.
+
+const wireKey = (feature: LockableFeature) => `${feature}Locked`;
+
+const LOCK_COLUMN_SELECT = LOCKABLE_FEATURES.reduce((acc, feature) => {
+  acc[FEATURE_REGISTRY[feature].column] = true;
+  return acc;
+}, {} as Record<string, boolean>);
+
+/** DB row -> panel ke flags */
+const readLockFlags = (org: any): Record<string, boolean> =>
+  LOCKABLE_FEATURES.reduce((acc, feature) => {
+    acc[wireKey(feature)] = org?.[FEATURE_REGISTRY[feature].column] ?? false;
+    return acc;
+  }, {} as Record<string, boolean>);
+
+/** Panel ke flags -> Prisma update data (sirf jo body me aaye) */
+const writableLockFlags = (body: any): Record<string, boolean> =>
+  LOCKABLE_FEATURES.reduce((acc, feature) => {
+    const value = body?.[wireKey(feature)];
+    if (typeof value === 'boolean') {
+      acc[FEATURE_REGISTRY[feature].column] = value;
+    }
+    return acc;
+  }, {} as Record<string, boolean>);
+
+/**
+ * Wo features jo plan ki wajah se band hain (plan limit 0). Inka admin
+ * toggle off karna kaafi nahi - panel ise batata hai taaki admin ko lage
+ * na ki unlock ho gaya jabki backend abhi bhi 403 dega.
+ */
+const planLockedFlags = async (
+  organizationId: string
+): Promise<Record<string, boolean>> => {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      subscription: {
+        select: {
+          plan: {
+            select: {
+              maxCampaigns: true,
+              maxChatbots: true,
+              maxAutomations: true,
+              maxWhatsAppAccounts: true,
+            },
+          },
+        },
+      },
+    } as any,
+  });
+
+  const plan = (org as any)?.subscription?.plan;
+
+  return LOCKABLE_FEATURES.reduce((acc, feature) => {
+    const limit = FEATURE_REGISTRY[feature].planLimit;
+    acc[wireKey(feature)] = limit ? plan?.[limit] === 0 : false;
+    return acc;
+  }, {} as Record<string, boolean>);
 };
 
 // ============================================
@@ -464,11 +536,7 @@ export class AdminController {
           featureSimpleBulkUpload: true,
           featureCsvUpload: true,
           featureOverrideByAdmin: true,
-          featureInboxLocked: true,
-          featureCampaignsLocked: true,
-          featureChatbotLocked: true,
-          featureAutomationLocked: true,
-          featureConnectionLocked: true,  // ✅ NEW
+          ...LOCK_COLUMN_SELECT,
         } as any,
       });
 
@@ -484,12 +552,11 @@ export class AdminController {
           simpleBulkPaste: (org as any).featureSimpleBulkUpload ?? false,
           csvUpload: (org as any).featureCsvUpload ?? false,
           adminOverride: (org as any).featureOverrideByAdmin ?? false,
-          inboxLocked: (org as any).featureInboxLocked ?? false,
-          campaignsLocked: (org as any).featureCampaignsLocked ?? false,
-          chatbotLocked: (org as any).featureChatbotLocked ?? false,
-          automationLocked: (org as any).featureAutomationLocked ?? false,
-          connectionLocked: (org as any).featureConnectionLocked ?? false,  // ✅ NEW
-        }
+          ...readLockFlags(org),
+        },
+        // Panel ko pata hona chahiye ki kaun sa lock plan ki wajah se hai -
+        // admin toggle off kare tab bhi wo feature band rahega.
+        planLocked: await planLockedFlags(organizationId),
       }, 'Features fetched');
 
     } catch (error) {
@@ -500,16 +567,7 @@ export class AdminController {
   async updateOrganizationFeatures(req: AdminRequest, res: Response, next: NextFunction) {
     try {
       const organizationId = getParamId(req.params.organizationId);
-      const {
-        simpleBulkPaste,
-        csvUpload,
-        enableOverride,
-        inboxLocked,
-        campaignsLocked,
-        chatbotLocked,
-        automationLocked,
-        connectionLocked,  // ✅ NEW
-      } = req.body;
+      const { simpleBulkPaste, csvUpload, enableOverride } = req.body;
 
       const org = await prisma.organization.findUnique({
         where: { id: organizationId }
@@ -525,11 +583,10 @@ export class AdminController {
           featureSimpleBulkUpload: simpleBulkPaste,
           featureCsvUpload: csvUpload,
           featureOverrideByAdmin: enableOverride ?? true,
-          featureInboxLocked: inboxLocked ?? false,
-          featureCampaignsLocked: campaignsLocked ?? false,
-          featureChatbotLocked: chatbotLocked ?? false,
-          featureAutomationLocked: automationLocked ?? false,
-          featureConnectionLocked: connectionLocked ?? false,  // ✅ NEW
+          // Sirf wahi lock likho jo body me aaya hai. Purana code har
+          // missing key ko `?? false` karke unlock kar deta tha, jisse ek
+          // partial update baaki sab locks chup-chaap khol deta.
+          ...writableLockFlags(req.body),
         } as any
       });
 
@@ -543,12 +600,9 @@ export class AdminController {
           simpleBulkPaste: (updated as any).featureSimpleBulkUpload,
           csvUpload: (updated as any).featureCsvUpload,
           adminOverride: (updated as any).featureOverrideByAdmin,
-          inboxLocked: (updated as any).featureInboxLocked,
-          campaignsLocked: (updated as any).featureCampaignsLocked,
-          chatbotLocked: (updated as any).featureChatbotLocked,
-          automationLocked: (updated as any).featureAutomationLocked,
-          connectionLocked: (updated as any).featureConnectionLocked,  // ✅ NEW
-        }
+          ...readLockFlags(updated),
+        },
+        planLocked: await planLockedFlags(organizationId),
       }, 'Features updated');
 
     } catch (error) {
