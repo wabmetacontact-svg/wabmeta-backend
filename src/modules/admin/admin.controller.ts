@@ -6,6 +6,8 @@ import {
   FEATURE_REGISTRY,
   LOCKABLE_FEATURES,
   LockableFeature,
+  planExcludesFeature,
+  PLAN_LIMIT_SELECT,
 } from '../../middleware/featureLock';
 import { adminService } from './admin.service';
 import { adminBillingService } from './admin.billing.service';
@@ -133,25 +135,17 @@ const planLockedFlags = async (
     where: { id: organizationId },
     select: {
       subscription: {
-        select: {
-          plan: {
-            select: {
-              maxCampaigns: true,
-              maxChatbots: true,
-              maxAutomations: true,
-              maxWhatsAppAccounts: true,
-            },
-          },
-        },
+        select: { plan: { select: PLAN_LIMIT_SELECT } },
       },
     } as any,
   });
 
   const plan = (org as any)?.subscription?.plan;
 
+  // Wahi function jo asli enforcement karta hai - warna admin panel kuch aur
+  // dikhata aur server kuch aur karta.
   return LOCKABLE_FEATURES.reduce((acc, feature) => {
-    const limit = FEATURE_REGISTRY[feature].planLimit;
-    acc[wireKey(feature)] = limit ? plan?.[limit] === 0 : false;
+    acc[wireKey(feature)] = planExcludesFeature(plan, feature);
     return acc;
   }, {} as Record<string, boolean>);
 };

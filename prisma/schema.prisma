@@ -186,6 +186,13 @@ model Plan {
   validityDays         Int            @default(30)
   isRecommended        Boolean        @default(false)
   features             Json           @default("[]")
+
+  // Har feature ke liye saaf haan/na: { "crm": true, "telegram": false, ... }
+  // Keys featureLock.ts ke LockableFeature hain. Jo feature yahan likha hi na
+  // ho uske liye purani numeric limit (maxChatbots wagairah) dekhi jaati hai,
+  // aur wo bhi na ho to feature khula rehta hai - purane plans isi wajah se
+  // waise ke waise chalte rahenge.
+  includedFeatures     Json?
   isActive             Boolean        @default(true)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt

@@ -125,14 +125,52 @@ export const invalidateFeatureLocks = (organizationId?: string) => {
 // missing hone par sabka access band ho jayega.
 const limitLocks = (limit: number | null | undefined): boolean => limit === 0;
 
+/**
+ * Plan.includedFeatures - har feature ke liye saaf haan/na.
+ *
+ * Pehle plan sirf un 5 features ko rok sakta tha jinke paas ek numeric limit
+ * thi (maxCampaigns, maxChatbots, maxAutomations, maxWhatsAppAccounts). CRM,
+ * Reports, Telegram, Instagram wagairah plan se control ho hi nahi sakte the -
+ * unhe sirf admin har org par alag se band kar sakta tha. Naye tiers isi par
+ * tike hain (Telegram Starter me band, Growth me khula), isliye plan ab har
+ * feature ke baare me bol sakta hai.
+ */
+export type PlanFeatureFlags = Partial<Record<LockableFeature, boolean>>;
+
+/**
+ * Plan is feature ko deta hai ya nahi.
+ *
+ * Tarteeb maayne rakhti hai:
+ *   1. includedFeatures me saaf true/false ho to wahi final hai.
+ *   2. Warna purani numeric limit (0 = nahi milta).
+ *   3. Dono na hon to lock mat karo.
+ *
+ * Teesra niyam jaan-boojhkar hai: plan row missing ho, ya purane plans me
+ * includedFeatures set hi na ho, to kisi ka access band nahi hona chahiye.
+ * Isi wajah se ye change deploy hone par aaj ka behaviour bilkul nahi badalta -
+ * jab tak plans par includedFeatures likha na jaye.
+ */
+export const planExcludesFeature = (
+  plan: any,
+  feature: LockableFeature
+): boolean => {
+  if (!plan) return false;
+
+  const flags = (plan.includedFeatures ?? null) as PlanFeatureFlags | null;
+  const explicit = flags && typeof flags === 'object' ? flags[feature] : undefined;
+  if (typeof explicit === 'boolean') return !explicit;
+
+  const limitField = FEATURE_REGISTRY[feature].planLimit;
+  return limitField ? limitLocks(plan[limitField]) : false;
+};
+
 export const computeFeatureLocks = (org: any): EffectiveFeatureLocks => {
   const plan = org?.subscription?.plan;
 
   return LOCKABLE_FEATURES.reduce((acc, feature) => {
     const def = FEATURE_REGISTRY[feature];
     acc[feature] =
-      org?.[def.column] === true ||
-      (def.planLimit ? limitLocks(plan?.[def.planLimit]) : false);
+      org?.[def.column] === true || planExcludesFeature(plan, feature);
     return acc;
   }, {} as EffectiveFeatureLocks);
 };
@@ -150,12 +188,16 @@ export const lockColumns = (
     return acc;
   }, {} as Record<string, boolean>);
 
-// Prisma select: har feature ka column + wo plan limits jo koi feature use karta hai.
-const PLAN_LIMIT_SELECT = LOCKABLE_FEATURES.reduce((acc, feature) => {
-  const limit = FEATURE_REGISTRY[feature].planLimit;
-  if (limit) acc[limit] = true;
-  return acc;
-}, {} as Record<string, boolean>);
+// Prisma select: plan ka includedFeatures + wo purani limits jo abhi bhi
+// fallback ki tarah kaam karti hain.
+export const PLAN_LIMIT_SELECT = LOCKABLE_FEATURES.reduce(
+  (acc, feature) => {
+    const limit = FEATURE_REGISTRY[feature].planLimit;
+    if (limit) acc[limit] = true;
+    return acc;
+  },
+  { includedFeatures: true } as Record<string, boolean>
+);
 
 /** Sirf lock columns - jab caller apna select khud bana raha ho */
 export const LOCK_SELECT_COLUMNS: Record<string, boolean> =
