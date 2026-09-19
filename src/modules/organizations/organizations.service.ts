@@ -3,7 +3,7 @@
 import prisma from '../../config/database';
 import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
-import { computeFeatureLocks, lockColumns } from '../../middleware/featureLock';
+import { getFeatureLocks, lockColumns } from '../../middleware/featureLock';
 import { comparePassword } from '../../utils/password';
 import { generateSlug } from '../../utils/otp';
 import { sendEmail } from '../../utils/email';
@@ -24,22 +24,34 @@ import {
 // HELPER FUNCTIONS
 // ============================================
 
-// Plan ke limits (jaise FREE_DEMO par maxChatbots = 0) bhi feature lock
-// karte hain, sirf admin ke featureXLocked columns nahi. Client ko
-// effective lock chahiye, isliye yahin compute karke bhejte hain.
-const formatOrganization = (org: any): OrganizationResponse => ({
-  id: org.id,
-  name: org.name,
-  slug: org.slug,
-  logo: org.logo,
-  website: org.website,
-  industry: org.industry,
-  timezone: org.timezone,
-  planType: org.planType,
-  ...lockColumns(computeFeatureLocks(org)),
-  createdAt: org.createdAt,
-  updatedAt: org.updatedAt,
-});
+// A feature is locked by the plan, by a per-organisation override, or by the
+// admin - and the client needs the answer all three produce together, not the
+// raw columns.
+//
+// This used to compute the locks from whatever the calling query happened to
+// have selected, and the callers disagreed. getById selected four numeric
+// plan limits and not includedFeatures, so a Starter organisation was told
+// its chatbot was open while the API answered 403; update() and
+// getUserOrganizations() selected no plan at all, so they reported everything
+// open. getFeatureLocks() runs its own query with the right select (and a
+// short cache the admin panel invalidates), so no caller has to remember it.
+const formatOrganization = async (org: any): Promise<OrganizationResponse> => {
+  const locks = await getFeatureLocks(org.id);
+
+  return {
+    id: org.id,
+    name: org.name,
+    slug: org.slug,
+    logo: org.logo,
+    website: org.website,
+    industry: org.industry,
+    timezone: org.timezone,
+    planType: org.planType,
+    ...(locks ? lockColumns(locks) : {}),
+    createdAt: org.createdAt,
+    updatedAt: org.updatedAt,
+  } as OrganizationResponse;
+};
 
 // ============================================
 // ORGANIZATIONS SERVICE CLASS
@@ -149,18 +161,10 @@ export class OrganizationsService {
         _count: {
           select: { members: true },
         },
-        // Plan limits chahiye taaki effective feature locks compute ho sakein
+        // Feature locks are not computed from this - formatOrganization asks
+        // getFeatureLocks, which selects exactly what it needs.
         subscription: {
-          select: {
-            plan: {
-              select: {
-                maxCampaigns: true,
-                maxChatbots: true,
-                maxAutomations: true,
-                maxWhatsAppAccounts: true,
-              },
-            },
-          },
+          select: { plan: { select: { name: true, type: true } } },
         },
       },
     });
@@ -182,7 +186,7 @@ export class OrganizationsService {
     }));
 
     return {
-      ...formatOrganization(organization),
+      ...(await formatOrganization(organization)),
       owner: organization.owner,
       members,
       memberCount: organization._count.members,
@@ -201,7 +205,7 @@ export class OrganizationsService {
       orderBy: { joinedAt: 'asc' },
     });
 
-    return memberships.map((m) => formatOrganization(m.organization));
+    return Promise.all(memberships.map((m) => formatOrganization(m.organization)));
   }
 
   // ==========================================
