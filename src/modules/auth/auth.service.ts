@@ -32,6 +32,7 @@ import { whatsappApi } from '../whatsapp/whatsapp.api';
 import { welcomeService } from '../../services/welcome.service';
 import { lockStatus, lockoutMessage, nextStateAfterFailure, clearedState, LOCKOUT_MINUTES } from './loginLockout';
 import { recordSecurityEvent } from '../../utils/securityLog';
+import { sessionCapForSeats, sessionsToEvict } from './sessionLimit';
 
 const WABMETA_OWN_ORG_ID = process.env.WABMETA_OWN_ORG_ID || '';
 
@@ -299,6 +300,43 @@ const formatUser = (user: any): AuthUser => ({
 // HELPER: Generate JWT tokens
 // ============================================
 
+/**
+ * Org ke plan ke hisaab se purani sessions hatao, taaki nayi ke liye jagah bane.
+ *
+ * Poore org ki zinda sessions ginti hain - ek user ke nahi - kyunki bikta
+ * seat hai. Jo sabse purani hai wahi jaati hai.
+ */
+const enforceOrgSessionCap = async (organizationId: string): Promise<void> => {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      subscription: { select: { plan: { select: { maxTeamMembers: true } } } },
+      members: { select: { userId: true } },
+    },
+  });
+
+  const cap = sessionCapForSeats(org?.subscription?.plan?.maxTeamMembers);
+  if (cap === null) return;
+
+  const userIds = (org?.members ?? []).map((m) => m.userId);
+  if (userIds.length === 0) return;
+
+  const sessions = await prisma.refreshToken.findMany({
+    where: { userId: { in: userIds }, expiresAt: { gt: new Date() } },
+    select: { id: true, createdAt: true },
+  });
+
+  const doomed = sessionsToEvict(sessions, cap);
+  if (doomed.length === 0) return;
+
+  await prisma.refreshToken.deleteMany({ where: { id: { in: doomed } } });
+  authLog.info('Session cap reached, oldest sessions ended', {
+    organizationId,
+    cap,
+    evicted: doomed.length,
+  });
+};
+
 const generateTokenPair = async (
   userId: string,
   email: string,
@@ -322,6 +360,16 @@ const generateTokenPair = async (
   const expiresAt = new Date(
     Date.now() + parseExpiryTime(config.jwt.refreshExpiresIn)
   );
+
+  // Seats ka matlab sirf "kitne log jud sakte hain" nahi, "kitne ek saath
+  // logged in reh sakte hain" bhi hai - warna ek login poori team me baant
+  // diya jata hai aur seats kabhi bikte hi nahi. Cap poore org par hai.
+  if (organizationId) {
+    await enforceOrgSessionCap(organizationId).catch((err: any) => {
+      // Cap lagana login ko kabhi fail na kare.
+      console.error('Session cap check failed:', err?.message || err);
+    });
+  }
 
   await prisma.refreshToken.create({
     data: { token: refreshToken, userId, expiresAt },
