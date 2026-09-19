@@ -4,7 +4,7 @@
 // access mil jana.
 
 import { describe, it, expect } from 'vitest';
-import { resolvePricing, PLAN_KEYS, type PricingRow } from './planCatalog';
+import { resolvePricing, subscriptionDays, PLAN_KEYS, type PricingRow } from './planCatalog';
 
 const plan = (over: Partial<PricingRow> = {}): PricingRow => ({
   name: 'Starter',
@@ -99,5 +99,39 @@ describe('PLAN_KEYS', () => {
       expect(PLAN_KEYS[`${t}_yearly`].cycle).toBe('yearly');
       expect(PLAN_KEYS[t].type).toBe(PLAN_KEYS[`${t}_yearly`].type);
     }
+  });
+});
+
+describe('subscriptionDays', () => {
+  it('order ke notes sabse upar - client ne paisa usi ke hisaab se diya', () => {
+    // Naye tier ka yearly purchase: plan ki validityDays 30 hai, par becha
+    // 365 din gaya tha. Pehle yahi ulta tha aur saal ka paisa lekar ek
+    // mahina milta tha.
+    expect(subscriptionDays({ notesValidityDays: 365, planValidityDays: 30 })).toBe(365);
+  });
+
+  it('notes string me aayen to bhi chalta hai (Razorpay sab string bhejta hai)', () => {
+    expect(subscriptionDays({ notesValidityDays: '365' })).toBe(365);
+  });
+
+  it('notes na hon to billingCycle se yearly pehchana jata hai', () => {
+    expect(subscriptionDays({ billingCycle: 'yearly', planValidityDays: 30 })).toBe(365);
+    expect(subscriptionDays({ billingCycle: 'YEARLY', planValidityDays: 30 })).toBe(365);
+  });
+
+  it('monthly cycle par plan ki validity chalti hai', () => {
+    expect(subscriptionDays({ billingCycle: 'monthly', planValidityDays: 30 })).toBe(30);
+  });
+
+  it('purane term plans par plan ki apni validity', () => {
+    expect(subscriptionDays({ planValidityDays: 180 })).toBe(180);
+    expect(subscriptionDays({ planValidityDays: 90 })).toBe(90);
+  });
+
+  it('kuch bhi na mile to 30 - kabhi 0 din nahi', () => {
+    expect(subscriptionDays({})).toBe(30);
+    expect(subscriptionDays({ notesValidityDays: 0, planValidityDays: 0 })).toBe(30);
+    expect(subscriptionDays({ notesValidityDays: 'abc' })).toBe(30);
+    expect(subscriptionDays({ notesValidityDays: -5 })).toBe(30);
   });
 });

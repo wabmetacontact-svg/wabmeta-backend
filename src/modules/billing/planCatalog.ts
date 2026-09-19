@@ -68,8 +68,8 @@ export interface PricingRow {
   isActive: boolean;
 }
 
-const MONTHLY_DAYS = 30;
-const YEARLY_DAYS = 365;
+export const MONTHLY_DAYS = 30;
+export const YEARLY_DAYS = 365;
 
 /** Prisma Decimal, string ya number - teeno se rupaye nikaalo. */
 const toRupees = (value: unknown): number => {
@@ -157,3 +157,30 @@ export const resolvePlanKey = async (key: string): Promise<ResolvedPlanKey> => {
 };
 
 export const planKeyNames = (): string[] => Object.keys(PLAN_KEYS);
+
+/**
+ * Subscription kitne din chalegi.
+ *
+ * Sabse pehle wahi jo order banate waqt tay hua tha (Razorpay notes me
+ * likha jaata hai) - kyunki client ne paisa usi ke hisaab se diya hai.
+ * Plan ki apni validityDays uske baad aati hai.
+ *
+ * Tarteeb galat hone se asli bug hua tha: naye tiers ki validityDays 30 hai,
+ * to `plan.validityDays || notes.validityDays` yearly purchase ko bhi 30 din
+ * de deta - poore saal ka paisa lekar ek mahina.
+ */
+export const subscriptionDays = (input: {
+  notesValidityDays?: unknown;
+  billingCycle?: unknown;
+  planValidityDays?: unknown;
+}): number => {
+  const fromNotes = Number(input.notesValidityDays);
+  if (Number.isFinite(fromNotes) && fromNotes > 0) return Math.floor(fromNotes);
+
+  if (String(input.billingCycle || '').toLowerCase() === 'yearly') return YEARLY_DAYS;
+
+  const fromPlan = Number(input.planValidityDays);
+  if (Number.isFinite(fromPlan) && fromPlan > 0) return Math.floor(fromPlan);
+
+  return MONTHLY_DAYS;
+};

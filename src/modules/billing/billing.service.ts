@@ -4,6 +4,7 @@ import { PrismaClient, PlanType, SubscriptionStatus } from '@prisma/client';
 import crypto from 'crypto';
 import prisma from '../../config/database';
 import { invalidateFeatureLocks } from '../../middleware/featureLock';
+import { subscriptionDays } from './planCatalog';
 
 // ============================================
 // RAZORPAY INITIALIZATION
@@ -852,7 +853,13 @@ class BillingService {
 
       // Calculate subscription period based on validityDays
       const now = new Date();
-      const validityDays = plan.validityDays || notes.validityDays || 30;
+      // Jo becha gaya wahi milega. Notes me order banate waqt ki validity
+      // likhi hoti hai; plan ki apni validityDays uske baad aati hai.
+      const validityDays = subscriptionDays({
+        notesValidityDays: notes.validityDays,
+        billingCycle: notes.billingCycle,
+        planValidityDays: plan.validityDays,
+      });
       const periodEnd = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000);
 
       console.log('Creating subscription:', {
