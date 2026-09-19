@@ -1,29 +1,30 @@
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 
-// ✅ UPDATED PLAN ACCESS MATRIX
-const PLAN_FEATURES = {
-    FREE_DEMO: {
-        simpleBulkPaste: false,
-        csvUpload: true          // ✅ Enabled for Demo Users
-    },
-    MONTHLY: {
-        simpleBulkPaste: false,  // ❌ Not available
-        csvUpload: true          // ✅ Available
-    },
-    QUARTERLY: {
-        simpleBulkPaste: true,   // ✅ Available
-        csvUpload: true          // ✅ Available
-    },
-    BIANNUAL: {
-        simpleBulkPaste: true,
-        csvUpload: true
-    },
-    ANNUAL: {
-        simpleBulkPaste: true,
-        csvUpload: true
-    }
+// Bulk paste access per plan.
+//
+// The source of truth is the plan row's `includedFeatures.bulkPaste`, which
+// set-billing-plans.ts writes. This table is only the fallback for rows that
+// predate that column - and for the retired term plans, which never had it.
+//
+// Without the new tiers listed here, an unseeded PRO organisation would fall
+// through to FREE_DEMO and be denied a feature it paid for.
+const PLAN_FEATURES: Record<string, { simpleBulkPaste: boolean; csvUpload: boolean }> = {
+    FREE_DEMO: { simpleBulkPaste: true, csvUpload: true },
+    STARTER: { simpleBulkPaste: false, csvUpload: true },
+    GROWTH: { simpleBulkPaste: true, csvUpload: true },
+    PRO: { simpleBulkPaste: true, csvUpload: true },
+    BUSINESS: { simpleBulkPaste: true, csvUpload: true },
+
+    // Retired duration plans - still live for existing subscriptions.
+    MONTHLY: { simpleBulkPaste: false, csvUpload: true },
+    QUARTERLY: { simpleBulkPaste: true, csvUpload: true },
+    BIANNUAL: { simpleBulkPaste: true, csvUpload: true },
+    ANNUAL: { simpleBulkPaste: true, csvUpload: true },
 };
+
+/** The plan the customer should move to for bulk paste. */
+const BULK_PASTE_PLAN = 'Growth';
 
 export interface FeatureAccess {
     simpleBulkPaste: boolean;
@@ -32,6 +33,27 @@ export interface FeatureAccess {
     upgradeRequired: boolean;
     upgradeMessage?: string;
 }
+
+/**
+ * What this organisation's plan allows.
+ *
+ * An explicit `includedFeatures.bulkPaste` on the plan row wins; anything the
+ * plan does not state falls back to the table above, and an unknown plan type
+ * falls back to the trial's access rather than to nothing.
+ */
+const resolvePlanFeatures = (org: any): { simpleBulkPaste: boolean; csvUpload: boolean } => {
+    const fallback = PLAN_FEATURES[String(org.planType)] || PLAN_FEATURES.FREE_DEMO;
+    const flags = org?.subscription?.plan?.includedFeatures;
+
+    if (!flags || typeof flags !== 'object') return fallback;
+
+    return {
+        simpleBulkPaste:
+            typeof flags.bulkPaste === 'boolean' ? flags.bulkPaste : fallback.simpleBulkPaste,
+        csvUpload:
+            typeof flags.csvUpload === 'boolean' ? flags.csvUpload : fallback.csvUpload,
+    };
+};
 
 export class ContactFeaturesService {
 
@@ -45,7 +67,10 @@ export class ContactFeaturesService {
                 planType: true,
                 featureSimpleBulkUpload: true,
                 featureCsvUpload: true,
-                featureOverrideByAdmin: true
+                featureOverrideByAdmin: true,
+                subscription: {
+                    select: { plan: { select: { includedFeatures: true } } }
+                }
             }
         });
 
@@ -53,8 +78,8 @@ export class ContactFeaturesService {
             throw new AppError('Organization not found', 404);
         }
 
-        const planType = organization.planType as keyof typeof PLAN_FEATURES;
-        const planFeatures = PLAN_FEATURES[planType] || PLAN_FEATURES.FREE_DEMO;
+        const planType = String(organization.planType);
+        const planFeatures = resolvePlanFeatures(organization);
 
         // ✅ Check Admin Override
         if ((organization as any).featureOverrideByAdmin) {
@@ -74,18 +99,10 @@ export class ContactFeaturesService {
             csvUpload: planFeatures.csvUpload,
             currentPlan: planType,
             upgradeRequired: needsUpgrade,
-            upgradeMessage: this.getUpgradeMessage(planType, planFeatures)
+            upgradeMessage: planFeatures.simpleBulkPaste
+                ? undefined
+                : `Bulk paste is included from the ${BULK_PASTE_PLAN} plan onwards.`
         };
-    }
-
-    private getUpgradeMessage(plan: string, features: any): string | undefined {
-        if (plan === 'FREE_DEMO') {
-            return 'Upgrade to Quarterly (₹2,500) to unlock Simple Bulk Paste and other premium features';
-        }
-        if (plan === 'MONTHLY' && !features.simpleBulkPaste) {
-            return 'Upgrade to Quarterly (₹2,500) to unlock Simple Bulk Paste';
-        }
-        return undefined;
     }
 
     /**
@@ -99,7 +116,7 @@ export class ContactFeaturesService {
 
         if (feature === 'simpleBulkPaste' && !access.simpleBulkPaste) {
             throw new AppError(
-                'Simple Bulk Paste requires Quarterly plan (₹2,500) or higher. Your current plan: ' + access.currentPlan,
+                `Bulk paste is included from the ${BULK_PASTE_PLAN} plan onwards. Your current plan: ${access.currentPlan}`,
                 403
             );
         }

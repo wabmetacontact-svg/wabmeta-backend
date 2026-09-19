@@ -1,13 +1,14 @@
 // prisma/set-billing-plans.ts
 //
-// Sets the billing plans to a clean "duration discount" ladder:
-//   every paid plan has IDENTICAL feature access; only the price-per-month,
-//   team seats and WhatsApp accounts change with the commitment length.
+// The one place the plans are defined. Everything else - the pricing page,
+// the comparison table, checkout, the feature middleware - reads the rows
+// this writes, so pricing changes happen here and nowhere else.
 //
-// Why: previously the ₹899 Monthly plan had maxAutomations = 0, which the
-// feature-lock middleware treats as "not in this plan" — so the main paid plan
-// had automation completely disabled. The 6-Month plan also advertised
-// "Save 15%" while costing the same ₹833/month as the 3-Month plan.
+// Four monthly tiers (Starter / Growth / Pro / Business) plus a 5-day Free
+// Demo. Annual is ten months' price, i.e. two months free. The old duration
+// plans (Monthly / 3-Month / 6-Month / 1-Year) stay in the table with
+// isPublic: false so existing subscriptions keep working, but nobody new can
+// buy them.
 //
 // Run (LOCAL):
 //   DATABASE_URL="postgresql://wabmeta:wabmeta@localhost:5433/wabmeta_dev" \
@@ -50,11 +51,11 @@ export interface PlanSpec {
   price: number;        // total charged for the whole period
   months: number;       // period length, for the per-month maths
   validityDays: number;
-  /** Annual daam (10 mahine ka = 2 mahine free). Purane term plans me same. */
+  /** Annual price (10 months' worth = 2 months free). Same as `price` on the old term plans. */
   yearlyPrice?: number;
-  /** Har feature ke liye saaf haan/na - featureLock isi ko padhta hai. */
+  /** Explicit yes/no per feature - this is what featureLock reads. */
   includedFeatures?: Record<string, boolean>;
-  /** Pricing page par dikhe ya nahi. Purane plans false. */
+  /** Whether the pricing page offers it. False on the retired term plans. */
   isPublic?: boolean;
   maxTeamMembers: number;
   maxWhatsAppAccounts: number;
@@ -96,11 +97,12 @@ export const PLANS: PlanSpec[] = [
       maxChatbots: 1,
       maxAutomations: 3,
     },
+    includedFeatures: { bulkPaste: true },
     features: [
-      'All features unlocked',
-      'Automation & chatbot included',
+      'Every feature unlocked',
       'WhatsApp + Instagram + Telegram',
-      '100 messages · 50 contacts · 5 days',
+      '50 contacts · 100 messages',
+      '5-day trial',
     ],
   },
   // ─── Naye feature tiers (monthly-first) ───────────────────────────────────
@@ -108,7 +110,7 @@ export const PLANS: PlanSpec[] = [
     type: 'STARTER',
     name: 'Starter',
     slug: 'starter',
-    description: 'WhatsApp aur Instagram par shuruaat.',
+    description: 'Get started on WhatsApp and Instagram.',
     price: 799,
     yearlyPrice: 7990,
     months: 1,
@@ -117,24 +119,28 @@ export const PLANS: PlanSpec[] = [
     maxWhatsAppAccounts: 1,
     maxApiCalls: 5000,
     isRecommended: false,
+    caps: {
+      maxContacts: 5000,
+      maxMessages: 10000,
+    },
     includedFeatures: {
       inbox: true, contacts: true, templates: true, campaigns: true,
       wallet: true, connection: true, instagram: true,
       telegram: false, chatbot: false, automation: false,
-      crm: false, reports: false, aiAgent: false,
+      crm: false, reports: false, aiAgent: false, bulkPaste: false,
     },
     features: [
       'WhatsApp + Instagram inbox',
-      'Unlimited contacts & campaigns',
-      '3 team seats · 1 WhatsApp number',
-      'Automation, CRM aur AI: Growth se',
+      '5,000 contacts · 10,000 messages/mo',
+      'Unlimited campaigns & templates',
+      '3 team members · 1 WhatsApp number',
     ],
   },
   {
     type: 'GROWTH',
     name: 'Growth',
     slug: 'growth',
-    description: 'Automation, chatbot aur CRM ke saath poori team.',
+    description: 'Automation, chatbot and CRM for the whole team.',
     price: 1799,
     yearlyPrice: 17990,
     months: 1,
@@ -143,25 +149,30 @@ export const PLANS: PlanSpec[] = [
     maxWhatsAppAccounts: 1,
     maxApiCalls: 20000,
     isRecommended: true,
+    caps: {
+      maxContacts: 25000,
+      maxMessages: 50000,
+    },
     includedFeatures: {
       inbox: true, contacts: true, templates: true, campaigns: true,
       wallet: true, connection: true, instagram: true, telegram: true,
       chatbot: true, automation: true, crm: true, reports: true,
-      aiAgent: false,
+      aiAgent: false, bulkPaste: true,
     },
     features: [
       'Everything in Starter, plus:',
       'Telegram inbox',
-      'Chatbot flow builder & automations',
-      'CRM pipelines aur reports',
-      '5 team seats',
+      'Automation & chatbot flow builder',
+      'CRM pipelines & reports',
+      '25,000 contacts · 50,000 messages/mo',
+      '5 team members',
     ],
   },
   {
     type: 'PRO',
     name: 'Pro',
     slug: 'pro',
-    description: 'AI Sales Agent aur payment links ke saath.',
+    description: 'AI Sales Agent and payment links.',
     price: 2999,
     yearlyPrice: 29990,
     months: 1,
@@ -170,23 +181,29 @@ export const PLANS: PlanSpec[] = [
     maxWhatsAppAccounts: 2,
     maxApiCalls: 50000,
     isRecommended: false,
+    caps: {
+      maxContacts: 100000,
+      maxMessages: 200000,
+    },
     includedFeatures: {
       inbox: true, contacts: true, templates: true, campaigns: true,
       wallet: true, connection: true, instagram: true, telegram: true,
-      chatbot: true, automation: true, crm: true, reports: true, aiAgent: true,
+      chatbot: true, automation: true, crm: true, reports: true,
+      aiAgent: true, bulkPaste: true,
     },
     features: [
       'Everything in Growth, plus:',
-      'AI Sales Agent — 2,000 replies/mahina',
+      'AI Sales Agent — 2,000 replies/month',
       'Payment links',
-      '10 team seats · 2 WhatsApp numbers',
+      '100,000 contacts · 200,000 messages/mo',
+      '10 team members · 2 WhatsApp numbers',
     ],
   },
   {
     type: 'BUSINESS',
     name: 'Business',
     slug: 'business',
-    description: 'Agency aur multi-number setup ke liye.',
+    description: 'For agencies and multi-number setups.',
     price: 5999,
     yearlyPrice: 59990,
     months: 1,
@@ -198,13 +215,15 @@ export const PLANS: PlanSpec[] = [
     includedFeatures: {
       inbox: true, contacts: true, templates: true, campaigns: true,
       wallet: true, connection: true, instagram: true, telegram: true,
-      chatbot: true, automation: true, crm: true, reports: true, aiAgent: true,
+      chatbot: true, automation: true, crm: true, reports: true,
+      aiAgent: true, bulkPaste: true,
     },
     features: [
       'Everything in Pro, plus:',
-      'Unlimited team seats',
-      '3 WhatsApp numbers',
-      'API access · AI 10,000 replies/mahina',
+      'Unlimited contacts & messages',
+      'AI Sales Agent — 10,000 replies/month',
+      '3 WhatsApp numbers · API access',
+      'Unlimited team members',
     ],
   },
 

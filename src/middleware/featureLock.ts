@@ -104,6 +104,25 @@ export const LOCKABLE_FEATURES = Object.keys(
   FEATURE_REGISTRY
 ) as LockableFeature[];
 
+/**
+ * Plan flags that are NOT middleware locks.
+ *
+ * A plan's `includedFeatures` is plan data, and not everything a plan gates
+ * runs through this middleware. Bulk paste has its own service and its own
+ * admin-override columns (contacts/contacts.features.ts), so it is read from
+ * the plan there rather than being given a lock column here - two systems
+ * owning one feature is how they drift apart.
+ *
+ * Listed so the plan-spec test can tell a deliberate extra key from a typo.
+ */
+export const PLAN_ONLY_FLAGS = ['bulkPaste', 'csvUpload'] as const;
+
+/** Every key that may legitimately appear in a plan's includedFeatures. */
+export const VALID_PLAN_FLAGS: string[] = [
+  ...LOCKABLE_FEATURES,
+  ...PLAN_ONLY_FLAGS,
+];
+
 export type EffectiveFeatureLocks = Record<LockableFeature, boolean>;
 
 // Har request par org + plan fetch karna mehnga hai (app server aur DB alag
