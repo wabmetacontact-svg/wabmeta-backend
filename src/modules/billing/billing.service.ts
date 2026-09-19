@@ -68,7 +68,7 @@ const DEFAULT_PLAN_LIMITS = {
     maxTemplates: 2,
     maxChatbots: 0,
     maxAutomations: 0,
-    validityDays: 2,
+    validityDays: 5,
   },
   MONTHLY: {
     maxContacts: 999999,
