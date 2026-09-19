@@ -363,7 +363,15 @@ async function main() {
 
 // Sirf tab chalao jab file seedha run ki gayi ho. Test isse import karke
 // sirf PLANS padhta hai - import par DB se judna nahi chahiye.
-if (require.main === module) {
+//
+// argv se dekha jata hai, `require.main` se nahi: package.json me
+// "type" nahi hai, to Node is file ko ES module ki tarah padhta hai
+// (`import` dekh kar), aur ESM me `require` hota hi nahi - wahan
+// require.main crash kar deta. argv dono me chalti hai, aur vitest ke
+// andar argv[1] vitest ka binary hota hai, to test par main() nahi chalta.
+const runDirectly = /set-billing-plans\.(ts|js)$/.test(process.argv[1] || '');
+
+if (runDirectly) {
   main()
     .catch((e) => { console.error(e); process.exit(1); })
     .finally(() => prisma.$disconnect());
