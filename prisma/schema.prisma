@@ -192,6 +192,12 @@ model Plan {
   isRecommended        Boolean        @default(false)
   features             Json           @default("[]")
 
+  // Pricing page par dikhe ya nahi. Purane duration plans false ho jayenge -
+  // rows zinda rehti hain taaki maujooda subscriptions chalti rahen, bas
+  // naye customers unhe chun nahi sakte. isActive se alag hai: wo plan ko
+  // poori tarah band karta hai.
+  isPublic             Boolean        @default(true)
+
   // Har feature ke liye saaf haan/na: { "crm": true, "telegram": false, ... }
   // Keys featureLock.ts ke LockableFeature hain. Jo feature yahan likha hi na
   // ho uske liye purani numeric limit (maxChatbots wagairah) dekhi jaati hai,
@@ -1536,6 +1542,15 @@ enum UserRole {
 
 enum PlanType {
   FREE_DEMO
+
+  // Naye feature tiers (2026-09). Purane duration-based types neeche bane
+  // hue hain kyunki maujooda customers unhi par chal rahe hain - unhe
+  // migrate nahi kiya ja raha, bas naye signups ko ye nahi dikhte.
+  STARTER
+  GROWTH
+  PRO
+  BUSINESS
+
   MONTHLY
   QUARTERLY
   BIANNUAL
