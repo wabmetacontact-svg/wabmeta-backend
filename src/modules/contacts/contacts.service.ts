@@ -3,6 +3,10 @@
 import prisma from '../../config/database';
 import { parse } from 'csv-parse/sync';
 import { AppError } from '../../middleware/errorHandler';
+import {
+  assertContactCapacity,
+  getContactQuota,
+} from '../billing/usageQuota';
 import { ContactStatus, Prisma } from '@prisma/client';
 import { ContactChannel, contactChannelWhere } from './contact.channel';
 import {
@@ -250,6 +254,10 @@ export class ContactsService {
 
     if (existing) {
       if (existing.status === 'DELETED') {
+        // Restoring a deleted contact grows the list like any other add, so
+        // it has to pass the same limit. It used to skip it.
+        await assertContactCapacity(organizationId);
+
         const restored = await prisma.contact.update({
           where: { id: existing.id },
           data: {
@@ -288,11 +296,7 @@ export class ContactsService {
       },
     });
 
-    if (org?.subscription?.plan) {
-      if (org._count.contacts >= org.subscription.plan.maxContacts) {
-        throw new AppError('Contact limit reached. Please upgrade your plan.', 400);
-      }
-    }
+    await assertContactCapacity(organizationId);
 
     const contact = await prisma.contact.create({
       data: {
@@ -597,8 +601,11 @@ export class ContactsService {
       },
     });
 
-    const currentCount = org?._count.contacts || 0;
-    const maxContacts = org?.subscription?.plan?.maxContacts || 999999;
+    // One definition of "how many contacts do they have" - this one leaves
+    // out deleted contacts, which the raw _count did not, so an org that had
+    // cleaned up its list was still being charged for the deletions.
+    const contactQuota = await getContactQuota(organizationId);
+    const currentCount = contactQuota.used;
     const planName = org?.subscription?.plan?.name?.toLowerCase() || 'free';
     const isFree = planName.includes('free') || planName.includes('trial');
 
@@ -617,9 +624,13 @@ export class ContactsService {
       }
     }
 
-    const availableSlots = Math.max(0, maxContacts - currentCount);
+    const availableSlots = contactQuota.remaining ?? Number.MAX_SAFE_INTEGER;
     if (availableSlots === 0) {
-      throw new AppError('Contact limit reached. Please upgrade your plan.', 400);
+      throw new AppError(
+        `Your plan includes ${contactQuota.limit?.toLocaleString('en-IN')} contacts ` +
+        'and they are all used. Upgrade your plan to import more.',
+        403
+      );
     }
 
     // ── Validate contacts ──────────────────────────────────

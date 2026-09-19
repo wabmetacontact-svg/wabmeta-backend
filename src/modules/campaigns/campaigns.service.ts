@@ -4,6 +4,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AppError } from '../../middleware/errorHandler';
+import { assertCampaignWithinMessageQuota } from '../billing/usageQuota';
 import { metaApi } from '../meta/meta.api';
 import { campaignSocketService } from './campaigns.socket';
 import { claimContactBatch } from './campaigns.claim';
@@ -869,6 +870,17 @@ export class CampaignsService {
     if (dbCampaign?.status === 'RUNNING' && this.processingCampaigns.has(campaignId)) {
       throw new AppError('Campaign is already being processed', 400);
     }
+
+    // Monthly message allowance pre-check.
+    //
+    // A campaign is the one place a plan's message limit can be enforced
+    // without hurting anybody: it is a deliberate bulk action, and the person
+    // running it can see the number and decide. Inbox replies are never
+    // blocked this way - there is a customer waiting on the other end.
+    const pendingRecipients = await prisma.campaignContact.count({
+      where: { campaignId, status: 'PENDING' },
+    });
+    await assertCampaignWithinMessageQuota(organizationId, pendingRecipients);
 
     // Wallet pre-check
     const wallet = await prisma.wallet.findUnique({ where: { organizationId } });
