@@ -427,7 +427,10 @@ class BillingService {
   async getPlans() {
     try {
       const plans = await prisma.plan.findMany({
-        where: { isActive: true },
+        // isPublic false = purane duration plans. Rows zinda hain taaki
+        // maujooda subscriptions chalti rahen, par naye customers ko ye
+        // pricing page par nahi dikhne chahiye.
+        where: { isActive: true, isPublic: true },
         orderBy: { monthlyPrice: 'asc' }
       });
 
@@ -437,7 +440,9 @@ class BillingService {
 
       return plans.map(plan => ({
         ...plan,
-        popular: plan.isRecommended || plan.type === 'BIANNUAL',
+        // Pehle BIANNUAL yahan hardcoded tha. Ab badge wahi plan pehnta hai
+        // jise script ne recommended likha ho.
+        popular: plan.isRecommended,
         monthlyPrice: Number(plan.monthlyPrice) || 0,
         yearlyPrice: Number(plan.yearlyPrice) || 0,
         features: Array.isArray(plan.features) ? plan.features : []
