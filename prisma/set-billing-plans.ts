@@ -42,7 +42,7 @@ const BASE_MONTHLY = 899;
 const pct = (total: number, months: number) =>
   Math.round((1 - total / months / BASE_MONTHLY) * 100);
 
-interface PlanSpec {
+export interface PlanSpec {
   type: PlanType;
   name: string;
   slug: string;
@@ -50,6 +50,12 @@ interface PlanSpec {
   price: number;        // total charged for the whole period
   months: number;       // period length, for the per-month maths
   validityDays: number;
+  /** Annual daam (10 mahine ka = 2 mahine free). Purane term plans me same. */
+  yearlyPrice?: number;
+  /** Har feature ke liye saaf haan/na - featureLock isi ko padhta hai. */
+  includedFeatures?: Record<string, boolean>;
+  /** Pricing page par dikhe ya nahi. Purane plans false. */
+  isPublic?: boolean;
   maxTeamMembers: number;
   maxWhatsAppAccounts: number;
   maxApiCalls: number;
@@ -67,7 +73,7 @@ interface PlanSpec {
   features: string[];
 }
 
-const PLANS: PlanSpec[] = [
+export const PLANS: PlanSpec[] = [
   {
     type: 'FREE_DEMO',
     name: 'Free Demo',
@@ -97,8 +103,115 @@ const PLANS: PlanSpec[] = [
       '100 messages · 50 contacts · 2 days',
     ],
   },
+  // ─── Naye feature tiers (monthly-first) ───────────────────────────────────
+  {
+    type: 'STARTER',
+    name: 'Starter',
+    slug: 'starter',
+    description: 'WhatsApp aur Instagram par shuruaat.',
+    price: 799,
+    yearlyPrice: 7990,
+    months: 1,
+    validityDays: 30,
+    maxTeamMembers: 3,
+    maxWhatsAppAccounts: 1,
+    maxApiCalls: 5000,
+    isRecommended: false,
+    includedFeatures: {
+      inbox: true, contacts: true, templates: true, campaigns: true,
+      wallet: true, connection: true, instagram: true,
+      telegram: false, chatbot: false, automation: false,
+      crm: false, reports: false, aiAgent: false,
+    },
+    features: [
+      'WhatsApp + Instagram inbox',
+      'Unlimited contacts & campaigns',
+      '3 team seats · 1 WhatsApp number',
+      'Automation, CRM aur AI: Growth se',
+    ],
+  },
+  {
+    type: 'GROWTH',
+    name: 'Growth',
+    slug: 'growth',
+    description: 'Automation, chatbot aur CRM ke saath poori team.',
+    price: 1799,
+    yearlyPrice: 17990,
+    months: 1,
+    validityDays: 30,
+    maxTeamMembers: 5,
+    maxWhatsAppAccounts: 1,
+    maxApiCalls: 20000,
+    isRecommended: true,
+    includedFeatures: {
+      inbox: true, contacts: true, templates: true, campaigns: true,
+      wallet: true, connection: true, instagram: true, telegram: true,
+      chatbot: true, automation: true, crm: true, reports: true,
+      aiAgent: false,
+    },
+    features: [
+      'Everything in Starter, plus:',
+      'Telegram inbox',
+      'Chatbot flow builder & automations',
+      'CRM pipelines aur reports',
+      '5 team seats',
+    ],
+  },
+  {
+    type: 'PRO',
+    name: 'Pro',
+    slug: 'pro',
+    description: 'AI Sales Agent aur payment links ke saath.',
+    price: 2999,
+    yearlyPrice: 29990,
+    months: 1,
+    validityDays: 30,
+    maxTeamMembers: 10,
+    maxWhatsAppAccounts: 2,
+    maxApiCalls: 50000,
+    isRecommended: false,
+    includedFeatures: {
+      inbox: true, contacts: true, templates: true, campaigns: true,
+      wallet: true, connection: true, instagram: true, telegram: true,
+      chatbot: true, automation: true, crm: true, reports: true, aiAgent: true,
+    },
+    features: [
+      'Everything in Growth, plus:',
+      'AI Sales Agent — 2,000 replies/mahina',
+      'Payment links',
+      '10 team seats · 2 WhatsApp numbers',
+    ],
+  },
+  {
+    type: 'BUSINESS',
+    name: 'Business',
+    slug: 'business',
+    description: 'Agency aur multi-number setup ke liye.',
+    price: 5999,
+    yearlyPrice: 59990,
+    months: 1,
+    validityDays: 30,
+    maxTeamMembers: UNLIMITED,
+    maxWhatsAppAccounts: 3,
+    maxApiCalls: 200000,
+    isRecommended: false,
+    includedFeatures: {
+      inbox: true, contacts: true, templates: true, campaigns: true,
+      wallet: true, connection: true, instagram: true, telegram: true,
+      chatbot: true, automation: true, crm: true, reports: true, aiAgent: true,
+    },
+    features: [
+      'Everything in Pro, plus:',
+      'Unlimited team seats',
+      '3 WhatsApp numbers',
+      'API access · AI 10,000 replies/mahina',
+    ],
+  },
+
+  // ─── Purane duration plans - zinda, par pricing page par nahi ────────────
   {
     type: 'MONTHLY',
+    isPublic: false,
     name: 'Monthly Plan',
     slug: 'monthly',
     description: 'Entry plan — unlimited messaging on every channel. Automation and chatbots start at the 3-Month plan.',
@@ -120,6 +233,7 @@ const PLANS: PlanSpec[] = [
   },
   {
     type: 'QUARTERLY',
+    isPublic: false,
     name: '3-Month Plan',
     slug: '3-month',
     description: 'Same full access, billed quarterly at a lower rate.',
@@ -139,6 +253,7 @@ const PLANS: PlanSpec[] = [
   },
   {
     type: 'BIANNUAL',
+    isPublic: false,
     name: '6-Month Plan ⭐',
     slug: '6-month',
     // Price stays ₹5,000 (₹833/mo — the same rate as 3-Month). It previously
@@ -152,7 +267,7 @@ const PLANS: PlanSpec[] = [
     maxTeamMembers: 10,
     maxWhatsAppAccounts: 2,
     maxApiCalls: 25000,
-    isRecommended: true,
+    isRecommended: false,
     features: [
       'Everything in 3-Month',
       '10 team members (2× the 3-Month plan)',
@@ -162,6 +277,7 @@ const PLANS: PlanSpec[] = [
   },
   {
     type: 'ANNUAL',
+    isPublic: false,
     name: '1-Year Plan ⭐',
     slug: '1-year',
     description: 'Same full access, billed yearly at the lowest rate.',
@@ -192,10 +308,12 @@ async function main() {
       slug: p.slug,
       description: p.description,
       monthlyPrice: p.price,
-      yearlyPrice: p.price,
+      yearlyPrice: p.yearlyPrice ?? p.price,
       validityDays: p.validityDays,
       isRecommended: p.isRecommended,
       isActive: true,
+      isPublic: p.isPublic ?? true,
+      includedFeatures: p.includedFeatures ?? undefined,
       // Paid plans: unlimited across the board. Trial: small but non-zero.
       maxContacts: caps?.maxContacts ?? UNLIMITED,
       maxMessages: caps?.maxMessages ?? UNLIMITED,
@@ -243,6 +361,10 @@ async function main() {
   }
 }
 
-main()
-  .catch((e) => { console.error(e); process.exit(1); })
-  .finally(() => prisma.$disconnect());
+// Sirf tab chalao jab file seedha run ki gayi ho. Test isse import karke
+// sirf PLANS padhta hai - import par DB se judna nahi chahiye.
+if (require.main === module) {
+  main()
+    .catch((e) => { console.error(e); process.exit(1); })
+    .finally(() => prisma.$disconnect());
+}
