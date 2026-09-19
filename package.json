@@ -25,7 +25,9 @@
     "generate:key": "node -e \"console.log('ENCRYPTION_KEY=' + require('crypto').randomBytes(32).toString('hex'))\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "playground": "ts-node --transpile-only prisma/automation-playground.ts"
+    "playground": "ts-node --transpile-only prisma/automation-playground.ts",
+    "plans:preview": "node prisma/set-billing-plans.ts --dry --allow-remote",
+    "plans:apply": "node prisma/set-billing-plans.ts --allow-remote"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1114.0",

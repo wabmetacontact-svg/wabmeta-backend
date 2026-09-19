@@ -4,7 +4,8 @@ import { PrismaClient, PlanType, SubscriptionStatus } from '@prisma/client';
 import crypto from 'crypto';
 import prisma from '../../config/database';
 import { invalidateFeatureLocks } from '../../middleware/featureLock';
-import { subscriptionDays } from './planCatalog';
+import { resolvePlanKey, subscriptionDays } from './planCatalog';
+import { AppError } from '../../middleware/errorHandler';
 
 // ============================================
 // RAZORPAY INITIALIZATION
@@ -664,86 +665,42 @@ class BillingService {
 
     const rzp = getRazorpayInstance();
     if (!rzp) {
-      throw new Error('Payment gateway not configured. Please contact support.');
+      throw new AppError('Payment gateway not configured. Please contact support.', 503);
     }
 
-    // ✅ USE FIXED METHOD
-    let plan = await this.getPlanBySlug(planKey);
+    // planCatalog resolves the checkout key against the Plan table.
+    //
+    // It has to be used here, and not only in razorpay.routes.ts, because
+    // that file is not mounted anywhere - this is the route the app calls.
+    // Resolving the key by slug alone broke every annual purchase: the key
+    // is "starter_yearly" and no plan has that slug, so it fell through to
+    // a hardcoded default list, found nothing, and threw a bare Error - the
+    // 500 the customer saw on clicking a yearly plan.
+    //
+    // It also fixes two things that would have been worse than an error. The
+    // amount came from monthlyPrice whatever the cycle, so a year would have
+    // been charged at one month's price; and validityDays came from the plan
+    // (30), so a year's money would have bought 30 days.
+    const priced = await resolvePlanKey(planKey);
 
-    // If not in DB, create from defaults
+    const plan = await prisma.plan.findUnique({
+      where: { type: priced.planType },
+      select: { id: true, name: true, slug: true, type: true },
+    });
+
     if (!plan) {
-      console.log(`Plan '${planKey}' not found in DB, checking defaults...`);
-
-      const defaultPlans = this.getDefaultPlans();
-      const defaultPlan = defaultPlans.find(
-        p => p.slug === planKey.toLowerCase() ||
-          p.id === planKey.toLowerCase()
+      throw new AppError(
+        `Plan '${planKey}' is not set up. Please contact support.`,
+        404
       );
-
-      if (!defaultPlan) {
-        throw new Error(`Plan '${planKey}' not found`);
-      }
-
-      // Get correct PlanType from mapping
-      const planType = SLUG_TO_PLAN_TYPE[planKey.toLowerCase()];
-      if (!planType) {
-        throw new Error(`Invalid plan type for '${planKey}'`);
-      }
-
-      try {
-        plan = await prisma.plan.create({
-          data: {
-            name: defaultPlan.name,
-            type: planType,
-            slug: defaultPlan.slug,
-            description: `${defaultPlan.name} - ${defaultPlan.validityDays} days validity`,
-            monthlyPrice: defaultPlan.monthlyPrice,
-            yearlyPrice: defaultPlan.yearlyPrice,
-            maxContacts: defaultPlan.maxContacts,
-            maxMessages: defaultPlan.maxMessages,
-            maxTeamMembers: defaultPlan.maxTeamMembers,
-            maxCampaigns: defaultPlan.maxCampaigns,
-            maxChatbots: defaultPlan.maxChatbots,
-            maxTemplates: defaultPlan.maxTemplates,
-            maxWhatsAppAccounts: defaultPlan.maxWhatsAppAccounts,
-            maxMessagesPerMonth: defaultPlan.maxMessages,
-            maxCampaignsPerMonth: defaultPlan.maxCampaignsPerMonth,
-            maxAutomations: defaultPlan.maxAutomations,
-            maxApiCalls: 10000,
-            validityDays: defaultPlan.validityDays,
-            features: defaultPlan.features,
-            isActive: true,
-            isRecommended: defaultPlan.isRecommended || false,
-          }
-        });
-        console.log('✅ Created plan in database:', plan.name);
-      } catch (createError: any) {
-        // If plan already exists (race condition), fetch it
-        if (createError.code === 'P2002') {
-          plan = await this.getPlanBySlug(planKey);
-        } else {
-          console.error('Failed to create plan:', createError);
-          throw new Error('Failed to initialize plan. Please try again.');
-        }
-      }
     }
-
-    if (!plan) {
-      throw new Error(`Plan '${planKey}' could not be found or created`);
-    }
-
-    const price = Number(plan.monthlyPrice) || 0;
 
     console.log('Plan details:', {
-      planName: plan.name,
-      price,
+      planName: priced.label,
+      amountPaise: priced.amount,
       planId: plan.id,
       type: plan.type,
     });
-
-    if (price <= 0) {
-      throw new Error('Cannot create order for free plan');
-    }
 
     try {
       const timestamp = Date.now().toString().slice(-8);
@@ -751,7 +708,7 @@ class BillingService {
       const receipt = `wm_${orgShort}_${timestamp}`;
 
       const orderOptions = {
-        amount: Math.round(price * 100),
+        amount: priced.amount,
         currency: 'INR',
         receipt: receipt,
         payment_capture: 1,
@@ -763,13 +720,15 @@ class BillingService {
           planSlug: plan.slug,
           billingCycle,
           planName: plan.name,
-          validityDays: plan.validityDays || 30,
+          // What was sold, written down at the moment of sale. The verify
+          // step reads this first, so a year stays a year.
+          validityDays: priced.validityDays,
         }
       };
 
       console.log('Creating order:', {
-        amount: `₹${price}`,
-        planName: plan.name,
+        amount: `₹${priced.amount / 100}`,
+        planName: priced.label,
       });
 
       const order = await rzp.orders.create(orderOptions);
@@ -781,8 +740,8 @@ class BillingService {
         amount: order.amount,
         currency: order.currency,
         planId: plan.id,
-        planName: plan.name,
-        validityDays: plan.validityDays || 30,
+        planName: priced.label,
+        validityDays: priced.validityDays,
         receipt: order.receipt
       };
 
