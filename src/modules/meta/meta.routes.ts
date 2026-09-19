@@ -16,6 +16,7 @@ import { checkConnectionLock } from '../../middleware/connectionLock';
 import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
 import { resolveOrganizationId } from '../../utils/resolveOrgId';
+import { assertCanConnectAnother } from './accountLimit';
 
 const router = Router();
 
@@ -277,18 +278,11 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
       throw new AppError('You do not have permission to connect WhatsApp', 403);
     }
 
-    // Check single account limit
-    const existingConnected = await prisma.whatsAppAccount.findFirst({
-      where: { organizationId, status: 'CONNECTED' },
-    });
-
-    if (existingConnected) {
-      throw new AppError(
-        `Organization already has a connected WhatsApp account (${existingConnected.phoneNumber}). ` +
-        `Please disconnect it first.`,
-        400
-      );
-    }
+    // Numbers ki limit plan se aati hai - pehle yahan hardcoded 1 tha, jisse
+    // Pro (2) aur Business (3) ka wada poora ho hi nahi sakta tha. Ye jaldi
+    // wala check hai taaki poora OAuth chakkar chalne se pehle mana ho jaye;
+    // asli rok account banate waqt transaction ke andar lagti hai.
+    await assertCanConnectAnother(organizationId);
 
     // ✅ Use metaService.completeConnection with embeddedSignup=true
     // Pass wabaId + phoneNumberId from session info (if captured by frontend)

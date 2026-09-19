@@ -107,6 +107,11 @@ model Organization {
   // false par chhoda hai, unka access chhina nahi.
   featureTelegramLocked   Boolean               @default(true)
   featureInstagramLocked  Boolean               @default(true)
+
+  // Plan ke upar admin ki chhoot: { "telegram": true } = plan me na hone par
+  // bhi is org ko ye feature milega. Admin ka apna lock (featureXLocked) isse
+  // upar rehta hai - "band karo" hamesha chalta hai.
+  featureOverrides        Json?
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
@@ -186,6 +191,19 @@ model Plan {
   validityDays         Int            @default(30)
   isRecommended        Boolean        @default(false)
   features             Json           @default("[]")
+
+  // Pricing page par dikhe ya nahi. Purane duration plans false ho jayenge -
+  // rows zinda rehti hain taaki maujooda subscriptions chalti rahen, bas
+  // naye customers unhe chun nahi sakte. isActive se alag hai: wo plan ko
+  // poori tarah band karta hai.
+  isPublic             Boolean        @default(true)
+
+  // Har feature ke liye saaf haan/na: { "crm": true, "telegram": false, ... }
+  // Keys featureLock.ts ke LockableFeature hain. Jo feature yahan likha hi na
+  // ho uske liye purani numeric limit (maxChatbots wagairah) dekhi jaati hai,
+  // aur wo bhi na ho to feature khula rehta hai - purane plans isi wajah se
+  // waise ke waise chalte rahenge.
+  includedFeatures     Json?
   isActive             Boolean        @default(true)
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
@@ -1524,6 +1542,15 @@ enum UserRole {
 
 enum PlanType {
   FREE_DEMO
+
+  // Naye feature tiers (2026-09). Purane duration-based types neeche bane
+  // hue hain kyunki maujooda customers unhi par chal rahe hain - unhe
+  // migrate nahi kiya ja raha, bas naye signups ko ye nahi dikhte.
+  STARTER
+  GROWTH
+  PRO
+  BUSINESS
+
   MONTHLY
   QUARTERLY
   BIANNUAL

@@ -125,14 +125,87 @@ export const invalidateFeatureLocks = (organizationId?: string) => {
 // missing hone par sabka access band ho jayega.
 const limitLocks = (limit: number | null | undefined): boolean => limit === 0;
 
+/**
+ * Plan.includedFeatures - har feature ke liye saaf haan/na.
+ *
+ * Pehle plan sirf un 5 features ko rok sakta tha jinke paas ek numeric limit
+ * thi (maxCampaigns, maxChatbots, maxAutomations, maxWhatsAppAccounts). CRM,
+ * Reports, Telegram, Instagram wagairah plan se control ho hi nahi sakte the -
+ * unhe sirf admin har org par alag se band kar sakta tha. Naye tiers isi par
+ * tike hain (Telegram Starter me band, Growth me khula), isliye plan ab har
+ * feature ke baare me bol sakta hai.
+ */
+export type PlanFeatureFlags = Partial<Record<LockableFeature, boolean>>;
+
+/**
+ * Plan is feature ko deta hai ya nahi.
+ *
+ * Tarteeb maayne rakhti hai:
+ *   1. includedFeatures me saaf true/false ho to wahi final hai.
+ *   2. Warna purani numeric limit (0 = nahi milta).
+ *   3. Dono na hon to lock mat karo.
+ *
+ * Teesra niyam jaan-boojhkar hai: plan row missing ho, ya purane plans me
+ * includedFeatures set hi na ho, to kisi ka access band nahi hona chahiye.
+ * Isi wajah se ye change deploy hone par aaj ka behaviour bilkul nahi badalta -
+ * jab tak plans par includedFeatures likha na jaye.
+ */
+export const planExcludesFeature = (
+  plan: any,
+  feature: LockableFeature
+): boolean => {
+  if (!plan) return false;
+
+  const flags = (plan.includedFeatures ?? null) as PlanFeatureFlags | null;
+  const explicit = flags && typeof flags === 'object' ? flags[feature] : undefined;
+  if (typeof explicit === 'boolean') return !explicit;
+
+  const limitField = FEATURE_REGISTRY[feature].planLimit;
+  return limitField ? limitLocks(plan[limitField]) : false;
+};
+
+/**
+ * Organization.featureOverrides - plan ke upar admin ki chhoot.
+ *
+ * Sirf `true` maayne rakhta hai: "plan me na ho tab bhi ye feature do".
+ * `false` likhne ka koi matlab nahi - us haalat me plan ka faisla hi chalta
+ * hai. Band karna admin ke apne featureXLocked column se hota hai.
+ */
+export const hasFeatureOverride = (
+  org: any,
+  feature: LockableFeature
+): boolean => {
+  const raw = org?.featureOverrides;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  return raw[feature] === true;
+};
+
+/**
+ * Ek feature band hai ya nahi.
+ *
+ * Tarteeb:
+ *   1. Admin ne band kiya hai  -> band. Ye hamesha jeetta hai; "band karo"
+ *      kabhi kisi aur cheez se hara nahi sakta.
+ *   2. Plan me shaamil nahi hai -> band, jab tak us org ke liye override na ho.
+ *   3. Warna khula.
+ *
+ * Override sirf plan ke faisle ko haraata hai, admin ke lock ko nahi. Isse
+ * Starter wale ek client ko Telegram dena mumkin ho jaata hai bina poora tier
+ * badle - warna aise har sauda "upgrade karo ya bhool jao" par atak jaata.
+ */
 export const computeFeatureLocks = (org: any): EffectiveFeatureLocks => {
   const plan = org?.subscription?.plan;
 
   return LOCKABLE_FEATURES.reduce((acc, feature) => {
     const def = FEATURE_REGISTRY[feature];
+
+    if (org?.[def.column] === true) {
+      acc[feature] = true;
+      return acc;
+    }
+
     acc[feature] =
-      org?.[def.column] === true ||
-      (def.planLimit ? limitLocks(plan?.[def.planLimit]) : false);
+      planExcludesFeature(plan, feature) && !hasFeatureOverride(org, feature);
     return acc;
   }, {} as EffectiveFeatureLocks);
 };
@@ -150,12 +223,16 @@ export const lockColumns = (
     return acc;
   }, {} as Record<string, boolean>);
 
-// Prisma select: har feature ka column + wo plan limits jo koi feature use karta hai.
-const PLAN_LIMIT_SELECT = LOCKABLE_FEATURES.reduce((acc, feature) => {
-  const limit = FEATURE_REGISTRY[feature].planLimit;
-  if (limit) acc[limit] = true;
-  return acc;
-}, {} as Record<string, boolean>);
+// Prisma select: plan ka includedFeatures + wo purani limits jo abhi bhi
+// fallback ki tarah kaam karti hain.
+export const PLAN_LIMIT_SELECT = LOCKABLE_FEATURES.reduce(
+  (acc, feature) => {
+    const limit = FEATURE_REGISTRY[feature].planLimit;
+    if (limit) acc[limit] = true;
+    return acc;
+  },
+  { includedFeatures: true } as Record<string, boolean>
+);
 
 /** Sirf lock columns - jab caller apna select khud bana raha ho */
 export const LOCK_SELECT_COLUMNS: Record<string, boolean> =
@@ -164,9 +241,10 @@ export const LOCK_SELECT_COLUMNS: Record<string, boolean> =
     return acc;
   }, {} as Record<string, boolean>);
 
-/** Lock columns + wo plan limits jo computeFeatureLocks ko chahiye */
+/** Lock columns + overrides + wo plan limits jo computeFeatureLocks ko chahiye */
 export const ORG_LOCK_SELECT: Record<string, any> = {
   ...LOCK_SELECT_COLUMNS,
+  featureOverrides: true,
   subscription: {
     select: { plan: { select: PLAN_LIMIT_SELECT } },
   },

@@ -4,6 +4,7 @@ import { PrismaClient, PlanType, SubscriptionStatus } from '@prisma/client';
 import crypto from 'crypto';
 import prisma from '../../config/database';
 import { invalidateFeatureLocks } from '../../middleware/featureLock';
+import { subscriptionDays } from './planCatalog';
 
 // ============================================
 // RAZORPAY INITIALIZATION
@@ -68,7 +69,7 @@ const DEFAULT_PLAN_LIMITS = {
     maxTemplates: 2,
     maxChatbots: 0,
     maxAutomations: 0,
-    validityDays: 2,
+    validityDays: 5,
   },
   MONTHLY: {
     maxContacts: 999999,
@@ -426,7 +427,10 @@ class BillingService {
   async getPlans() {
     try {
       const plans = await prisma.plan.findMany({
-        where: { isActive: true },
+        // isPublic false = purane duration plans. Rows zinda hain taaki
+        // maujooda subscriptions chalti rahen, par naye customers ko ye
+        // pricing page par nahi dikhne chahiye.
+        where: { isActive: true, isPublic: true },
         orderBy: { monthlyPrice: 'asc' }
       });
 
@@ -436,7 +440,9 @@ class BillingService {
 
       return plans.map(plan => ({
         ...plan,
-        popular: plan.isRecommended || plan.type === 'BIANNUAL',
+        // Pehle BIANNUAL yahan hardcoded tha. Ab badge wahi plan pehnta hai
+        // jise script ne recommended likha ho.
+        popular: plan.isRecommended,
         monthlyPrice: Number(plan.monthlyPrice) || 0,
         yearlyPrice: Number(plan.yearlyPrice) || 0,
         features: Array.isArray(plan.features) ? plan.features : []
@@ -852,7 +858,13 @@ class BillingService {
 
       // Calculate subscription period based on validityDays
       const now = new Date();
-      const validityDays = plan.validityDays || notes.validityDays || 30;
+      // Jo becha gaya wahi milega. Notes me order banate waqt ki validity
+      // likhi hoti hai; plan ki apni validityDays uske baad aati hai.
+      const validityDays = subscriptionDays({
+        notesValidityDays: notes.validityDays,
+        billingCycle: notes.billingCycle,
+        planValidityDays: plan.validityDays,
+      });
       const periodEnd = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000);
 
       console.log('Creating subscription:', {

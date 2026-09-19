@@ -111,7 +111,9 @@ export const COUNTRY_RATES: Record<string, CountryRate> = {
   // Hungary (+36)
   '36':  { marketing: 8.22,  utility: 2.78, authentication: 2.78 },
   // India (+91)
-  '91':  { marketing: 1.00,  utility: 0.19, authentication: 0.12 },
+  // Utility AiSensy ke ₹0.145 se match karta hai - wahi category hai jahan
+  // e-commerce ka sabse zyada volume jaata hai, aur pehle hum 31% mehenge the.
+  '91':  { marketing: 1.00,  utility: 0.145, authentication: 0.12 },
   // Indonesia (+62)
   '62':  { marketing: 4.45,  utility: 3.10, authentication: 3.10 },
   // Iraq (+964)
@@ -202,7 +204,9 @@ export const COUNTRY_RATES: Record<string, CountryRate> = {
 
 // ─── Default (fallback) rate when country cannot be determined ─────────────────
 export const DEFAULT_RATE: CountryRate = {
-  marketing: 1.00,      // India rate as safe default
+  // Country pata na chale to thoda upar rakhna hi surakshit hai - India se
+  // sasta koi bada market nahi hai, aur kam charge karna seedha nuksan hai.
+  marketing: 1.00,
   utility: 0.19,
   authentication: 0.12,
 };

@@ -7,6 +7,7 @@ import { authenticate } from "../../middleware/auth";
 import { AppError } from "../../middleware/errorHandler";
 import prisma from "../../config/database";
 import { PlanType, SubscriptionStatus, ActivityAction } from "@prisma/client";
+import { resolvePlanKey } from './planCatalog';
 
 const router = Router();
 router.use(authenticate);
@@ -14,60 +15,11 @@ router.use(authenticate);
 console.log("✅ Razorpay routes loaded");
 
 // ============================================
-// ✅ PLAN KEY → PLAN TYPE + VALIDITY MAPPING
+// ✅ PLAN CATALOGUE
 // ============================================
-export const PLAN_KEY_MAP: Record<string, {
-  amount: number;        // paise mein
-  planType: PlanType;    // DB enum
-  validityDays: number;  // kitne din ka subscription
-  label: string;
-}> = {
-  monthly: {
-    amount: 89900,
-    planType: PlanType.MONTHLY,
-    validityDays: 30,
-    label: "Monthly",
-  },
-  three_month: {
-    amount: 250000,
-    planType: PlanType.QUARTERLY,
-    validityDays: 90,
-    label: "3-Month",
-  },
-  "3-month": {
-    amount: 250000,
-    planType: PlanType.QUARTERLY,
-    validityDays: 90,
-    label: "3-Month",
-  },
-  six_month: {
-    amount: 500000,
-    planType: PlanType.BIANNUAL,
-    validityDays: 180,
-    label: "6-Month",
-  },
-  "6-month": {
-    amount: 500000,
-    planType: PlanType.BIANNUAL,
-    validityDays: 180,
-    label: "6-Month",
-  },
-  one_year: {
-    amount: 899900,
-    planType: PlanType.ANNUAL,
-    validityDays: 365,
-    label: "1-Year",
-  },
-  "1-year": {
-    amount: 899900,
-    planType: PlanType.ANNUAL,
-    validityDays: 365,
-    label: "1-Year",
-  },
-};
-
-// Backward compat alias (keep old PRICE_MAP callers working)
-export const PRICE_MAP = PLAN_KEY_MAP;
+// Daam ab Plan table se aate hain, yahan hardcoded nahi. Kaunsi key kis plan
+// aur cycle ko kehti hai, wo planCatalog.ts me hai. Do jagah daam rakhne ka
+// matlab tha ki wo alag ho jaayen aur client se galat paisa liya jaye.
 
 // ============================================
 // Razorpay instance (lazy init)
@@ -120,13 +72,9 @@ router.post("/create-order", async (req: any, res, next) => {
     const planKey = (req.body?.planKey as string)?.toLowerCase().trim();
     if (!planKey) throw new AppError("planKey is required", 400);
 
-    const selected = PLAN_KEY_MAP[planKey];
-    if (!selected) {
-      throw new AppError(
-        `Invalid planKey '${planKey}'. Valid: ${Object.keys(PLAN_KEY_MAP).join(", ")}`,
-        400
-      );
-    }
+    // Daam DB se - galat key, band plan ya bina daam wale plan par ye khud
+    // throw karta hai, taaki kabhi 0 charge na ho.
+    const selected = await resolvePlanKey(planKey);
 
     const razorpay = getRazorpayClient();
 
@@ -242,7 +190,7 @@ router.post("/verify", async (req: any, res, next) => {
     }
 
     const normalizedKey = orderPlanKey;
-    const selected = PLAN_KEY_MAP[normalizedKey];
+    const selected = await resolvePlanKey(normalizedKey);
     if (!selected) {
       throw new AppError(`Invalid plan on order: ${orderPlanKey}`, 400);
     }

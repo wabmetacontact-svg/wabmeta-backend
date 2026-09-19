@@ -25,6 +25,7 @@ import prisma from '../../config/database';
 import { getRedis } from '../../config/redis';
 import { metaLog } from '../../utils/logger';
 import { toClientAccount, tierDailyLimit } from './accountView';
+import { assertCanConnectAnother } from './accountLimit';
 
 async function extractStoredPin(
   webhookSecretEncrypted: string | null
@@ -622,6 +623,11 @@ export class MetaService {
           return updated;
         } else {
           metaLog.info('Creating new WhatsApp account', { organizationId });
+
+          // Asli rok yahin hai, transaction ke andar - do connects ek saath
+          // aayen to dono bahar wala check paas kar sakte the.
+          await assertCanConnectAnother(organizationId, tx as any);
+
           const accountCount = await tx.whatsAppAccount.count({ where: { organizationId } });
 
           const created = await tx.whatsAppAccount.create({

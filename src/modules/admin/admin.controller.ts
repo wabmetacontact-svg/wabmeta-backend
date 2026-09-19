@@ -6,6 +6,8 @@ import {
   FEATURE_REGISTRY,
   LOCKABLE_FEATURES,
   LockableFeature,
+  planExcludesFeature,
+  PLAN_LIMIT_SELECT,
 } from '../../middleware/featureLock';
 import { adminService } from './admin.service';
 import { adminBillingService } from './admin.billing.service';
@@ -99,6 +101,23 @@ const getParamId = (id: string | string[] | undefined): string => {
 
 const wireKey = (feature: LockableFeature) => `${feature}Locked`;
 
+/**
+ * Body se aaye overrides ko saaf karo: sirf asli feature naam, sirf `true`.
+ *
+ * `false` store karne ka koi matlab nahi - us haalat me plan ka faisla hi
+ * chalta hai. Key body me hai hi nahi to undefined lautao, taaki partial
+ * update chup-chaap saare overrides na uda de.
+ */
+const sanitizeOverrides = (raw: any): Record<string, boolean> | undefined => {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+
+  return LOCKABLE_FEATURES.reduce((acc, feature) => {
+    if (raw[feature] === true) acc[feature] = true;
+    return acc;
+  }, {} as Record<string, boolean>);
+};
+
 const LOCK_COLUMN_SELECT = LOCKABLE_FEATURES.reduce((acc, feature) => {
   acc[FEATURE_REGISTRY[feature].column] = true;
   return acc;
@@ -133,25 +152,17 @@ const planLockedFlags = async (
     where: { id: organizationId },
     select: {
       subscription: {
-        select: {
-          plan: {
-            select: {
-              maxCampaigns: true,
-              maxChatbots: true,
-              maxAutomations: true,
-              maxWhatsAppAccounts: true,
-            },
-          },
-        },
+        select: { plan: { select: PLAN_LIMIT_SELECT } },
       },
     } as any,
   });
 
   const plan = (org as any)?.subscription?.plan;
 
+  // Wahi function jo asli enforcement karta hai - warna admin panel kuch aur
+  // dikhata aur server kuch aur karta.
   return LOCKABLE_FEATURES.reduce((acc, feature) => {
-    const limit = FEATURE_REGISTRY[feature].planLimit;
-    acc[wireKey(feature)] = limit ? plan?.[limit] === 0 : false;
+    acc[wireKey(feature)] = planExcludesFeature(plan, feature);
     return acc;
   }, {} as Record<string, boolean>);
 };
@@ -536,6 +547,7 @@ export class AdminController {
           featureSimpleBulkUpload: true,
           featureCsvUpload: true,
           featureOverrideByAdmin: true,
+          featureOverrides: true,
           ...LOCK_COLUMN_SELECT,
         } as any,
       });
@@ -557,6 +569,8 @@ export class AdminController {
         // Panel ko pata hona chahiye ki kaun sa lock plan ki wajah se hai -
         // admin toggle off kare tab bhi wo feature band rahega.
         planLocked: await planLockedFlags(organizationId),
+        // ...aur kin par plan ke bawajood chhoot di gayi hai.
+        overrides: (org as any).featureOverrides ?? {},
       }, 'Features fetched');
 
     } catch (error) {
@@ -568,6 +582,7 @@ export class AdminController {
     try {
       const organizationId = getParamId(req.params.organizationId);
       const { simpleBulkPaste, csvUpload, enableOverride } = req.body;
+      const overrides = sanitizeOverrides(req.body?.overrides);
 
       const org = await prisma.organization.findUnique({
         where: { id: organizationId }
@@ -583,6 +598,7 @@ export class AdminController {
           featureSimpleBulkUpload: simpleBulkPaste,
           featureCsvUpload: csvUpload,
           featureOverrideByAdmin: enableOverride ?? true,
+          ...(overrides === undefined ? {} : { featureOverrides: overrides }),
           // Sirf wahi lock likho jo body me aaya hai. Purana code har
           // missing key ko `?? false` karke unlock kar deta tha, jisse ek
           // partial update baaki sab locks chup-chaap khol deta.
@@ -603,6 +619,7 @@ export class AdminController {
           ...readLockFlags(updated),
         },
         planLocked: await planLockedFlags(organizationId),
+        overrides: (updated as any).featureOverrides ?? {},
       }, 'Features updated');
 
     } catch (error) {
