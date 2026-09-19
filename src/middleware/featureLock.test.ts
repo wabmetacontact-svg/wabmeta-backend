@@ -142,3 +142,50 @@ describe('computeFeatureLocks', () => {
     expect(locks.instagram).toBe(false);
   });
 });
+
+describe('admin override', () => {
+  const starterPlan = { includedFeatures: { telegram: false, crm: false } };
+
+  it('override plan ke lock ko harata hai', () => {
+    const locks = computeFeatureLocks(
+      org({ featureOverrides: { telegram: true } }, starterPlan)
+    );
+    expect(locks.telegram).toBe(false);
+    // Jo override nahi kiya wo band hi rehta hai.
+    expect(locks.crm).toBe(true);
+  });
+
+  it('admin ka lock override se upar hai - "band karo" hamesha chalta hai', () => {
+    const locks = computeFeatureLocks(
+      org({ featureTelegramLocked: true, featureOverrides: { telegram: true } }, starterPlan)
+    );
+    expect(locks.telegram).toBe(true);
+  });
+
+  it('plan me feature ho to override se kuch farak nahi padta', () => {
+    const locks = computeFeatureLocks(
+      org({ featureOverrides: { telegram: true } }, { includedFeatures: { telegram: true } })
+    );
+    expect(locks.telegram).toBe(false);
+  });
+
+  it('sirf true maayne rakhta hai - false likhne se feature khulta nahi', () => {
+    const locks = computeFeatureLocks(
+      org({ featureOverrides: { telegram: false } }, starterPlan)
+    );
+    expect(locks.telegram).toBe(true);
+  });
+
+  it('kachra override crash nahi karta aur kuch kholta bhi nahi', () => {
+    for (const bad of [null, 'yes', [], 42, { telegram: 'true' }]) {
+      const locks = computeFeatureLocks(org({ featureOverrides: bad }, starterPlan));
+      expect(locks.telegram).toBe(true);
+    }
+  });
+
+  it('purane orgs par override column khali hai - kuch nahi badla', () => {
+    const locks = computeFeatureLocks(org({}, starterPlan));
+    expect(locks.telegram).toBe(true);
+    expect(locks.crm).toBe(true);
+  });
+});

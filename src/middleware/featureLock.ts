@@ -164,13 +164,48 @@ export const planExcludesFeature = (
   return limitField ? limitLocks(plan[limitField]) : false;
 };
 
+/**
+ * Organization.featureOverrides - plan ke upar admin ki chhoot.
+ *
+ * Sirf `true` maayne rakhta hai: "plan me na ho tab bhi ye feature do".
+ * `false` likhne ka koi matlab nahi - us haalat me plan ka faisla hi chalta
+ * hai. Band karna admin ke apne featureXLocked column se hota hai.
+ */
+export const hasFeatureOverride = (
+  org: any,
+  feature: LockableFeature
+): boolean => {
+  const raw = org?.featureOverrides;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  return raw[feature] === true;
+};
+
+/**
+ * Ek feature band hai ya nahi.
+ *
+ * Tarteeb:
+ *   1. Admin ne band kiya hai  -> band. Ye hamesha jeetta hai; "band karo"
+ *      kabhi kisi aur cheez se hara nahi sakta.
+ *   2. Plan me shaamil nahi hai -> band, jab tak us org ke liye override na ho.
+ *   3. Warna khula.
+ *
+ * Override sirf plan ke faisle ko haraata hai, admin ke lock ko nahi. Isse
+ * Starter wale ek client ko Telegram dena mumkin ho jaata hai bina poora tier
+ * badle - warna aise har sauda "upgrade karo ya bhool jao" par atak jaata.
+ */
 export const computeFeatureLocks = (org: any): EffectiveFeatureLocks => {
   const plan = org?.subscription?.plan;
 
   return LOCKABLE_FEATURES.reduce((acc, feature) => {
     const def = FEATURE_REGISTRY[feature];
+
+    if (org?.[def.column] === true) {
+      acc[feature] = true;
+      return acc;
+    }
+
     acc[feature] =
-      org?.[def.column] === true || planExcludesFeature(plan, feature);
+      planExcludesFeature(plan, feature) && !hasFeatureOverride(org, feature);
     return acc;
   }, {} as EffectiveFeatureLocks);
 };
@@ -206,9 +241,10 @@ export const LOCK_SELECT_COLUMNS: Record<string, boolean> =
     return acc;
   }, {} as Record<string, boolean>);
 
-/** Lock columns + wo plan limits jo computeFeatureLocks ko chahiye */
+/** Lock columns + overrides + wo plan limits jo computeFeatureLocks ko chahiye */
 export const ORG_LOCK_SELECT: Record<string, any> = {
   ...LOCK_SELECT_COLUMNS,
+  featureOverrides: true,
   subscription: {
     select: { plan: { select: PLAN_LIMIT_SELECT } },
   },

@@ -107,6 +107,11 @@ model Organization {
   // false par chhoda hai, unka access chhina nahi.
   featureTelegramLocked   Boolean               @default(true)
   featureInstagramLocked  Boolean               @default(true)
+
+  // Plan ke upar admin ki chhoot: { "telegram": true } = plan me na hone par
+  // bhi is org ko ye feature milega. Admin ka apna lock (featureXLocked) isse
+  // upar rehta hai - "band karo" hamesha chalta hai.
+  featureOverrides        Json?
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]

@@ -101,6 +101,23 @@ const getParamId = (id: string | string[] | undefined): string => {
 
 const wireKey = (feature: LockableFeature) => `${feature}Locked`;
 
+/**
+ * Body se aaye overrides ko saaf karo: sirf asli feature naam, sirf `true`.
+ *
+ * `false` store karne ka koi matlab nahi - us haalat me plan ka faisla hi
+ * chalta hai. Key body me hai hi nahi to undefined lautao, taaki partial
+ * update chup-chaap saare overrides na uda de.
+ */
+const sanitizeOverrides = (raw: any): Record<string, boolean> | undefined => {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+
+  return LOCKABLE_FEATURES.reduce((acc, feature) => {
+    if (raw[feature] === true) acc[feature] = true;
+    return acc;
+  }, {} as Record<string, boolean>);
+};
+
 const LOCK_COLUMN_SELECT = LOCKABLE_FEATURES.reduce((acc, feature) => {
   acc[FEATURE_REGISTRY[feature].column] = true;
   return acc;
@@ -530,6 +547,7 @@ export class AdminController {
           featureSimpleBulkUpload: true,
           featureCsvUpload: true,
           featureOverrideByAdmin: true,
+          featureOverrides: true,
           ...LOCK_COLUMN_SELECT,
         } as any,
       });
@@ -551,6 +569,8 @@ export class AdminController {
         // Panel ko pata hona chahiye ki kaun sa lock plan ki wajah se hai -
         // admin toggle off kare tab bhi wo feature band rahega.
         planLocked: await planLockedFlags(organizationId),
+        // ...aur kin par plan ke bawajood chhoot di gayi hai.
+        overrides: (org as any).featureOverrides ?? {},
       }, 'Features fetched');
 
     } catch (error) {
@@ -562,6 +582,7 @@ export class AdminController {
     try {
       const organizationId = getParamId(req.params.organizationId);
       const { simpleBulkPaste, csvUpload, enableOverride } = req.body;
+      const overrides = sanitizeOverrides(req.body?.overrides);
 
       const org = await prisma.organization.findUnique({
         where: { id: organizationId }
@@ -577,6 +598,7 @@ export class AdminController {
           featureSimpleBulkUpload: simpleBulkPaste,
           featureCsvUpload: csvUpload,
           featureOverrideByAdmin: enableOverride ?? true,
+          ...(overrides === undefined ? {} : { featureOverrides: overrides }),
           // Sirf wahi lock likho jo body me aaya hai. Purana code har
           // missing key ko `?? false` karke unlock kar deta tha, jisse ek
           // partial update baaki sab locks chup-chaap khol deta.
@@ -597,6 +619,7 @@ export class AdminController {
           ...readLockFlags(updated),
         },
         planLocked: await planLockedFlags(organizationId),
+        overrides: (updated as any).featureOverrides ?? {},
       }, 'Features updated');
 
     } catch (error) {
