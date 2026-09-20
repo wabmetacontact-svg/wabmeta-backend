@@ -14,6 +14,7 @@ const userAuth = [authenticate, featureLock('wallet')];
 router.get('/wallet', ...userAuth, walletController.getWallet);
 router.post('/wallet/request-access', ...userAuth, walletController.requestAccess);
 router.get('/wallet/analytics', ...userAuth, walletController.getMessageAnalytics);
+router.get('/wallet/rates', ...userAuth, walletController.getRates);
 router.get('/wallet/transactions', ...userAuth, walletController.getTransactions);
 router.post('/wallet/topup/create-order', ...userAuth, walletController.createTopUp);
 router.post('/wallet/topup/verify', ...userAuth, walletController.verifyTopUp);

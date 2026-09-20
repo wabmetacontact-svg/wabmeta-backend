@@ -438,3 +438,30 @@ export const adminToggleWallet = async (req: Request, res: Response) => {
     return errorResponse(res, err.message, err.statusCode || 500);
   }
 };
+
+// ─── Rate card ────────────────────────────────────────────────
+/**
+ * The per-message rates, by country.
+ *
+ * The app used to carry its own copy of this table, and it had drifted from
+ * what the wallet actually charges. Whatever this returns is the same table
+ * the deduction reads, so the two cannot disagree again.
+ */
+export const getRates = async (_req: Request, res: Response) => {
+  try {
+    const { rateCard, DEFAULT_RATE } = await import('./wallet.deduction.service');
+
+    return sendSuccess(
+      res,
+      {
+        countries: rateCard(),
+        // What an unrecognised number is charged.
+        default: { ...DEFAULT_RATE, service: 0 },
+        currency: 'INR',
+      },
+      'Rates fetched'
+    );
+  } catch (err: any) {
+    return errorResponse(res, err.message, err.statusCode || 500);
+  }
+};

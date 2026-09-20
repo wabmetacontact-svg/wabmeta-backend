@@ -250,8 +250,10 @@ export const LANGUAGE_TO_PREFIX: Record<string, string> = {
 };
 
 // ─── Dial-code lookup: longest-prefix-match from cleaned phone number ──────────
-export function getCountryRateFromPhone(phone: string): CountryRate {
-  if (!phone) return DEFAULT_RATE;
+
+/** The country prefix a number starts with, or null if none is recognised. */
+export function matchCountryPrefix(phone: string): string | null {
+  if (!phone) return null;
 
   // Strip all non-digits and leading zeros
   const digits = phone.replace(/\D/g, '').replace(/^0+/, '');
@@ -259,29 +261,49 @@ export function getCountryRateFromPhone(phone: string): CountryRate {
   // Try prefixes from longest (4 digits) to shortest (1 digit)
   for (const len of [4, 3, 2, 1]) {
     const prefix = digits.slice(0, len);
-    if (COUNTRY_RATES[prefix]) {
-      return COUNTRY_RATES[prefix];
-    }
+    if (COUNTRY_RATES[prefix]) return prefix;
+  }
+
+  return null;
+}
+
+export function getCountryRateFromPhone(phone: string): CountryRate {
+  const prefix = matchCountryPrefix(phone);
+  return prefix ? COUNTRY_RATES[prefix] : DEFAULT_RATE;
+}
+
+// ─── Get rate (INR) for a given category + recipient phone OR language ────────
+
+/**
+ * The rates that apply to one message.
+ *
+ * Meta bills on the country of the number being messaged, so that is what is
+ * checked first. This used to read the template's language first, and the
+ * language table maps plain 'en' to India - so an English template sent to a
+ * UK number was charged India's 1.00 while Meta billed us 5.44. The
+ * difference came out of us on every single send.
+ *
+ * The language is still a reasonable guess when there is no usable number,
+ * which is the case for a campaign estimate made before the list is resolved.
+ */
+export function resolveRates(recipientPhone?: string, language?: string): CountryRate {
+  const prefix = recipientPhone ? matchCountryPrefix(recipientPhone) : null;
+  if (prefix) return COUNTRY_RATES[prefix];
+
+  if (language && LANGUAGE_TO_PREFIX[language]) {
+    return COUNTRY_RATES[LANGUAGE_TO_PREFIX[language]] || DEFAULT_RATE;
   }
 
   return DEFAULT_RATE;
 }
 
-// ─── Get rate (INR) for a given category + recipient phone OR language ────────
-export function getRateForCategory(category: string, recipientPhone?: string, language?: string): number {
+export function getRateForCategory(
+  category: string,
+  recipientPhone?: string,
+  language?: string
+): number {
   const upper = (category || '').toUpperCase().trim();
-  
-  let rates = DEFAULT_RATE;
-
-  // 1. Priority: Language (Template Country)
-  if (language && LANGUAGE_TO_PREFIX[language]) {
-    const prefix = LANGUAGE_TO_PREFIX[language];
-    rates = COUNTRY_RATES[prefix] || DEFAULT_RATE;
-  } 
-  // 2. Fallback: Recipient Phone prefix
-  else if (recipientPhone) {
-    rates = getCountryRateFromPhone(recipientPhone);
-  }
+  const rates = resolveRates(recipientPhone, language);
 
   if (upper.includes('MARKETING')) return rates.marketing;
   if (upper.includes('AUTH'))      return rates.authentication;
@@ -550,17 +572,24 @@ export async function deductWalletForCampaign(params: {
     category = template?.category || 'MARKETING';
   }
 
-  // Compute rate
+  // Compute rate.
+  //
+  // The sampled recipients come first: they are who Meta will bill for. The
+  // language branch used to win, and it ignored recipientPhones entirely, so
+  // a campaign to UK numbers was estimated at India's rate - the check passed,
+  // the campaign started, and the wallet ran dry part-way through.
+  //
+  // An average is used because the estimate covers the whole list; each send
+  // is then charged its own recipient's rate by deductWalletForTemplate.
   let rateRupees: number;
-  if (templateLanguage && LANGUAGE_TO_PREFIX[templateLanguage]) {
-    rateRupees = getRateForCategory(category, undefined, templateLanguage);
-  } else if (recipientPhones?.length) {
+  if (recipientPhones?.length) {
     const total = recipientPhones.reduce(
-      (sum, p) => sum + getRateForCategory(category!, p), 0
+      (sum, phone) => sum + getRateForCategory(category!, phone, templateLanguage),
+      0
     );
     rateRupees = total / recipientPhones.length;
   } else {
-    rateRupees = getRateForCategory(category);
+    rateRupees = getRateForCategory(category, undefined, templateLanguage);
   }
 
   const estimatedCostRupees = rateRupees * totalRecipients;
@@ -655,6 +684,35 @@ export const TEMPLATE_RATES: Record<string, number> = {
   authentication: DEFAULT_RATE.authentication,
   auth_intl: 2.50,
 };
+
+/**
+ * Every country we can price, for the rate card in the app.
+ *
+ * The card had its own hardcoded copy of these numbers and it had drifted:
+ * it showed India's utility at 0.19 while the wallet was charging 0.145. A
+ * price list that disagrees with the charge is worse than no price list.
+ */
+export function rateCard(): Array<{
+  code: string;
+  name: string;
+  marketing: number;
+  utility: number;
+  authentication: number;
+  service: number;
+}> {
+  return Object.entries(COUNTRY_NAMES_MAP)
+    .filter(([code]) => COUNTRY_RATES[code])
+    .map(([code, name]) => ({
+      code,
+      name,
+      marketing: COUNTRY_RATES[code].marketing,
+      utility: COUNTRY_RATES[code].utility,
+      authentication: COUNTRY_RATES[code].authentication,
+      // A service conversation - a reply inside the 24h window - is free.
+      service: 0,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 // File ke end mein add karo (COUNTRY_NAMES ke baad)
 // Export karo taaki campaigns.service use kar sake
