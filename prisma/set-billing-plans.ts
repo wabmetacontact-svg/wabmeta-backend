@@ -164,6 +164,7 @@ export const PLANS: PlanSpec[] = [
       'Telegram inbox',
       'Automation & chatbot flow builder',
       'CRM pipelines & reports',
+      'Bulk paste & CSV import',
       '25,000 contacts · 50,000 messages/mo',
       '5 team members',
     ],
