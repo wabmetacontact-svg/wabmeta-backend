@@ -48,9 +48,15 @@ async function extractStoredPin(
   }
 }
 
+// How old Meta's health_status may be before a page load refreshes it.
+// Short enough that a customer who fixes a block sees it clear on a reload,
+// long enough not to call Meta on every render of the settings page.
+const HEALTH_STALE_MS = 10 * 60 * 1000;
+
 export class MetaService {
   // Ek hi account ke liye ek waqt mein ek hi background tier sync
   private tierSyncInFlight = new Set<string>();
+  private healthSyncInFlight = new Set<string>();
 
   // 24h usage ka count. Ye groupBy poore Message table par chalta hai aur
   // /meta/accounts har jagah se call hota hai (chat kholte waqt bhi), isliye
@@ -765,6 +771,11 @@ export class MetaService {
         // Background mein Meta se laa lo - agli baar sahi dikhega.
         this.ensureTierSynced(account);
 
+        // Same for the blocked/connected state. Without this it only ever
+        // changed in the nightly job, so a number Meta had unblocked in the
+        // morning still showed "Blocked" to its owner all day.
+        this.ensureHealthSynced(account);
+
         // usage PEHLE merge karo, phir sanitize. Ulta karne par usage ka
         // messagingLimitPerDay (Meta ke asli tier se) admin ke override par
         // chad jata tha - card upar 100,000/day aur neeche "0 / 2,000 used"
@@ -772,6 +783,38 @@ export class MetaService {
         return this.sanitizeAccount({ ...account, ...usage });
       })
     );
+  }
+
+  /**
+   * Refresh Meta's health_status when it has gone stale (fire-and-forget).
+   *
+   * This is what decides the Connected / Blocked badge, and nothing on the
+   * page refreshed it - not opening the page, not the Sync button. Only the
+   * nightly job did, so a stale "Blocked" sat there for up to a day with no
+   * way for the customer to clear it.
+   *
+   * Like ensureTierSynced, it never blocks the response: the current load
+   * returns what the database has, and the next one has the truth.
+   */
+  private ensureHealthSynced(account: any) {
+    if (account?.status !== 'CONNECTED') return;
+    if (this.healthSyncInFlight.has(account.id)) return;
+
+    const age = account?.healthCheckedAt
+      ? Date.now() - new Date(account.healthCheckedAt).getTime()
+      : Infinity;
+    if (age < HEALTH_STALE_MS) return;
+
+    this.healthSyncInFlight.add(account.id);
+
+    import('./accountHealth.service')
+      .then(({ accountHealthService }) =>
+        accountHealthService.get(account.id, { force: true })
+      )
+      .catch((e: any) =>
+        console.warn('Health auto-sync failed:', e?.message)
+      )
+      .finally(() => this.healthSyncInFlight.delete(account.id));
   }
 
   /**

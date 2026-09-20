@@ -1843,13 +1843,30 @@ private buildTemplateComponents(
         } as any,
       });
 
+      // Meta's health_status - whether this number may send business-initiated
+      // messages at all - is the one thing this sync did not refresh, and it
+      // is what drives the Connected / Blocked badge. So a number that Meta
+      // had unblocked kept showing "Blocked" no matter how many times the
+      // customer pressed Sync; only the nightly job ever cleared it.
+      //
+      // force: true because the point of pressing Sync is to bypass the cache.
+      const health = await accountHealthService
+        .get(accountId, { force: true })
+        .catch(() => null);
+
       console.log(`✅ Quality synced for ${account.phoneNumber}:`, {
         quality: updated.qualityRating,
         tier: updated.messagingLimit,
         verification: updated.codeVerificationStatus,
+        canSend: health?.canSend,
       });
 
-      return { success: true, account: updated };
+      // Read back so the caller gets the health this sync just wrote.
+      const fresh = health
+        ? await prisma.whatsAppAccount.findUnique({ where: { id: accountId } })
+        : null;
+
+      return { success: true, account: fresh || updated };
     } catch (error: any) {
       const errorData = error.response?.data?.error;
       const code      = errorData?.code;
