@@ -56,6 +56,8 @@ export const updateAdminSchema = z.object({
     role: z.enum(['admin', 'super_admin', 'support', 'finance']).optional(),
     isActive: z.boolean().optional(),
     password: z.string().min(8).optional(),
+    // Clear a failed-login lockout.
+    unlock: z.boolean().optional(),
   }),
 });
 
