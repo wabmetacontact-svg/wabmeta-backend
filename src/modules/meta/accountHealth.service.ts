@@ -88,6 +88,99 @@ function parse(raw: any): { canSend: HealthLevel; issues: HealthIssue[] } {
   return { canSend: worst, issues };
 }
 
+/**
+ * What to tell a client for the error codes Meta sends most.
+ *
+ * Meta's own description is accurate but written for a developer, and its
+ * "possible_solution" is often generic. These are the concrete next steps an
+ * admin can read out to a client. Codes not listed fall back to Meta's text.
+ */
+export const KNOWN_HEALTH_CODES: Record<number, { title: string; action: string }> = {
+  141006: {
+    title: 'Payment method problem',
+    action:
+      'The WhatsApp Business Account has no working payment method. In Meta ' +
+      'Business Suite > Billing & payments > WhatsApp Business accounts, select ' +
+      'THIS account and set a card as default. If a card is already there: pay ' +
+      'any outstanding balance, and make sure the bank allows international ' +
+      'and online transactions - Indian cards often decline Meta by default.',
+  },
+  141010: {
+    title: 'Business verification not complete',
+    action:
+      'Complete business verification in Meta Business Suite > Settings > ' +
+      'Security Center. Business-initiated messages stay blocked until Meta ' +
+      'approves it.',
+  },
+  141014: {
+    title: 'WhatsApp Business Account banned',
+    action:
+      'Meta has disabled this account for a policy violation. The owner can ' +
+      'request a review in WhatsApp Manager > Account quality. Nothing in ' +
+      'WabMeta can lift this.',
+  },
+  131049: {
+    title: 'Throttled for quality',
+    action:
+      'Meta is limiting marketing messages to protect users - usually after ' +
+      'blocks or reports. Send fewer marketing templates and only to contacts ' +
+      'who opted in; it recovers as quality improves.',
+  },
+  130497: {
+    title: 'Throttled for quality',
+    action:
+      'Meta is limiting what this number can send. Reduce volume and send only ' +
+      'to opted-in contacts; it recovers as quality improves.',
+  },
+};
+
+export interface HealthEntity {
+  /** PHONE_NUMBER | WABA | BUSINESS | APP */
+  entity: string;
+  id: string | null;
+  canSend: HealthLevel;
+  errors: Array<{
+    code: number | null;
+    description: string;
+    solution: string | null;
+    /** Our client-ready explanation, when the code is one we know. */
+    known: { title: string; action: string } | null;
+  }>;
+  info: string[];
+}
+
+/**
+ * Meta's health_status, one row per level it checked.
+ *
+ * Meta evaluates the phone number, the WABA, the business portfolio and the
+ * app separately, and a block at any one of them stops sending. The summary
+ * line only ever shows the first problem; this keeps every level, so an
+ * admin can see that - say - the phone is fine and the WABA is not.
+ */
+export function describeHealth(raw: any): HealthEntity[] {
+  const entities = Array.isArray(raw?.entities) ? raw.entities : [];
+
+  return entities.map((e: any) => ({
+    entity: String(e?.entity_type || 'UNKNOWN'),
+    id: e?.id ? String(e.id) : null,
+    canSend: normalise(e?.can_send_message),
+    errors: (Array.isArray(e?.errors) ? e.errors : [])
+      .filter((err: any) => !IGNORED_CODES.has(Number(err?.error_code)))
+      .map((err: any) => {
+        const code = Number(err?.error_code) || null;
+        return {
+          code,
+          description: String(err?.error_description || '').trim(),
+          solution: err?.possible_solution ? String(err.possible_solution).trim() : null,
+          known: code ? KNOWN_HEALTH_CODES[code] || null : null,
+        };
+      }),
+    info: (Array.isArray(e?.additional_info) ? e.additional_info : [])
+      .map((x: any) => String(x || '').trim())
+      .filter(Boolean),
+  }));
+}
+
 function buildSummary(canSend: HealthLevel, issues: HealthIssue[]): string | null {
   if (canSend === 'AVAILABLE' && issues.length === 0) return null;
 
