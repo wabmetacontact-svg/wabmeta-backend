@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import { encrypt, safeDecrypt } from '../../utils/encryption';
 import { writeAudit } from './admin.audit';
 import { permissionsFor } from './admin.permissions';
+import { AdminChange, adminChangeProblem, AdminTarget } from './admin.team';
 import {
   generateTotpSecret,
   lockAfterFailure,
@@ -1190,6 +1191,9 @@ export class AdminService {
         name: true,
         role: true,
         isActive: true,
+        otpEnabled: true,
+        failedLoginAttempts: true,
+        lockedUntil: true,
         lastLoginAt: true,
         createdAt: true,
       },
@@ -1231,12 +1235,22 @@ export class AdminService {
     return admin;
   }
 
-  async updateAdmin(id: string, data: any) {
+  private async assertAdminChangeAllowed(target: AdminTarget, actorId: string, change: AdminChange) {
+    const activeSuperAdmins = await prisma.adminUser.count({
+      where: { role: 'super_admin', isActive: true },
+    });
+    const problem = adminChangeProblem({ target, actorId, change, activeSuperAdmins });
+    if (problem) throw new AppError(problem, 400);
+  }
+
+  async updateAdmin(id: string, data: any, actorId: string) {
     const admin = await prisma.adminUser.findUnique({ where: { id } });
 
     if (!admin) {
       throw new AppError('Admin not found', 404);
     }
+
+    await this.assertAdminChangeAllowed(admin, actorId, { role: data.role, isActive: data.isActive });
 
     const updateData: any = {};
 
@@ -1248,6 +1262,12 @@ export class AdminService {
       updateData.password = await bcrypt.hash(data.password, 12);
     }
 
+    // A new password, or an explicit unlock, clears a failed-login lockout.
+    if (data.password || data.unlock) {
+      updateData.failedLoginAttempts = 0;
+      updateData.lockedUntil = null;
+    }
+
     const updated = await prisma.adminUser.update({
       where: { id },
       data: updateData,
@@ -1257,27 +1277,22 @@ export class AdminService {
         name: true,
         role: true,
         isActive: true,
+        otpEnabled: true,
+        lockedUntil: true,
       },
     });
 
     return updated;
   }
 
-  async deleteAdmin(id: string) {
+  async deleteAdmin(id: string, actorId: string) {
     const admin = await prisma.adminUser.findUnique({ where: { id } });
 
     if (!admin) {
       throw new AppError('Admin not found', 404);
     }
 
-    // Count remaining super admins
-    const superAdminCount = await prisma.adminUser.count({
-      where: { role: 'super_admin', isActive: true },
-    });
-
-    if (admin.role === 'super_admin' && superAdminCount <= 1) {
-      throw new AppError('Cannot delete the last super admin', 400);
-    }
+    await this.assertAdminChangeAllowed(admin, actorId, { delete: true });
 
     await prisma.adminUser.delete({ where: { id } });
 

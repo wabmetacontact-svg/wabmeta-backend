@@ -725,7 +725,7 @@ export class AdminController {
         throw new AppError('Admin ID is required', 400);
       }
 
-      const admin = await adminService.updateAdmin(id, req.body);
+      const admin = await adminService.updateAdmin(id, req.body, req.admin!.id);
       return sendSuccess(res, admin, 'Admin updated successfully');
     } catch (error) {
       next(error);
@@ -740,12 +740,8 @@ export class AdminController {
         throw new AppError('Admin ID is required', 400);
       }
 
-      // Prevent self-deletion
-      if (req.admin?.id === id) {
-        throw new AppError('Cannot delete your own admin account', 400);
-      }
-
-      const result = await adminService.deleteAdmin(id);
+      // Self-deletion and the last super admin are refused in the service.
+      const result = await adminService.deleteAdmin(id, req.admin!.id);
       return sendSuccess(res, null, result.message);
     } catch (error) {
       next(error);
