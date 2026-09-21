@@ -14,6 +14,7 @@
 // BACKEND_AUDIT_FINDINGS Phase 41.
 
 import prisma from '../../config/database';
+import { parsePartnerAdded, recordPartnerAdded } from '../meta/partnerSolution';
 import { contactsService } from '../contacts/contacts.service';
 import { EventEmitter } from 'events';
 import { MessageType, MessageStatus } from '@prisma/client';
@@ -576,6 +577,23 @@ export class WebhookService {
         case 'calls':
           await this.handleCallWebhook(payload, value);
           return { status: 'processed', reason: 'Call webhook processed' };
+
+        case 'account_update': {
+          // PARTNER_ADDED is Meta confirming a client signed up through a
+          // Multi-Partner Solution - i.e. is billed on the Solution Partner's
+          // credit line. Other account_update events are not used yet.
+          const partner = parsePartnerAdded(value);
+          if (!partner) {
+            return { status: 'ignored', reason: `account_update: ${value?.event || 'unknown'}` };
+          }
+
+          const updated = await recordPartnerAdded(partner);
+          console.log(
+            `🤝 [Solution] PARTNER_ADDED waba=${partner.wabaId} ` +
+            `solution=${partner.solutionId || '(none)'} accounts=${updated}`
+          );
+          return { status: 'processed', reason: 'Partner added recorded' };
+        }
 
         case 'messages':
         case 'statuses':

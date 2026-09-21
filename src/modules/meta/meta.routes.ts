@@ -12,6 +12,7 @@ import { metaService } from './meta.service';
 import { sendSuccess } from '../../utils/response';
 import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
+import { recordSignupSolution } from './partnerSolution';
 import { checkConnectionLock } from '../../middleware/connectionLock';
 import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
@@ -243,7 +244,10 @@ async function processTemplateUpdate(value: any) {
 // /connect - Frontend FB.login Embedded Signup flow (NO state token)
 router.post('/connect', authenticate, checkConnectionLock, async (req, res, next) => {
   try {
-    const { code, organizationId, wabaId, phoneNumberId } = req.body;
+    // solutionId is optional - sent only when the web app opened Embedded
+    // Signup with a Multi-Partner Solution configured. Older clients (and
+    // the mobile app) never send it, and connect exactly as before.
+    const { code, organizationId, wabaId, phoneNumberId, solutionId } = req.body;
     const userId = (req as any).user?.id;
 
     console.log('\n🔄 ========== META CONNECT (FB.login flow) ==========');
@@ -302,6 +306,10 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
 
     if (result.success) {
       console.log('✅ FB.login connection successful');
+
+      // Which solution this client signed up through, if any. Meta confirms
+      // it separately with an account_update PARTNER_ADDED webhook.
+      await recordSignupSolution((result.account as any)?.id, solutionId);
       return sendSuccess(
         res,
         {

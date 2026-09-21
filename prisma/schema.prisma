@@ -262,6 +262,19 @@ model WhatsAppAccount {
   healthStatus        Json?
   healthCheckedAt     DateTime?
 
+  // The Multi-Partner Solution this client was onboarded through, if any.
+  //
+  // A client who signs up through a solution is billed on the Solution
+  // Partner's credit line instead of their own card. That makes this the
+  // field that says whose money a message is spent from - the wallet needs
+  // it to know which clients it is recovering a real cost from.
+  //
+  // solutionId is written when signup completes with a solution configured;
+  // solutionConfirmedAt only when Meta's account_update PARTNER_ADDED webhook
+  // confirms it. Only the second is proof the credit line applies.
+  solutionId          String?
+  solutionConfirmedAt DateTime?
+
   // Admin ke display overrides.
   //
   // Quality rating aur messaging tier dono Meta assign karta hai - koi API
