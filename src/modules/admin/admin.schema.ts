@@ -6,6 +6,12 @@ import { z } from 'zod';
 // COMMON VALIDATORS
 // ============================================
 
+// Forms send "" for an empty field and numbers as strings.
+const optionalDays = z.preprocess(
+  (v) => (v === '' || v === null ? undefined : v),
+  z.coerce.number().int().min(1).max(3650).optional()
+);
+
 const idParamSchema = z.object({
   params: z.object({
     id: z.string().min(1, 'ID is required'),
@@ -37,7 +43,7 @@ export const createAdminSchema = z.object({
     email: z.string().email('Invalid email address'),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     name: z.string().min(2, 'Name must be at least 2 characters'),
-    role: z.enum(['admin', 'super_admin']).optional().default('admin'),
+    role: z.enum(['admin', 'super_admin', 'support', 'finance']).optional().default('admin'),
   }),
 });
 
@@ -47,7 +53,7 @@ export const updateAdminSchema = z.object({
   }),
   body: z.object({
     name: z.string().min(2).optional(),
-    role: z.enum(['admin', 'super_admin']).optional(),
+    role: z.enum(['admin', 'super_admin', 'support', 'finance']).optional(),
     isActive: z.boolean().optional(),
     password: z.string().min(8).optional(),
   }),
@@ -116,6 +122,8 @@ export const getOrganizationsSchema = z.object({
     limit: z.string().optional(),
     search: z.string().optional(),
     planType: z.string().optional(),
+    status: z.enum(['ACTIVE', 'SUSPENDED', 'READ_ONLY']).optional(),
+    includeDeleted: z.enum(['true', 'false']).optional(),
     sortBy: z.string().optional(),
     sortOrder: z.enum(['asc', 'desc']).optional(),
   }),
@@ -132,7 +140,6 @@ export const updateOrganizationSchema = z.object({
     website: z.string().url().optional().nullable(),
     industry: z.string().optional(),
     timezone: z.string().optional(),
-    planType: z.enum(['FREE', 'STARTER', 'PRO', 'ENTERPRISE']).optional(),
   }),
 });
 
@@ -143,9 +150,9 @@ export const updateSubscriptionSchema = z.object({
     id: z.string().min(1, 'Organization ID is required'),
   }),
   body: z.object({
-    planId: z.string().optional(),
-    status: z.enum(['ACTIVE', 'CANCELLED', 'EXPIRED', 'PAST_DUE']).optional(),
-    billingCycle: z.enum(['monthly', 'yearly']).optional(),
+    planId: z.string().min(1, 'planId is required'),
+    validityDays: optionalDays,
+    reason: z.string().max(500).optional(),
   }),
 });
 
@@ -250,3 +257,39 @@ export type CreatePlanSchema = z.infer<typeof createPlanSchema>;
 export type UpdatePlanSchema = z.infer<typeof updatePlanSchema>;
 export type GetActivityLogsSchema = z.infer<typeof getActivityLogsSchema>;
 export type UpdateSystemSettingsSchema = z.infer<typeof updateSystemSettingsSchema>;
+// ============================================
+// SUBSCRIPTION AND FEATURE SCHEMAS
+// ============================================
+
+export const organizationFeaturesSchema = z.object({
+  params: z.object({ organizationId: z.string().min(1) }),
+  body: z
+    .object({})
+    .catchall(z.union([z.boolean(), z.null(), z.record(z.boolean())])),
+});
+
+export const assignPlanSchema = z.object({
+  body: z.object({
+    organizationId: z.string().min(1),
+    planSlug: z.string().min(1),
+    validityDays: optionalDays,
+    customEndDate: z.string().optional(),
+    reason: z.string().max(500).optional(),
+  }),
+});
+
+export const extendSubscriptionSchema = z.object({
+  params: z.object({ organizationId: z.string().min(1) }),
+  body: z.object({
+    additionalDays: z.coerce.number().int().min(1).max(3650),
+    reason: z.string().max(500).optional(),
+  }),
+});
+
+export const revokeSubscriptionSchema = z.object({
+  params: z.object({ organizationId: z.string().min(1) }),
+  body: z.object({
+    reason: z.string().max(500).optional(),
+    immediate: z.union([z.boolean(), z.enum(['true', 'false'])]).optional(),
+  }),
+});

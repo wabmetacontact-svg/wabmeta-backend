@@ -1,8 +1,7 @@
 // src/modules/admin/admin.middleware.ts
 
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { config } from '../../config';
+import { verifyAdminToken } from './admin.security';
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 
@@ -58,7 +57,7 @@ export const authenticateAdmin = async (
     let decoded: AdminJWTPayload;
 
     try {
-      decoded = jwt.verify(token, config.jwt.secret) as AdminJWTPayload;
+      decoded = verifyAdminToken(token) as AdminJWTPayload;
     } catch (jwtError: any) {
       if (jwtError.name === 'TokenExpiredError') {
         throw new AppError('Admin token expired', 401);

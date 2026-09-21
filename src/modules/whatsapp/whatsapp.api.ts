@@ -3,6 +3,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
 import { config } from '../../config';
+import { installSendGuard } from '../admin/orgControl';
 
 const META_API_VERSION = config.meta.graphApiVersion || 'v22.0';
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -62,6 +63,9 @@ class WhatsAppAPI {
         'Content-Type': 'application/json',
       },
     });
+
+    // Blocked (suspended / read-only) organizations send nothing.
+    installSendGuard(this.client);
 
     // Unversioned client (for debug_token)
     this.clientUnversioned = axios.create({

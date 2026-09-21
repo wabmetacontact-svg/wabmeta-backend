@@ -11,6 +11,8 @@ export interface TokenPayload {
   type:            'access' | 'refresh';
   // Sirf refresh tokens par lagta hai - dekho generateRefreshToken
   jti?:            string;
+  // Set only on an admin's read-only "view as user" token.
+  impersonatedBy?: string;
   iat?:            number;
   exp?:            number;
 }
@@ -42,6 +44,21 @@ export const generateAccessToken = (
     // ✅ NO issuer/audience - backward compatible
   };
   return jwt.sign({ ...payload, type: 'access' }, secret, options);
+};
+
+/**
+ * A short-lived, read-only access token an admin uses to see the app as a
+ * user. There is no refresh token: when it expires the view ends.
+ */
+export const IMPERSONATION_TTL_SECONDS = 30 * 60;
+
+export const generateImpersonationToken = (
+  payload: Omit<TokenPayload, 'type' | 'iat' | 'exp' | 'jti'> & { impersonatedBy: string }
+): string => {
+  const secret: Secret = config.jwt.accessSecret || config.jwt.secret;
+  return jwt.sign({ ...payload, type: 'access' }, secret, {
+    expiresIn: IMPERSONATION_TTL_SECONDS,
+  });
 };
 
 export const generateRefreshToken = (

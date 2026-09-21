@@ -1,10 +1,18 @@
 // src/modules/admin/admin.service.ts
 
 import prisma from '../../config/database';
-import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { encrypt, safeDecrypt } from '../../utils/encryption';
+import { writeAudit } from './admin.audit';
+import { permissionsFor } from './admin.permissions';
+import {
+  generateTotpSecret,
+  lockAfterFailure,
+  otpauthUrl,
+  signAdminToken,
+  verifyTotp,
+} from './admin.security';
 import { hashPassword } from '../../utils/password';
 import { emitForceLogout } from '../../socket';
 
@@ -15,6 +23,7 @@ import { emitForceLogout } from '../../socket';
 interface LoginInput {
   email: string;
   password: string;
+  otp?: string;
 }
 
 interface GetUsersInput {
@@ -31,6 +40,8 @@ interface GetOrganizationsInput {
   limit: number;
   search?: string;
   planType?: string;
+  status?: 'ACTIVE' | 'SUSPENDED' | 'READ_ONLY';
+  includeDeleted?: boolean;
   sortBy?: string;
   sortOrder?: string;
 }
@@ -45,15 +56,6 @@ interface GetActivityLogsInput {
   endDate?: string;
 }
 
-// In-memory system settings (use database in production)
-let systemSettings = {
-  maintenanceMode: false,
-  allowRegistration: true,
-  maxOrganizationsPerUser: 5,
-  defaultPlanType: 'FREE',
-  smtpEnabled: true,
-};
-
 // ============================================
 // ADMIN SERVICE CLASS
 // ============================================
@@ -63,43 +65,81 @@ export class AdminService {
   // ADMIN AUTH
   // ==========================================
 
-  async login(input: LoginInput) {
-    const { email, password } = input;
+  async login(input: LoginInput, meta: { ip?: string | null; userAgent?: string | null } = {}) {
+    const { email, password, otp } = input;
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const audit = (statusCode: number, action: string, adminId?: string) =>
+      writeAudit({
+        adminId: adminId ?? null,
+        adminEmail: normalizedEmail,
+        action,
+        method: 'POST',
+        path: '/api/admin/login',
+        targetType: 'admin',
+        targetId: adminId ?? null,
+        statusCode,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
 
     const admin = await prisma.adminUser.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: normalizedEmail },
     });
 
     if (!admin) {
+      await audit(401, 'LOGIN_FAILED unknown email');
       throw new AppError('Invalid credentials', 401);
+    }
+
+    if (admin.lockedUntil && admin.lockedUntil > new Date()) {
+      await audit(423, 'LOGIN_BLOCKED account locked', admin.id);
+      throw new AppError(
+        'Too many failed attempts. This admin account is locked for a few minutes.',
+        423,
+        'ADMIN_LOCKED'
+      );
     }
 
     if (!admin.isActive) {
+      await audit(403, 'LOGIN_FAILED inactive admin', admin.id);
       throw new AppError('Admin account is inactive', 403);
     }
 
-    const isValidPassword = await bcrypt.compare(password, admin.password);
+    const recordFailure = async (why: string) => {
+      const next = lockAfterFailure(admin.failedLoginAttempts);
+      await prisma.adminUser.update({
+        where: { id: admin.id },
+        data: { failedLoginAttempts: next.attempts, lockedUntil: next.lockedUntil },
+      });
+      await audit(401, next.lockedUntil ? `LOGIN_FAILED ${why}, account locked` : `LOGIN_FAILED ${why}`, admin.id);
+    };
 
+    const isValidPassword = await bcrypt.compare(password, admin.password);
     if (!isValidPassword) {
+      await recordFailure('wrong password');
       throw new AppError('Invalid credentials', 401);
     }
 
-    // Generate token
-    const token = jwt.sign(
-      {
-        adminId: admin.id,
-        email: admin.email,
-        role: admin.role,
-      },
-      config.jwt.secret,
-      { expiresIn: '24h' }
-    );
+    // Second factor, when this admin has turned it on.
+    if (admin.otpEnabled && admin.otpSecret) {
+      if (!otp) {
+        throw new AppError('Enter the 6-digit code from your authenticator app.', 401, 'ADMIN_OTP_REQUIRED');
+      }
+      const secret = safeDecrypt(admin.otpSecret);
+      if (!secret || !verifyTotp(secret, otp)) {
+        await recordFailure('wrong 2FA code');
+        throw new AppError('The authenticator code is not correct.', 401, 'ADMIN_OTP_INVALID');
+      }
+    }
 
-    // Update last login
+    const token = signAdminToken({ adminId: admin.id, email: admin.email, role: admin.role });
+
     await prisma.adminUser.update({
       where: { id: admin.id },
-      data: { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date(), failedLoginAttempts: 0, lockedUntil: null },
     });
+    await audit(200, 'LOGIN_SUCCESS', admin.id);
 
     return {
       token,
@@ -108,8 +148,66 @@ export class AdminService {
         email: admin.email,
         name: admin.name,
         role: admin.role,
+        otpEnabled: admin.otpEnabled,
+        permissions: permissionsFor(admin.role),
       },
     };
+  }
+
+  // ==========================================
+  // ADMIN 2FA
+  // ==========================================
+
+  /** Step 1: create a secret and show it. Not active until confirmed. */
+  async startTwoFactorSetup(adminId: string) {
+    const admin = await prisma.adminUser.findUnique({ where: { id: adminId } });
+    if (!admin) throw new AppError('Admin not found', 404);
+    if (admin.otpEnabled) throw new AppError('Two-factor authentication is already on.', 400);
+
+    const secret = generateTotpSecret();
+    await prisma.adminUser.update({
+      where: { id: adminId },
+      data: { otpSecret: encrypt(secret), otpEnabled: false },
+    });
+
+    return { secret, otpauthUrl: otpauthUrl(secret, admin.email) };
+  }
+
+  /** Step 2: a correct code from the app proves it was set up, then it turns on. */
+  async confirmTwoFactor(adminId: string, code: string) {
+    const admin = await prisma.adminUser.findUnique({ where: { id: adminId } });
+    const secret = admin?.otpSecret ? safeDecrypt(admin.otpSecret) : null;
+    if (!admin || !secret) throw new AppError('Start two-factor setup first.', 400);
+    if (!verifyTotp(secret, code)) throw new AppError('The authenticator code is not correct.', 400);
+
+    await prisma.adminUser.update({ where: { id: adminId }, data: { otpEnabled: true } });
+    return { otpEnabled: true };
+  }
+
+  /**
+   * Turn 2FA off. An admin turning off their own needs a current code; a
+   * super admin can reset someone else's (lost phone) without one.
+   */
+  async disableTwoFactor(targetAdminId: string, actor: { id: string; role: string }, code?: string) {
+    const admin = await prisma.adminUser.findUnique({ where: { id: targetAdminId } });
+    if (!admin) throw new AppError('Admin not found', 404);
+
+    const self = targetAdminId === actor.id;
+    if (!self && actor.role !== 'super_admin') {
+      throw new AppError("Only a super admin can reset another admin's 2FA.", 403);
+    }
+    if (self && admin.otpEnabled) {
+      const secret = admin.otpSecret ? safeDecrypt(admin.otpSecret) : null;
+      if (!secret || !verifyTotp(secret, code || '')) {
+        throw new AppError('The authenticator code is not correct.', 400);
+      }
+    }
+
+    await prisma.adminUser.update({
+      where: { id: targetAdminId },
+      data: { otpEnabled: false, otpSecret: null },
+    });
+    return { otpEnabled: false };
   }
 
   async getAdminById(id: string) {
@@ -121,6 +219,7 @@ export class AdminService {
         name: true,
         role: true,
         isActive: true,
+        otpEnabled: true,
         lastLoginAt: true,
         createdAt: true,
       },
@@ -560,6 +659,13 @@ export class AdminService {
       },
     });
 
+    if (data.status && data.status !== user.status) {
+      const { forceLogoutUser } = await import('./admin.control.service');
+      const { invalidateUserAuthCache } = await import('../../middleware/auth');
+      if (data.status === 'SUSPENDED') await forceLogoutUser(id);
+      else await invalidateUserAuthCache(id);
+    }
+
     return updatedUser;
   }
 
@@ -581,6 +687,16 @@ export class AdminService {
         status: true,
       },
     });
+
+    // The auth middleware caches users for a few minutes; without this a
+    // suspension only took effect when that cache expired.
+    const { forceLogoutUser } = await import('./admin.control.service');
+    if (status === 'SUSPENDED') {
+      await forceLogoutUser(id);
+    } else {
+      const { invalidateUserAuthCache } = await import('../../middleware/auth');
+      await invalidateUserAuthCache(id);
+    }
 
     return updatedUser;
   }
@@ -782,9 +898,14 @@ export class AdminService {
   // ==========================================
 
   async getOrganizations(input: GetOrganizationsInput) {
-    const { page, limit, search, planType, sortBy = 'createdAt', sortOrder = 'desc' } = input;
+    const { page, limit, search, planType, status, includeDeleted, sortBy = 'createdAt', sortOrder = 'desc' } = input;
 
-    const where: any = {};
+    // Soft-deleted organizations are hidden unless asked for.
+    const where: any = includeDeleted ? {} : { deletedAt: null };
+
+    if (status) {
+      where.status = status;
+    }
 
     if (search) {
       where.OR = [
@@ -908,7 +1029,8 @@ export class AdminService {
         website: data.website,
         industry: data.industry,
         timezone: data.timezone,
-        planType: data.planType,
+        // planType is not set here: it must move together with the
+        // subscription, which only assignPlanToOrganization does.
       },
     });
 
@@ -928,50 +1050,30 @@ export class AdminService {
     return { message: 'Organization deleted successfully' };
   }
 
-  async updateSubscription(id: string, data: any) {
-    const org = await prisma.organization.findUnique({
-      where: { id },
-      include: { subscription: true },
+  /**
+   * Put an organization on a plan. This used to write planType and the
+   * subscription itself with a fixed 30 days; it now goes through the same
+   * path as /subscriptions/assign so both endpoints give the same result.
+   */
+  async updateSubscription(
+    id: string,
+    data: { planId: string; validityDays?: number; reason?: string },
+    admin: { id: string; name?: string; email?: string }
+  ) {
+    const plan = await prisma.plan.findUnique({ where: { id: data.planId } });
+    if (!plan) {
+      throw new AppError('Plan not found', 404);
+    }
+
+    const { adminBillingService } = await import('./admin.billing.service');
+    await adminBillingService.assignPlanToOrganization({
+      organizationId: id,
+      planSlug: plan.slug,
+      validityDays: data.validityDays,
+      adminId: admin.id,
+      adminName: admin.name || admin.email || 'Admin',
+      reason: data.reason,
     });
-
-    if (!org) {
-      throw new AppError('Organization not found', 404);
-    }
-
-    if (data.planId) {
-      const plan = await prisma.plan.findUnique({ where: { id: data.planId } });
-      if (!plan) {
-        throw new AppError('Plan not found', 404);
-      }
-
-      // Update organization plan type
-      await prisma.organization.update({
-        where: { id },
-        data: { planType: plan.type },
-      });
-
-      // Update or create subscription
-      if (org.subscription) {
-        await prisma.subscription.update({
-          where: { id: org.subscription.id },
-          data: {
-            planId: data.planId,
-            status: data.status || 'ACTIVE',
-          },
-        });
-      } else {
-        await prisma.subscription.create({
-          data: {
-            organizationId: id,
-            planId: data.planId,
-            status: 'ACTIVE',
-            billingCycle: data.billingCycle || 'monthly',
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          },
-        });
-      }
-    }
 
     return this.getOrganizationById(id);
   }
@@ -1235,22 +1337,6 @@ export class AdminService {
     ]);
 
     return { logs, total };
-  }
-
-  // ==========================================
-  // SYSTEM SETTINGS
-  // ==========================================
-
-  getSystemSettings() {
-    return systemSettings;
-  }
-
-  updateSystemSettings(data: any) {
-    systemSettings = {
-      ...systemSettings,
-      ...data,
-    };
-    return systemSettings;
   }
 
   // ==========================================

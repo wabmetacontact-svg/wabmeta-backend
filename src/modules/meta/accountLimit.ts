@@ -13,6 +13,7 @@
 
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
+import { effectiveLimit, parseLimitOverrides } from '../admin/orgControl';
 
 export const DEFAULT_MAX_ACCOUNTS = 1;
 
@@ -54,13 +55,22 @@ export const assertCanConnectAnother = async (
   const org = await tx.organization.findUnique({
     where: { id: organizationId },
     select: {
+      limitOverrides: true,
       subscription: {
         select: { plan: { select: { maxWhatsAppAccounts: true } } },
       },
     },
   });
 
-  const limit = accountLimitFor(org?.subscription?.plan?.maxWhatsAppAccounts);
+  // Read from the row, not the cache: this runs inside the transaction that
+  // creates the account, and an admin may have just raised the limit.
+  const limit = accountLimitFor(
+    effectiveLimit(
+      parseLimitOverrides(org?.limitOverrides),
+      'whatsappNumbers',
+      org?.subscription?.plan?.maxWhatsAppAccounts
+    )
+  );
 
   const connectedCount = await tx.whatsAppAccount.count({
     where: { organizationId, status: 'CONNECTED' },

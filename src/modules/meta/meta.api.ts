@@ -18,6 +18,7 @@ import {
   MetaApiError,
   WebhookSubscribeResponse,
 } from './meta.types';
+import { installSendGuard } from '../admin/orgControl';
 
 /**
  * ✅ NEW: Generate a cryptographically random 6-digit PIN for
@@ -43,6 +44,9 @@ class MetaApiClient {
         'Content-Type': 'application/json',
       },
     });
+
+    // Blocked (suspended / read-only) organizations send nothing.
+    installSendGuard(this.client);
 
     this.client.interceptors.request.use(
       (reqConfig) => {
