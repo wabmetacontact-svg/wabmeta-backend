@@ -15,6 +15,7 @@ import prisma from '../../config/database';
 import axios from 'axios';
 import { notificationsService } from '../notifications/notifications.service';
 import { accountHealthService } from '../meta/accountHealth.service';
+import { getOrgControl, remainingCampaignMessagesToday } from '../admin/orgControl';
 import { describeMetaError } from '../meta/metaErrors';
 import {
   deductWalletForCampaign,
@@ -2031,6 +2032,22 @@ export class CampaignsService {
         throw new Error('Campaign data incomplete');
       }
 
+      // ── Admin block ───────────────────────────────────────
+      // A suspended or read-only organization sends nothing. Pause rather
+      // than fail, so the campaign can be resumed if the org is reactivated.
+      const control = await getOrgControl(organizationId);
+      if (control.status !== 'ACTIVE') {
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'PAUSED' },
+        });
+        campaignSocketService.emitCampaignError(organizationId, campaignId, {
+          message: 'This account cannot send messages right now. Please contact support.',
+          code: control.status === 'SUSPENDED' ? 'ORG_SUSPENDED' : 'ORG_READ_ONLY',
+        });
+        return;
+      }
+
       // Reset QUEUED → PENDING
       await prisma.campaignContact.updateMany({
         where: { campaignId, status: 'QUEUED' as any },
@@ -2297,7 +2314,27 @@ export class CampaignsService {
         // Atomically claim this batch (PENDING -> QUEUED, SKIP LOCKED) so a
         // second sender or the recovery job can never grab the same rows. Then
         // load the claimed rows with their contacts. See campaigns.claim.ts.
-        const claimedIds = await claimContactBatch(campaignId, SEND_CONFIG.BATCH_SIZE);
+        // Daily cap set by an admin for this organization. Checked per batch,
+        // so a day can overshoot by at most one partial batch.
+        const remainingToday = await remainingCampaignMessagesToday(organizationId);
+        if (remainingToday !== null && remainingToday <= 0) {
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'PAUSED' },
+          });
+          campaignSocketService.emitCampaignError(organizationId, campaignId, {
+            message:
+              "Today's campaign message limit for this account has been reached. " +
+              'Resume the campaign tomorrow, or contact support to raise the limit.',
+            code: 'DAILY_CAMPAIGN_CAP',
+          });
+          break;
+        }
+
+        const batchSize = remainingToday === null
+          ? SEND_CONFIG.BATCH_SIZE
+          : Math.min(SEND_CONFIG.BATCH_SIZE, remainingToday);
+        const claimedIds = await claimContactBatch(campaignId, batchSize);
         if (claimedIds.length === 0) { hasMore = false; break; }
 
         const contacts = await prisma.campaignContact.findMany({

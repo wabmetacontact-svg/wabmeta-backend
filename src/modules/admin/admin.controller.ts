@@ -11,6 +11,8 @@ import {
 } from '../../middleware/featureLock';
 import { adminService } from './admin.service';
 import { adminBillingService } from './admin.billing.service';
+import { clientIp } from './admin.audit';
+import { permissionsFor } from './admin.permissions';
 import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
 import { accountHealthService, describeHealth } from '../meta/accountHealth.service';
@@ -178,13 +180,16 @@ export class AdminController {
 
   async login(req: Request, res: Response, next: NextFunction) {
     try {
-      const { email, password } = req.body;
+      const { email, password, otp } = req.body;
 
       if (!email || !password) {
         throw new AppError('Email and password are required', 400);
       }
 
-      const result = await adminService.login({ email, password });
+      const result = await adminService.login(
+        { email, password, otp },
+        { ip: clientIp(req), userAgent: req.headers['user-agent'] || null }
+      );
 
       // Store admin user info for frontend
       return res.json({
@@ -212,7 +217,12 @@ export class AdminController {
         throw new AppError('Admin not found', 404);
       }
 
-      return sendSuccess(res, admin, 'Profile fetched successfully');
+      // The panel hides what this role cannot do.
+      return sendSuccess(
+        res,
+        { ...admin, permissions: permissionsFor(admin.role) },
+        'Profile fetched successfully'
+      );
     } catch (error) {
       next(error);
     }
@@ -436,6 +446,9 @@ export class AdminController {
       const limit = parseQueryNumber(req.query.limit, 20);
       const search = parseQueryString(req.query.search);
       const planType = parseQueryString(req.query.planType);
+      const status = parseQueryString(req.query.status) as any;
+      const includeDeleted = parseQueryString(req.query.includeDeleted) === 'true';
+      const tag = parseQueryString(req.query.tag);
       const sortBy = parseQueryString(req.query.sortBy) || 'createdAt';
       const sortOrder = parseQueryString(req.query.sortOrder) || 'desc';
 
@@ -444,6 +457,9 @@ export class AdminController {
         limit,
         search,
         planType,
+        status,
+        tag,
+        includeDeleted,
         sortBy,
         sortOrder,
       });
@@ -523,7 +539,7 @@ export class AdminController {
         throw new AppError('Organization ID is required', 400);
       }
 
-      const result = await adminService.updateSubscription(id, req.body);
+      const result = await adminService.updateSubscription(id, req.body, req.admin!);
       return sendSuccess(res, result, 'Subscription updated successfully');
     } catch (error) {
       next(error);
@@ -781,23 +797,6 @@ export class AdminController {
   // SYSTEM SETTINGS
   // ==========================================
 
-  async getSystemSettings(req: AdminRequest, res: Response, next: NextFunction) {
-    try {
-      const settings = adminService.getSystemSettings();
-      return sendSuccess(res, settings, 'Settings fetched successfully');
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  async updateSystemSettings(req: AdminRequest, res: Response, next: NextFunction) {
-    try {
-      const settings = adminService.updateSystemSettings(req.body);
-      return sendSuccess(res, settings, 'Settings updated successfully');
-    } catch (error) {
-      next(error);
-    }
-  }
   // ============================================
   // ASSIGN PLAN TO ORGANIZATION
   // ============================================

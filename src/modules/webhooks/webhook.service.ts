@@ -427,6 +427,10 @@ export class WebhookService {
             } catch (e: any) {
               console.error('IG inbox record error:', e?.message || e);
             }
+
+            // Suspended / read-only: keep the message, answer nothing.
+            const { orgCanSend } = await import('../admin/orgControl');
+            if (!(await orgCanSend(account.organizationId))) automationPaused = true;
           }
 
           // Human handoff: once an agent takes over, no channel automation fires.
@@ -491,7 +495,8 @@ export class WebhookService {
             return r.keywords.some((k) => commentText.includes(String(k).toLowerCase()));
           });
 
-          if (rule) {
+          const { orgCanSend } = await import('../admin/orgControl');
+          if (rule && (await orgCanSend(rule.igAccount.organizationId))) {
             const token = instagramService.igAccessToken(rule.igAccount.accessToken);
             const instagramApi = await import('../instagram/instagram.api');
 
@@ -1200,6 +1205,12 @@ export class WebhookService {
     savedMessageId: string;
   }): Promise<void> {
     const { organizationId, conversation, message, msgType, content } = p;
+
+    // A suspended or read-only organization keeps receiving messages (they
+    // are already saved), but no bot, AI or automation answers on its behalf.
+    const { orgCanSend } = await import('../admin/orgControl');
+    if (!(await orgCanSend(organizationId))) return;
+
     const paused = !!conversation.automationPaused;
 
     const automationPromise = this.runAutomations(

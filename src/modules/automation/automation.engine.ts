@@ -5,6 +5,7 @@ import { AutomationTrigger } from '@prisma/client';
 import { deductWalletForTemplate } from '../wallet/wallet.deduction.service';
 import { automationLog } from '../../utils/logger';
 import { notificationsService } from '../notifications/notifications.service';
+import { orgCanSend } from '../admin/orgControl';
 import {
   ClaimedJob,
   cancelPendingJobs,
@@ -1494,6 +1495,13 @@ class AutomationEngine {
       );
       if (quietUntil) {
         await deferJob(job.id, quietUntil, 'quiet hours');
+        return;
+      }
+
+      // Suspended / read-only: hold the job instead of cancelling it, so the
+      // sequence carries on where it was once the organization is reactivated.
+      if (!(await orgCanSend(job.organizationId))) {
+        await deferJob(job.id, new Date(Date.now() + 60 * 60 * 1000), 'organization blocked by admin');
         return;
       }
 

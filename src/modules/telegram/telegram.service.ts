@@ -280,7 +280,9 @@ const handleCallbackQuery = async (bot: any, cq: any): Promise<void> => {
 
   try {
     // Human handoff: skip automation once an agent has taken over this conversation.
-    if (!updatedConversation.automationPaused) {
+    const { orgCanSend } = await import('../admin/orgControl');
+    // Suspended / read-only: keep the message, answer nothing.
+    if (!updatedConversation.automationPaused && (await orgCanSend(organizationId))) {
       // Button taps first feed the visual flow (their callback_data resumes it).
       const { runTelegramFlow } = await import('./telegram.flow');
       const handledByFlow = await runTelegramFlow(organizationId, updatedConversation, bot, data);
@@ -452,7 +454,9 @@ export const processUpdate = async (
 
   // Automation (best-effort). Human handoff: skip once an agent has taken over.
   try {
-    if (!updatedConversation.automationPaused) {
+    const { orgCanSend } = await import('../admin/orgControl');
+    // Suspended / read-only: keep the message, answer nothing.
+    if (!updatedConversation.automationPaused && (await orgCanSend(organizationId))) {
       // A visual flow (if one targets Telegram / is in progress) takes priority;
       // only if it doesn't handle the message do keyword auto-replies run.
       const { runTelegramFlow } = await import('./telegram.flow');
@@ -667,6 +671,9 @@ export const sendTelegramMessage = async (
 ) => {
   const body = (text || '').trim();
   if (!body) throw new Error('Message text is required');
+
+  const { assertOrgCanSend } = await import('../admin/orgControl');
+  await assertOrgCanSend(organizationId);
 
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, organizationId, channel: 'TELEGRAM' },

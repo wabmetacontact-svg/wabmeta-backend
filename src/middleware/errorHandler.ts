@@ -10,10 +10,13 @@ import { captureError } from '../config/monitoring';
 export class AppError extends Error {
   statusCode: number;
   isOperational: boolean;
+  /** Machine-readable reason the client can branch on, e.g. ORG_SUSPENDED. */
+  code?: string;
 
-  constructor(message: string, statusCode: number = 400) {
+  constructor(message: string, statusCode: number = 400, code?: string) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
     this.isOperational = true;
     this.name = this.constructor.name;
 
@@ -76,7 +79,8 @@ const sendJsonError = (
   res: Response,
   message: string,
   statusCode: number = 500,
-  errors?: any[]
+  errors?: any[],
+  code?: string
 ) => {
   // Prevent double response
   if (res.headersSent) {
@@ -88,6 +92,7 @@ const sendJsonError = (
     error: string;
     message: string;
     statusCode: number;
+    code?: string;
     errors?: any[];
     stack?: string;
   } = {
@@ -96,6 +101,10 @@ const sendJsonError = (
     message: message,
     statusCode,
   };
+
+  if (code) {
+    response.code = code;
+  }
 
   if (errors && errors.length > 0) {
     response.errors = errors;
@@ -174,7 +183,7 @@ export const errorHandler = (
   // CUSTOM APP ERRORS
   // ============================================
   if (err instanceof AppError) {
-    return sendJsonError(res, err.message, err.statusCode);
+    return sendJsonError(res, err.message, err.statusCode, undefined, err.code);
   }
 
   // ============================================

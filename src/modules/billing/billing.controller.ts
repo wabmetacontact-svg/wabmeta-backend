@@ -61,7 +61,7 @@ class BillingController {
   // ============================================
   async createRazorpayOrder(req: Request, res: Response) {
     try {
-      const { planKey, billingCycle = 'monthly' } = req.body;
+      const { planKey, billingCycle = 'monthly', couponCode } = req.body;
       const organizationId = req.user?.organizationId;
       const userId = req.user?.id;
 
@@ -77,13 +77,35 @@ class BillingController {
         organizationId,
         userId,
         planKey,
-        billingCycle: billingCycle as 'monthly' | 'yearly'
+        billingCycle: billingCycle as 'monthly' | 'yearly',
+        couponCode: couponCode || undefined,
       });
 
       return sendSuccess(res, order, 'Order created successfully');
     } catch (error: any) {
       console.error('Create Razorpay order error:', error);
-      return errorResponse(res, error.message || 'Failed to create order', 500);
+      // A refused coupon is the customer's to fix, not a server error.
+      return errorResponse(res, error.message || 'Failed to create order', error.statusCode || 500);
+    }
+  }
+
+  // ============================================
+  // COUPON PREVIEW
+  // ============================================
+  async previewCoupon(req: Request, res: Response) {
+    try {
+      const organizationId = req.user?.organizationId;
+      if (!organizationId) {
+        return errorResponse(res, 'User not authenticated', 401);
+      }
+      const result = await billingService.previewCoupon({
+        organizationId,
+        planKey: req.body.planKey,
+        couponCode: req.body.couponCode,
+      });
+      return sendSuccess(res, result, 'Coupon applied');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Could not check coupon', error.statusCode || 500);
     }
   }
 

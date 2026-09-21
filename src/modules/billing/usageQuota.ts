@@ -24,6 +24,7 @@
 
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
+import { effectiveLimit, getLimitOverrides } from '../admin/orgControl';
 
 /** Plans write this where they mean "no limit". */
 export const UNLIMITED_AT = 999999;
@@ -102,7 +103,17 @@ const planForOrg = async (organizationId: string) => {
       },
     },
   });
-  return subscription?.plan ?? null;
+  const plan = subscription?.plan ?? null;
+
+  // An admin's per-organization limit replaces the plan's.
+  const overrides = await getLimitOverrides(organizationId);
+  if (!overrides.contacts && !overrides.messagesPerMonth) return plan;
+
+  return {
+    name: plan?.name ?? '',
+    maxContacts: effectiveLimit(overrides, 'contacts', plan?.maxContacts ?? null),
+    maxMessagesPerMonth: effectiveLimit(overrides, 'messagesPerMonth', plan?.maxMessagesPerMonth ?? null),
+  };
 };
 
 export const getMessageQuota = async (

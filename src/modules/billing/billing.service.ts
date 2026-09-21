@@ -6,6 +6,7 @@ import prisma from '../../config/database';
 import { invalidateFeatureLocks } from '../../middleware/featureLock';
 import { resolvePlanKey, subscriptionDays } from './planCatalog';
 import { AppError } from '../../middleware/errorHandler';
+import { applyCoupon, checkCouponForCheckout, recordCouponRedemption } from './coupons';
 
 // ============================================
 // RAZORPAY INITIALIZATION
@@ -658,8 +659,9 @@ class BillingService {
     userId: string;
     planKey: string;
     billingCycle: 'monthly' | 'yearly';
+    couponCode?: string;
   }) {
-    const { organizationId, userId, planKey, billingCycle } = params;
+    const { organizationId, userId, planKey, billingCycle, couponCode } = params;
 
     console.log('Creating Razorpay order:', { organizationId, planKey, billingCycle });
 
@@ -702,13 +704,22 @@ class BillingService {
       type: plan.type,
     });
 
+    // A coupon changes the amount of this order and nothing after it: the
+    // discounted price is what Razorpay charges, and the notes say why.
+    const coupon = couponCode
+      ? await checkCouponForCheckout(couponCode, organizationId, String(plan.type))
+      : null;
+    const pricing = coupon
+      ? applyCoupon(priced.amount, coupon)
+      : { discountPaise: 0, finalPaise: priced.amount };
+
     try {
       const timestamp = Date.now().toString().slice(-8);
       const orgShort = organizationId.replace(/[^a-zA-Z0-9]/g, '').slice(-6);
       const receipt = `wm_${orgShort}_${timestamp}`;
 
       const orderOptions = {
-        amount: priced.amount,
+        amount: pricing.finalPaise,
         currency: 'INR',
         receipt: receipt,
         payment_capture: 1,
@@ -723,6 +734,12 @@ class BillingService {
           // What was sold, written down at the moment of sale. The verify
           // step reads this first, so a year stays a year.
           validityDays: priced.validityDays,
+          ...(coupon && {
+            couponId: coupon.id,
+            couponCode: coupon.code,
+            originalPaise: priced.amount,
+            discountPaise: pricing.discountPaise,
+          }),
         }
       };
 
@@ -742,7 +759,10 @@ class BillingService {
         planId: plan.id,
         planName: priced.label,
         validityDays: priced.validityDays,
-        receipt: order.receipt
+        receipt: order.receipt,
+        originalAmount: priced.amount,
+        discountAmount: pricing.discountPaise,
+        couponCode: coupon?.code ?? null,
       };
 
     } catch (razorpayError: any) {
@@ -759,6 +779,20 @@ class BillingService {
 
   // ============================================
   // ✅ VERIFY RAZORPAY PAYMENT (FIXED)
+  /** Show the customer what a coupon does to a plan before they pay. */
+  async previewCoupon(params: { organizationId: string; planKey: string; couponCode: string }) {
+    const priced = await resolvePlanKey(params.planKey);
+    const coupon = await checkCouponForCheckout(params.couponCode, params.organizationId, String(priced.planType));
+    const pricing = applyCoupon(priced.amount, coupon);
+    return {
+      code: coupon.code,
+      description: coupon.description,
+      originalAmount: priced.amount,
+      discountAmount: pricing.discountPaise,
+      finalAmount: pricing.finalPaise,
+    };
+  }
+
   // ============================================
 
   async verifyRazorpayPayment(params: {
@@ -888,6 +922,13 @@ class BillingService {
           receipt: order.receipt || `wm_${organizationId.slice(-6)}_${Date.now().toString().slice(-8)}`,
           paidAt: now,
         },
+      });
+
+      await recordCouponRedemption({
+        notes,
+        organizationId,
+        razorpayOrderId: razorpay_order_id,
+        paidPaise: Number(order.amount) || 0,
       });
 
       console.log('✅ Subscription activated:', {

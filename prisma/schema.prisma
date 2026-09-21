@@ -112,6 +112,21 @@ model Organization {
   // bhi is org ko ye feature milega. Admin ka apna lock (featureXLocked) isse
   // upar rehta hai - "band karo" hamesha chalta hai.
   featureOverrides        Json?
+
+  // Admin control over the whole organization. SUSPENDED blocks sign-in and
+  // every outbound message; READ_ONLY lets the team see its data and pay,
+  // but sends nothing. See src/modules/admin/orgControl.ts.
+  status                  OrganizationStatus    @default(ACTIVE)
+  statusReason            String?
+  statusChangedAt         DateTime?
+  statusChangedBy         String?
+  // Per-organization limits that replace the plan's, set by an admin:
+  // { "contacts": 20000, "messagesPerMonth": 50000, "whatsappNumbers": 2,
+  //   "teamMembers": 8, "aiRepliesPerDay": 1000, "dailyCampaignMessages": 5000 }
+  // A missing key means "use the plan".
+  limitOverrides          Json?
+  // Internal labels only admins see, e.g. "vip", "payment-follow-up".
+  adminTags               String[]              @default([])
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
@@ -150,6 +165,7 @@ model Organization {
   @@index([slug])
   @@index([ownerId])
   @@index([planType])
+  @@index([status])
 }
 
 model OrganizationMember {
@@ -1141,6 +1157,11 @@ model AdminUser {
   role                   String                @default("admin")
   isActive               Boolean               @default(true)
   lastLoginAt            DateTime?
+  failedLoginAttempts    Int                   @default(0)
+  lockedUntil            DateTime?
+  // TOTP second factor. The secret is stored encrypted (utils/encryption).
+  otpSecret              String?
+  otpEnabled             Boolean               @default(false)
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
   reviewedWalletRequests WalletAccessRequest[]
@@ -1148,6 +1169,114 @@ model AdminUser {
   @@index([email])
   @@index([role])
   @@index([isActive])
+}
+
+// Every change an admin makes, written by middleware on the admin router.
+// Deliberately has no foreign keys: a record must survive the deletion of
+// the admin, user or organization it describes.
+model AdminAuditLog {
+  id             String   @id @default(cuid())
+  adminId        String?
+  adminEmail     String?
+  action         String // e.g. "PATCH /users/:id/status"
+  method         String
+  path           String // the concrete URL that was called
+  targetType     String? // user | organization | plan | admin | wallet | whatsapp | ...
+  targetId       String?
+  organizationId String?
+  reason         String?
+  requestBody    Json?
+  statusCode     Int
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  @@index([adminId, createdAt])
+  @@index([targetType, targetId])
+  @@index([organizationId, createdAt])
+  @@index([createdAt])
+}
+
+// An admin's private note on an organization (support history, deals,
+// warnings). Never shown to the customer.
+model OrganizationNote {
+  id             String   @id @default(cuid())
+  organizationId String
+  adminId        String?
+  adminEmail     String?
+  body           String   @db.Text
+  pinned         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+// A message admins publish to customers: a banner in the app, and optionally
+// an in-app notification to every member of the targeted organizations.
+model Announcement {
+  id              String    @id @default(cuid())
+  title           String
+  message         String    @db.Text
+  level           String    @default("INFO") // INFO | WARNING | CRITICAL
+  audience        String    @default("ALL") // ALL | PLANS | ORGS
+  planTypes       String[]  @default([])
+  organizationIds String[]  @default([])
+  startsAt        DateTime  @default(now())
+  endsAt          DateTime?
+  isActive        Boolean   @default(true)
+  notifiedAt      DateTime?
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([isActive, startsAt])
+}
+
+// A discount code for plan checkout. The discount is applied when the
+// Razorpay order is created and written into the order's notes; the
+// redemption is recorded when the payment is verified.
+model Coupon {
+  id             String             @id @default(cuid())
+  code           String             @unique // stored upper-case
+  description    String?
+  discountType   String             @default("PERCENT") // PERCENT | FLAT
+  // PERCENT: 1-100. FLAT: paise.
+  value          Int
+  maxRedemptions Int? // null = unlimited
+  redeemedCount  Int                @default(0)
+  onePerOrg      Boolean            @default(true)
+  planTypes      String[]           @default([]) // empty = every plan
+  validFrom      DateTime           @default(now())
+  validUntil     DateTime?
+  isActive       Boolean            @default(true)
+  createdBy      String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  redemptions    CouponRedemption[]
+}
+
+model CouponRedemption {
+  id              String   @id @default(cuid())
+  couponId        String
+  organizationId  String
+  razorpayOrderId String   @unique
+  originalPaise   Int
+  discountPaise   Int
+  paidPaise       Int
+  createdAt       DateTime @default(now())
+  coupon          Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([organizationId])
+}
+
+// Platform-wide switches (maintenance mode, sign-ups). Stored as rows so
+// they survive a restart and every instance reads the same value.
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
 }
 
 model Payment {
@@ -1544,6 +1673,12 @@ enum UserStatus {
   INACTIVE
   SUSPENDED
   PENDING_VERIFICATION
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  READ_ONLY
 }
 
 enum UserRole {

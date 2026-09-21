@@ -5,6 +5,8 @@
 // ✅ FIX 4: logoutAll now increments tokenVersion in a transaction (invalidates in-flight access tokens too)
 
 import prisma from '../../config/database';
+import { effectiveLimit, parseLimitOverrides } from '../admin/orgControl';
+import { assertRegistrationOpen } from '../admin/systemSettings';
 import { config } from '../../config';
 import { getFeatureLocks, lockColumns } from '../../middleware/featureLock';
 import { authLog } from '../../utils/logger';
@@ -310,12 +312,19 @@ const enforceOrgSessionCap = async (organizationId: string): Promise<void> => {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
     select: {
+      limitOverrides: true,
       subscription: { select: { plan: { select: { maxTeamMembers: true } } } },
       members: { select: { userId: true } },
     },
   });
 
-  const cap = sessionCapForSeats(org?.subscription?.plan?.maxTeamMembers);
+  const cap = sessionCapForSeats(
+    effectiveLimit(
+      parseLimitOverrides(org?.limitOverrides),
+      'teamMembers',
+      org?.subscription?.plan?.maxTeamMembers
+    )
+  );
   if (cap === null) return;
 
   const userIds = (org?.members ?? []).map((m) => m.userId);
@@ -629,6 +638,7 @@ export class AuthService {
       );
     }
 
+    await assertRegistrationOpen();
     await deleteOTP(key);
 
     const normalizedEmail = userData.email.trim().toLowerCase();
@@ -720,6 +730,8 @@ export class AuthService {
     email: string;
     requiresVerification: boolean;
   }> {
+    await assertRegistrationOpen();
+
     const { email, password, firstName, lastName, phone, organizationName } = input;
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -1346,6 +1358,7 @@ export class AuthService {
         });
       }
     } else {
+      await assertRegistrationOpen();
       const created = await prisma.$transaction(async (tx) => {
         const newUser = await tx.user.create({
           data: {

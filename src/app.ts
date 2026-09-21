@@ -33,6 +33,8 @@ import chatbotRoutes from './modules/chatbot/chatbot.routes';
 import inboxRoutes from './modules/inbox/inbox.routes';
 import billingRoutes from './modules/billing/billing.routes';
 import adminRoutes from './modules/admin/admin.routes';
+import { maintenanceGate, systemStatusHandler } from './modules/admin/systemSettings';
+import announcementRoutes from './modules/admin/announcements.routes';
 import analyticsRoutes from './modules/analytics/analytics.routes';
 import crmRoutes from './modules/crm/crm.routes';
 import automationRoutes from './modules/automation/automation.routes';
@@ -266,6 +268,11 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 // app.ts mein koi inline webhook handler NAHI
 // Double processing completely removed
 // ============================================
+// Public platform status, then the maintenance switch in front of every
+// customer-facing route. See modules/admin/systemSettings.ts.
+app.get('/api/system/status', systemStatusHandler);
+app.use(maintenanceGate);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/webhooks', walletWebhookRouter);
 // Client ke apne Razorpay account ka webhook (WabMeta ke apne se alag)
@@ -293,6 +300,7 @@ app.use('/api/telegram', telegramRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai-agent', aiAgentRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/announcements', announcementRoutes);
 
 logger.info('✅ All API routes registered');
 

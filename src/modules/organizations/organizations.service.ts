@@ -1,6 +1,8 @@
 // src/modules/organizations/organizations.service.ts
 
 import prisma from '../../config/database';
+import { effectiveLimit, parseLimitOverrides } from '../admin/orgControl';
+import { getSystemSettings } from '../admin/systemSettings';
 import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
 import { getFeatureLocks, lockColumns } from '../../middleware/featureLock';
@@ -63,6 +65,15 @@ export class OrganizationsService {
   // ==========================================
   async create(userId: string, input: CreateOrganizationInput): Promise<OrganizationResponse> {
     const { name, website, industry, timezone } = input;
+
+    const { maxOrganizationsPerUser } = await getSystemSettings();
+    const owned = await prisma.organization.count({ where: { ownerId: userId, deletedAt: null } });
+    if (owned >= maxOrganizationsPerUser) {
+      throw new AppError(
+        `You can own up to ${maxOrganizationsPerUser} organizations. Please contact support to add more.`,
+        400
+      );
+    }
 
     // Create organization with transaction
     const organization = await prisma.$transaction(async (tx) => {
@@ -329,7 +340,12 @@ export class OrganizationsService {
       where: { organizationId },
     });
 
-    if (organization.subscription?.plan && memberCount >= organization.subscription.plan.maxTeamMembers) {
+    const seatLimit = effectiveLimit(
+      parseLimitOverrides((organization as any).limitOverrides),
+      'teamMembers',
+      organization.subscription?.plan?.maxTeamMembers
+    );
+    if (seatLimit !== undefined && memberCount >= seatLimit) {
       throw new AppError('Team member limit reached. Please upgrade your plan.', 400);
     }
 

@@ -159,6 +159,9 @@ export const sendInstagramMessage = async (organizationId: string, conversationI
   const body = (text || '').trim();
   if (!body) throw new Error('Message text is required');
 
+  const { assertOrgCanSend } = await import('../admin/orgControl');
+  await assertOrgCanSend(organizationId);
+
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, organizationId, channel: 'INSTAGRAM' },
     include: { contact: true },

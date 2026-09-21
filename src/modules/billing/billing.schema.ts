@@ -6,7 +6,15 @@ export const billingSchema = {
   createOrder: z.object({
     body: z.object({
       planKey: z.string().min(1, 'Plan key is required'),
-      billingCycle: z.enum(['monthly', 'yearly']).optional().default('monthly')
+      billingCycle: z.enum(['monthly', 'yearly']).optional().default('monthly'),
+      couponCode: z.string().max(32).optional(),
+    })
+  }),
+
+  couponPreview: z.object({
+    body: z.object({
+      planKey: z.string().min(1, 'Plan key is required'),
+      couponCode: z.string().min(1, 'Enter a coupon code').max(32),
     })
   }),
 
