@@ -435,6 +435,12 @@ router.post(
   adminController.refreshWhatsAppAccount.bind(adminController)
 );
 
+// Meta's full health_status for support: code, level, and how old it is.
+router.get(
+  '/whatsapp-connections/:accountId/health',
+  adminController.getWhatsAppAccountHealth.bind(adminController)
+);
+
 // Display overrides - user ko kya dikhe. Meta par kuch nahi badalta,
 // aur sending par bhi koi asar nahi.
 router.put(

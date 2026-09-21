@@ -13,7 +13,7 @@ import { adminService } from './admin.service';
 import { adminBillingService } from './admin.billing.service';
 import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
-import { accountHealthService } from '../meta/accountHealth.service';
+import { accountHealthService, describeHealth } from '../meta/accountHealth.service';
 import { metaService } from '../meta/meta.service';
 
 // ============================================
@@ -1001,6 +1001,73 @@ export class AdminController {
           ? { canSend: health.canSend, blocked: health.blocked, summary: health.summary, issues: health.issues }
           : null,
       }, 'Account refreshed from Meta');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Meta's full health answer for one number, for support.
+   *
+   * GET  /admin/whatsapp-connections/:accountId/health
+   * GET  ...?refresh=true  asks Meta again instead of reading the stored copy
+   *
+   * The customer only sees a one-line reason. When a client says "it is not
+   * blocked" or "I already added a card", support needs what Meta actually
+   * said: the error code, which level it is on (phone, WABA, business, app),
+   * and how old the answer is - so it is clear whether this is Meta's current
+   * view or a stale copy.
+   */
+  async getWhatsAppAccountHealth(req: AdminRequest, res: Response, next: NextFunction) {
+    try {
+      const { accountId } = req.params as { accountId: string };
+      const refresh = String((req.query as any)?.refresh || '') === 'true';
+
+      const exists = await prisma.whatsAppAccount.findUnique({
+        where: { id: accountId },
+        select: { id: true },
+      });
+      if (!exists) throw new AppError('WhatsApp account not found', 404);
+
+      let fetchedNow = false;
+      if (refresh) {
+        const h = await accountHealthService
+          .get(accountId, { force: true })
+          .catch(() => null);
+        fetchedNow = !!h?.fresh;
+      }
+
+      const account: any = await prisma.whatsAppAccount.findUnique({
+        where: { id: accountId },
+        select: {
+          id: true, phoneNumber: true, wabaId: true, phoneNumberId: true,
+          healthCanSend: true, healthBlockedReason: true,
+          healthStatus: true, healthCheckedAt: true,
+        } as any,
+      });
+
+      const checkedAt = account?.healthCheckedAt
+        ? new Date(account.healthCheckedAt)
+        : null;
+
+      return sendSuccess(res, {
+        accountId,
+        phoneNumber: account?.phoneNumber,
+        wabaId: account?.wabaId,
+        phoneNumberId: account?.phoneNumberId,
+        canSend: account?.healthCanSend || 'UNKNOWN',
+        summary: account?.healthBlockedReason || null,
+        checkedAt,
+        ageSeconds: checkedAt
+          ? Math.round((Date.now() - checkedAt.getTime()) / 1000)
+          : null,
+        // A refresh that failed leaves the stored copy in place; this says
+        // which of the two the admin is looking at.
+        refreshRequested: refresh,
+        fetchedNow,
+        entities: describeHealth(account?.healthStatus),
+        raw: account?.healthStatus ?? null,
+      }, 'Health fetched');
     } catch (error) {
       next(error);
     }
