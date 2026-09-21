@@ -8,7 +8,7 @@
 //   admin        day-to-day operations. Cannot delete, move money, edit
 //                plans or platform settings, manage admins, or view as a user.
 //   support      reads everything, refreshes WhatsApp numbers, ends sessions.
-//   finance      reads everything, runs subscriptions and wallets.
+//   finance      reads everything, runs subscriptions, wallets and coupons.
 
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../../middleware/errorHandler';
@@ -44,6 +44,9 @@ export const PERMISSIONS = [
   'settings.write',
   'audit.read',
   'security.read',
+  'announcements.write',
+  'coupons.write',
+  'data.export',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -75,9 +78,11 @@ const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
     'whatsapp.write',
     'audit.read',
     'security.read',
+    'announcements.write',
+    'data.export',
   ],
   support: [...READ_ALL, 'whatsapp.refresh', 'sessions.manage', 'security.read'],
-  finance: [...READ_ALL, 'billing.write', 'wallet.review', 'wallet.money'],
+  finance: [...READ_ALL, 'billing.write', 'wallet.review', 'wallet.money', 'coupons.write', 'data.export'],
 };
 
 export const isAdminRole = (role: unknown): role is AdminRole =>

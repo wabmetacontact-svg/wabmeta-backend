@@ -448,6 +448,7 @@ export class AdminController {
       const planType = parseQueryString(req.query.planType);
       const status = parseQueryString(req.query.status) as any;
       const includeDeleted = parseQueryString(req.query.includeDeleted) === 'true';
+      const tag = parseQueryString(req.query.tag);
       const sortBy = parseQueryString(req.query.sortBy) || 'createdAt';
       const sortOrder = parseQueryString(req.query.sortOrder) || 'desc';
 
@@ -457,6 +458,7 @@ export class AdminController {
         search,
         planType,
         status,
+        tag,
         includeDeleted,
         sortBy,
         sortOrder,

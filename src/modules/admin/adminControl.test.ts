@@ -200,6 +200,11 @@ describe('audit log', () => {
       targetId: 'u1',
       organizationId: 'o2',
     });
+    expect(describeTarget('/admin/wallets/:organizationId/toggle', { organizationId: 'o4' }, {})).toEqual({
+      targetType: 'organization',
+      targetId: 'o4',
+      organizationId: 'o4',
+    });
     expect(describeTarget('/wallets/:organizationId/adjust', { organizationId: 'o3' }, {})).toEqual({
       targetType: 'organization',
       targetId: 'o3',

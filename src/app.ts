@@ -34,6 +34,7 @@ import inboxRoutes from './modules/inbox/inbox.routes';
 import billingRoutes from './modules/billing/billing.routes';
 import adminRoutes from './modules/admin/admin.routes';
 import { maintenanceGate, systemStatusHandler } from './modules/admin/systemSettings';
+import announcementRoutes from './modules/admin/announcements.routes';
 import analyticsRoutes from './modules/analytics/analytics.routes';
 import crmRoutes from './modules/crm/crm.routes';
 import automationRoutes from './modules/automation/automation.routes';
@@ -299,6 +300,7 @@ app.use('/api/telegram', telegramRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/ai-agent', aiAgentRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/announcements', announcementRoutes);
 
 logger.info('✅ All API routes registered');
 

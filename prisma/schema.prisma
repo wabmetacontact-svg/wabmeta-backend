@@ -125,6 +125,8 @@ model Organization {
   //   "teamMembers": 8, "aiRepliesPerDay": 1000, "dailyCampaignMessages": 5000 }
   // A missing key means "use the plan".
   limitOverrides          Json?
+  // Internal labels only admins see, e.g. "vip", "payment-follow-up".
+  adminTags               String[]              @default([])
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
@@ -1193,6 +1195,79 @@ model AdminAuditLog {
   @@index([targetType, targetId])
   @@index([organizationId, createdAt])
   @@index([createdAt])
+}
+
+// An admin's private note on an organization (support history, deals,
+// warnings). Never shown to the customer.
+model OrganizationNote {
+  id             String   @id @default(cuid())
+  organizationId String
+  adminId        String?
+  adminEmail     String?
+  body           String   @db.Text
+  pinned         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+// A message admins publish to customers: a banner in the app, and optionally
+// an in-app notification to every member of the targeted organizations.
+model Announcement {
+  id              String    @id @default(cuid())
+  title           String
+  message         String    @db.Text
+  level           String    @default("INFO") // INFO | WARNING | CRITICAL
+  audience        String    @default("ALL") // ALL | PLANS | ORGS
+  planTypes       String[]  @default([])
+  organizationIds String[]  @default([])
+  startsAt        DateTime  @default(now())
+  endsAt          DateTime?
+  isActive        Boolean   @default(true)
+  notifiedAt      DateTime?
+  createdBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([isActive, startsAt])
+}
+
+// A discount code for plan checkout. The discount is applied when the
+// Razorpay order is created and written into the order's notes; the
+// redemption is recorded when the payment is verified.
+model Coupon {
+  id             String             @id @default(cuid())
+  code           String             @unique // stored upper-case
+  description    String?
+  discountType   String             @default("PERCENT") // PERCENT | FLAT
+  // PERCENT: 1-100. FLAT: paise.
+  value          Int
+  maxRedemptions Int? // null = unlimited
+  redeemedCount  Int                @default(0)
+  onePerOrg      Boolean            @default(true)
+  planTypes      String[]           @default([]) // empty = every plan
+  validFrom      DateTime           @default(now())
+  validUntil     DateTime?
+  isActive       Boolean            @default(true)
+  createdBy      String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  redemptions    CouponRedemption[]
+}
+
+model CouponRedemption {
+  id              String   @id @default(cuid())
+  couponId        String
+  organizationId  String
+  razorpayOrderId String   @unique
+  originalPaise   Int
+  discountPaise   Int
+  paidPaise       Int
+  createdAt       DateTime @default(now())
+  coupon          Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([organizationId])
 }
 
 // Platform-wide switches (maintenance mode, sign-ups). Stored as rows so

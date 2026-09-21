@@ -16,6 +16,17 @@ import {
 } from './admin.control.controller';
 import { rateLimit } from '../../middleware/rateLimit';
 import {
+  adminOpsController as ops,
+  announcementCreateSchema,
+  announcementUpdateSchema,
+  bulkSchema,
+  couponCreateSchema,
+  couponUpdateSchema,
+  notePatchSchema,
+  noteSchema,
+  tagsSchema,
+} from './admin.ops.controller';
+import {
   adminLoginSchema,
   createAdminSchema,
   updateAdminSchema,
@@ -624,5 +635,54 @@ router.post('/2fa/confirm', validate(otpCodeSchema), control.confirmTwoFactor);
 router.post('/2fa/disable', validate(otpCodeSchema), control.disableOwnTwoFactor);
 // Reset another admin's 2FA, for a lost phone
 router.delete('/admins/:id/2fa', can('admins.manage'), control.resetAdminTwoFactor);
+
+// ============================================
+// INSIGHTS
+// ============================================
+
+// One organization end to end
+router.get('/organizations/:id/overview', can('orgs.read'), ops.overview);
+
+// Accounts that need attention
+router.get('/risk', can('orgs.read'), ops.risk);
+
+// Users, organizations, WhatsApp numbers, payments
+router.get('/search', can('users.read'), ops.search);
+
+// Payments and run rate
+router.get('/revenue', can('billing.read'), ops.revenue);
+
+// ============================================
+// OPERATIONS
+// ============================================
+
+// Internal notes on an organization
+router.get('/organizations/:id/notes', can('orgs.read'), ops.listNotes);
+router.post('/organizations/:id/notes', can('orgs.write'), validate(noteSchema), ops.addNote);
+router.patch('/organizations/:id/notes/:noteId', can('orgs.write'), validate(notePatchSchema), ops.updateNote);
+router.delete('/organizations/:id/notes/:noteId', can('orgs.write'), ops.deleteNote);
+
+// Internal tags
+router.get('/tags', can('orgs.read'), ops.allTags);
+router.put('/organizations/:id/tags', can('orgs.write'), validate(tagsSchema), ops.setTags);
+
+// Announcements to customers
+router.get('/announcements', can('orgs.read'), ops.listAnnouncements);
+router.post('/announcements', can('announcements.write'), validate(announcementCreateSchema), ops.createAnnouncement);
+router.put('/announcements/:id', can('announcements.write'), validate(announcementUpdateSchema), ops.updateAnnouncement);
+router.delete('/announcements/:id', can('announcements.write'), ops.deleteAnnouncement);
+
+// One action on many organizations (each action checks its own permission)
+router.post('/bulk', can('orgs.read'), validate(bulkSchema), ops.bulk);
+
+// CSV exports (audited as exports)
+router.get('/export/organizations', can('data.export'), ops.exportOrganizations);
+router.get('/export/users', can('data.export'), ops.exportUsers);
+
+// Checkout coupons
+router.get('/coupons', can('billing.read'), ops.listCoupons);
+router.post('/coupons', can('coupons.write'), validate(couponCreateSchema), ops.createCoupon);
+router.put('/coupons/:id', can('coupons.write'), validate(couponUpdateSchema), ops.updateCoupon);
+router.delete('/coupons/:id', can('coupons.write'), ops.deleteCoupon);
 
 export default router;

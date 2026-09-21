@@ -41,6 +41,7 @@ interface GetOrganizationsInput {
   search?: string;
   planType?: string;
   status?: 'ACTIVE' | 'SUSPENDED' | 'READ_ONLY';
+  tag?: string;
   includeDeleted?: boolean;
   sortBy?: string;
   sortOrder?: string;
@@ -898,13 +899,17 @@ export class AdminService {
   // ==========================================
 
   async getOrganizations(input: GetOrganizationsInput) {
-    const { page, limit, search, planType, status, includeDeleted, sortBy = 'createdAt', sortOrder = 'desc' } = input;
+    const { page, limit, search, planType, status, tag, includeDeleted, sortBy = 'createdAt', sortOrder = 'desc' } = input;
 
     // Soft-deleted organizations are hidden unless asked for.
     const where: any = includeDeleted ? {} : { deletedAt: null };
 
     if (status) {
       where.status = status;
+    }
+
+    if (tag) {
+      where.adminTags = { has: tag };
     }
 
     if (search) {

@@ -44,6 +44,13 @@ router.post(
     billingController.createRazorpayOrder
 );
 
+// What a coupon does to a plan's price, before paying
+router.post(
+    '/coupon/preview',
+    validate(billingSchema.couponPreview),
+    billingController.previewCoupon
+);
+
 // Verify Razorpay payment
 router.post(
     '/razorpay/verify',

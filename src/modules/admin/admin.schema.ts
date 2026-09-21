@@ -124,6 +124,7 @@ export const getOrganizationsSchema = z.object({
     planType: z.string().optional(),
     status: z.enum(['ACTIVE', 'SUSPENDED', 'READ_ONLY']).optional(),
     includeDeleted: z.enum(['true', 'false']).optional(),
+    tag: z.string().max(32).optional(),
     sortBy: z.string().optional(),
     sortOrder: z.enum(['asc', 'desc']).optional(),
   }),

@@ -44,6 +44,10 @@ const TARGET_TYPES: Record<string, string> = {
   'whatsapp-connections': 'whatsapp',
   settings: 'settings',
   'transfer-ownership': 'organization',
+  announcements: 'announcement',
+  coupons: 'coupon',
+  bulk: 'bulk',
+  export: 'export',
 };
 
 /**
@@ -55,7 +59,10 @@ export const describeTarget = (
   params: Record<string, string>,
   body: any
 ): { targetType: string | null; targetId: string | null; organizationId: string | null } => {
-  const segment = routePath.split('/').filter(Boolean)[0] || '';
+  // Routes served from other routers (wallet.routes.ts) carry the full
+  // "/admin/..." path; skip that prefix to reach the kind of thing.
+  const parts = routePath.split('/').filter(Boolean);
+  const segment = (parts[0] === 'admin' ? parts[1] : parts[0]) || '';
   const targetType = TARGET_TYPES[segment] ?? (segment || null);
 
   const targetId =
