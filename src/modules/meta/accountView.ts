@@ -13,6 +13,8 @@
  * Meta ne 1K ko 2K se badal diya tha - wo entry missing hone se limit
  * "unknown" ho jati thi.
  */
+import { displayStateFor } from './healthDisplay';
+
 export const TIER_DAILY_LIMIT: Record<string, number | null> = {
   TIER_50: 50,
   TIER_250: 250,
@@ -67,6 +69,21 @@ export function toClientAccount(account: any): SanitizedAccount | null {
   if (qualityRatingOverride) safe.qualityRating = qualityRatingOverride;
   if (codeVerificationOverride) safe.codeVerificationStatus = codeVerificationOverride;
   if (healthCanSendOverride) safe.connectionState = healthCanSendOverride;
+
+  // What the customer's status pill should say, decided here once so the
+  // web app, the mobile app and support all agree. It separates "banned" from
+  // "a card was declined" - Meta reports both as BLOCKED, and calling a
+  // payment problem "Blocked" made customers think they had lost the number.
+  //
+  // New fields rather than a new meaning for connectionState, which older
+  // clients read as BAN | BLOCKED | CONNECTED.
+  const display = displayStateFor({
+    override: healthCanSendOverride,
+    canSend: safe.healthCanSend,
+    raw: healthStatus,
+  });
+  safe.displayState = display.state;
+  safe.displayIssue = display.issue;
 
   if (messagingLimitOverride) {
     safe.messagingLimit = messagingLimitOverride;
