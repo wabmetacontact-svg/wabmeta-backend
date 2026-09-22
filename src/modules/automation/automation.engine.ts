@@ -6,6 +6,8 @@ import { deductWalletForTemplate } from '../wallet/wallet.deduction.service';
 import { automationLog } from '../../utils/logger';
 import { notificationsService } from '../notifications/notifications.service';
 import { orgCanSend } from '../admin/orgControl';
+import axios from 'axios';
+import { assertSafeWebhookUrl, buildButtonsPayload, mediaTriggerMatches } from './automation.media';
 import {
   ClaimedJob,
   cancelPendingJobs,
@@ -37,6 +39,8 @@ interface TriggerContext {
   message?: string;
   conversationId?: string;
   metadata?: any;
+  /** Set for MEDIA_RECEIVED: what the customer sent. */
+  media?: { type: string; id?: string | null; caption?: string | null };
 }
 
 class AutomationEngine {
@@ -239,6 +243,46 @@ class AutomationEngine {
       }
     } catch (error) {
       console.error('🤖 NEW_CONTACT automation error:', error);
+    }
+    return triggered;
+  }
+
+  // ==========================================
+  // TRIGGER: MEDIA RECEIVED
+  // ==========================================
+  /**
+   * The customer sent an image, video, document or audio. Each active
+   * MEDIA_RECEIVED automation decides by its triggerConfig which media types
+   * (and, optionally, which caption words) start it.
+   */
+  async triggerMediaReceived(context: TriggerContext): Promise<boolean> {
+    if (!context.media) return false;
+    let triggered = false;
+
+    try {
+      const automations = await automationService.getActiveByTrigger(
+        context.organizationId,
+        'MEDIA_RECEIVED' as AutomationTrigger
+      );
+
+      for (const automation of automations) {
+        if (context.contactId && automation.targetGroupIds?.length > 0) {
+          const inGroup = await this.isContactInTargetGroups(context.contactId, automation.targetGroupIds);
+          if (!inGroup) continue;
+        }
+
+        if (!mediaTriggerMatches(automation.triggerConfig as any, context.media)) continue;
+
+        automationLog.info('Media automation triggered', {
+          name: automation.name,
+          id: automation.id,
+          mediaType: context.media.type,
+        });
+        await this.executeSequence(automation.id, automation.actions as any, context);
+        triggered = true;
+      }
+    } catch (error: any) {
+      automationLog.error('Media trigger error', error);
     }
     return triggered;
   }
@@ -772,6 +816,10 @@ class AutomationEngine {
             await this.actionSendPaymentLink({ ...context, contactId }, action.config);
             break;
 
+          case 'webhook':
+            await this.actionWebhook({ ...context, contactId }, action.config, automationId);
+            break;
+
           default:
             console.warn(`⚠️ Unknown action: ${action.type}`);
         }
@@ -855,38 +903,24 @@ class AutomationEngine {
     const account = await this.getDefaultAccount(context.organizationId);
     if (!account || !context.phone) return;
 
-    const buttons = config.buttons || [];
-    if (buttons.length === 0) {
-      console.warn('⚠️ No buttons configured');
-      return;
+    const body = await this.replaceVariables(config.text || 'Please choose an option:', context);
+    const built = buildButtonsPayload(config, body);
+    if ('error' in built) {
+      // Thrown so the step shows as failed in the logs instead of silently
+      // sending nothing - which is what an empty buttons list used to do.
+      throw new Error(`send_buttons: ${built.error}`);
     }
 
-    const text = await this.replaceVariables(config.text || 'Please select:', context);
-
-    const interactivePayload = {
-      type: 'button',
-      body: { text },
-      action: {
-        buttons: buttons.slice(0, 3).map((btn: any, i: number) => ({
-          type: 'reply',
-          reply: {
-            id: btn.id || `btn_${i}`,
-            title: btn.text.substring(0, 20), // Max 20 chars
-          },
-        })),
-      },
-    };
-
-    await (whatsappService as any).sendMessage({
+    await whatsappService.sendMessage({
       accountId: account.id,
       to: context.phone,
       type: 'interactive',
-      content: { interactive: interactivePayload },
+      content: { interactive: built.interactive },
       conversationId: context.conversationId,
       organizationId: context.organizationId,
     });
 
-    console.log(`✅ Sent buttons to ${context.phone}`);
+    console.log(`✅ Sent ${built.interactive.type} buttons to ${context.phone}`);
   }
 
   // ==========================================
@@ -1811,10 +1845,52 @@ class AutomationEngine {
       }
     }
 
+    result = result.replace(/\{\{message\}\}/gi, context.message || '');
+    result = result.replace(/\{\{caption\}\}/gi, context.media?.caption || '');
+    result = result.replace(/\{\{media_type\}\}/gi, (context.media?.type || '').toLowerCase());
+
     result = result.replace(/\{\{date\}\}/gi, new Date().toLocaleDateString());
     result = result.replace(/\{\{time\}\}/gi, new Date().toLocaleTimeString());
 
     return result;
+  }
+
+  /**
+   * POST the run's details to a URL the customer chose (their CRM, Zapier,
+   * a sheet). The URL is checked so it cannot reach internal addresses, and
+   * the call gives up after 10 seconds.
+   */
+  private async actionWebhook(context: TriggerContext, config: any, automationId: string): Promise<void> {
+    if (!config?.url) throw new Error('webhook: no URL set');
+    const url = await assertSafeWebhookUrl(String(config.url));
+
+    const contact = context.contactId
+      ? await prisma.contact.findUnique({
+          where: { id: context.contactId },
+          select: { id: true, phone: true, firstName: true, lastName: true, email: true, tags: true },
+        })
+      : null;
+
+    const payload = {
+      event: 'automation.step',
+      automationId,
+      organizationId: context.organizationId,
+      sentAt: new Date().toISOString(),
+      contact,
+      conversationId: context.conversationId ?? null,
+      message: context.message ?? null,
+      media: context.media ?? null,
+      metadata: context.metadata ?? null,
+    };
+
+    const res = await axios.post(url.toString(), payload, {
+      timeout: 10_000,
+      maxRedirects: 0,
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'WabMeta-Automation/1.0' },
+      validateStatus: () => true,
+    });
+    if (res.status >= 400) throw new Error(`webhook: ${url.host} answered ${res.status}`);
+    console.log(`✅ [webhook] ${url.host} answered ${res.status}`);
   }
 
   private async actionAddTag(
@@ -1845,37 +1921,58 @@ class AutomationEngine {
   private async actionCreateLead(context: TriggerContext, config: any): Promise<void> {
     if (!context.contactId) return;
 
-    const existing = await prisma.lead.findFirst({
-      where: {
-        organizationId: context.organizationId,
-        contactId: context.contactId,
-        status: { notIn: ['WON', 'LOST'] },
-      },
+    const { crmService } = await import('../crm/crm.service');
+    const title = config.title ? await this.replaceVariables(String(config.title), context) : undefined;
+    const priority = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'].includes(config.priority) ? config.priority : undefined;
+
+    const result = await crmService.smartCreateLead({
+      organizationId: context.organizationId,
+      contactId: context.contactId,
+      conversationId: context.conversationId,
+      title: title?.slice(0, 200),
+      source: 'automation',
+      priority,
+      notes: config.notes ? await this.replaceVariables(String(config.notes), context) : undefined,
     });
 
-    if (existing) {
-      console.log(`⏭️ Lead already exists`);
+    // An open lead already existed: leave it alone unless the step says to
+    // move it to the chosen stage.
+    if (result.wasExisting && config.ifExists !== 'move_stage') {
+      console.log(`⏭️ [create_lead] Contact already has an open lead ${result.lead?.id}`);
       return;
     }
 
-    const pipeline = await prisma.pipeline.findFirst({
-      where: { organizationId: context.organizationId, isDefault: true },
-      include: { stages: { orderBy: { order: 'asc' }, take: 1 } },
-    });
+    const update: any = {};
+    if (config.stageId) {
+      const stage = await prisma.pipelineStage.findFirst({
+        where: { id: config.stageId, pipeline: { organizationId: context.organizationId } },
+        select: { id: true, pipelineId: true },
+      });
+      if (stage) {
+        update.stageId = stage.id;
+        update.pipelineId = stage.pipelineId;
+      }
+    } else if (config.pipelineId && !result.wasExisting) {
+      const pipeline = await prisma.pipeline.findFirst({
+        where: { id: config.pipelineId, organizationId: context.organizationId },
+        include: { stages: { orderBy: { order: 'asc' }, take: 1 } },
+      });
+      if (pipeline) {
+        update.pipelineId = pipeline.id;
+        update.stageId = pipeline.stages[0]?.id ?? null;
+      }
+    }
+    const value = Number(config.value);
+    if (Number.isFinite(value) && value > 0) update.value = value;
 
-    await prisma.lead.create({
-      data: {
-        organizationId: context.organizationId,
-        title: config.title || 'Automated Lead',
-        contactId: context.contactId,
-        pipelineId: pipeline?.id,
-        stageId: pipeline?.stages[0]?.id,
-        source: 'automation',
-      },
-    });
+    if (Object.keys(update).length && result.lead?.id) {
+      await prisma.lead.update({ where: { id: result.lead.id }, data: update });
+    }
 
-    console.log(`✅ Created lead`);
+    console.log(`✅ [create_lead] Lead ${result.action}: ${result.lead?.id}`);
   }
+
+
 
   /**
    * Client ke apne Razorpay se payment link bana kar customer ko bhejo.

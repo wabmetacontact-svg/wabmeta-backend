@@ -1315,6 +1315,23 @@ export class WebhookService {
             })
           : Promise.resolve(false),
 
+        // 4. Media received: the customer sent an image, video, document or
+        // audio. The raw WhatsApp message carries its id and caption under
+        // its own type key (message.image.id, message.video.caption, ...).
+        ['IMAGE', 'VIDEO', 'DOCUMENT', 'AUDIO'].includes(msgType)
+          ? automationEngine.triggerMediaReceived({
+              ...context,
+              media: {
+                type: msgType,
+                id: message?.[msgType.toLowerCase()]?.id ?? null,
+                caption: message?.[msgType.toLowerCase()]?.caption ?? null,
+              },
+            }).catch((err): boolean => {
+              console.error('❌ Media trigger:', err.message);
+              return false;
+            })
+          : Promise.resolve(false),
+
         // ✅ 3. New contact trigger (only if contact was JUST created)
         wasNewlyCreated
           ? automationEngine.triggerNewContact({
