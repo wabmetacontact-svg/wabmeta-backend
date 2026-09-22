@@ -127,6 +127,10 @@ model Organization {
   limitOverrides          Json?
   // Internal labels only admins see, e.g. "vip", "payment-follow-up".
   adminTags               String[]              @default([])
+  // The onboarder (an AdminUser) this client belongs to, if any. Onboarders
+  // see and manage only their own clients.
+  onboardedById           String?
+  onboardedAt             DateTime?
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
@@ -166,6 +170,7 @@ model Organization {
   @@index([ownerId])
   @@index([planType])
   @@index([status])
+  @@index([onboardedById])
 }
 
 model OrganizationMember {
@@ -1195,6 +1200,52 @@ model AdminAuditLog {
   @@index([targetType, targetId])
   @@index([organizationId, createdAt])
   @@index([createdAt])
+}
+
+// A paid capacity add-on sold to a client (usually offline, by an
+// onboarder). While active it raises the client's limit - see
+// src/modules/admin/addOns.ts - and it is a line on the client's bill.
+model ClientAddOn {
+  id             String    @id @default(cuid())
+  organizationId String
+  type           String // EXTRA_SEAT | EXTRA_NUMBER | AI_TOPUP | CUSTOM
+  label          String
+  quantity       Int       @default(1)
+  unitPricePaise Int
+  billing        String    @default("MONTHLY") // MONTHLY | ONE_TIME
+  startsAt       DateTime  @default(now())
+  endsAt         DateTime?
+  note           String?
+  createdById    String?
+  createdByEmail String?
+  removedAt      DateTime?
+  removedBy      String?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId])
+}
+
+// Money received outside Razorpay (UPI, cash, bank transfer). It counts as
+// revenue only once a finance or super admin has verified it.
+model ManualPayment {
+  id              String    @id @default(cuid())
+  organizationId  String
+  amountPaise     Int
+  method          String // UPI | CASH | BANK | CHEQUE | OTHER
+  reference       String?
+  description     String?
+  paidAt          DateTime
+  status          String    @default("PENDING") // PENDING | VERIFIED | REJECTED
+  recordedById    String?
+  recordedByEmail String?
+  verifiedById    String?
+  verifiedByEmail String?
+  verifiedAt      DateTime?
+  rejectReason    String?
+  createdAt       DateTime  @default(now())
+
+  @@index([organizationId])
+  @@index([status, createdAt])
 }
 
 // An admin's private note on an organization (support history, deals,

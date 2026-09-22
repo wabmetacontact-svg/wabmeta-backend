@@ -14,6 +14,7 @@
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { effectiveLimit, parseLimitOverrides } from '../admin/orgControl';
+import { getAddOnBoosts } from '../admin/addOns';
 
 export const DEFAULT_MAX_ACCOUNTS = 1;
 
@@ -64,13 +65,16 @@ export const assertCanConnectAnother = async (
 
   // Read from the row, not the cache: this runs inside the transaction that
   // creates the account, and an admin may have just raised the limit.
-  const limit = accountLimitFor(
-    effectiveLimit(
-      parseLimitOverrides(org?.limitOverrides),
-      'whatsappNumbers',
-      org?.subscription?.plan?.maxWhatsAppAccounts
-    )
-  );
+  // Same transaction when the caller passed one, so a parallel connect sees it too.
+  const boosts = await getAddOnBoosts(organizationId, (tx as any).clientAddOn ? (tx as any) : undefined);
+  const limit =
+    accountLimitFor(
+      effectiveLimit(
+        parseLimitOverrides(org?.limitOverrides),
+        'whatsappNumbers',
+        org?.subscription?.plan?.maxWhatsAppAccounts
+      )
+    ) + (boosts.whatsappNumbers ?? 0);
 
   const connectedCount = await tx.whatsAppAccount.count({
     where: { organizationId, status: 'CONNECTED' },

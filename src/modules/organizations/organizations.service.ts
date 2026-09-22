@@ -2,6 +2,7 @@
 
 import prisma from '../../config/database';
 import { effectiveLimit, parseLimitOverrides } from '../admin/orgControl';
+import { getAddOnBoosts, withBoost } from '../admin/addOns';
 import { getSystemSettings } from '../admin/systemSettings';
 import { config } from '../../config';
 import { AppError } from '../../middleware/errorHandler';
@@ -340,10 +341,13 @@ export class OrganizationsService {
       where: { organizationId },
     });
 
-    const seatLimit = effectiveLimit(
-      parseLimitOverrides((organization as any).limitOverrides),
-      'teamMembers',
-      organization.subscription?.plan?.maxTeamMembers
+    const seatLimit = withBoost(
+      effectiveLimit(
+        parseLimitOverrides((organization as any).limitOverrides),
+        'teamMembers',
+        organization.subscription?.plan?.maxTeamMembers
+      ),
+      (await getAddOnBoosts(organizationId)).teamMembers
     );
     if (seatLimit !== undefined && memberCount >= seatLimit) {
       throw new AppError('Team member limit reached. Please upgrade your plan.', 400);
