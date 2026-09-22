@@ -1875,6 +1875,7 @@ enum AutomationTrigger {
   NO_REPLY
   TASK_DUE
   PAYMENT_RECEIVED
+  MEDIA_RECEIVED
 }
 
 enum WebhookStatus {
