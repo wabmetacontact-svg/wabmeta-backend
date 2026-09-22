@@ -12,6 +12,7 @@ vi.mock('../../socket', () => ({ emitForceLogout: vi.fn() }));
 
 import prisma from '../../config/database';
 import { checkCouponForCheckout, createCoupon, deleteCoupon, recordCouponRedemption } from '../billing/coupons';
+import { adminService } from './admin.service';
 import { getOrganizationOverview, getRevenueReport, getRiskReport, globalSearch } from './admin.insights.service';
 import {
   activeAnnouncementsFor,
@@ -89,6 +90,11 @@ describe('reports run against Postgres', () => {
     expect(o.organization.id).toBe(organizationId);
     expect(o.members).toHaveLength(1);
     expect(o.usage.messagesToday).toBe(0);
+  });
+
+  it('the organization list finds an organization by the owner email', async () => {
+    const r = await adminService.getOrganizations({ page: 1, limit: 10, search: `${SUFFIX}@WABMETA` });
+    expect(r.organizations.map((o: any) => o.id)).toEqual(expect.arrayContaining([organizationId, otherOrgId]));
   });
 
   it('global search finds the org and the user', async () => {

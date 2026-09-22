@@ -857,9 +857,12 @@ export class AdminService {
     }
 
     if (search) {
+      // Admins look clients up by the owner's email as often as by name.
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
         { slug: { contains: search, mode: 'insensitive' } },
+        { owner: { email: { contains: search, mode: 'insensitive' } } },
+        { owner: { phone: { contains: search } } },
       ];
     }
 
