@@ -10,6 +10,7 @@
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { istDayStart } from './orgControl';
+import { computeMrr, receivedSummary } from './revenue';
 
 const LIST_LIMIT = 20;
 
@@ -354,14 +355,14 @@ export const globalSearch = async (rawQuery: string) => {
 export const getRevenueReport = async (months = 6) => {
   const n = Math.min(24, Math.max(1, Math.floor(months) || 6));
 
-  const [byMonth, walletByMonth, activeSubs, churned, manualByMonth, monthlyAddOns, coupons] = await Promise.all([
+  const [byMonth, walletByMonth, churned, manualByMonth, coupons] = await Promise.all([
     prisma.$queryRaw<Row[]>`
       SELECT to_char(date_trunc('month', COALESCE(p."paidAt", p."createdAt") AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM') AS month,
-             SUM(p.amount)::bigint AS paise,
+             SUM(p.amount - p."refundedAmount")::bigint AS paise,
              COUNT(*)::int AS payments,
              COUNT(DISTINCT p."organizationId")::int AS customers
       FROM "Payment" p
-      WHERE p.status = 'SUCCESS'
+      WHERE p.status IN ('SUCCESS', 'REFUNDED') AND p."razorpayPaymentId" IS NOT NULL
         AND COALESCE(p."paidAt", p."createdAt") >= date_trunc('month', NOW()) - make_interval(months => ${n - 1}::int)
       GROUP BY 1 ORDER BY 1`,
     prisma.$queryRaw<Row[]>`
@@ -372,13 +373,6 @@ export const getRevenueReport = async (months = 6) => {
       WHERE t.type = 'credit' AND t.status = 'completed' AND t."razorpayPaymentId" IS NOT NULL
         AND t."createdAt" >= date_trunc('month', NOW()) - make_interval(months => ${n - 1}::int)
       GROUP BY 1 ORDER BY 1`,
-    prisma.subscription.findMany({
-      where: { status: 'ACTIVE', currentPeriodEnd: { gt: new Date() } },
-      select: {
-        organizationId: true, currentPeriodStart: true, currentPeriodEnd: true,
-        plan: { select: { type: true, name: true } },
-      },
-    }),
     prisma.subscription.count({
       where: {
         currentPeriodEnd: { gte: new Date(Date.now() - 30 * 86_400_000), lt: new Date() },
@@ -394,10 +388,6 @@ export const getRevenueReport = async (months = 6) => {
       WHERE m.status = 'VERIFIED'
         AND m."paidAt" >= date_trunc('month', NOW()) - make_interval(months => ${n - 1}::int)
       GROUP BY 1 ORDER BY 1`,
-    prisma.clientAddOn.findMany({
-      where: { removedAt: null, billing: 'MONTHLY', startsAt: { lte: new Date() } },
-      select: { quantity: true, unitPricePaise: true, endsAt: true },
-    }),
     prisma.couponRedemption.aggregate({
       _sum: { discountPaise: true },
       _count: true,
@@ -405,38 +395,8 @@ export const getRevenueReport = async (months = 6) => {
     }),
   ]);
 
-  // Last successful payment per active subscriber.
-  const orgIds = activeSubs.map((s) => s.organizationId);
-  const lastPayments = orgIds.length
-    ? await prisma.payment.findMany({
-        where: { organizationId: { in: orgIds }, status: 'SUCCESS' },
-        orderBy: { createdAt: 'desc' },
-        distinct: ['organizationId'],
-        select: { organizationId: true, amount: true },
-      })
-    : [];
-  const lastPaid = new Map(lastPayments.map((p) => [p.organizationId, p.amount]));
-
-  let mrrPaise = 0;
-  let paying = 0;
-  let complimentary = 0;
-  const byPlan: Record<string, { customers: number; mrrPaise: number }> = {};
-
-  for (const s of activeSubs) {
-    const planType = String(s.plan?.type ?? 'UNKNOWN');
-    if (planType === 'FREE_DEMO') continue;
-
-    const amount = lastPaid.get(s.organizationId);
-    const days = Math.max(1, (s.currentPeriodEnd.getTime() - s.currentPeriodStart.getTime()) / 86_400_000);
-    const monthly = amount ? Math.round((amount * 30) / days) : 0;
-
-    if (amount) paying++;
-    else complimentary++;
-    mrrPaise += monthly;
-    byPlan[planType] = byPlan[planType] || { customers: 0, mrrPaise: 0 };
-    byPlan[planType].customers++;
-    byPlan[planType].mrrPaise += monthly;
-  }
+  const mrr = await computeMrr();
+  const received = await receivedSummary();
 
   const num = (v: unknown) => Number(v ?? 0);
 
@@ -446,14 +406,13 @@ export const getRevenueReport = async (months = 6) => {
     offlinePayments: manualByMonth.map((r) => ({ month: r.month, paise: num(r.paise), payments: num(r.payments) })),
     // Monthly add-ons billed on top of plans; not in mrrPaise, which is what
     // plan payments imply.
-    addOnMrrPaise: monthlyAddOns
-      .filter((a) => !a.endsAt || a.endsAt > new Date())
-      .reduce((s, a) => s + a.quantity * a.unitPricePaise, 0),
-    mrrPaise,
-    arrPaise: mrrPaise * 12,
-    payingCustomers: paying,
-    complimentaryCustomers: complimentary,
-    byPlan,
+    addOnMrrPaise: mrr.addOnMrrPaise,
+    mrrPaise: mrr.mrrPaise,
+    arrPaise: mrr.mrrPaise * 12,
+    payingCustomers: mrr.payingCustomers,
+    complimentaryCustomers: mrr.complimentaryCustomers,
+    byPlan: mrr.byPlan,
+    received,
     endedLast30Days: churned,
     couponsLast30Days: { redemptions: coupons._count, discountPaise: num(coupons._sum.discountPaise) },
   };

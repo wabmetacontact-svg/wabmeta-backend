@@ -1340,6 +1340,9 @@ model Payment {
   amount            Int
   currency          String        @default("INR")
   status            PaymentStatus @default(PENDING)
+  // Paise refunded on Razorpay so far (partial refunds add up). Revenue
+  // counts amount - refundedAmount.
+  refundedAmount    Int           @default(0)
   planId            String?
   planName          String?
   billingCycle      String?

@@ -13,6 +13,7 @@ import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { hashPassword } from '../../utils/password';
 import { ADDON_CATALOG, isAddOnActive, isAddOnType } from './addOns';
+import { istMonthStart, receivedSummary } from './revenue';
 
 interface Actor {
   id: string;
@@ -22,7 +23,7 @@ interface Actor {
 
 export const PAYMENT_METHODS = ['UPI', 'CASH', 'BANK', 'CHEQUE', 'OTHER'] as const;
 
-const monthStart = (now = new Date()) => new Date(now.getFullYear(), now.getMonth(), 1);
+const monthStart = (now = new Date()) => istMonthStart(now);
 
 /** A plan's price per month, from the list prices, for the cycle the client is on. */
 export const planMonthlyPaise = (
@@ -56,9 +57,12 @@ export const getClientBilling = async (organizationId: string) => {
   const [addOns, razorpay, manual, wallet, onboarder] = await Promise.all([
     prisma.clientAddOn.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' } }),
     prisma.payment.findMany({
-      where: { organizationId, status: 'SUCCESS' },
+      where: { organizationId, status: { in: ['SUCCESS', 'REFUNDED'] }, razorpayPaymentId: { not: null } },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, amount: true, planName: true, billingCycle: true, paidAt: true, createdAt: true, razorpayPaymentId: true },
+      select: {
+        id: true, amount: true, refundedAmount: true, status: true, planName: true, billingCycle: true,
+        paidAt: true, createdAt: true, razorpayPaymentId: true,
+      },
     }),
     prisma.manualPayment.findMany({ where: { organizationId }, orderBy: { paidAt: 'desc' } }),
     prisma.wallet.findUnique({ where: { organizationId }, select: { id: true } }),
@@ -93,14 +97,16 @@ export const getClientBilling = async (organizationId: string) => {
     .reduce((s, a) => s + a.quantity * a.unitPricePaise, 0);
 
   const verifiedManual = manual.filter((m) => m.status === 'VERIFIED');
-  const razorpayPaise = razorpay.reduce((s, p) => s + p.amount, 0);
+  // Net of refunds, as everywhere revenue is counted (admin/revenue.ts).
+  const net = (p: { amount: number; refundedAmount: number }) => p.amount - p.refundedAmount;
+  const razorpayPaise = razorpay.reduce((s, p) => s + net(p), 0);
   const topupPaise = topups.reduce((s, t) => s + t.amountPaise, 0);
   const manualPaise = verifiedManual.reduce((s, m) => s + m.amountPaise, 0);
   const pendingPaise = manual.filter((m) => m.status === 'PENDING').reduce((s, m) => s + m.amountPaise, 0);
 
   const ms = monthStart(now);
   const thisMonthPaise =
-    razorpay.filter((p) => (p.paidAt ?? p.createdAt) >= ms).reduce((s, p) => s + p.amount, 0) +
+    razorpay.filter((p) => (p.paidAt ?? p.createdAt) >= ms).reduce((s, p) => s + net(p), 0) +
     topups.filter((t) => t.createdAt >= ms).reduce((s, t) => s + t.amountPaise, 0) +
     verifiedManual.filter((m) => m.paidAt >= ms).reduce((s, m) => s + m.amountPaise, 0);
 
@@ -284,13 +290,11 @@ export const onboarderSummary = async (onboarderId: string) => {
     return { clients: 0, monthlyBilledPaise: 0, revenueTotalPaise: 0, revenueThisMonthPaise: 0, pendingPaise: 0 };
   }
 
-  const ms = monthStart();
-  const [payments, manual, topups, addOns, subs] = await Promise.all([
-    prisma.payment.findMany({ where: { organizationId: { in: ids }, status: 'SUCCESS' }, select: { amount: true, paidAt: true, createdAt: true } }),
-    prisma.manualPayment.findMany({ where: { organizationId: { in: ids }, status: { in: ['VERIFIED', 'PENDING'] } }, select: { amountPaise: true, status: true, paidAt: true } }),
-    prisma.walletTransaction.findMany({
-      where: { wallet: { organizationId: { in: ids } }, type: 'credit', status: 'completed', razorpayPaymentId: { not: null } },
-      select: { amountPaise: true, createdAt: true },
+  const [received, pending, addOns, subs] = await Promise.all([
+    receivedSummary(ids),
+    prisma.manualPayment.aggregate({
+      where: { organizationId: { in: ids }, status: 'PENDING' },
+      _sum: { amountPaise: true },
     }),
     prisma.clientAddOn.findMany({ where: { organizationId: { in: ids }, removedAt: null, billing: 'MONTHLY' } }),
     prisma.subscription.findMany({
@@ -299,16 +303,6 @@ export const onboarderSummary = async (onboarderId: string) => {
     }),
   ]);
 
-  const verified = manual.filter((m) => m.status === 'VERIFIED');
-  const revenueTotalPaise =
-    payments.reduce((s, p) => s + p.amount, 0) +
-    verified.reduce((s, m) => s + m.amountPaise, 0) +
-    topups.reduce((s, t) => s + t.amountPaise, 0);
-  const revenueThisMonthPaise =
-    payments.filter((p) => (p.paidAt ?? p.createdAt) >= ms).reduce((s, p) => s + p.amount, 0) +
-    verified.filter((m) => m.paidAt >= ms).reduce((s, m) => s + m.amountPaise, 0) +
-    topups.filter((t) => t.createdAt >= ms).reduce((s, t) => s + t.amountPaise, 0);
-
   const monthlyBilledPaise =
     subs.filter((s) => s.plan.type !== 'FREE_DEMO').reduce((sum, s) => sum + planMonthlyPaise(s.plan, s.billingCycle), 0) +
     addOns.filter((a) => isAddOnActive(a)).reduce((s, a) => s + a.quantity * a.unitPricePaise, 0);
@@ -316,9 +310,9 @@ export const onboarderSummary = async (onboarderId: string) => {
   return {
     clients: ids.length,
     monthlyBilledPaise,
-    revenueTotalPaise,
-    revenueThisMonthPaise,
-    pendingPaise: manual.filter((m) => m.status === 'PENDING').reduce((s, m) => s + m.amountPaise, 0),
+    revenueTotalPaise: received.total.totalPaise,
+    revenueThisMonthPaise: received.month.totalPaise,
+    pendingPaise: pending._sum.amountPaise ?? 0,
   };
 };
 
