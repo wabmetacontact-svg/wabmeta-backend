@@ -6,6 +6,7 @@
 
 import prisma from '../../config/database';
 import { effectiveLimit, parseLimitOverrides } from '../admin/orgControl';
+import { getAddOnBoosts, withBoost } from '../admin/addOns';
 import { assertRegistrationOpen } from '../admin/systemSettings';
 import { config } from '../../config';
 import { getFeatureLocks, lockColumns } from '../../middleware/featureLock';
@@ -318,11 +319,15 @@ const enforceOrgSessionCap = async (organizationId: string): Promise<void> => {
     },
   });
 
+  const boosts = await getAddOnBoosts(organizationId);
   const cap = sessionCapForSeats(
-    effectiveLimit(
-      parseLimitOverrides(org?.limitOverrides),
-      'teamMembers',
-      org?.subscription?.plan?.maxTeamMembers
+    withBoost(
+      effectiveLimit(
+        parseLimitOverrides(org?.limitOverrides),
+        'teamMembers',
+        org?.subscription?.plan?.maxTeamMembers
+      ),
+      boosts.teamMembers
     )
   );
   if (cap === null) return;
@@ -474,7 +479,7 @@ const getDefaultOrg = async (userId: string) => {
 // HELPER: Create org with plan
 // ============================================
 
-const createOrgWithPlan = async (
+export const createOrgWithPlan = async (
   tx: any,
   userId: string,
   orgName: string

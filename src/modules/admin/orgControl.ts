@@ -20,6 +20,7 @@
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
+import { addOnBoosts } from './addOns';
 
 export type OrgStatus = 'ACTIVE' | 'SUSPENDED' | 'READ_ONLY';
 
@@ -42,6 +43,8 @@ export interface OrgControl {
   status: OrgStatus;
   statusReason: string | null;
   limitOverrides: LimitOverrides;
+  /** Capacity added by active paid add-ons, on top of the limit. */
+  addOnBoosts: LimitOverrides;
 }
 
 const CACHE_MS = 30_000;
@@ -50,6 +53,7 @@ const ACTIVE_DEFAULT: OrgControl = {
   status: 'ACTIVE',
   statusReason: null,
   limitOverrides: {},
+  addOnBoosts: {},
 };
 
 // ─── Pure helpers ──────────────────────────────────────────────────────────
@@ -166,16 +170,23 @@ export const getOrgControl = async (organizationId: string): Promise<OrgControl>
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
 
   try {
-    const org = await prisma.organization.findUnique({
-      where: { id: organizationId },
-      select: { status: true, statusReason: true, limitOverrides: true },
-    });
+    const [org, addOns] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { status: true, statusReason: true, limitOverrides: true },
+      }),
+      prisma.clientAddOn.findMany({
+        where: { organizationId, removedAt: null },
+        select: { type: true, quantity: true, startsAt: true, endsAt: true, removedAt: true },
+      }),
+    ]);
 
     const value: OrgControl = org
       ? {
           status: parseOrgStatus(org.status),
           statusReason: org.statusReason,
           limitOverrides: parseLimitOverrides(org.limitOverrides),
+          addOnBoosts: addOnBoosts(addOns),
         }
       : ACTIVE_DEFAULT;
 

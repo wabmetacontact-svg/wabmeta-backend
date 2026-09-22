@@ -354,7 +354,7 @@ export const globalSearch = async (rawQuery: string) => {
 export const getRevenueReport = async (months = 6) => {
   const n = Math.min(24, Math.max(1, Math.floor(months) || 6));
 
-  const [byMonth, walletByMonth, activeSubs, churned, coupons] = await Promise.all([
+  const [byMonth, walletByMonth, activeSubs, churned, manualByMonth, monthlyAddOns, coupons] = await Promise.all([
     prisma.$queryRaw<Row[]>`
       SELECT to_char(date_trunc('month', COALESCE(p."paidAt", p."createdAt") AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM') AS month,
              SUM(p.amount)::bigint AS paise,
@@ -384,6 +384,19 @@ export const getRevenueReport = async (months = 6) => {
         currentPeriodEnd: { gte: new Date(Date.now() - 30 * 86_400_000), lt: new Date() },
         status: { in: ['EXPIRED', 'CANCELLED', 'ACTIVE'] },
       },
+    }),
+    // Offline payments count only once verified.
+    prisma.$queryRaw<Row[]>`
+      SELECT to_char(date_trunc('month', m."paidAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM') AS month,
+             SUM(m."amountPaise")::bigint AS paise,
+             COUNT(*)::int AS payments
+      FROM "ManualPayment" m
+      WHERE m.status = 'VERIFIED'
+        AND m."paidAt" >= date_trunc('month', NOW()) - make_interval(months => ${n - 1}::int)
+      GROUP BY 1 ORDER BY 1`,
+    prisma.clientAddOn.findMany({
+      where: { removedAt: null, billing: 'MONTHLY', startsAt: { lte: new Date() } },
+      select: { quantity: true, unitPricePaise: true, endsAt: true },
     }),
     prisma.couponRedemption.aggregate({
       _sum: { discountPaise: true },
@@ -430,6 +443,12 @@ export const getRevenueReport = async (months = 6) => {
   return {
     months: byMonth.map((r) => ({ month: r.month, paise: num(r.paise), payments: num(r.payments), customers: num(r.customers) })),
     walletTopups: walletByMonth.map((r) => ({ month: r.month, paise: num(r.paise), topups: num(r.topups) })),
+    offlinePayments: manualByMonth.map((r) => ({ month: r.month, paise: num(r.paise), payments: num(r.payments) })),
+    // Monthly add-ons billed on top of plans; not in mrrPaise, which is what
+    // plan payments imply.
+    addOnMrrPaise: monthlyAddOns
+      .filter((a) => !a.endsAt || a.endsAt > new Date())
+      .reduce((s, a) => s + a.quantity * a.unitPricePaise, 0),
     mrrPaise,
     arrPaise: mrrPaise * 12,
     payingCustomers: paying,

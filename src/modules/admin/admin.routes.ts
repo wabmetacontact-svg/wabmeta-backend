@@ -4,7 +4,15 @@ import { Router } from 'express';
 import { adminController } from './admin.controller';
 import { validate } from '../../middleware/validate';
 import { authenticateAdmin } from './admin.middleware';
-import { requirePermission as can } from './admin.permissions';
+import { requireAnyPermission as canAny, requireOrgAccess, requirePermission as can } from './admin.permissions';
+import {
+  addOnSchema,
+  assignOnboarderSchema,
+  clientBillingController as bill,
+  createClientSchema,
+  manualPaymentSchema,
+  reviewPaymentSchema,
+} from './clientBilling.controller';
 import { auditAdminActions } from './admin.audit';
 import {
   adminControlController as control,
@@ -269,13 +277,13 @@ router.put(
 // Feature Management
 router.get(
   '/organizations/:organizationId/features',
-  can('orgs.read'),
+  requireOrgAccess('orgs.read', (req) => String(req.params.organizationId || '') || undefined),
   adminController.getOrganizationFeatures.bind(adminController)
 );
 
 router.put(
   '/organizations/:organizationId/features',
-  can('orgs.features'),
+  requireOrgAccess('orgs.features', (req) => String(req.params.organizationId || '') || undefined),
   validate(organizationFeaturesSchema),
   adminController.updateOrganizationFeatures.bind(adminController)
 );
@@ -301,7 +309,7 @@ router.get(
 // Assign plan to organization
 router.post(
   '/subscriptions/assign',
-  can('billing.write'),
+  requireOrgAccess('billing.write', (req) => (typeof req.body?.organizationId === 'string' ? req.body.organizationId : undefined)),
   validate(assignPlanSchema),
   adminController.assignPlan.bind(adminController)
 );
@@ -309,7 +317,7 @@ router.post(
 // Extend subscription
 router.post(
   '/subscriptions/:organizationId/extend',
-  can('billing.write'),
+  requireOrgAccess('billing.write', (req) => String(req.params.organizationId || '') || undefined),
   validate(extendSubscriptionSchema),
   adminController.extendSubscription.bind(adminController)
 );
@@ -331,7 +339,7 @@ router.post(
  * @desc    Get all plans
  * @access  Admin
  */
-router.get('/plans', can('orgs.read'), adminController.getPlans.bind(adminController));
+router.get('/plans', canAny('orgs.read', 'clients.own'), adminController.getPlans.bind(adminController));
 
 /**
  * @route   POST /api/v1/admin/plans
@@ -624,7 +632,9 @@ router.post('/users/:id/force-logout', can('sessions.manage'), control.forceLogo
 // Read-only, 30-minute view of the app as this user
 router.post(
   '/users/:id/impersonate',
-  can('impersonate'),
+  // An onboarder may view their own client's account; the organization in the
+  // body must be theirs, and impersonateUser checks the user belongs to it.
+  requireOrgAccess('impersonate', (req) => (typeof req.body?.organizationId === 'string' ? req.body.organizationId : undefined)),
   validate(impersonateSchema),
   control.impersonate
 );
@@ -641,7 +651,7 @@ router.delete('/admins/:id/2fa', can('admins.manage'), control.resetAdminTwoFact
 // ============================================
 
 // One organization end to end
-router.get('/organizations/:id/overview', can('orgs.read'), ops.overview);
+router.get('/organizations/:id/overview', requireOrgAccess('orgs.read'), ops.overview);
 
 // Accounts that need attention
 router.get('/risk', can('orgs.read'), ops.risk);
@@ -657,14 +667,14 @@ router.get('/revenue', can('billing.read'), ops.revenue);
 // ============================================
 
 // Internal notes on an organization
-router.get('/organizations/:id/notes', can('orgs.read'), ops.listNotes);
-router.post('/organizations/:id/notes', can('orgs.write'), validate(noteSchema), ops.addNote);
-router.patch('/organizations/:id/notes/:noteId', can('orgs.write'), validate(notePatchSchema), ops.updateNote);
-router.delete('/organizations/:id/notes/:noteId', can('orgs.write'), ops.deleteNote);
+router.get('/organizations/:id/notes', requireOrgAccess('orgs.read'), ops.listNotes);
+router.post('/organizations/:id/notes', requireOrgAccess('orgs.write'), validate(noteSchema), ops.addNote);
+router.patch('/organizations/:id/notes/:noteId', requireOrgAccess('orgs.write'), validate(notePatchSchema), ops.updateNote);
+router.delete('/organizations/:id/notes/:noteId', requireOrgAccess('orgs.write'), ops.deleteNote);
 
 // Internal tags
 router.get('/tags', can('orgs.read'), ops.allTags);
-router.put('/organizations/:id/tags', can('orgs.write'), validate(tagsSchema), ops.setTags);
+router.put('/organizations/:id/tags', requireOrgAccess('orgs.write'), validate(tagsSchema), ops.setTags);
 
 // Announcements to customers
 router.get('/announcements', can('orgs.read'), ops.listAnnouncements);
@@ -684,5 +694,40 @@ router.get('/coupons', can('billing.read'), ops.listCoupons);
 router.post('/coupons', can('coupons.write'), validate(couponCreateSchema), ops.createCoupon);
 router.put('/coupons/:id', can('coupons.write'), validate(couponUpdateSchema), ops.updateCoupon);
 router.delete('/coupons/:id', can('coupons.write'), ops.deleteCoupon);
+
+// ============================================
+// CLIENT BILLING, ADD-ONS, OFFLINE PAYMENTS
+// ============================================
+
+// What can be sold as an add-on, with default prices
+router.get('/addon-catalog', canAny('orgs.read', 'clients.own'), bill.catalog);
+
+// A client's bill (plan + add-ons) and the money actually received
+router.get('/organizations/:id/billing', requireOrgAccess('billing.read'), bill.billing);
+
+// Add-ons: raise the client's limit while active
+router.get('/organizations/:id/addons', requireOrgAccess('orgs.read'), bill.listAddOns);
+router.post('/organizations/:id/addons', requireOrgAccess('billing.write'), validate(addOnSchema), bill.addAddOn);
+router.delete('/organizations/:id/addons/:addOnId', requireOrgAccess('billing.write'), bill.removeAddOn);
+
+// Offline payments: recorded as pending, counted once verified
+router.post(
+  '/organizations/:id/manual-payments',
+  requireOrgAccess('billing.write'),
+  validate(manualPaymentSchema),
+  bill.recordPayment
+);
+router.get('/manual-payments', can('billing.read'), bill.paymentQueue);
+router.post('/manual-payments/:paymentId/review', can('payments.verify'), validate(reviewPaymentSchema), bill.reviewPayment);
+
+// Onboarders
+router.put('/organizations/:id/onboarder', can('orgs.write'), validate(assignOnboarderSchema), bill.assignOnboarder);
+router.get('/onboarders', can('billing.read'), bill.onboarders);
+
+// The signed-in onboarder's own clients
+router.get('/my-clients', can('clients.own'), bill.myClients);
+router.get('/my-clients/summary', can('clients.own'), bill.mySummary);
+router.get('/my-clients/payments', can('clients.own'), bill.myPayments);
+router.post('/my-clients', can('clients.own'), validate(createClientSchema), bill.createClient);
 
 export default router;

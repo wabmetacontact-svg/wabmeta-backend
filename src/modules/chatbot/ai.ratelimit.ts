@@ -1,6 +1,6 @@
 // src/modules/chatbot/ai.ratelimit.ts
 import { getRedis } from '../../config/redis';
-import { getLimitOverrides } from '../admin/orgControl';
+import { getOrgControl } from '../admin/orgControl';
 
 /**
  * Per-organization daily cap on AI chatbot replies.
@@ -35,7 +35,10 @@ export async function consumeAiQuota(organizationId: string): Promise<boolean> {
     const key = keyFor(organizationId);
 
     // An admin can give one organization more (or fewer) replies per day.
-    const limit = (await getLimitOverrides(organizationId)).aiRepliesPerDay ?? DAILY_AI_LIMIT;
+    // Paid AI top-ups add to it.
+    const control = await getOrgControl(organizationId);
+    const limit =
+      (control.limitOverrides.aiRepliesPerDay ?? DAILY_AI_LIMIT) + (control.addOnBoosts.aiRepliesPerDay ?? 0);
 
     const used = Number((await redis.get(key)) || 0);
     if (used >= limit) return false;
