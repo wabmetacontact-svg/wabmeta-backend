@@ -312,72 +312,10 @@ export class AdminService {
         prisma.campaign.count(),
       ]);
 
-      // ✅ Get ACTUAL revenue from Payment table (Exclude manual/admin assigned)
-      const [totalRevenue, monthlyRevenue, todayRevenue] = await Promise.all([
-        // Total all-time revenue (Only from Razorpay)
-        prisma.payment.aggregate({
-          where: {
-            status: 'SUCCESS',
-            razorpayPaymentId: { not: null } // ✅ Only count actual purchases
-          },
-          _sum: {
-            amount: true
-          }
-        }),
-        
-        // This month's revenue (Only from Razorpay)
-        prisma.payment.aggregate({
-          where: {
-            status: 'SUCCESS',
-            razorpayPaymentId: { not: null }, // ✅ Only count actual purchases
-            createdAt: {
-              gte: startOfMonth
-            }
-          },
-          _sum: {
-            amount: true
-          }
-        }),
-        
-        // Today's revenue (Only from Razorpay)
-        prisma.payment.aggregate({
-          where: {
-            status: 'SUCCESS',
-            razorpayPaymentId: { not: null }, // ✅ Only count actual purchases
-            createdAt: {
-              gte: today,
-              lt: tomorrow
-            }
-          },
-          _sum: {
-            amount: true
-          }
-        })
-      ]);
-
-      // ✅ Get subscription breakdown (Exclude manual/admin assigned for MRR)
-      const subscriptionsByPlan = await prisma.subscription.groupBy({
-        by: ['planId'],
-        where: {
-          status: 'ACTIVE',
-          paymentMethod: { not: 'admin_assigned' } // ✅ Only count actual paid subscriptions for MRR
-        },
-        _count: true
-      });
-
-      // Get plan details for MRR calculation
-      const plans = await prisma.plan.findMany();
-      const planMap = new Map(plans.map(p => [p.id, p]));
-
-      // ✅ Calculate actual MRR from active subscriptions
-      let mrr = 0;
-      for (const sub of subscriptionsByPlan) {
-        if (!sub.planId) continue;
-        const plan = planMap.get(sub.planId);
-        if (plan) {
-          mrr += Number(plan.monthlyPrice) * sub._count;
-        }
-      }
+      // Revenue = money actually received, India time. One definition shared
+      // with the Revenue page and client billing - see admin/revenue.ts.
+      const { receivedSummary, computeMrr } = await import('./revenue');
+      const [received, mrrReport] = await Promise.all([receivedSummary(), computeMrr()]);
 
       // ✅ WhatsApp connection stats with connectionType
       const whatsappStats = await prisma.whatsAppAccount.groupBy({
@@ -427,12 +365,17 @@ export class AdminService {
           thisMonthSent: messagesThisMonth,
         },
         revenue: {
-          // ✅ Actual revenue from payments (in paise, divide by 100 for rupees)
-          totalRevenue: totalRevenue._sum.amount || 0,
-          monthlyRevenue: monthlyRevenue._sum.amount || 0,
-          todayRevenue: todayRevenue._sum.amount || 0,
-          mrr, // ✅ Actual MRR from active subscriptions
-          arr: mrr * 12,
+          // Paise. Plan payments net of refunds + wallet top-ups + verified
+          // offline payments.
+          totalRevenue: received.total.totalPaise,
+          monthlyRevenue: received.month.totalPaise,
+          todayRevenue: received.today.totalPaise,
+          // Rupees (the dashboard shows these as they are). From what active
+          // customers last paid, not list prices.
+          mrr: Math.round(mrrReport.mrrPaise / 100),
+          arr: Math.round((mrrReport.mrrPaise * 12) / 100),
+          addOnMrr: Math.round(mrrReport.addOnMrrPaise / 100),
+          breakdown: received,
         },
         whatsapp: {
           connectedAccounts: connectedCloudApi + connectedBusinessApp,

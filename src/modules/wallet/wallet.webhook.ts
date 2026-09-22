@@ -76,6 +76,13 @@ router.post('/razorpay', async (req: Request, res: Response) => {
         await handlePaymentFailed(event.payload.payment.entity);
         break;
 
+      // A refund made from the Razorpay dashboard. Both events carry the
+      // payment, whose amount_refunded is the running total.
+      case 'payment.refunded':
+      case 'refund.processed':
+        await handleRefund(event.payload.payment?.entity, event.payload.refund?.entity);
+        break;
+
       default:
         console.log(`ℹ️ Unhandled event: ${eventType}`);
     }
@@ -96,7 +103,9 @@ async function handlePaymentCaptured(payment: any) {
   const purpose = notes.purpose;
 
   if (purpose !== 'wallet_topup') {
-    console.log('ℹ️ Non-wallet payment, skipping:', purpose || 'unknown');
+    // A plan purchase. The browser normally activates it through /verify;
+    // this catches the payment when the customer closed the tab first.
+    await activatePlanIfPlanOrder(payment);
     return;
   }
 
@@ -134,6 +143,10 @@ async function handlePaymentCaptured(payment: any) {
 // ─── Order Paid (fallback) ────────────────────────────────────────────────────
 async function handleOrderPaid(order: any, payment?: any) {
   const notes = order.notes || {};
+  if (notes.planId && payment) {
+    await activatePlanIfPlanOrder(payment, order);
+    return;
+  }
   if (notes.purpose !== 'wallet_topup') return;
 
   console.log('📦 Order paid event:', order.id);
@@ -160,6 +173,57 @@ async function handlePaymentFailed(payment: any) {
       lastAttemptAt: new Date(),
     },
   });
+}
+
+// ─── Plan purchase (webhook fallback for /verify) ─────────────────────────────
+async function activatePlanIfPlanOrder(payment: any, orderEntity?: any) {
+  if (!payment?.order_id) return;
+
+  const { billingService, getRazorpayInstance } = await import('../billing/billing.service');
+
+  // Plan orders keep their details in the ORDER's notes, not the payment's.
+  let order = orderEntity;
+  if (!order?.notes?.planId) {
+    const rzp = getRazorpayInstance();
+    if (!rzp) return;
+    order = await rzp.orders.fetch(payment.order_id);
+  }
+
+  const notes = order?.notes || {};
+  if (!notes.planId || !notes.organizationId) {
+    console.log('ℹ️ Payment is neither a wallet top-up nor a plan order, skipping:', payment.id);
+    return;
+  }
+
+  const result = await billingService.activatePlanFromOrder({
+    organizationId: notes.organizationId,
+    order,
+    razorpayPaymentId: payment.id,
+  });
+  console.log(
+    result.alreadyRecorded
+      ? `ℹ️ Plan payment ${payment.id} was already recorded by /verify`
+      : `✅ Plan activated from webhook for ${notes.organizationId} (${payment.id})`
+  );
+}
+
+// ─── Refunds ──────────────────────────────────────────────────────────────────
+async function handleRefund(paymentEntity: any, refundEntity: any) {
+  const paymentId = paymentEntity?.id || refundEntity?.payment_id;
+  if (!paymentId) return;
+
+  let refunded = Number(paymentEntity?.amount_refunded);
+  if (!Number.isFinite(refunded)) {
+    const { getRazorpayInstance } = await import('../billing/billing.service');
+    const rzp = getRazorpayInstance();
+    if (!rzp) return;
+    const p: any = await rzp.payments.fetch(paymentId);
+    refunded = Number(p.amount_refunded) || 0;
+  }
+
+  const { billingService } = await import('../billing/billing.service');
+  const updated = await billingService.recordRefund(paymentId, refunded);
+  console.log(updated ? `↩️ Refund recorded on ${paymentId}: ${refunded} paise` : `ℹ️ Refund for unknown payment ${paymentId}`);
 }
 
 export default router;

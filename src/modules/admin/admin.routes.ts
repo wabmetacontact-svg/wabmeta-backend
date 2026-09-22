@@ -662,6 +662,11 @@ router.get('/search', can('users.read'), ops.search);
 // Payments and run rate
 router.get('/revenue', can('billing.read'), ops.revenue);
 
+// Match Razorpay's captured payments against what was recorded, and record
+// one that was missed (a plan payment also activates the plan).
+router.get('/revenue/reconcile', can('billing.read'), ops.reconcile);
+router.post('/revenue/reconcile/:paymentId/import', can('payments.verify'), ops.importPayment);
+
 // ============================================
 // OPERATIONS
 // ============================================

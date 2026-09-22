@@ -9,6 +9,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { createCoupon, deleteCoupon, listCoupons, updateCoupon } from '../billing/coupons';
 import { hasPermission, Permission } from './admin.permissions';
 import { getOrganizationOverview, getRevenueReport, getRiskReport, globalSearch } from './admin.insights.service';
+import { importRazorpayPayment, reconcileWithRazorpay } from './reconcile';
 import {
   addNote,
   BULK_MAX,
@@ -131,6 +132,12 @@ export const adminOpsController = {
   search: handle(async (req, res) => ok(res, await globalSearch(String(req.query.q || '')))),
 
   revenue: handle(async (req, res) => ok(res, await getRevenueReport(Number(req.query.months) || 6))),
+
+  reconcile: handle(async (req, res) => ok(res, await reconcileWithRazorpay(Number(req.query.days) || 7))),
+
+  importPayment: handle(async (req, res) =>
+    ok(res, await importRazorpayPayment(param(req, 'paymentId')), 'Payment recorded')
+  ),
 
   listNotes: handle(async (req, res) => ok(res, await listNotes(param(req, 'id')))),
 

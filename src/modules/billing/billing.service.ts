@@ -14,7 +14,7 @@ import { applyCoupon, checkCouponForCheckout, recordCouponRedemption } from './c
 
 let razorpay: any = null;
 
-const getRazorpayInstance = () => {
+export const getRazorpayInstance = () => {
   if (!razorpay) {
     const keyId = process.env.RAZORPAY_KEY_ID;
     const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -802,13 +802,7 @@ class BillingService {
     razorpay_payment_id: string;
     razorpay_signature: string;
   }) {
-    const {
-      organizationId,
-      userId,
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature
-    } = params;
+    const { organizationId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = params;
 
     console.log('Verifying payment:', { orderId: razorpay_order_id, paymentId: razorpay_payment_id });
 
@@ -835,120 +829,181 @@ class BillingService {
       throw new Error('Payment gateway not available');
     }
 
-    try {
-      const order = await rzp.orders.fetch(razorpay_order_id);
-      const notes = order.notes || {};
+    const order = await rzp.orders.fetch(razorpay_order_id);
 
-      console.log('Order notes:', notes);
-
-      const plan = await prisma.plan.findUnique({
-        where: { id: notes.planId }
-      });
-
-      if (!plan) {
-        throw new Error('Plan not found for this payment');
-      }
-
-      // Calculate subscription period based on validityDays
-      const now = new Date();
-      // Jo becha gaya wahi milega. Notes me order banate waqt ki validity
-      // likhi hoti hai; plan ki apni validityDays uske baad aati hai.
-      const validityDays = subscriptionDays({
-        notesValidityDays: notes.validityDays,
-        billingCycle: notes.billingCycle,
-        planValidityDays: plan.validityDays,
-      });
-      const periodEnd = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000);
-
-      console.log('Creating subscription:', {
-        planId: plan.id,
-        validityDays,
-        periodEnd,
-      });
-
-      // Update or create subscription
-      const subscription = await prisma.subscription.upsert({
-        where: { organizationId },
-        create: {
-          organizationId,
-          planId: plan.id,
-          status: SubscriptionStatus.ACTIVE,
-          billingCycle: notes.billingCycle || 'monthly',
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-          paymentMethod: 'razorpay',
-          lastPaymentAt: now,
-          messagesUsed: 0,
-          contactsUsed: 0
-        },
-        update: {
-          planId: plan.id,
-          status: SubscriptionStatus.ACTIVE,
-          billingCycle: notes.billingCycle || 'monthly',
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-          paymentMethod: 'razorpay',
-          lastPaymentAt: now,
-          cancelledAt: null
-        }
-      });
-
-      // Update organization plan type
-      await prisma.organization.update({
-        where: { id: organizationId },
-        data: { planType: plan.type }
-      });
-
-        // Plan badla hai - featureLock ka cache clear karo taaki naye plan ke
-      // locks turant effective ho jayein (warna 60s tak purane dikhenge)
-      invalidateFeatureLocks(organizationId);
-
-
-      // ✅ Create Payment record for revenue tracking
-      await prisma.payment.create({
-        data: {
-          organizationId,
-          subscriptionId: subscription.id,
-          razorpayOrderId: razorpay_order_id,
-          razorpayPaymentId: razorpay_payment_id,
-          razorpaySignature: razorpay_signature,
-          amount: Number(order.amount) || Math.round(Number(plan.monthlyPrice) * 100), // Amount in paise
-          currency: 'INR',
-          status: 'SUCCESS',
-          planId: plan.id,
-          planName: plan.name,
-          billingCycle: notes.billingCycle || 'monthly',
-          description: `${plan.name} subscription`,
-          receipt: order.receipt || `wm_${organizationId.slice(-6)}_${Date.now().toString().slice(-8)}`,
-          paidAt: now,
-        },
-      });
-
-      await recordCouponRedemption({
-        notes,
-        organizationId,
-        razorpayOrderId: razorpay_order_id,
-        paidPaise: Number(order.amount) || 0,
-      });
-
-      console.log('✅ Subscription activated:', {
-        subscriptionId: subscription.id,
-        planName: plan.name,
-        validUntil: periodEnd,
-        paymentRecorded: true,
-      });
-
-      return {
-        subscription,
-        plan,
-        validUntil: periodEnd,
-        message: `Subscription activated! Valid until ${periodEnd.toLocaleDateString('en-IN')}`
-      };
-
-    } catch (error: any) {
-      console.error('❌ Payment verification error:', error);
-      throw new Error(error.message || 'Payment verification failed');
+    // The order says which organization it was made for. Without this check
+    // a user could pay an order made for another organization and have it
+    // activate a plan on their own.
+    if (order.notes?.organizationId && order.notes.organizationId !== organizationId) {
+      throw new AppError('This payment belongs to a different account.', 403);
     }
+
+    return this.activatePlanFromOrder({
+      organizationId,
+      order,
+      razorpayPaymentId: razorpay_payment_id,
+      razorpaySignature: razorpay_signature,
+    });
+  }
+
+  /**
+   * Turn a paid Razorpay order into an active plan and a Payment row.
+   *
+   * Called from two places that can both fire for the same payment: the
+   * browser's /verify after checkout, and the Razorpay webhook (which is
+   * what catches a payment whose browser closed before /verify ran). The
+   * Payment row is unique on the order, so whichever arrives second finds
+   * it and changes nothing - the customer is never extended twice and the
+   * money is never counted twice.
+   */
+  async activatePlanFromOrder(params: {
+    organizationId: string;
+    order: { id: string; amount: number | string; receipt?: string | null; notes?: any };
+    razorpayPaymentId: string;
+    razorpaySignature?: string | null;
+  }): Promise<any> {
+    const { organizationId, order, razorpayPaymentId } = params;
+    const notes = order.notes || {};
+
+    const existing = await prisma.payment.findUnique({
+      where: { razorpayOrderId: order.id },
+      include: { subscription: true },
+    });
+    if (existing) {
+      const plan = existing.planId ? await prisma.plan.findUnique({ where: { id: existing.planId } }) : null;
+      return {
+        subscription: existing.subscription,
+        plan,
+        validUntil: existing.subscription?.currentPeriodEnd,
+        alreadyRecorded: true,
+        message: 'Payment already received - your plan is active.',
+      };
+    }
+
+    const plan = await prisma.plan.findUnique({ where: { id: notes.planId } });
+    if (!plan) {
+      throw new Error('Plan not found for this payment');
+    }
+
+    const now = new Date();
+    // What was sold is written in the order notes; the plan's own
+    // validityDays only comes after that.
+    const validityDays = subscriptionDays({
+      notesValidityDays: notes.validityDays,
+      billingCycle: notes.billingCycle,
+      planValidityDays: plan.validityDays,
+    });
+    const periodEnd = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000);
+    const amountPaise = Number(order.amount) || Math.round(Number(plan.monthlyPrice) * 100);
+
+    let subscription;
+    try {
+      subscription = await prisma.$transaction(async (tx) => {
+        const sub = await tx.subscription.upsert({
+          where: { organizationId },
+          create: {
+            organizationId,
+            planId: plan.id,
+            status: SubscriptionStatus.ACTIVE,
+            billingCycle: notes.billingCycle || 'monthly',
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            paymentMethod: 'razorpay',
+            lastPaymentAt: now,
+            messagesUsed: 0,
+            contactsUsed: 0,
+          },
+          update: {
+            planId: plan.id,
+            status: SubscriptionStatus.ACTIVE,
+            billingCycle: notes.billingCycle || 'monthly',
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+            paymentMethod: 'razorpay',
+            lastPaymentAt: now,
+            cancelledAt: null,
+          },
+        });
+
+        await tx.organization.update({
+          where: { id: organizationId },
+          data: { planType: plan.type },
+        });
+
+        // Unique on razorpayOrderId: a second, simultaneous activation fails
+        // here and its whole transaction - including the subscription change
+        // above - rolls back.
+        await tx.payment.create({
+          data: {
+            organizationId,
+            subscriptionId: sub.id,
+            razorpayOrderId: order.id,
+            razorpayPaymentId,
+            razorpaySignature: params.razorpaySignature ?? null,
+            amount: amountPaise,
+            currency: 'INR',
+            status: 'SUCCESS',
+            planId: plan.id,
+            planName: plan.name,
+            billingCycle: notes.billingCycle || 'monthly',
+            description: `${plan.name} subscription`,
+            receipt: order.receipt || `wm_${organizationId.slice(-6)}_${Date.now().toString().slice(-8)}`,
+            paidAt: now,
+          },
+        });
+
+        return sub;
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        // The other path recorded it a moment ago.
+        return this.activatePlanFromOrder(params);
+      }
+      throw err;
+    }
+
+    // Plan changed - clear the feature-lock cache so the new plan applies now.
+    invalidateFeatureLocks(organizationId);
+
+    await recordCouponRedemption({
+      notes,
+      organizationId,
+      razorpayOrderId: order.id,
+      paidPaise: amountPaise,
+    });
+
+    console.log('✅ Subscription activated:', {
+      subscriptionId: subscription.id,
+      planName: plan.name,
+      validUntil: periodEnd,
+    });
+
+    return {
+      subscription,
+      plan,
+      validUntil: periodEnd,
+      alreadyRecorded: false,
+      message: `Subscription activated! Valid until ${periodEnd.toLocaleDateString('en-IN')}`,
+    };
+  }
+
+  /**
+   * Record a refund made on Razorpay. `refundedPaise` is the payment's total
+   * refunded so far (Razorpay's amount_refunded), so replaying the webhook
+   * sets the same number again instead of adding it twice.
+   */
+  async recordRefund(razorpayPaymentId: string, refundedPaise: number) {
+    const payment = await prisma.payment.findUnique({ where: { razorpayPaymentId } });
+    if (!payment) return null;
+
+    const refunded = Math.min(payment.amount, Math.max(0, Math.floor(refundedPaise)));
+    return prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        refundedAmount: refunded,
+        status: refunded >= payment.amount ? 'REFUNDED' : payment.status,
+      },
+    });
   }
 
   // ============================================

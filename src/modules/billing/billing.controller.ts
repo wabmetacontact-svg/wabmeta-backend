@@ -133,7 +133,7 @@ class BillingController {
       return sendSuccess(res, result, 'Payment verified successfully');
     } catch (error: any) {
       console.error('Verify payment error:', error);
-      return errorResponse(res, error.message || 'Payment verification failed', 500);
+      return errorResponse(res, error.message || 'Payment verification failed', error.statusCode || 500);
     }
   }
 
