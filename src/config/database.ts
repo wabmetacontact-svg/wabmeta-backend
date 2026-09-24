@@ -2,13 +2,33 @@
 import { PrismaClient } from '@prisma/client';
 import { dbLog } from '../utils/logger';
 
-const createPrismaClient = () => {
-  let dbUrl = process.env.DATABASE_URL;
+/**
+ * Hosts we know speak TLS, so the connection can demand it.
+ *
+ * Without sslmode, libpq's default is "prefer": it encrypts when the server
+ * offers TLS and falls back to plaintext when it does not. A silent fallback is
+ * the problem - the database is reachable over the public internet, so every
+ * query, including the credentials, could travel unencrypted and nothing in the
+ * logs would say so. "require" refuses to connect rather than fall back.
+ *
+ * It is deliberately a list of known hosts and not "everything but localhost":
+ * a managed Postgres without TLS would stop connecting the moment it deployed,
+ * and that is not a failure mode worth risking for a guess. Local Postgres
+ * (docker, tests on localhost:5433) has no certificate and is untouched.
+ *
+ * Note this encrypts but does not verify the server's identity - Prisma only
+ * accepts sslmode prefer/disable/require, so pinning Amazon's CA would need
+ * sslcert with the RDS bundle shipped in the image.
+ */
+const TLS_HOSTS = ['rds.amazonaws.com', 'neon.tech'];
 
-  if (!dbUrl) {
-    throw new Error('DATABASE_URL environment variable is not set');
-  }
-
+/**
+ * Apply this deployment's connection settings to a raw DATABASE_URL.
+ *
+ * Exported for the tests: the client itself is built once at module load, so
+ * without a pure function here there is no way to assert what URL Prisma gets.
+ */
+export const buildDatabaseUrl = (dbUrl: string): string => {
   const baseUrl = dbUrl.split('?')[0];
   const existingParams = new URLSearchParams(
     dbUrl.includes('?') ? dbUrl.split('?')[1] : ''
@@ -26,8 +46,14 @@ const createPrismaClient = () => {
   }
 
   if (isNeon) {
-    existingParams.set('sslmode', 'require');
     dbLog.info('Database mode configured', { mode: 'Neon' });
+  }
+
+  // An sslmode already in the URL wins, so a deployment can still override this
+  // from the environment without a code change.
+  if (!existingParams.has('sslmode') && TLS_HOSTS.some(h => baseUrl.includes(h))) {
+    existingParams.set('sslmode', 'require');
+    dbLog.info('Database TLS required', { sslmode: 'require' });
   }
 
   // Paid plan settings
@@ -37,7 +63,17 @@ const createPrismaClient = () => {
   existingParams.set('statement_timeout', '30000');
   existingParams.set('idle_in_transaction_session_timeout', '60000');
 
-  const finalUrl = `${baseUrl}?${existingParams.toString()}`;
+  return `${baseUrl}?${existingParams.toString()}`;
+};
+
+const createPrismaClient = () => {
+  const dbUrl = process.env.DATABASE_URL;
+
+  if (!dbUrl) {
+    throw new Error('DATABASE_URL environment variable is not set');
+  }
+
+  const finalUrl = buildDatabaseUrl(dbUrl);
 
   const client = new PrismaClient({
     log: [
