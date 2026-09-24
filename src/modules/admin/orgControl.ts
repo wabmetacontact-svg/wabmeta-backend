@@ -45,6 +45,12 @@ export interface OrgControl {
   limitOverrides: LimitOverrides;
   /** Capacity added by active paid add-ons, on top of the limit. */
   addOnBoosts: LimitOverrides;
+  /**
+   * The organization is soft-deleted, or there is no such organization. Both
+   * mean the same thing to a caller: it must behave as if it no longer exists.
+   * Carried here so auth does not need a second query of its own per request.
+   */
+  deleted: boolean;
 }
 
 const CACHE_MS = 30_000;
@@ -54,6 +60,7 @@ const ACTIVE_DEFAULT: OrgControl = {
   statusReason: null,
   limitOverrides: {},
   addOnBoosts: {},
+  deleted: false,
 };
 
 // ─── Pure helpers ──────────────────────────────────────────────────────────
@@ -173,7 +180,7 @@ export const getOrgControl = async (organizationId: string): Promise<OrgControl>
     const [org, addOns] = await Promise.all([
       prisma.organization.findUnique({
         where: { id: organizationId },
-        select: { status: true, statusReason: true, limitOverrides: true },
+        select: { status: true, statusReason: true, limitOverrides: true, deletedAt: true },
       }),
       prisma.clientAddOn.findMany({
         where: { organizationId, removedAt: null },
@@ -187,8 +194,11 @@ export const getOrgControl = async (organizationId: string): Promise<OrgControl>
           statusReason: org.statusReason,
           limitOverrides: parseLimitOverrides(org.limitOverrides),
           addOnBoosts: addOnBoosts(addOns),
+          deleted: org.deletedAt !== null,
         }
-      : ACTIVE_DEFAULT;
+      // No such organization. Sending stays permitted exactly as before, but a
+      // caller asking "does this org exist" is told the truth.
+      : { ...ACTIVE_DEFAULT, deleted: true };
 
     controlCache.set(organizationId, { value, at: Date.now() });
     return value;

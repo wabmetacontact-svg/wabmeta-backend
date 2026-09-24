@@ -714,6 +714,11 @@ export class OrganizationsService {
       data:  { deletedAt: new Date() },
     });
 
+    // auth reads deletedAt through the org control cache, so without this the
+    // org keeps working for up to CACHE_MS after the owner deletes it.
+    const { invalidateOrgControl } = await import('../admin/orgControl');
+    invalidateOrgControl(organizationId);
+
     return { message: 'Organization deleted successfully' };
   }
 }

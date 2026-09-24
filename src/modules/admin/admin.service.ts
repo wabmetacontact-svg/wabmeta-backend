@@ -999,6 +999,11 @@ export class AdminService {
     // Soft delete: keep payments and the wallet ledger.
     await prisma.organization.update({ where: { id }, data: { deletedAt: new Date() } });
 
+    // auth reads deletedAt through the org control cache, so without this the
+    // org keeps working for up to CACHE_MS after being deleted.
+    const { invalidateOrgControl } = await import('./orgControl');
+    invalidateOrgControl(id);
+
     return { message: 'Organization deleted successfully' };
   }
 
