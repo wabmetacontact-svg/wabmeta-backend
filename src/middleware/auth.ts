@@ -10,7 +10,7 @@ import prisma from '../config/database';
 import { getRedis } from '../config/redis';
 import { authService } from '../modules/auth/auth.service';
 import { getCookieOptions } from '../utils/cookies';
-import { orgBlockedError, readOnlyAllows } from '../modules/admin/orgControl';
+import { getOrgControl, orgBlockedError, readOnlyAllows } from '../modules/admin/orgControl';
 
 const USER_CACHE_PREFIX = 'user:auth:';
 const CACHE_TTL = 300;
@@ -264,23 +264,28 @@ export const authenticate = async (
     // A soft-deleted organization must behave as if it no longer exists: drop
     // the org context so every org-scoped route rejects. This is the single
     // gate that blocks access to a deleted org's data.
+    //
+    // This used to be its own findFirst, so every authenticated request paid a
+    // full database round trip for it - 240ms when the app ran in Oregon, 65ms
+    // from Singapore - on top of whatever the route itself needed. getOrgControl
+    // answers from a 30s per-process cache and already reads this same row for
+    // the admin block, so the two checks now cost one lookup instead of two.
+    // Admin changes stay immediate because every place that writes status,
+    // limits or deletedAt calls invalidateOrgControl.
     if (organizationId) {
-      const org = await prisma.organization.findFirst({
-        where: { id: organizationId, deletedAt: null },
-        select: { id: true, status: true, statusReason: true },
-      });
-      if (!org) organizationId = undefined;
+      const control = await getOrgControl(organizationId);
+      if (control.deleted) organizationId = undefined;
 
       // Admin block on the whole organization. SUSPENDED stops everything;
       // READ_ONLY still lets the team read and pay. See admin/orgControl.ts.
       const path = (req.originalUrl || '').split('?')[0];
       // /api/auth stays open so a member can still log out or switch to
       // another organization they belong to.
-      if (org?.status === 'SUSPENDED' && !path.startsWith('/api/auth/')) {
-        throw orgBlockedError('SUSPENDED', org.statusReason);
+      if (!control.deleted && control.status === 'SUSPENDED' && !path.startsWith('/api/auth/')) {
+        throw orgBlockedError('SUSPENDED', control.statusReason);
       }
-      if (org?.status === 'READ_ONLY' && !readOnlyAllows(req.method, path)) {
-        throw orgBlockedError('READ_ONLY', org.statusReason);
+      if (!control.deleted && control.status === 'READ_ONLY' && !readOnlyAllows(req.method, path)) {
+        throw orgBlockedError('READ_ONLY', control.statusReason);
       }
     }
 

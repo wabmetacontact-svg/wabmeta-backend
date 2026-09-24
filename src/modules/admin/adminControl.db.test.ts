@@ -139,6 +139,33 @@ describe('organization status', () => {
     const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
     expect(campaign?.status).toBe('PAUSED');
   });
+
+  // auth drops the organization context when this flag is true, and it is the
+  // only gate on a deleted org's data - it used to be a findFirst of its own on
+  // every authenticated request.
+  it('reports a live organization as not deleted', async () => {
+    expect((await getOrgControl(organizationId)).deleted).toBe(false);
+  });
+
+  it('reports an organization that does not exist as deleted', async () => {
+    expect((await getOrgControl('org-that-never-existed')).deleted).toBe(true);
+  });
+
+  it('reports a soft-deleted organization as deleted', async () => {
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { deletedAt: new Date() },
+    });
+    invalidateOrgControl(organizationId);
+
+    expect((await getOrgControl(organizationId)).deleted).toBe(true);
+
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { deletedAt: null },
+    });
+    invalidateOrgControl(organizationId);
+  });
 });
 
 describe('limits', () => {
