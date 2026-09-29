@@ -14,6 +14,7 @@ import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
 import { recordSignupSolution } from './partnerSolution';
 import { checkConnectionLock } from '../../middleware/connectionLock';
+import { runCoexistenceSync } from './coexistence';
 import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
 import { resolveOrganizationId } from '../../utils/resolveOrgId';
@@ -247,7 +248,9 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
     // solutionId is optional - sent only when the web app opened Embedded
     // Signup with a Multi-Partner Solution configured. Older clients (and
     // the mobile app) never send it, and connect exactly as before.
-    const { code, organizationId, wabaId, phoneNumberId, solutionId } = req.body;
+    // coexistence: true = customer ne popup me apna WhatsApp Business app
+    // number joda (FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING).
+    const { code, organizationId, wabaId, phoneNumberId, solutionId, coexistence } = req.body;
     const userId = (req as any).user?.id;
 
     console.log('\n🔄 ========== META CONNECT (FB.login flow) ==========');
@@ -301,7 +304,9 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
       // Us flow me redirect_uri hota hi nahi, isliye skip.
       true,
       wabaId || undefined,        // ✅ Session WABA ID from message event
-      phoneNumberId || undefined  // ✅ Session Phone Number ID from message event
+      phoneNumberId || undefined, // ✅ Session Phone Number ID from message event
+      undefined,                  // redirectUriOverride
+      coexistence === true
     );
 
     if (result.success) {
@@ -826,6 +831,33 @@ router.post('/accounts/:id/set-default', async (req, res, next) => {
   }
 });
 
+// ✅ Coexistence number: contacts + chat history Meta se dobara maango.
+// Connect ke waqt ye apne aap chalta hai; ye route tab ke liye hai jab wo
+// fail hua ho. Meta sirf connect ke 24 ghante tak aur har type ek baar deta hai.
+router.post('/accounts/:id/coexistence-sync', async (req, res, next) => {
+  try {
+    const { id: accountId } = req.params;
+    const userId = (req as any).user?.id;
+    if (!userId) throw new AppError('Authentication required', 401);
+
+    const account = await prisma.whatsAppAccount.findUnique({
+      where: { id: accountId },
+      select: { organizationId: true },
+    });
+    if (!account) throw new AppError('Account not found', 404);
+
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: account.organizationId, userId, role: { in: ['OWNER', 'ADMIN'] } },
+    });
+    if (!membership) throw new AppError('You do not have permission to import chats', 403);
+
+    const result = await runCoexistenceSync(accountId);
+    if (result.error) throw new AppError(result.error, 400);
+    return sendSuccess(res, { smbSyncState: result.state }, 'Chat import requested');
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ============================================
 // HEALTH CHECK

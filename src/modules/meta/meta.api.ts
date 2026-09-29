@@ -843,6 +843,33 @@ class MetaApiClient {
   // WEBHOOK METHODS
   // ============================================
 
+  /**
+   * Coexistence number ke contacts (smb_app_state_sync) ya chat history
+   * (history) Meta se mangwao. Data baad me isi naam ke webhooks se aata hai.
+   * Meta har sync_type ek hi baar aur onboarding ke 24 ghante ke andar deta hai.
+   */
+  async requestSmbAppDataSync(
+    phoneNumberId: string,
+    accessToken: string,
+    syncType: 'smb_app_state_sync' | 'history'
+  ): Promise<{ requestId: string | null }> {
+    try {
+      const response = await this.client.post(
+        `${phoneNumberId}/smb_app_data`,
+        { messaging_product: 'whatsapp', sync_type: syncType },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      return { requestId: response.data?.request_id || null };
+    } catch (error: any) {
+      throw this.handleError(error, `Failed to request ${syncType} sync`);
+    }
+  }
+
   async subscribeToWebhooks(wabaId: string, accessToken: string): Promise<boolean> {
     try {
       console.log(`[Meta API] Subscribing to webhooks for WABA ${wabaId}...`);

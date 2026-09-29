@@ -27,6 +27,7 @@ import { metaLog } from '../../utils/logger';
 import { toClientAccount, tierDailyLimit } from './accountView';
 import { assertCanConnectAnother } from './accountLimit';
 import { notifyIfQualityDropped } from './qualityAlert';
+import { markCoexistenceOnboarded, runCoexistenceSync } from './coexistence';
 
 async function extractStoredPin(
   webhookSecretEncrypted: string | null
@@ -239,7 +240,11 @@ export class MetaService {
     embeddedSignup = false,
     sessionWabaId?: string,
     sessionPhoneNumberId?: string,
-    redirectUriOverride?: string
+    redirectUriOverride?: string,
+    // Number WhatsApp Business app se aaya (Embedded Signup ka coexistence
+    // flow). Tab register nahi karte aur contacts/history sync maangte hain -
+    // dekho coexistence.ts.
+    coexistence = false
   ): Promise<{ success: boolean; account?: any; error?: string }> {
     try {
       metaLog.info('Meta connection start', {
@@ -435,7 +440,9 @@ export class MetaService {
       });
 
       const autoDetected = this.detectConnectionType(primaryPhone);
-      const finalConnectionType = autoDetected !== 'CLOUD_API' ? autoDetected : connectionType;
+      const finalConnectionType = coexistence
+        ? 'WHATSAPP_BUSINESS_APP'
+        : autoDetected !== 'CLOUD_API' ? autoDetected : connectionType;
 
       // STEP 4: Subscribe to Webhooks
       onProgress?.({
@@ -448,12 +455,17 @@ export class MetaService {
       // non-fatal, but it sat on the critical path — with the Meta client's
       // retry backoff it could add many seconds before the user saw
       // "connected". Start it and let it settle after the response goes out.
-      void metaApi
+      //
+      // Coexistence me isse pehle poora hona zaroori hai: contacts/history
+      // sync isi WABA ke webhooks par aata hai, aur Meta use sirf ek baar
+      // bhejta hai - subscription se pehle aaya to hamesha ke liye gaya.
+      const webhookSubscription = metaApi
         .subscribeToWebhooks(wabaId, accessToken)
         .then(() => metaLog.info('Webhooks subscribed'))
         .catch((webhookError: any) =>
           metaLog.warn('Webhook subscription failed', { error: webhookError.message })
         );
+      if (coexistence) await webhookSubscription;
 
       onProgress?.({
         step: 'SUBSCRIBE_WEBHOOK',
@@ -483,47 +495,54 @@ export class MetaService {
         const reusedPin = await extractStoredPin(existingRecord?.webhookSecret ?? null);
         phonePin = reusedPin || generatePhonePin();
 
-        // ✅ CRITICAL FIX: accessToken already DECRYPTED hai yahan
-        // Kyunki abhi Meta se fresh aaya hai, encrypt nahi hua abhi
-        // Direct wahi use karo
-        
-        metaLog.info('Registering phone with fresh token', {
-          phoneNumberId: primaryPhone.id,
-          tokenPrefix:   accessToken.substring(0, 10),
-          tokenLength:   accessToken.length,
-          isMetaFormat:  accessToken.startsWith('EAA'),
-        });
-
-        // ✅ Verify token format before sending
-        if (!accessToken.startsWith('EAA')) {
-          throw new Error(
-            `Invalid token format. Expected EAA... got: ${accessToken.substring(0, 15)}...`
-          );
-        }
-
-        const registerResult = await metaApi.registerPhone(
-          primaryPhone.id,
-          phonePin,
-          accessToken  // ✅ PLAIN token - encryption abhi hui hi nahi
-        );
-
-        metaLog.info('Register result', {
-          phoneNumberId:     primaryPhone.id,
-          success:           registerResult.success,
-          alreadyRegistered: registerResult.alreadyRegistered,
-          error:             registerResult.error,
-        });
-
-        if (registerResult.success) {
-          metaLog.info('✅ Phone registered successfully to Cloud API');
+        // Meta: business app number pehle se registered hai - "skip the phone
+        // number registration step". Register call us number ki app wali
+        // registration se takra sakti hai.
+        if (coexistence) {
+          metaLog.info('Coexistence number - registration skipped', { phoneNumberId: primaryPhone.id });
         } else {
-          registrationWarning = 'PHONE_NOT_REGISTERED';
-          registrationMessage = registerResult.error || 
-            'Phone registration failed. Check Meta Business Manager.';
-          
-          metaLog.warn('⚠️ Phone registration failed', {
-            error: registerResult.error,
+          // ✅ CRITICAL FIX: accessToken already DECRYPTED hai yahan
+          // Kyunki abhi Meta se fresh aaya hai, encrypt nahi hua abhi
+          // Direct wahi use karo
+        
+          metaLog.info('Registering phone with fresh token', {
+            phoneNumberId: primaryPhone.id,
+            tokenPrefix:   accessToken.substring(0, 10),
+            tokenLength:   accessToken.length,
+            isMetaFormat:  accessToken.startsWith('EAA'),
           });
+
+          // ✅ Verify token format before sending
+          if (!accessToken.startsWith('EAA')) {
+            throw new Error(
+              `Invalid token format. Expected EAA... got: ${accessToken.substring(0, 15)}...`
+            );
+          }
+
+          const registerResult = await metaApi.registerPhone(
+            primaryPhone.id,
+            phonePin,
+            accessToken  // ✅ PLAIN token - encryption abhi hui hi nahi
+          );
+
+          metaLog.info('Register result', {
+            phoneNumberId:     primaryPhone.id,
+            success:           registerResult.success,
+            alreadyRegistered: registerResult.alreadyRegistered,
+            error:             registerResult.error,
+          });
+
+          if (registerResult.success) {
+            metaLog.info('✅ Phone registered successfully to Cloud API');
+          } else {
+            registrationWarning = 'PHONE_NOT_REGISTERED';
+            registrationMessage = registerResult.error || 
+              'Phone registration failed. Check Meta Business Manager.';
+          
+            metaLog.warn('⚠️ Phone registration failed', {
+              error: registerResult.error,
+            });
+          }
         }
       } catch (registerError: any) {
         metaLog.error('Registration exception', registerError, { 
@@ -729,6 +748,17 @@ export class MetaService {
       this.syncTemplatesBackground(savedAccount.id, wabaId, accessToken).catch((err) => {
         metaLog.error('Background template sync failed', err, { accountId: savedAccount.id });
       });
+
+      // Coexistence: 24 ghante ki ghadi abhi se, aur contacts + history
+      // turant maango. Fail ho to user Settings se "Import chats" dabakar
+      // (POST /meta/accounts/:id/coexistence-sync) 24 ghante tak dobara
+      // koshish kar sakta hai.
+      if (coexistence) {
+        await markCoexistenceOnboarded(savedAccount.id);
+        void runCoexistenceSync(savedAccount.id).catch((err) =>
+          metaLog.error('Coexistence sync failed', err, { accountId: savedAccount.id })
+        );
+      }
 
       metaLog.info('Meta connection finished');
 

@@ -26,6 +26,7 @@ import { shouldAiReply } from '../aiagent/aiagent.prompt';
 import { toCanonicalPhone, buildPhoneVariants } from '../../utils/phone';
 import * as instagramService from '../instagram/instagram.service';
 import { notificationsService } from '../notifications/notifications.service';
+import { recordHistoryProgress } from '../meta/coexistence';
 
 export const webhookEvents = new EventEmitter();
 webhookEvents.setMaxListeners(100);
@@ -839,6 +840,136 @@ export class WebhookService {
   // Critical path: [dedupe | contact | phoneNumber] -> conversation upsert ->
   // message create -> socket emit. Baaki sab writes iske baad/background mein.
   // -----------------------------
+  /**
+   * Meta message ka content/media nikaalo. Live inbound (processIncomingMessage)
+   * aur coexistence history import dono yahi use karte hain.
+   */
+  private parseMessageContent(message: any): {
+    content: string;
+    mediaUrl: string | null;
+    mediaType: string | null;
+    mediaMimeType: string | null;
+    mediaId: string | null;
+    fileName: string | null;
+  } {
+    const typeRaw = String(message?.type || 'text');
+    let content: string = '';
+    let mediaUrl: string | null = null;
+    let mediaType: string | null = null;
+    let mediaMimeType: string | null = null;
+    let mediaId: string | null = null;
+    let fileName: string | null = null;
+
+    switch (typeRaw) {
+      case 'reaction':
+        content = message.reaction?.emoji || '[Reaction]';
+        break;
+      case 'text':
+        content = message.text?.body || '';
+        break;
+      case 'image':
+        mediaId = message.image?.id;
+        mediaMimeType = message.image?.mime_type || 'image/jpeg';
+        content = message.image?.caption || '[Image]';
+        mediaType = 'image';
+        if (mediaId) mediaUrl = mediaId;
+        break;
+      case 'video':
+        mediaId = message.video?.id;
+        mediaMimeType = message.video?.mime_type || 'video/mp4';
+        content = message.video?.caption || '[Video]';
+        mediaType = 'video';
+        if (mediaId) mediaUrl = mediaId;
+        break;
+      case 'audio':
+        mediaId = message.audio?.id;
+        mediaMimeType = message.audio?.mime_type || 'audio/ogg';
+        content = '[Audio]';
+        mediaType = 'audio';
+        if (mediaId) mediaUrl = mediaId;
+        break;
+      case 'document':
+        mediaId = message.document?.id;
+        mediaMimeType = message.document?.mime_type || 'application/pdf';
+        fileName = message.document?.filename || 'document';
+        content = message.document?.caption || `[Document: ${fileName}]`;
+        mediaType = 'document';
+        if (mediaId) mediaUrl = mediaId;
+        break;
+      case 'sticker':
+        mediaId = message.sticker?.id;
+        mediaMimeType = message.sticker?.mime_type || 'image/webp';
+        content = '[Sticker]';
+        mediaType = 'sticker';
+        if (mediaId) mediaUrl = mediaId;
+        break;
+      case 'location':
+        content = `[Location: ${message.location?.latitude}, ${message.location?.longitude}]`;
+        mediaType = 'location';
+        mediaUrl = JSON.stringify({
+          latitude: message.location?.latitude,
+          longitude: message.location?.longitude,
+          name: message.location?.name,
+          address: message.location?.address,
+        });
+        break;
+      case 'contacts':
+        content = '[Contact Card]';
+        mediaType = 'contact';
+        mediaUrl = JSON.stringify(message.contacts);
+        break;
+      case 'interactive': {
+        const iType = message?.interactive?.type;
+
+        if (iType === 'button_reply') {
+          content = message.interactive.button_reply?.title || '[Button Reply]';
+          mediaUrl = JSON.stringify({
+            type: 'button_reply',
+            button_reply: {
+              id: message.interactive.button_reply?.id,
+              title: message.interactive.button_reply?.title,
+            }
+          });
+        } else if (iType === 'list_reply') {
+          content = message.interactive.list_reply?.title || '[List Reply]';
+          mediaUrl = JSON.stringify({
+            type: 'list_reply',
+            list_reply: {
+              id: message.interactive.list_reply?.id,
+              title: message.interactive.list_reply?.title,
+              description: message.interactive.list_reply?.description,
+            }
+          });
+        } else if (iType === 'button') {
+          content = message.interactive?.body?.text || '[Interactive]';
+          mediaUrl = JSON.stringify(message.interactive);
+        } else if (iType === 'list') {
+          content = message.interactive?.body?.text || '[List]';
+          mediaUrl = JSON.stringify(message.interactive);
+        } else {
+          content = '[Interactive]';
+          mediaUrl = JSON.stringify(message.interactive || {});
+        }
+        break;
+      }
+      case 'button': {
+        content = message.button?.text || '[Button Reply]';
+        mediaUrl = JSON.stringify({
+          type: 'button_reply',
+          button_reply: {
+            id: message.button?.payload || message.button?.text,
+            title: message.button?.text,
+          }
+        });
+        break;
+      }
+      default:
+        content = `[${typeRaw}]`;
+    }
+
+    return { content, mediaUrl, mediaType, mediaMimeType, mediaId, fileName };
+  }
+
   private async processIncomingMessage(
     message: any,
     organizationId: string,
@@ -893,119 +1024,8 @@ export class WebhookService {
         phoneNumberUUID
       );
 
-      let content: string = '';
-      let mediaUrl: string | null = null;
-      let mediaType: string | null = null;
-      let mediaMimeType: string | null = null;
-      let mediaId: string | null = null;
-      let fileName: string | null = null;
-
-      switch (typeRaw) {
-        case 'reaction':
-          content = message.reaction?.emoji || '[Reaction]';
-          break;
-        case 'text':
-          content = message.text?.body || '';
-          break;
-        case 'image':
-          mediaId = message.image?.id;
-          mediaMimeType = message.image?.mime_type || 'image/jpeg';
-          content = message.image?.caption || '[Image]';
-          mediaType = 'image';
-          if (mediaId) mediaUrl = mediaId;
-          break;
-        case 'video':
-          mediaId = message.video?.id;
-          mediaMimeType = message.video?.mime_type || 'video/mp4';
-          content = message.video?.caption || '[Video]';
-          mediaType = 'video';
-          if (mediaId) mediaUrl = mediaId;
-          break;
-        case 'audio':
-          mediaId = message.audio?.id;
-          mediaMimeType = message.audio?.mime_type || 'audio/ogg';
-          content = '[Audio]';
-          mediaType = 'audio';
-          if (mediaId) mediaUrl = mediaId;
-          break;
-        case 'document':
-          mediaId = message.document?.id;
-          mediaMimeType = message.document?.mime_type || 'application/pdf';
-          fileName = message.document?.filename || 'document';
-          content = message.document?.caption || `[Document: ${fileName}]`;
-          mediaType = 'document';
-          if (mediaId) mediaUrl = mediaId;
-          break;
-        case 'sticker':
-          mediaId = message.sticker?.id;
-          mediaMimeType = message.sticker?.mime_type || 'image/webp';
-          content = '[Sticker]';
-          mediaType = 'sticker';
-          if (mediaId) mediaUrl = mediaId;
-          break;
-        case 'location':
-          content = `[Location: ${message.location?.latitude}, ${message.location?.longitude}]`;
-          mediaType = 'location';
-          mediaUrl = JSON.stringify({
-            latitude: message.location?.latitude,
-            longitude: message.location?.longitude,
-            name: message.location?.name,
-            address: message.location?.address,
-          });
-          break;
-        case 'contacts':
-          content = '[Contact Card]';
-          mediaType = 'contact';
-          mediaUrl = JSON.stringify(message.contacts);
-          break;
-        case 'interactive': {
-          const iType = message?.interactive?.type;
-
-          if (iType === 'button_reply') {
-            content = message.interactive.button_reply?.title || '[Button Reply]';
-            mediaUrl = JSON.stringify({
-              type: 'button_reply',
-              button_reply: {
-                id: message.interactive.button_reply?.id,
-                title: message.interactive.button_reply?.title,
-              }
-            });
-          } else if (iType === 'list_reply') {
-            content = message.interactive.list_reply?.title || '[List Reply]';
-            mediaUrl = JSON.stringify({
-              type: 'list_reply',
-              list_reply: {
-                id: message.interactive.list_reply?.id,
-                title: message.interactive.list_reply?.title,
-                description: message.interactive.list_reply?.description,
-              }
-            });
-          } else if (iType === 'button') {
-            content = message.interactive?.body?.text || '[Interactive]';
-            mediaUrl = JSON.stringify(message.interactive);
-          } else if (iType === 'list') {
-            content = message.interactive?.body?.text || '[List]';
-            mediaUrl = JSON.stringify(message.interactive);
-          } else {
-            content = '[Interactive]';
-            mediaUrl = JSON.stringify(message.interactive || {});
-          }
-          break;
-        }
-        case 'button': {
-          content = message.button?.text || '[Button Reply]';
-          mediaUrl = JSON.stringify({
-            type: 'button_reply',
-            button_reply: {
-              id: message.button?.payload || message.button?.text,
-              title: message.button?.text,
-            }
-          });
-          break;
-        }
-        default:
-          content = `[${typeRaw}]`;
-      }
+      const { content, mediaUrl, mediaType, mediaMimeType, mediaId, fileName } =
+        this.parseMessageContent(message);
 
       const savedMessage = await prisma.message.create({
         data: {
@@ -2156,93 +2176,363 @@ export class WebhookService {
     }
   }
 
+  // ============================================
+  // COEXISTENCE: contacts + chat history import
+  // ============================================
+  // Meta ye tab bhejta hai jab humne connect ke baad smb_app_data se maanga ho
+  // (src/modules/meta/coexistence.ts). Shape:
+  //   history:            value.history[] -> { metadata{phase,progress}, threads[] -> { id: customer wa_id, messages[] }, errors? }
+  //   smb_app_state_sync: value.state_sync[] -> { type:'contact', contact{full_name,first_name,phone_number}, action:'add'|'remove' }
+  //
+  // Ye PURANI chats hain: inpar chatbot / AI / automation nahi chalte, unread
+  // nahi badhta, notification nahi jaata aur 24h window sirf tab khulti hai
+  // jab customer ka aakhri message sach me 24 ghante ke andar ka ho. Isliye
+  // processIncomingMessage ki jagah alag, bina side-effect wala raasta.
+
+  private async findSyncAccount(payload: any, value: any) {
+    const phoneNumberId = value?.metadata?.phone_number_id;
+    if (phoneNumberId) {
+      const byPhone = await prisma.whatsAppAccount.findUnique({
+        where: { phoneNumberId: String(phoneNumberId) },
+        select: { id: true, organizationId: true, phoneNumberId: true, phoneNumber: true },
+      });
+      if (byPhone) return byPhone;
+    }
+    const wabaId = payload?.entry?.[0]?.id;
+    if (!wabaId) return null;
+    return prisma.whatsAppAccount.findFirst({
+      where: { wabaId: String(wabaId) },
+      select: { id: true, organizationId: true, phoneNumberId: true, phoneNumber: true },
+    });
+  }
+
+  private mapHistoryStatus(status: any): MessageStatus {
+    switch (String(status || '').toUpperCase()) {
+      case 'READ':
+      case 'PLAYED':
+        return 'READ';
+      case 'SENT':
+        return 'SENT';
+      case 'PENDING':
+        return 'PENDING';
+      case 'ERROR':
+      case 'FAILED':
+        return 'FAILED';
+      default:
+        return 'DELIVERED';
+    }
+  }
+
   private async handleHistorySync(payload: any, value: any) {
     try {
-      console.log('📜 History sync webhook received');
-      const wabaId = payload.entry[0].id;
-
-      const account = await prisma.whatsAppAccount.findFirst({
-        where: { wabaId },
-        select: { id: true, organizationId: true, phoneNumberId: true }
-      });
-
-      if (!account) return;
-
-      const messages = value?.messages || [];
-      console.log(`📜 Processing ${messages.length} historical messages`);
-
-      for (const msg of messages) {
-        try {
-          await this.processIncomingMessage(
-            msg,
-            account.organizationId,
-            account.id,
-            value?.metadata?.phone_number_id || account.phoneNumberId || ''
-          );
-        } catch (e) {
-          console.error('History message processing error:', e);
-        }
+      const account = await this.findSyncAccount(payload, value);
+      if (!account) {
+        webhookLog.warn('History webhook for unknown account', { wabaId: payload?.entry?.[0]?.id });
+        return;
       }
 
-      console.log('✅ History sync complete');
-    } catch (e) {
-      console.error('handleHistorySync error:', e);
+      const businessDigits = String(
+        value?.metadata?.display_phone_number || account.phoneNumber || ''
+      ).replace(/\D/g, '');
+
+      const chunks: any[] = Array.isArray(value?.history) ? value.history : [];
+      const topErrors: any[] = Array.isArray(value?.errors) ? value.errors : [];
+
+      for (const chunk of [{ errors: topErrors }, ...chunks]) {
+        // 2593109 = business ne WhatsApp Business app me history sharing band rakhi.
+        if ((chunk?.errors || []).some((e: any) => Number(e?.code) === 2593109)) {
+          webhookLog.warn('History sharing declined by business', { accountId: account.id });
+          await recordHistoryProgress(account.id, { declined: true });
+          continue;
+        }
+
+        let imported = 0;
+        for (const thread of (chunk as any)?.threads || []) {
+          imported += (await this.importHistoryThread(account, businessDigits, thread)).count;
+        }
+        if (imported > 0) this.clearInboxCache(account.organizationId);
+
+        const meta = (chunk as any)?.metadata;
+        if (meta) {
+          await recordHistoryProgress(account.id, {
+            phase: Number(meta.phase),
+            progress: Number(meta.progress),
+          });
+          webhookLog.info('History chunk imported', {
+            accountId: account.id,
+            phase: meta.phase,
+            chunk: meta.chunk_order,
+            progress: meta.progress,
+            imported,
+          });
+        }
+      }
+    } catch (e: any) {
+      webhookLog.error('handleHistorySync error', { error: e?.message });
     }
+  }
+
+  /**
+   * Ek customer ki chat ke messages save karo - coexistence history, ya
+   * `echo` = business ne connect ke BAAD phone ki WhatsApp Business app se
+   * bheja (smb_message_echoes). Kitne naye messages bane aur kis conversation
+   * me, wo lautao.
+   */
+  private async importHistoryThread(
+    account: { id: string; organizationId: string; phoneNumberId: string },
+    businessDigits: string,
+    thread: any,
+    opts: { echo?: boolean } = {}
+  ): Promise<{ count: number; conversationId: string | null }> {
+    const customer = String(thread?.id || '');
+    const messages: any[] = Array.isArray(thread?.messages) ? thread.messages : [];
+    if (!customer || messages.length === 0) return { count: 0, conversationId: null };
+
+    const { contact } = await this.findOrCreateContact(account.organizationId, customer);
+    const phoneNumberUUID = await this.resolvePhoneNumberUUID(account.phoneNumberId);
+
+    // Nayi conversation BAND window ke saath - neeche asli samay se tay hoti hai.
+    const conversation = await prisma.conversation.upsert({
+      where: {
+        organizationId_contactId_channel: {
+          organizationId: account.organizationId,
+          contactId: contact.id,
+          channel: 'WHATSAPP',
+        },
+      },
+      create: {
+        organizationId: account.organizationId,
+        contactId: contact.id,
+        ...(phoneNumberUUID ? { phoneNumberId: phoneNumberUUID } : {}),
+        isWindowOpen: false,
+        windowExpiresAt: null,
+        unreadCount: 0,
+        isRead: true,
+      },
+      update: {},
+    });
+
+    const rows: any[] = [];
+    let newest: { at: Date; preview: string } | null = null;
+    let newestInbound: Date | null = null;
+
+    for (const msg of messages) {
+      const waMessageId = String(msg?.id || '');
+      if (!waMessageId) continue;
+
+      const at = new Date(Number(msg?.timestamp || 0) * 1000);
+      if (isNaN(at.getTime()) || at.getTime() === 0) continue;
+
+      const typeRaw = String(msg?.type || 'text');
+      const outbound = String(msg?.from || '').replace(/\D/g, '') === businessDigits;
+      const parsed = this.parseMessageContent(msg);
+      // Echo abhi-abhi bheja gaya hai - aage ka status (DELIVERED/READ) normal
+      // statuses webhook se isi wamid par aata hai.
+      const status: MessageStatus = !outbound
+        ? 'DELIVERED'
+        : opts.echo
+          ? 'SENT'
+          : this.mapHistoryStatus(msg?.history_context?.status);
+
+      rows.push({
+        conversationId: conversation.id,
+        whatsappAccountId: account.id,
+        waMessageId,
+        wamId: waMessageId,
+        direction: outbound ? 'OUTBOUND' : 'INBOUND',
+        type: this.mapMessageType(typeRaw),
+        ...parsed,
+        status,
+        sentAt: at,
+        deliveredAt: status === 'DELIVERED' || status === 'READ' ? at : null,
+        readAt: status === 'READ' ? at : null,
+        timestamp: at,
+        createdAt: at,
+        metadata: {
+          originalType: typeRaw,
+          source: opts.echo ? 'business_app_echo' : 'coexistence_history',
+          historyStatus: msg?.history_context?.status || null,
+          context: msg?.context || null,
+        },
+      });
+
+      if (!newest || at > newest.at) {
+        newest = { at, preview: (parsed.content || `[${typeRaw}]`).substring(0, 100) };
+      }
+      if (!outbound && (!newestInbound || at > newestInbound)) newestInbound = at;
+    }
+
+    if (rows.length === 0) return { count: 0, conversationId: conversation.id };
+
+    // waMessageId unique hai - Meta ek chunk dobara bheje to duplicate chup-chaap chhoot jaata hai.
+    const { count } = await prisma.message.createMany({ data: rows, skipDuplicates: true });
+    // Sab pehle se the (Meta ne dobara bheja) - conversation ko mat chhedo.
+    if (count === 0) return { count: 0, conversationId: conversation.id };
+
+    // Conversation ka "aakhri message" sirf tab badlo jab history wala usse naya ho -
+    // connect ke baad aaye live messages ko purana message peeche na dhakel de.
+    const patch: any = {};
+    if (newest && (!conversation.lastMessageAt || newest.at > conversation.lastMessageAt)) {
+      patch.lastMessageAt = newest.at;
+      patch.lastMessagePreview = newest.preview;
+    }
+    if (
+      newestInbound &&
+      (!conversation.lastCustomerMessageAt || newestInbound > conversation.lastCustomerMessageAt)
+    ) {
+      patch.lastCustomerMessageAt = newestInbound;
+      const expires = new Date(newestInbound.getTime() + 24 * 60 * 60 * 1000);
+      if (expires.getTime() > Date.now()) {
+        patch.isWindowOpen = true;
+        patch.windowExpiresAt = expires;
+      }
+    }
+    // Business ne phone se jawab diya = chat dekh li. WhatsApp app bhi yahi karti hai.
+    if (opts.echo && count > 0) {
+      patch.isRead = true;
+      patch.unreadCount = 0;
+    }
+    if (Object.keys(patch).length > 0) {
+      await prisma.conversation.update({ where: { id: conversation.id }, data: patch });
+    }
+
+    return { count, conversationId: conversation.id };
+  }
+
+  private clearInboxCache(organizationId: string) {
+    import('../inbox/inbox.service')
+      .then(({ inboxService }) => inboxService.clearCache(organizationId))
+      .catch((e: any) => webhookLog.warn('Inbox cache clear failed', { error: e?.message }));
   }
 
   private async handleSmbStateSync(payload: any, value: any) {
     try {
-      console.log('👥 SMB state sync webhook received');
-      const wabaId = payload.entry[0].id;
+      const account = await this.findSyncAccount(payload, value);
+      if (!account) {
+        webhookLog.warn('SMB state sync for unknown account', { wabaId: payload?.entry?.[0]?.id });
+        return;
+      }
 
-      const account = await prisma.whatsAppAccount.findFirst({
-        where: { wabaId },
-        select: { id: true, organizationId: true }
-      });
+      const items: any[] = Array.isArray(value?.state_sync) ? value.state_sync : [];
+      let saved = 0;
 
-      if (!account) return;
+      for (const item of items) {
+        // 'remove' = business ne phone se contact hataya. CRM ka contact nahi
+        // mitate - usme notes, labels, campaigns ho sakte hain.
+        if (item?.type !== 'contact' || item?.action === 'remove') continue;
 
-      const contacts = value?.contacts || [];
-      console.log(`👥 Syncing ${contacts.length} contacts from WBA app`);
+        const phone = item?.contact?.phone_number;
+        if (!phone) continue;
 
-      for (const contact of contacts) {
+        // Ye naam business ne apne phone me save kiya hai, WhatsApp profile
+        // name nahi. Isliye sirf tab lagao jab CRM me naam hai hi nahi.
+        const savedName = String(item.contact.full_name || item.contact.first_name || '').trim();
+
         try {
-          const phone = contact.wa_id || contact.phone;
-          const name = contact.profile?.name || 'Unknown';
-
-          if (phone) {
-            await contactsService.updateContactFromWebhook(
-              phone,
-              name,
-              account.organizationId
-            );
+          const { contact } = await this.findOrCreateContact(account.organizationId, String(phone));
+          if (savedName && (!contact.firstName || contact.firstName === 'Unknown')) {
+            await prisma.contact.update({
+              where: { id: contact.id },
+              data: { firstName: savedName },
+            });
           }
-        } catch (e) {
-          console.error('SMB contact sync error:', e);
+          saved++;
+        } catch (e: any) {
+          webhookLog.warn('SMB contact sync error', { error: e?.message });
         }
       }
 
-      console.log('✅ SMB state sync complete');
-    } catch (e) {
-      console.error('handleSmbStateSync error:', e);
+      webhookLog.info('SMB contacts synced', { accountId: account.id, received: items.length, saved });
+    } catch (e: any) {
+      webhookLog.error('handleSmbStateSync error', { error: e?.message });
     }
   }
 
+  /**
+   * Coexistence: business ne connect ke baad phone ki WhatsApp Business app se
+   * message bheja. Meta use `message_echoes` me bhejta hai (from = business,
+   * to = customer). Pehle ye sirf log hota tha, isliye phone se diye jawab
+   * Inbox me dikhte hi nahi the - agent ko lagta tha customer ko kisi ne
+   * reply nahi kiya. Ab OUTBOUND message ki tarah save + live emit hota hai.
+   * Chatbot/AI/automation nahi chalte (ye customer ka message nahi hai).
+   */
   private async handleSmbMessageEchoes(payload: any, value: any) {
     try {
-      console.log('💬 SMB message echoes webhook received');
-      const messages = value?.messages || [];
-
-      for (const msg of messages) {
-        console.log('Echo message:', {
-          id: msg.id,
-          to: msg.to,
-          type: msg.type,
-        });
+      const account = await this.findSyncAccount(payload, value);
+      if (!account) {
+        webhookLog.warn('Message echo for unknown account', { wabaId: payload?.entry?.[0]?.id });
+        return;
       }
-    } catch (e) {
-      console.error('handleSmbMessageEchoes error:', e);
+
+      const echoes: any[] = Array.isArray(value?.message_echoes) ? value.message_echoes : [];
+      const businessDigits = String(
+        value?.metadata?.display_phone_number || account.phoneNumber || ''
+      ).replace(/\D/g, '');
+
+      // Ek webhook me kai customers ke echo ho sakte hain - customer ke hisaab se baanto.
+      const byCustomer = new Map<string, any[]>();
+      for (const echo of echoes) {
+        const to = String(echo?.to || '');
+        if (!to) continue;
+        byCustomer.set(to, [...(byCustomer.get(to) || []), echo]);
+      }
+
+      let saved = 0;
+      for (const [to, messages] of byCustomer) {
+        const { count, conversationId } = await this.importHistoryThread(
+          account,
+          businessDigits,
+          { id: to, messages },
+          { echo: true }
+        );
+        if (count === 0 || !conversationId) continue;
+        saved += count;
+        await this.emitEchoes(account.organizationId, conversationId, messages.map((m) => String(m?.id || '')));
+      }
+
+      if (saved > 0) this.clearInboxCache(account.organizationId);
+      webhookLog.info('Business app echoes saved', { accountId: account.id, received: echoes.length, saved });
+    } catch (e: any) {
+      webhookLog.error('handleSmbMessageEchoes error', { error: e?.message });
     }
+  }
+
+  /** Naye save hue echo messages Inbox ko live bhejo (socket.ts newMessage relay). */
+  private async emitEchoes(organizationId: string, conversationId: string, waMessageIds: string[]) {
+    const [saved, conversation] = await Promise.all([
+      prisma.message.findMany({
+        where: { conversationId, waMessageId: { in: waMessageIds.filter(Boolean) } },
+        orderBy: { timestamp: 'asc' },
+      }),
+      prisma.conversation.findUnique({ where: { id: conversationId }, include: { contact: true } }),
+    ]);
+    if (!conversation) return;
+
+    const c: any = conversation.contact || {};
+    const conversationPayload: any = {
+      ...conversation,
+      contact: {
+        id: c.id,
+        phone: c.phone,
+        firstName: c.firstName,
+        lastName: c.lastName,
+        avatar: c.avatar,
+        whatsappProfileName: c.whatsappProfileName,
+        name:
+          c.whatsappProfileName ||
+          (c.firstName ? `${c.firstName} ${c.lastName || ''}`.trim() : c.phone),
+      },
+    };
+
+    for (const message of saved) {
+      webhookEvents.emit('newMessage', {
+        organizationId,
+        conversationId,
+        message,
+        conversation: conversationPayload,
+      });
+    }
+    webhookEvents.emit('conversationUpdated', { organizationId, conversation: conversationPayload });
   }
 
   private async handleCallWebhook(payload: any, value: any) {

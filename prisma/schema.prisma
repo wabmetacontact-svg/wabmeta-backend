@@ -296,6 +296,12 @@ model WhatsAppAccount {
   solutionId          String?
   solutionConfirmedAt DateTime?
 
+  // Coexistence (WhatsApp Business app number) onboarding ke baad Meta se
+  // contacts aur chat history mangwane ka haal. Meta har sync_type ek hi baar,
+  // aur connect ke 24 ghante ke andar hi karne deta hai - isliye yahan likha
+  // jaata hai ki kya maanga ja chuka hai. Shape: src/modules/meta/coexistence.ts
+  smbSyncState        Json?
+
   // Admin ke display overrides.
   //
   // Quality rating aur messaging tier dono Meta assign karta hai - koi API
