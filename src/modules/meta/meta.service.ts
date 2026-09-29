@@ -26,6 +26,7 @@ import { getRedis } from '../../config/redis';
 import { metaLog } from '../../utils/logger';
 import { toClientAccount, tierDailyLimit } from './accountView';
 import { assertCanConnectAnother } from './accountLimit';
+import { notifyIfQualityDropped } from './qualityAlert';
 
 async function extractStoredPin(
   webhookSecretEncrypted: string | null
@@ -1176,6 +1177,15 @@ export class MetaService {
             codeVerificationStatus: phoneInfo?.code_verification_status || account.codeVerificationStatus,
             messagingLimit: phoneInfo?.messaging_limit_tier || account.messagingLimit,
           } as any,
+        });
+
+        await notifyIfQualityDropped({
+          accountId,
+          organizationId: account.organizationId,
+          phoneNumber: account.phoneNumber,
+          previous: account.qualityRating,
+          next: phoneInfo?.quality_rating || account.qualityRating,
+          override: account.qualityRatingOverride,
         });
 
         return {
