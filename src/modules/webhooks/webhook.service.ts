@@ -524,6 +524,38 @@ export class WebhookService {
   }
 
   // ============================================
+  // PHONE NUMBER QUALITY UPDATE
+  // ============================================
+  private async handleQualityUpdate(payload: any, value: any): Promise<void> {
+    const wabaId = payload?.entry?.[0]?.id;
+    if (!wabaId) return;
+
+    const accounts = await prisma.whatsAppAccount.findMany({
+      where: { wabaId: String(wabaId), isActive: true },
+      select: { id: true, phoneNumber: true },
+    });
+
+    // Event me sirf display_phone_number hota hai. Match na mile to WABA ke
+    // saare number sync kar do - sync idempotent hai.
+    const digits = (v: any) => String(v || '').replace(/\D/g, '');
+    const target = digits(value?.display_phone_number);
+    const matched = target
+      ? accounts.filter((a) => {
+          const d = digits(a.phoneNumber);
+          return d && (d.endsWith(target) || target.endsWith(d));
+        })
+      : [];
+
+    const { whatsappService } = await import('../whatsapp/whatsapp.service');
+    for (const acc of matched.length ? matched : accounts) {
+      const res = await whatsappService.syncAccountQuality(acc.id);
+      if (!res.success) {
+        webhookLog.warn('Quality sync after webhook failed', { accountId: acc.id, error: res.error });
+      }
+    }
+  }
+
+  // ============================================
   // MAIN WEBHOOK HANDLER
   // ✅ FIX: "📨 Webhook received" log REMOVED
   //    webhook.routes.ts already handle karta hai logging
@@ -582,6 +614,14 @@ export class WebhookService {
         case 'calls':
           await this.handleCallWebhook(payload, value);
           return { status: 'processed', reason: 'Call webhook processed' };
+
+        case 'phone_number_quality_update':
+          // Meta event (FLAGGED / UNFLAGGED / DOWNGRADE / UPGRADE) me rating
+          // khud nahi aati - number ko turant sync karo; wahi sync rating
+          // likhti hai aur girne par org ko notify karti hai (qualityAlert.ts).
+          // Iske bina girawat agli raat ki sync tak chhupi rehti.
+          await this.handleQualityUpdate(payload, value);
+          return { status: 'processed', reason: `Quality update: ${value?.event || 'unknown'}` };
 
         case 'account_update': {
           // PARTNER_ADDED is Meta confirming a client signed up through a

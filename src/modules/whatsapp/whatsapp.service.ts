@@ -26,6 +26,7 @@ import { whatsappLog } from '../../utils/logger';
 import { AppError } from '../../middleware/errorHandler';
 import { accountHealthService } from '../meta/accountHealth.service';
 import { describeMetaError } from '../meta/metaErrors';
+import { notifyIfQualityDropped } from '../meta/qualityAlert';
 
 // ============================================
 // INTERFACES
@@ -1841,6 +1842,15 @@ private buildTemplateComponents(
           nameStatus: phoneInfo?.name_status || (account as any).nameStatus,
           updatedAt: new Date(),
         } as any,
+      });
+
+      await notifyIfQualityDropped({
+        accountId,
+        organizationId: account.organizationId,
+        phoneNumber: account.phoneNumber,
+        previous: account.qualityRating,
+        next: updated.qualityRating,
+        override: account.qualityRatingOverride,
       });
 
       // Meta's health_status - whether this number may send business-initiated
