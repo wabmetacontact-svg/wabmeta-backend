@@ -1763,6 +1763,7 @@ export class WebhookService {
       if (orgId) {
         try {
           const { campaignSocketService } = await import('../campaigns/campaigns.socket');
+          const { campaignsService } = await import('../campaigns/campaigns.service');
 
           // Emit individual contact status
           campaignSocketService.emitContactStatus(orgId, campaignContact.campaignId, {
@@ -1776,13 +1777,28 @@ export class WebhookService {
             failedAt: newStatus === 'FAILED' ? statusTime.toISOString() : undefined,
           } as any);
 
+          // Live counts go through the same smart display as the send loop
+          // and the REST stats - emitting the raw failed count here made the
+          // Failed card jump between real and smart numbers mid-campaign.
+          // The DB above keeps the real counts.
+          const smart = campaignsService.calculateSmartDisplay({
+            totalContacts: total,
+            deliveredCount: delivered,
+            readCount: read,
+            failedCount: failed,
+            pendingCount: pending,
+            sentCount: sentOnly,
+          });
+          const shownSent = smart.displaySent + cumulativeDelivered;
+          const shownFailed = smart.displayFailed;
+
           // Emit progress update
-          const processed = cumulativeSent + failed;
+          const processed = shownSent + shownFailed;
           const percentage = Math.min(100, Math.round((processed / Math.max(total, 1)) * 100));
 
           campaignSocketService.emitCampaignProgress(orgId, campaignContact.campaignId, {
-            sent: cumulativeSent,
-            failed,
+            sent: shownSent,
+            failed: shownFailed,
             delivered: cumulativeDelivered,
             read,
             total,
@@ -1795,10 +1811,10 @@ export class WebhookService {
             status: campaignContact.campaign?.status || 'RUNNING',
             message: 'Status updated',
             totalContacts: total,
-            sentCount: cumulativeSent,
+            sentCount: shownSent,
             deliveredCount: cumulativeDelivered,
             readCount: read,
-            failedCount: failed,
+            failedCount: shownFailed,
           });
         } catch (e) {
           console.error('❌ Socket emit failed:', e);

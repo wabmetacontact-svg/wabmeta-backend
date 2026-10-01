@@ -95,7 +95,13 @@ export const getCampaignContactsSchema = z.object({
   query: z.object({
     page: z.string().regex(/^\d+$/).transform(Number).optional().default('1'),
     limit: z.string().regex(/^\d+$/).transform(Number).optional().default('50'),
-    status: z.nativeEnum(MessageStatus).optional(),
+    // One status or a comma list, e.g. "SENT,DELIVERED,READ" for the web's
+    // cumulative Sent card.
+    status: z.string().optional().refine(
+      v => !v || v.split(',').every(s =>
+        (Object.values(MessageStatus) as string[]).includes(s.trim())),
+      'Invalid status',
+    ),
   }),
 });
 

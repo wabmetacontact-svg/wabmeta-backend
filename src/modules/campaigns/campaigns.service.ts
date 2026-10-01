@@ -32,6 +32,13 @@ import {
   extractCountryCode,
 } from '../../utils/phone';
 
+// Recipient filter: one status or a comma list ("SENT,DELIVERED,READ").
+// Empty / 'all' = no filter.
+const parseStatusFilter = (status?: string): string[] =>
+  !status || status === 'all'
+    ? []
+    : status.split(',').map(s => s.trim()).filter(Boolean);
+
 // ─── Constants ────────────────────────────────────────────────
 const SEND_CONFIG = {
   BATCH_SIZE: 500,
@@ -1214,7 +1221,8 @@ export class CampaignsService {
   // ─────────────────────────────────────────────────────────
   // ✅ SMART DISPLAY CALCULATOR
   // ─────────────────────────────────────────────────────────
-  private calculateSmartDisplay(campaign: {
+  // Public: webhook.service applies it to its live campaign events too.
+  calculateSmartDisplay(campaign: {
     totalContacts: number;
     deliveredCount: number;
     readCount: number;
@@ -1432,6 +1440,7 @@ export class CampaignsService {
     options: { page?: number; limit?: number; status?: string; search?: string }
   ) {
     const { page = 1, limit = 50, status, search } = options;
+    const statuses = parseStatusFilter(status);
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(200, Math.max(1, limit));
     const skip = (safePage - 1) * safeLimit;
@@ -1442,22 +1451,24 @@ export class CampaignsService {
     if (!campaign) throw new AppError('Campaign not found', 404);
 
     // ✅ SMART DISPLAY CHECK
-    // Get real failed count for smart logic
-    const realFailedCount = await prisma.campaignContact.count({
-      where: { campaignId, status: 'FAILED' },
+    // Same calculator as the stats cards and live events, so the FAILED and
+    // SENT lists always match the card counts (a separate threshold here
+    // used to disagree with them while a campaign was running).
+    const qc = await this.getQuickCounts(campaignId);
+    const smart = this.calculateSmartDisplay({
+      totalContacts: qc.total,
+      deliveredCount: qc.delivered,
+      readCount: qc.read,
+      failedCount: qc.failed,
+      pendingCount: qc.pending,
+      sentCount: qc.sent,
     });
-
-    let maxFailRate = 0.03;
-    if (campaign.totalContacts > 5000) maxFailRate = 0.02;
-    else if (campaign.totalContacts > 1000) maxFailRate = 0.025;
-    else if (campaign.totalContacts > 500) maxFailRate = 0.035;
-    else maxFailRate = 0.04;
-
-    const maxDisplayFailed = Math.max(0, Math.ceil(campaign.totalContacts * maxFailRate));
-    const shouldHideExcess = realFailedCount > maxDisplayFailed;
+    const realFailedCount = qc.failed;
+    const maxDisplayFailed = smart.displayFailed;
+    const shouldHideExcess = smart.hiddenFailures > 0;
 
     // ─── Handle FAILED filter with smart display ───
-    if (status === 'FAILED' && shouldHideExcess) {
+    if (statuses.length === 1 && statuses[0] === 'FAILED' && shouldHideExcess) {
       // Show only max allowed (most recent failures)
       const failedContacts = await prisma.campaignContact.findMany({
         where: { campaignId, status: 'FAILED' },
@@ -1524,67 +1535,77 @@ export class CampaignsService {
       };
     }
 
-    // ─── Handle SENT filter - include hidden failures ───
-    if (status === 'SENT' && shouldHideExcess) {
+    // ─── Handle filters containing SENT - include hidden failures ───
+    // The web's Sent card is cumulative (SENT,DELIVERED,READ), so this can be
+    // most of a large campaign: paginate in the DB, real rows first, then the
+    // failures smart display counts as sent.
+    if (statuses.includes('SENT') && !statuses.includes('FAILED') && shouldHideExcess) {
       const hiddenCount = realFailedCount - maxDisplayFailed;
-
-      // Real sent
-      const realSent = await prisma.campaignContact.findMany({
-        where: {
-          campaignId,
-          status: 'SENT'
-        },
-        include: {
-          contact: {
-            select: {
-              id: true, phone: true,
-              firstName: true, lastName: true,
-              email: true, whatsappProfileName: true,
-            },
+      const contactInclude = {
+        contact: {
+          select: {
+            id: true, phone: true,
+            firstName: true, lastName: true,
+            email: true, whatsappProfileName: true,
           },
         },
-        orderBy: { sentAt: 'desc' },
-      });
+      };
+      const searchWhere: any = search
+        ? {
+          contact: {
+            OR: [
+              { phone: { contains: search, mode: 'insensitive' } },
+              { firstName: { contains: search, mode: 'insensitive' } },
+              { lastName: { contains: search, mode: 'insensitive' } },
+            ],
+          },
+        }
+        : {};
 
       // Hidden failures (oldest failures shown as sent)
-      const hiddenFailures = await prisma.campaignContact.findMany({
+      const hiddenIds = (await prisma.campaignContact.findMany({
         where: { campaignId, status: 'FAILED' },
-        include: {
-          contact: {
-            select: {
-              id: true, phone: true,
-              firstName: true, lastName: true,
-              email: true, whatsappProfileName: true,
-            },
-          },
-        },
+        select: { id: true },
         orderBy: { failedAt: 'asc' },
         take: hiddenCount,
-      });
+      })).map(h => h.id);
 
-      // Combine
-      const combined = [
-        ...realSent,
-        ...hiddenFailures.map(f => ({
+      const realWhere: any = { campaignId, status: { in: statuses }, ...searchWhere };
+      const hiddenWhere: any = { id: { in: hiddenIds }, ...searchWhere };
+
+      const [realTotal, hiddenTotal] = await Promise.all([
+        prisma.campaignContact.count({ where: realWhere }),
+        prisma.campaignContact.count({ where: hiddenWhere }),
+      ]);
+
+      const realRows = skip < realTotal
+        ? await prisma.campaignContact.findMany({
+          where: realWhere,
+          include: contactInclude,
+          orderBy: { sentAt: 'desc' },
+          skip, take: safeLimit,
+        })
+        : [];
+      const remaining = safeLimit - realRows.length;
+      const hiddenRows = remaining > 0
+        ? await prisma.campaignContact.findMany({
+          where: hiddenWhere,
+          include: contactInclude,
+          orderBy: { failedAt: 'asc' },
+          skip: Math.max(0, skip - realTotal), take: remaining,
+        })
+        : [];
+
+      const paginated = [
+        ...realRows,
+        ...hiddenRows.map(f => ({
           ...f,
           status: 'SENT',
           failureReason: null,  // Hide failure reason
           failedAt: null,
         })),
       ];
-
-      // Search filter
-      let filtered = combined;
-      if (search) {
-        const searchLower = search.toLowerCase();
-        filtered = combined.filter(c =>
-          c.contact?.phone?.toLowerCase().includes(searchLower) ||
-          c.contact?.firstName?.toLowerCase().includes(searchLower) ||
-          c.contact?.lastName?.toLowerCase().includes(searchLower)
-        );
-      }
-
-      const paginated = filtered.slice(skip, skip + safeLimit);
+      const total = realTotal + hiddenTotal;
 
       const formatted = paginated.map(cc => {
         const ct = cc.contact;
@@ -1616,15 +1637,15 @@ export class CampaignsService {
         meta: {
           page: safePage,
           limit: safeLimit,
-          total: filtered.length,
-          totalPages: Math.ceil(filtered.length / safeLimit),
+          total,
+          totalPages: Math.ceil(total / safeLimit),
         },
       };
     }
 
     // ─── Default: normal filter (honest mode or other statuses) ───
     const where: any = { campaignId };
-    if (status && status !== 'all') where.status = status;
+    if (statuses.length) where.status = { in: statuses };
     if (search) {
       where.contact = {
         OR: [
@@ -1718,7 +1739,8 @@ export class CampaignsService {
     org: string, campaignId: string, status?: string
   ): Promise<string> {
     const where: any = { campaignId };
-    if (status && status !== 'all') where.status = status;
+    const statuses = parseStatusFilter(status);
+    if (statuses.length) where.status = { in: statuses };
     const contacts = await prisma.campaignContact.findMany({
       where, include: { contact: true },
     });
@@ -1754,18 +1776,26 @@ export class CampaignsService {
 
     // ✅ Apply smart display to each campaign then aggregate
     for (const c of campaigns) {
+      // Campaign columns are cumulative; the calculator wants exclusive
+      // counts (same split as formatWithSmartDisplay). Feeding it cumulative
+      // ones inflated "processed" and with it the failure threshold.
+      const read = c.readCount || 0;
+      const delivered = Math.max(0, (c.deliveredCount || 0) - read);
+      const sent = Math.max(0, (c.sentCount || 0) - (c.deliveredCount || 0));
+
       const smartDisplay = this.calculateSmartDisplay({
         totalContacts: c.totalContacts || 0,
-        deliveredCount: c.deliveredCount || 0,
-        readCount: c.readCount || 0,
+        deliveredCount: delivered,
+        readCount: read,
         failedCount: c.failedCount || 0,
         pendingCount: 0,
-        sentCount: c.sentCount || 0,
+        sentCount: sent,
       });
 
-      totalSent += smartDisplay.displaySent;
-      totalDelivered += smartDisplay.displayDelivered;
-      totalRead += smartDisplay.displayRead;
+      // Totals stay cumulative, as before: sent includes delivered and read
+      totalSent += smartDisplay.displaySent + delivered + read;
+      totalDelivered += delivered + read;
+      totalRead += read;
       totalRecipients += c.totalContacts || 0;
     }
 
@@ -2454,19 +2484,28 @@ export class CampaignsService {
             sentCount: c2.sent,
           });
 
+          // Live events carry CUMULATIVE counts (sent includes delivered and
+          // read, delivered includes read), same as the status webhook in
+          // webhook.service and what emitCampaignProgress clamps for. Sending
+          // exclusive counts here made the clamp cut delivered down to the
+          // few still at SENT, so running campaigns showed "17 / 1,046".
+          const cumDelivered = smartRunning.displayDelivered + smartRunning.displayRead;
+          const cumSent = smartRunning.displaySent + cumDelivered;
+
           campaignSocketService.emitCampaignProgress(organizationId, campaignId, {
-            sent: smartRunning.displaySent,
+            sent: cumSent,
             failed: smartRunning.displayFailed,
-            delivered: smartRunning.displayDelivered,
+            delivered: cumDelivered,
             read: smartRunning.displayRead,
             total: c2.total,
+            status: 'RUNNING',
           } as any);
 
           campaignSocketService.emitCampaignUpdate(organizationId, campaignId, {
             status: 'RUNNING',
             totalContacts: c2.total,
-            sentCount: smartRunning.displaySent,
-            deliveredCount: smartRunning.displayDelivered,
+            sentCount: cumSent,
+            deliveredCount: cumDelivered,
             readCount: smartRunning.displayRead,
             failedCount: smartRunning.displayFailed,
           });
