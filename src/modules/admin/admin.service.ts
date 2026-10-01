@@ -21,6 +21,16 @@ import { emitForceLogout } from '../../socket';
 // TYPES
 // ============================================
 
+// User columns that must never leave the server, even to an admin.
+const USER_SECRET_FIELDS = [
+  'password',
+  'passwordResetToken',
+  'passwordResetExpires',
+  'emailVerifyToken',
+  'emailVerifyExpires',
+  'otpSecret',
+] as const;
+
 interface LoginInput {
   email: string;
   password: string;
@@ -443,7 +453,6 @@ export class AdminService {
           emailVerified: true,
           createdAt: true,
           lastLoginAt: true,
-          password: true,
           memberships: {
             select: {
               role: true,
@@ -512,8 +521,13 @@ export class AdminService {
       throw new AppError('User not found', 404);
     }
 
+    // `include` returns every column, so drop the credentials before this
+    // goes to the browser. The admin panel uses none of them.
+    const safeUser: Record<string, unknown> = { ...user };
+    for (const key of USER_SECRET_FIELDS) delete safeUser[key];
+
     return {
-      ...user,
+      ...(safeUser as Omit<typeof user, (typeof USER_SECRET_FIELDS)[number]>),
       organizations: user.memberships?.map((m) => ({
         ...m.organization,
         role: m.role,
