@@ -162,7 +162,10 @@ async function handlePaymentFailed(payment: any) {
   console.log('❌ Payment failed:', payment.id);
 
   const notes = payment.notes || {};
-  if (notes.purpose !== 'wallet_topup') return;
+  if (notes.purpose !== 'wallet_topup') {
+    await recordPlanPaymentFailure(payment);
+    return;
+  }
 
   await db.walletTopUpOrder.updateMany({
     where: { razorpayOrderId: payment.order_id },
@@ -173,6 +176,35 @@ async function handlePaymentFailed(payment: any) {
       lastAttemptAt: new Date(),
     },
   });
+}
+
+// A failed plan checkout, kept for the admin's Plan payments page. Plan
+// details live on the ORDER's notes, as in activatePlanIfPlanOrder.
+async function recordPlanPaymentFailure(payment: any) {
+  if (!payment?.order_id) return;
+
+  const { billingService, getRazorpayInstance } = await import('../billing/billing.service');
+
+  // Razorpay usually copies the order's notes onto the payment; fetch the
+  // order only when it did not.
+  let order: any = payment.notes?.planId
+    ? { id: payment.order_id, amount: payment.amount, notes: payment.notes }
+    : null;
+  if (!order) {
+    const rzp = getRazorpayInstance();
+    if (!rzp) return;
+    order = await rzp.orders.fetch(payment.order_id);
+  }
+
+  const notes = order?.notes || {};
+  if (!notes.planId || !notes.organizationId) return;
+
+  await billingService.recordFailedPlanPayment({
+    organizationId: notes.organizationId,
+    order,
+    payment,
+  });
+  console.log(`📝 Failed plan payment recorded for ${notes.organizationId} (${payment.id})`);
 }
 
 // ─── Plan purchase (webhook fallback for /verify) ─────────────────────────────

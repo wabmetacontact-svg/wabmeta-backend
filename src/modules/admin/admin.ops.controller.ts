@@ -10,6 +10,7 @@ import { createCoupon, deleteCoupon, listCoupons, updateCoupon } from '../billin
 import { hasPermission, Permission } from './admin.permissions';
 import { getOrganizationOverview, getRevenueReport, getRiskReport, globalSearch } from './admin.insights.service';
 import { importRazorpayPayment, reconcileWithRazorpay } from './reconcile';
+import { listPlanPayments, parsePlanPaymentQuery } from './planPayments';
 import {
   addNote,
   BULK_MAX,
@@ -137,6 +138,10 @@ export const adminOpsController = {
 
   importPayment: handle(async (req, res) =>
     ok(res, await importRazorpayPayment(param(req, 'paymentId')), 'Payment recorded')
+  ),
+
+  planPayments: handle(async (req, res) =>
+    ok(res, await listPlanPayments(parsePlanPaymentQuery(req.query as Record<string, unknown>)))
   ),
 
   listNotes: handle(async (req, res) => ok(res, await listNotes(param(req, 'id')))),
