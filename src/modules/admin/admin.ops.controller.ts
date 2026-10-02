@@ -11,6 +11,7 @@ import { hasPermission, Permission } from './admin.permissions';
 import { getOrganizationOverview, getRevenueReport, getRiskReport, globalSearch } from './admin.insights.service';
 import { importRazorpayPayment, reconcileWithRazorpay } from './reconcile';
 import { listPlanPayments, parsePlanPaymentQuery } from './planPayments';
+import { listRazorpayPayments, parseRazorpayPaymentsQuery } from './razorpayPayments';
 import {
   addNote,
   BULK_MAX,
@@ -142,6 +143,10 @@ export const adminOpsController = {
 
   planPayments: handle(async (req, res) =>
     ok(res, await listPlanPayments(parsePlanPaymentQuery(req.query as Record<string, unknown>)))
+  ),
+
+  razorpayPayments: handle(async (req, res) =>
+    ok(res, await listRazorpayPayments(parseRazorpayPaymentsQuery(req.query as Record<string, unknown>)))
   ),
 
   listNotes: handle(async (req, res) => ok(res, await listNotes(param(req, 'id')))),

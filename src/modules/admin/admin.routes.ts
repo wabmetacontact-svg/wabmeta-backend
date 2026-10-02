@@ -670,6 +670,10 @@ router.post('/revenue/reconcile/:paymentId/import', can('payments.verify'), ops.
 // Every plan payment across customers: received, refunded and failed attempts
 router.get('/plan-payments', can('billing.read'), ops.planPayments);
 
+// The Razorpay account's own payments, live: includes QR code, payment link
+// and payment page money that never went through WabMeta's checkout
+router.get('/razorpay-payments', can('billing.read'), ops.razorpayPayments);
+
 // ============================================
 // OPERATIONS
 // ============================================
