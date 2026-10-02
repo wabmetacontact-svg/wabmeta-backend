@@ -667,6 +667,9 @@ router.get('/revenue', can('billing.read'), ops.revenue);
 router.get('/revenue/reconcile', can('billing.read'), ops.reconcile);
 router.post('/revenue/reconcile/:paymentId/import', can('payments.verify'), ops.importPayment);
 
+// Every plan payment across customers: received, refunded and failed attempts
+router.get('/plan-payments', can('billing.read'), ops.planPayments);
+
 // ============================================
 // OPERATIONS
 // ============================================

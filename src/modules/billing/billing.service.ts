@@ -1006,6 +1006,61 @@ class BillingService {
     });
   }
 
+  /**
+   * Record a failed plan checkout attempt (Razorpay payment.failed), so the
+   * admin can see who tried to pay and why it failed. Nothing is activated.
+   *
+   * The order id goes in `notes`, NOT in razorpayOrderId: activatePlanFromOrder
+   * treats any row holding the order id as "already paid", so a customer whose
+   * first attempt failed and second succeeded would never get the plan.
+   * Keyed on the payment id, so a replayed webhook writes nothing new.
+   */
+  async recordFailedPlanPayment(params: {
+    organizationId: string;
+    order: { id: string; amount?: number | string; notes?: any };
+    payment: {
+      id: string;
+      amount?: number | string;
+      currency?: string;
+      method?: string | null;
+      error_code?: string | null;
+      error_description?: string | null;
+      error_reason?: string | null;
+      error_source?: string | null;
+      error_step?: string | null;
+    };
+  }) {
+    const { organizationId, order, payment } = params;
+    const notes = order.notes || {};
+    const planName = notes.planName || null;
+
+    return prisma.payment.upsert({
+      where: { razorpayPaymentId: payment.id },
+      create: {
+        organizationId,
+        razorpayPaymentId: payment.id,
+        amount: Number(payment.amount) || Number(order.amount) || 0,
+        currency: payment.currency || 'INR',
+        status: 'FAILED',
+        planId: notes.planId || null,
+        planName,
+        billingCycle: notes.billingCycle || 'monthly',
+        description: `${planName || 'Plan'} subscription - payment failed`,
+        failedAt: new Date(),
+        notes: {
+          razorpayOrderId: order.id,
+          method: payment.method ?? null,
+          errorCode: payment.error_code ?? null,
+          errorDescription: payment.error_description ?? null,
+          errorReason: payment.error_reason ?? null,
+          errorSource: payment.error_source ?? null,
+          errorStep: payment.error_step ?? null,
+        },
+      },
+      update: {},
+    });
+  }
+
   // ============================================
   // UPGRADE PLAN
   // ============================================
@@ -1124,7 +1179,9 @@ class BillingService {
     try {
       // 1. Get Subscription Payments
       const payments = await prisma.payment.findMany({
-        where: { organizationId },
+        // Money received only: failed checkout attempts are recorded for the
+        // admin (recordFailedPlanPayment) and are not invoices.
+        where: { organizationId, status: { in: ['SUCCESS', 'REFUNDED'] } },
         orderBy: { paidAt: 'desc' },
         take: limit + offset, // fetch enough to cover pagination
       });
