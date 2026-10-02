@@ -1768,192 +1768,85 @@ class MetaApiClient {
     }
   }
 
-  async initiateCall(
+  /**
+   * One action on a call: POST /{phone-number-id}/calls.
+   *
+   * - connect (business-initiated): `to` + session {sdp_type: 'offer'}; the
+   *   response carries the new call's id (wacid.…).
+   * - pre_accept / accept (a user's call): call_id + session {sdp_type: 'answer'}.
+   * - reject / terminate: call_id only.
+   *
+   * Media never touches the server: the SDP comes from the agent's browser
+   * (WebRTC) and goes back to it.
+   */
+  async callAction(
     phoneNumberId: string,
     accessToken: string,
-    to: string,
-    options?: {
-      callbackData?: string;
-      bodyText?: string;
-      buttonText?: string;
-      businessPhoneNumber?: string;
+    body:
+      | { action: 'connect'; to: string; sdp: string; bizOpaqueCallbackData?: string }
+      | { action: 'pre_accept' | 'accept'; callId: string; sdp: string; bizOpaqueCallbackData?: string }
+      | { action: 'reject' | 'terminate'; callId: string }
+  ): Promise<{ callId: string | null; success: boolean }> {
+    const payload: any = { messaging_product: 'whatsapp', action: body.action };
+    if (body.action === 'connect') {
+      payload.to = body.to.replace(/[^0-9]/g, '');
+      payload.session = { sdp_type: 'offer', sdp: body.sdp };
+    } else {
+      payload.call_id = body.callId;
+      if (body.action === 'pre_accept' || body.action === 'accept') {
+        payload.session = { sdp_type: 'answer', sdp: body.sdp };
+      }
     }
+    if ('bizOpaqueCallbackData' in body && body.bizOpaqueCallbackData) {
+      payload.biz_opaque_callback_data = body.bizOpaqueCallbackData.slice(0, 512);
+    }
+
+    try {
+      const response = await this.client.post(`/${phoneNumberId}/calls`, payload, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      return {
+        callId: response.data?.calls?.[0]?.id ?? null,
+        success: response.data?.success !== false,
+      };
+    } catch (error: any) {
+      console.error(`[Meta API] ❌ Call action ${body.action} failed:`, error.response?.data);
+      throw this.handleError(error, `Call ${body.action} failed`);
+    }
+  }
+
+  /**
+   * Whether this user lets the business call them, and whether a call or a
+   * permission request may be sent right now (Meta's daily/weekly limits).
+   */
+  async getCallPermission(
+    phoneNumberId: string,
+    accessToken: string,
+    userWaId: string
   ): Promise<{
-    messageId: string;
-    status: string;
+    status: 'no_permission' | 'temporary' | 'permanent' | string;
+    expiresAt: string | null;
+    canStartCall: boolean;
+    canSendRequest: boolean;
   }> {
     try {
-      const cleanTo = to.replace(/[^0-9]/g, '');
-      console.log(`[Meta API] Sending call CTA to ${cleanTo.substring(0, 5)}...`);
-
-      const rawBusinessPhone = (options?.businessPhoneNumber || '').replace(/[^0-9]/g, '');
-      const isRealPhone = rawBusinessPhone.length >= 7 && rawBusinessPhone.length <= 15;
-
-      let callUrl: string;
-      let bodyText: string;
-      let buttonText: string;
-
-      if (isRealPhone) {
-        callUrl = `https://wa.me/${rawBusinessPhone}?call=true`;
-        bodyText = options?.bodyText || '📞 Aap hamse WhatsApp Call ke zariye baat kar sakte hain. Niche button dabayein.';
-        buttonText = options?.buttonText || '📞 Call Now';
-      } else {
-        console.warn('[Meta API] ⚠️ No valid business phone number for wa.me URL — sending text-only call invite');
-        callUrl = 'https://wa.me/';
-        bodyText = options?.bodyText || '📞 Please call us back on WhatsApp to connect with our team.';
-        buttonText = options?.buttonText || '📞 Call Us';
-      }
-
-      const payload: any = {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: cleanTo,
-        type: 'interactive',
-        interactive: {
-          type: 'cta_url',
-          body: {
-            text: bodyText,
-          },
-          action: {
-            name: 'cta_url',
-            parameters: {
-              display_text: buttonText,
-              url: callUrl,
-            },
-          },
-        },
-      };
-
-      if (options?.callbackData) {
-        payload.biz_opaque_callback_data = options.callbackData;
-      }
-
-      const response = await this.client.post(
-        `/${phoneNumberId}/messages`,
-        payload,
-        {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }
-      );
-
-      const messageId = response.data?.messages?.[0]?.id;
-      console.log('[Meta API] ✅ Call CTA message sent:', messageId);
-
+      const response = await this.client.get(`/${phoneNumberId}/call_permissions`, {
+        params: { user_wa_id: userWaId.replace(/[^0-9]/g, '') },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = response.data || {};
+      const can = (name: string) =>
+        !!(data.actions || []).find((a: any) => a.action_name === name)?.can_perform_action;
+      const exp = Number(data.permission?.expiration_time);
       return {
-        messageId,
-        status: response.data?.messages?.[0]?.message_status || 'sent',
+        status: data.permission?.status || 'no_permission',
+        expiresAt: exp ? new Date(exp * 1000).toISOString() : null,
+        canStartCall: can('start_call'),
+        canSendRequest: can('send_call_permission_request'),
       };
-
     } catch (error: any) {
-      console.error('[Meta API] ❌ Call initiation failed:', error.response?.data);
-      throw this.handleError(error, 'Failed to initiate call');
-    }
-  }
-
-  async requestCallPermission(
-    phoneNumberId: string,
-    accessToken: string,
-    to: string
-  ): Promise<{
-    permitted: boolean;
-    permissionId?: string;
-  }> {
-    try {
-      const cleanTo = to.replace(/[^0-9]/g, '');
-
-      const response = await this.client.post(
-        `/${phoneNumberId}/call_permissions`,
-        {
-          messaging_product: 'whatsapp',
-          to: cleanTo,
-        },
-        {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }
-      );
-
-      return {
-        permitted: true,
-        permissionId: response.data?.id,
-      };
-
-    } catch (error: any) {
-      const metaErr = error.response?.data?.error;
-      if (metaErr?.code === 131056) {
-        return { permitted: false };
-      }
-      throw this.handleError(error, 'Failed to request call permission');
-    }
-  }
-
-  async subscribeToCallsWebhook(
-    wabaId: string,
-    accessToken: string
-  ): Promise<boolean> {
-    try {
-      console.log('[Meta API] Subscribing to calls webhook...');
-
-      const response = await this.client.post(
-        `/${wabaId}/subscribed_apps`,
-        {
-          subscribed_fields: ['messages', 'calls', 'call_logs'],
-        },
-        {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }
-      );
-
-      console.log('[Meta API] ✅ Calls webhook subscribed');
-      return response.data?.success === true;
-
-    } catch (error: any) {
-      console.error('[Meta API] ❌ Calls webhook subscription failed');
-      throw this.handleError(error, 'Failed to subscribe to calls webhook');
-    }
-  }
-
-  async getCallLogs(
-    phoneNumberId: string,
-    accessToken: string,
-    limit: number = 20
-  ): Promise<Array<{
-    callId: string;
-    direction: 'inbound' | 'outbound';
-    status: string;
-    duration?: number;
-    startTime: string;
-    endTime?: string;
-    from: string;
-    to: string;
-  }>> {
-    try {
-      const response = await this.client.get(
-        `/${phoneNumberId}/call_logs`,
-        {
-          params: {
-            access_token: accessToken,
-            limit,
-            fields: 'id,direction,status,duration,start_time,end_time,from,to',
-          }
-        }
-      );
-
-      const logs = response.data?.data || [];
-
-      return logs.map((log: any) => ({
-        callId: log.id,
-        direction: log.direction,
-        status: log.status,
-        duration: log.duration,
-        startTime: log.start_time,
-        endTime: log.end_time,
-        from: log.from,
-        to: log.to,
-      }));
-
-    } catch (error: any) {
-      console.error('[Meta API] ❌ Get call logs failed');
-      return [];
+      console.error('[Meta API] ❌ Get call permission failed:', error.response?.data);
+      throw this.handleError(error, 'Could not check call permission');
     }
   }
 

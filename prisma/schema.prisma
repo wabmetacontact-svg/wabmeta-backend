@@ -165,6 +165,7 @@ model Organization {
   knowledgeItems          KnowledgeItem[]
   paymentGateway          PaymentGateway?
   leadPayments            LeadPayment[]
+  callLogs                CallLog[]
 
   @@index([slug])
   @@index([ownerId])
@@ -449,6 +450,7 @@ model Contact {
   conversations       Conversation[]
   leads               Lead[]
   messageQueue        MessageQueue[]
+  callLogs            CallLog[]
 
   @@unique([organizationId, phone])
   @@index([organizationId])
@@ -960,6 +962,45 @@ model PaymentGateway {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// One WhatsApp voice call (Cloud API Calling), inbound or outbound. Meta's call
+// id (wacid.…) is the key every webhook and action uses. Media flows browser
+// to Meta over WebRTC; this row is the record and the claim on who answered.
+//
+// status: RINGING -> ANSWERING -> ANSWERED -> COMPLETED for an inbound call
+// (or REJECTED / MISSED / FAILED); CALLING -> RINGING -> ANSWERED -> COMPLETED
+// for an outbound one (or REJECTED / NOT_ANSWERED / FAILED).
+model CallLog {
+  id                String    @id @default(cuid())
+  organizationId    String
+  whatsappAccountId String?
+  contactId         String?
+  conversationId    String?
+  callId            String    @unique
+  direction         String // INBOUND | OUTBOUND
+  status            String
+  from              String?
+  to                String?
+  // An inbound call's SDP offer, so an agent who opens the app while it is
+  // still ringing can answer it. Cleared when the call ends.
+  offerSdp          String?
+  startedAt         DateTime  @default(now())
+  answeredAt        DateTime?
+  endedAt           DateTime?
+  duration          Int? // seconds, from Meta's terminate webhook
+  answeredById      String?
+  initiatedById     String?
+  failureReason     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, startedAt])
+  @@index([contactId])
+  @@index([status])
 }
 
 // Customer ko bheja gaya payment link aur uska haal. Confirmation do raaste se
