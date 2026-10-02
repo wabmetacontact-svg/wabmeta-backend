@@ -28,6 +28,16 @@ import * as instagramService from '../instagram/instagram.service';
 import { notificationsService } from '../notifications/notifications.service';
 import { recordHistoryProgress } from '../meta/coexistence';
 
+/** A customer's answer to a call permission request, in words for the chat. */
+export const callPermissionReplyText = (reply: any): string => {
+  if (reply?.response !== 'accept') return '📵 Declined calls from your business';
+  if (reply.is_permanent) return '📞 Allowed calls from your business';
+  const exp = Number(reply.expiration_timestamp);
+  return exp
+    ? `📞 Allowed calls until ${new Date(exp * 1000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })}`
+    : '📞 Allowed calls from your business';
+};
+
 export const webhookEvents = new EventEmitter();
 webhookEvents.setMaxListeners(100);
 
@@ -117,6 +127,7 @@ export class WebhookService {
       const iType = message?.interactive?.type;
       if (iType === 'button_reply') return { content: message.interactive.button_reply.title || '[Button Reply]', mediaUrl: null };
       if (iType === 'list_reply') return { content: message.interactive.list_reply.title || '[List Reply]', mediaUrl: null };
+      if (iType === 'call_permission_reply') return { content: callPermissionReplyText(message.interactive.call_permission_reply), mediaUrl: null };
       return { content: '[Interactive]', mediaUrl: null };
     }
 
@@ -126,7 +137,8 @@ export class WebhookService {
   // ============================================
   // ✅ FIX 1: findOrCreateContact - UPSERT
   // ============================================
-  private async findOrCreateContact(
+  // Public: calling.service resolves the caller of an inbound call with it too.
+  async findOrCreateContact(
     organizationId: string,
     phone: string,
     profileName?: string
@@ -612,9 +624,12 @@ export class WebhookService {
           await this.handleTemplateCategoryUpdate(value);
           return { status: 'processed', reason: 'Template category update processed' };
 
-        case 'calls':
-          await this.handleCallWebhook(payload, value);
+        case 'calls': {
+          // WhatsApp Calling: connect / terminate events and call statuses.
+          const { callingService } = await import('../calling/calling.service');
+          await callingService.handleCallsWebhook(value);
           return { status: 'processed', reason: 'Call webhook processed' };
+        }
 
         case 'phone_number_quality_update':
           // Meta event (FLAGGED / UNFLAGGED / DOWNGRADE / UPGRADE) me rating
@@ -945,6 +960,9 @@ export class WebhookService {
           mediaUrl = JSON.stringify(message.interactive);
         } else if (iType === 'list') {
           content = message.interactive?.body?.text || '[List]';
+          mediaUrl = JSON.stringify(message.interactive);
+        } else if (iType === 'call_permission_reply') {
+          content = callPermissionReplyText(message.interactive.call_permission_reply);
           mediaUrl = JSON.stringify(message.interactive);
         } else {
           content = '[Interactive]';
@@ -2551,119 +2569,6 @@ export class WebhookService {
     webhookEvents.emit('conversationUpdated', { organizationId, conversation: conversationPayload });
   }
 
-  private async handleCallWebhook(payload: any, value: any) {
-    try {
-      const callData = value?.call || {};
-      const callId = callData.id;
-      const status = callData.status;
-      const direction = callData.direction;
-      const from = callData.from;
-      const to = callData.to;
-      const duration = callData.duration;
-
-      console.log(`📞 Call webhook received:`, {
-        callId,
-        status,
-        direction,
-        from: from ? String(from).substring(0, 6) : undefined,
-      });
-
-      const phoneNumberId = value?.metadata?.phone_number_id;
-      if (!phoneNumberId) return;
-
-      const account = await prisma.whatsAppAccount.findFirst({
-        where: { phoneNumberId },
-      });
-
-      if (!account) return;
-
-      if (direction === 'inbound' && from) {
-        const cleanPhone = String(from).replace(/[^0-9]/g, '');
-        let phone10 = cleanPhone;
-        if (phone10.startsWith('91') && phone10.length === 12) {
-          phone10 = phone10.substring(2);
-        }
-
-        let contact = await prisma.contact.findFirst({
-          where: {
-            organizationId: account.organizationId,
-            OR: [
-              { phone: phone10 },
-              { phone: `+91${phone10}` },
-              { phone: `91${phone10}` },
-            ],
-          },
-        });
-
-        if (!contact) {
-          contact = await prisma.contact.create({
-            data: {
-              organizationId: account.organizationId,
-              phone: phone10,
-              firstName: 'Unknown',
-              status: 'ACTIVE',
-              source: 'WHATSAPP_CALL',
-            },
-          });
-          console.log('👤 New contact from inbound call:', phone10);
-        }
-
-        (prisma as any).callLog?.create({
-          data: {
-            organizationId: account.organizationId,
-            whatsappAccountId: account.id,
-            contactId: contact.id,
-            callId: callId || `call_${Date.now()}`,
-            direction: 'INBOUND',
-            status: status || 'received',
-            from: cleanPhone,
-            to: account.phoneNumber,
-            duration: duration || null,
-            startedAt: new Date(),
-            endedAt: status === 'ended' ? new Date() : null,
-          },
-        })?.catch((dbErr: any) => console.warn('Call log DB save failed:', dbErr.message));
-
-        webhookEvents.emit('incomingCall', {
-          organizationId: account.organizationId,
-          callId,
-          from: cleanPhone,
-          contactId: contact.id,
-          contactName: contact.firstName || phone10,
-          status,
-          direction: 'INBOUND',
-          timestamp: new Date().toISOString(),
-        });
-
-        console.log(`📞 Inbound call processed from: ${phone10}`);
-      }
-
-      if (direction === 'outbound' && callId) {
-        (prisma as any).callLog?.updateMany({
-          where: { callId },
-          data: {
-            status: status || 'updated',
-            duration: duration || undefined,
-            endedAt: status === 'ended' ? new Date() : undefined,
-          },
-        })?.catch((dbErr: any) => console.warn('Call log update failed:', dbErr.message));
-
-        webhookEvents.emit('callStatusUpdate', {
-          organizationId: account.organizationId,
-          callId,
-          status,
-          duration,
-          direction: 'OUTBOUND',
-          timestamp: new Date().toISOString(),
-        });
-      }
-
-      console.log(`✅ Call webhook processed: ${callId} -> ${status}`);
-
-    } catch (e) {
-      console.error('handleCallWebhook error:', e);
-    }
-  }
   // ============================================
   // ✅ NEW: Auto-backup inbound media to Cloudinary
   // Meta media 30 din baad expire hoti hai

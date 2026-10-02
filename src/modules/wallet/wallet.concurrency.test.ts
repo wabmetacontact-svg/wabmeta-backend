@@ -20,6 +20,7 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { deductWalletForTemplate } from './wallet.deduction.service';
+import { creditWalletFromWebhook } from './wallet.service';
 
 const prisma = new PrismaClient();
 
@@ -56,6 +57,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await prisma.walletTopUpOrder.deleteMany({ where: { organizationId } });
   await prisma.walletTransaction.deleteMany({ where: { wallet: { organizationId } } });
   await prisma.wallet.deleteMany({ where: { organizationId } });
 
@@ -80,6 +82,7 @@ afterAll(async () => {
     return;
   }
 
+  await prisma.walletTopUpOrder.deleteMany({ where: { organizationId } });
   await prisma.walletTransaction.deleteMany({ where: { wallet: { organizationId } } });
   await prisma.wallet.deleteMany({ where: { organizationId } });
   await prisma.organization.deleteMany({ where: { id: organizationId } });
@@ -132,5 +135,34 @@ describe('wallet debit under concurrency', () => {
 
     const wallet = await prisma.wallet.findUniqueOrThrow({ where: { id: walletId } });
     expect(wallet.balancePaise).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// One Razorpay top-up reaches creditWalletAtomic from the browser's /verify,
+// the webhook, the cron reconciliation and admin Reconcile - possibly all at
+// once. It must land in the wallet (and in revenue) exactly once.
+describe('wallet top-up credit under concurrency', () => {
+  const TOPUP_PAISE = 500_00;
+
+  it('credits one Razorpay payment once when every path arrives together', async () => {
+    const payment = {
+      organizationId,
+      razorpayOrderId: `order_${SUFFIX}`,
+      razorpayPaymentId: `pay_${SUFFIX}`,
+      amountPaise: TOPUP_PAISE,
+    };
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 10 }, () => creditWalletFromWebhook(payment))
+    );
+    expect(results.filter((r) => r.status === 'rejected')).toEqual([]);
+
+    const credits = await prisma.walletTransaction.findMany({
+      where: { walletId, type: 'credit', razorpayPaymentId: payment.razorpayPaymentId },
+    });
+    const wallet = await prisma.wallet.findUniqueOrThrow({ where: { id: walletId } });
+
+    expect(credits).toHaveLength(1);
+    expect(wallet.balancePaise).toBe(START_PAISE + TOPUP_PAISE);
   });
 });

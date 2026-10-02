@@ -396,6 +396,14 @@ async function creditWalletAtomic(params: {
     async (tx) => {
       const txDb = tx as any;
 
+      // Serialise credits per wallet. The same payment reaches here from up to
+      // four callers (browser /verify, webhook, cron reconciliation, admin
+      // Reconcile) that can arrive together, and nothing in the schema stops a
+      // second credit row. Under ReadCommitted both would pass the check below
+      // and credit twice - double money in the wallet and in revenue. With the
+      // row locked, the second waits, then sees the first one's credit.
+      await tx.$queryRaw`SELECT id FROM "Wallet" WHERE "organizationId" = ${organizationId} FOR UPDATE`;
+
       // ✅ Idempotency check
       const existing = await tx.walletTransaction.findFirst({
         where: {
