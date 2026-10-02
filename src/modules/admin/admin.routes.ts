@@ -306,10 +306,11 @@ router.get(
   adminController.getSubscriptionStats.bind(adminController)
 );
 
-// Assign plan to organization
+// Assign plan to organization. Billing admins only: an onboarder may not give
+// their own clients a plan (requireOrgAccess would have let them).
 router.post(
   '/subscriptions/assign',
-  requireOrgAccess('billing.write', (req) => (typeof req.body?.organizationId === 'string' ? req.body.organizationId : undefined)),
+  can('billing.write'),
   validate(assignPlanSchema),
   adminController.assignPlan.bind(adminController)
 );
