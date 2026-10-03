@@ -23,7 +23,9 @@ vi.mock('../../socket', () => ({
 }));
 
 const notify = vi.hoisted(() => vi.fn());
-vi.mock('../notifications/notifications.service', () => ({ notificationsService: { notifyOrganization: notify } }));
+const push = vi.hoisted(() => vi.fn());
+vi.mock('../notifications/notifications.service', () => ({ notificationsService: { notifyOrganization: notify, sendCallPush: push } }));
+const pushesOf = (type: string) => push.mock.calls.filter((c) => c[1]?.type === type);
 
 import { PrismaClient } from '@prisma/client';
 import { callingService } from './calling.service';
@@ -59,6 +61,12 @@ beforeAll(async () => {
   agentId = agent.id;
   const org = await prisma.organization.create({ data: { name: `Calls ${SUFFIX}`, slug: SUFFIX, ownerId } });
   organizationId = org.id;
+  await prisma.organizationMember.createMany({
+    data: [
+      { organizationId, userId: ownerId, role: 'OWNER' },
+      { organizationId, userId: agentId, role: 'MEMBER' },
+    ],
+  });
   await prisma.whatsAppAccount.create({
     data: {
       organizationId, phoneNumberId: PHONE_NUMBER_ID, wabaId: `waba-${SUFFIX}`, phoneNumber: '+919900000000',
@@ -70,6 +78,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   emitted.length = 0;
   notify.mockReset();
+  push.mockReset();
   for (const fn of Object.values(meta)) fn.mockReset();
   meta.callAction.mockResolvedValue({ callId: null, success: true });
   await prisma.callLog.deleteMany({ where: { organizationId } });
@@ -103,6 +112,13 @@ describe("a customer's call", () => {
     expect(ring).toHaveLength(1);
     expect(ring[0]).toMatchObject({ room: `org:${organizationId}`, data: { callId: callId('a'), sdp: 'v=0 offer' } });
     expect(await callingService.getActiveCalls(organizationId)).toHaveLength(1);
+
+    // One push rings every member's phone
+    await vi.waitFor(() => expect(pushesOf('incoming_call')).toHaveLength(1));
+    const [userIds, data, alert] = pushesOf('incoming_call')[0];
+    expect([...userIds].sort()).toEqual([ownerId, agentId].sort());
+    expect(data).toMatchObject({ callId: callId('a'), callerName: `+${CUSTOMER}`, startedAt: logs[0].startedAt.toISOString() });
+    expect(alert).toMatchObject({ title: '📞 Incoming WhatsApp call' });
   });
 
   it('is answered by exactly one agent when two press Accept together', async () => {
@@ -122,6 +138,9 @@ describe("a customer's call", () => {
     expect(log.status).toBe('ANSWERED');
     expect(log.offerSdp).toBeNull();
     expect(emitted.some((e) => e.event === 'call:answered')).toBe(true);
+    // The loser's phone stops ringing
+    await vi.waitFor(() => expect(pushesOf('call_ended')).toHaveLength(1));
+    expect(pushesOf('call_ended')[0][1]).toEqual({ type: 'call_ended', callId: callId('b') });
   });
 
   it('ends completed with its duration after being answered', async () => {
@@ -141,6 +160,7 @@ describe("a customer's call", () => {
     expect((await prisma.callLog.findUniqueOrThrow({ where: { callId: callId('d') } })).status).toBe('MISSED');
     expect(notify).toHaveBeenCalledWith(organizationId, expect.objectContaining({ title: 'Missed WhatsApp call' }));
     expect(emitted.find((e) => e.event === 'call:ended')?.data).toMatchObject({ status: 'MISSED' });
+    await vi.waitFor(() => expect(pushesOf('call_ended')).toHaveLength(1));
   });
 
   it('can be declined', async () => {
@@ -148,6 +168,7 @@ describe("a customer's call", () => {
     await callingService.rejectCall({ organizationId, userId: agentId, callId: callId('e') });
     expect(meta.callAction.mock.calls[0][2]).toEqual({ action: 'reject', callId: callId('e') });
     expect((await prisma.callLog.findUniqueOrThrow({ where: { callId: callId('e') } })).status).toBe('REJECTED');
+    await vi.waitFor(() => expect(pushesOf('call_ended')).toHaveLength(1));
   });
 });
 

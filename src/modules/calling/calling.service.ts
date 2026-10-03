@@ -265,6 +265,48 @@ export const callingService = {
       startedAt: log.startedAt.toISOString(),
     });
     console.log(`📞 Incoming WhatsApp call ${ev.callId} from ${from.slice(0, 6)}…`);
+
+    // The socket only reaches open apps; a push wakes the mobile app so an
+    // agent can still answer within Meta's ~60 seconds.
+    void this.pushIncomingCall(
+      organizationId,
+      ev.callId,
+      contactName(contact) || (from ? `+${from}` : 'A customer'),
+      log.startedAt
+    );
+  },
+
+  /** Agents whose phones ring for a customer's call. */
+  async ringingMembers(organizationId: string) {
+    const members = await prisma.organizationMember.findMany({
+      where: { organizationId, role: { in: ['OWNER', 'ADMIN', 'MEMBER'] } },
+      select: { userId: true },
+    });
+    return members.map((m) => m.userId);
+  },
+
+  /** Rings every agent's phone: the Android app as a phone call, others as a notification. */
+  async pushIncomingCall(organizationId: string, callId: string, callerName: string, startedAt: Date) {
+    try {
+      const { notificationsService } = await import('../notifications/notifications.service');
+      await notificationsService.sendCallPush(
+        await this.ringingMembers(organizationId),
+        { type: 'incoming_call', callId, callerName, startedAt: startedAt.toISOString(), actionUrl: '/dashboard/inbox' },
+        { title: '📞 Incoming WhatsApp call', body: `${callerName} is calling. Tap to answer.` }
+      );
+    } catch (e: any) {
+      console.warn('[Calling] Incoming call push failed:', e?.message);
+    }
+  },
+
+  /** A customer's call stopped ringing (answered, declined, over): stop it on every phone. */
+  async pushCallEnded(organizationId: string, callId: string) {
+    try {
+      const { notificationsService } = await import('../notifications/notifications.service');
+      await notificationsService.sendCallPush(await this.ringingMembers(organizationId), { type: 'call_ended', callId });
+    } catch (e: any) {
+      console.warn('[Calling] Call ended push failed:', e?.message);
+    }
   },
 
   async onStatus(organizationId: string, callId: string, status: string) {
@@ -307,6 +349,7 @@ export const callingService = {
       data: { status, endedAt: log.endedAt ?? new Date(), duration: ev.duration ?? log.duration, offerSdp: null },
     });
     await emitToOrg(organizationId, 'call:ended', { callId: ev.callId, status, duration: ev.duration });
+    if (log.direction === 'INBOUND' && log.status === 'RINGING') void this.pushCallEnded(organizationId, ev.callId);
 
     if (status === 'MISSED') {
       const contact = log.contactId
@@ -344,6 +387,8 @@ export const callingService = {
         409
       );
     }
+    // Answered here: the other agents' phones stop ringing
+    void this.pushCallEnded(organizationId, callId);
 
     const log = await prisma.callLog.findUniqueOrThrow({ where: { callId } });
     try {
@@ -371,6 +416,7 @@ export const callingService = {
       data: { status: 'REJECTED', answeredById: userId, endedAt: new Date(), offerSdp: null },
     });
     if (claim.count !== 1) throw new AppError('This call is no longer ringing.', 409);
+    void this.pushCallEnded(organizationId, callId);
 
     const log = await prisma.callLog.findUniqueOrThrow({ where: { callId } });
     try {
