@@ -450,6 +450,19 @@ class MetaApiClient {
     return response.data?.health_status || null;
   }
 
+  /**
+   * Business verification of the Meta business portfolio that owns this WABA:
+   * verified, pending, not_verified, rejected, expired, ... (lowercase, as
+   * Meta sends it). Null when Meta does not say.
+   */
+  async getBusinessVerificationStatus(wabaId: string, accessToken: string): Promise<string | null> {
+    const response = await this.client.get(wabaId, {
+      params: { access_token: accessToken, fields: 'business_verification_status' },
+      timeout: 15000,
+    });
+    return response.data?.business_verification_status || null;
+  }
+
   async getPhoneNumberDetails(
     phoneNumberId: string,
     accessToken: string

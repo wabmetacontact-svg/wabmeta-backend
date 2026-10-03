@@ -23,6 +23,9 @@ export function normalise(level: any): HealthLevel {
   return 'UNKNOWN';
 }
 
+/** Meta's note on a LIMITED number whose display name is not approved. */
+export const DISPLAY_NAME_NOTICE = /display name has not been approved/i;
+
 /** Meta's code for "this WhatsApp Business Account is banned". */
 export const WABA_BANNED_CODE = 141014;
 
@@ -165,6 +168,8 @@ export function displayStateFor(input: {
   canSend?: string | null;
   /** healthStatus, Meta's raw response. */
   raw?: any;
+  /** The phone number's name_status from Meta (APPROVED, PENDING_REVIEW, ...). */
+  nameStatus?: string | null;
 }): { state: DisplayState; issue: DisplayIssue | null } {
   // An admin's display override is deliberate and wins.
   const override = String(input.override || '').toUpperCase();
@@ -240,8 +245,23 @@ export function displayStateFor(input: {
   }
 
   if (level === 'LIMITED') {
+    // Meta's example LIMITED number: no error, only "Your display name has
+    // not been approved yet...". When the same Meta sync reports the name as
+    // APPROVED, that reason no longer holds, and the card said "Sending is
+    // limited" to customers whose name was approved and quality High. The
+    // daily limit itself is on the tier card either way.
+    const notices = entities.flatMap((e) => e.info);
+    if (
+      errors.length === 0 &&
+      notices.length > 0 &&
+      notices.every((n) => DISPLAY_NAME_NOTICE.test(n)) &&
+      String(input.nameStatus || '').toUpperCase() === 'APPROVED'
+    ) {
+      return { state: 'CONNECTED', issue: null };
+    }
+
     const found = errors.find((x) => x.err.known) || errors[0];
-    const info = entities.flatMap((e) => e.info)[0] || null;
+    const info = notices[0] || null;
     const issue = toIssue(found, 'Limited', 'Sending is limited');
     return {
       state: 'LIMITED',

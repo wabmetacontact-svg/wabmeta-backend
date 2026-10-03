@@ -1816,10 +1816,14 @@ private buildTemplateComponents(
       const { account, accessToken } = await this.getAccountWithToken(accountId);
 
       // ✅ Fresh data from Meta
-      const phoneInfo = await metaApi.getPhoneNumberInfo(
-        account.phoneNumberId,
-        accessToken
-      );
+      const [phoneInfo, businessVerification] = await Promise.all([
+        metaApi.getPhoneNumberInfo(account.phoneNumberId, accessToken),
+        // The verification customers mean by "verified" - the business
+        // portfolio's, read from the WABA. A failure here must not fail the sync.
+        account.wabaId
+          ? metaApi.getBusinessVerificationStatus(account.wabaId, accessToken).catch(() => null)
+          : Promise.resolve(null),
+      ]);
 
       whatsappLog.info('Meta returned sync data', {
         quality_rating: phoneInfo?.quality_rating,
@@ -1840,6 +1844,8 @@ private buildTemplateComponents(
           codeVerificationStatus: 
             phoneInfo?.code_verification_status || account.codeVerificationStatus,
           nameStatus: phoneInfo?.name_status || (account as any).nameStatus,
+          businessVerificationStatus:
+            businessVerification || (account as any).businessVerificationStatus,
           updatedAt: new Date(),
         } as any,
       });

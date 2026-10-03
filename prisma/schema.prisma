@@ -275,6 +275,10 @@ model WhatsAppAccount {
   status                 WhatsAppAccountStatus @default(PENDING)
   codeVerificationStatus String?
   nameStatus             String?
+  // Meta business verification of the portfolio that owns this WABA
+  // (verified, pending, not_verified, rejected, ...). codeVerificationStatus
+  // above is only the phone number's SMS/voice code check.
+  businessVerificationStatus String?
 
   // Meta ka health_status - wahi jagah jahan wo asli wajah batata hai
   // (payment method error, WABA banned, business verification pending).
