@@ -67,7 +67,13 @@ export function toClientAccount(account: any): SanitizedAccount | null {
   } = account as any;
 
   if (qualityRatingOverride) safe.qualityRating = qualityRatingOverride;
-  if (codeVerificationOverride) safe.codeVerificationStatus = codeVerificationOverride;
+  if (codeVerificationOverride) {
+    safe.codeVerificationStatus = codeVerificationOverride;
+    // The account card's "Verification" is business verification now; the
+    // admin's verification override (VERIFIED / NOT_VERIFIED / EXPIRED) is
+    // what it shows. Meta's business statuses use the same words, lowercase.
+    safe.businessVerificationStatus = String(codeVerificationOverride).toLowerCase();
+  }
   if (healthCanSendOverride) safe.connectionState = healthCanSendOverride;
 
   // What the customer's status pill should say, decided here once so the
@@ -81,6 +87,7 @@ export function toClientAccount(account: any): SanitizedAccount | null {
     override: healthCanSendOverride,
     canSend: safe.healthCanSend,
     raw: healthStatus,
+    nameStatus: safe.nameStatus,
   });
   safe.displayState = display.state;
   safe.displayIssue = display.issue;

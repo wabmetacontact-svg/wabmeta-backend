@@ -130,3 +130,52 @@ describe('the other states', () => {
       .toBe('CONNECTED');
   });
 });
+
+describe("Meta's display-name note on a LIMITED number", () => {
+  // Meta's own example of a LIMITED phone number
+  const nameNotApproved = {
+    can_send_message: 'LIMITED',
+    entities: [
+      {
+        entity_type: 'PHONE_NUMBER',
+        can_send_message: 'LIMITED',
+        additional_info: [
+          'Your display name has not been approved yet. Your message limit will increase after the display name is approved.',
+        ],
+      },
+      { entity_type: 'WABA', can_send_message: 'AVAILABLE' },
+    ],
+  };
+
+  it('is shown while the name is not approved', () => {
+    for (const nameStatus of ['PENDING_REVIEW', 'AVAILABLE_WITHOUT_REVIEW', 'DECLINED', null]) {
+      const r = displayStateFor({ canSend: 'LIMITED', raw: nameNotApproved, nameStatus });
+      expect(r.state).toBe('LIMITED');
+      expect(r.issue?.action).toContain('display name has not been approved');
+    }
+  });
+
+  it('is dropped once Meta reports the name APPROVED', () => {
+    const r = displayStateFor({ canSend: 'LIMITED', raw: nameNotApproved, nameStatus: 'APPROVED' });
+    expect(r).toEqual({ state: 'CONNECTED', issue: null });
+  });
+
+  it('does not hide any other limit on an approved name', () => {
+    const throttled = {
+      ...nameNotApproved,
+      entities: [
+        {
+          ...nameNotApproved.entities[0],
+          errors: [{ error_code: 131049, error_description: 'Throttled' }],
+        },
+      ],
+    };
+    expect(displayStateFor({ canSend: 'LIMITED', raw: throttled, nameStatus: 'APPROVED' }).state).toBe('LIMITED');
+
+    const otherNote = {
+      ...nameNotApproved,
+      entities: [{ ...nameNotApproved.entities[0], additional_info: ['Some other limit.'] }],
+    };
+    expect(displayStateFor({ canSend: 'LIMITED', raw: otherNote, nameStatus: 'APPROVED' }).state).toBe('LIMITED');
+  });
+});

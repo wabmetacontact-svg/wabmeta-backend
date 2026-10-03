@@ -84,7 +84,7 @@ export class MetaService {
    * yahan distinct conversations gine jaate hain, raw message count nahi -
    * warna number hamesha zyada dikhta aur galat hota.
    */
-  private async getMessagingUsage(account: any) {
+  async getMessagingUsage(account: any) {
     const accountId = account.id;
     const tier = account.messagingLimit as string | null;
 

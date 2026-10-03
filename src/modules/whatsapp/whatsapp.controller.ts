@@ -6,6 +6,7 @@ import { successResponse, errorResponse } from '../../utils/response';
 import { resolveOrganizationId } from '../../utils/resolveOrgId';
 import { AuthRequest } from '../../types/express';
 import { toClientAccount } from '../meta/accountView';
+import { metaService } from '../meta/meta.service';
 
 // ============================================
 // HELPER FUNCTIONS
@@ -21,6 +22,15 @@ const getOrgId = (req: Request): Promise<string> =>
 // apply nahi karti thi - isliye "Sync" dabate hi admin ki set ki hui value
 // gayab ho jati thi aur Meta wali wapas aa jati thi.
 const sanitizeAccount = toClientAccount;
+
+/**
+ * An account as the settings page shows it, with today's usage - the same
+ * shape GET /meta/accounts returns. The sync endpoints used to send it
+ * without usage, so the page's auto-sync replaced "120 / 2,000 used" with
+ * a bare caption a moment after it loaded.
+ */
+const withUsage = async (account: any) =>
+  sanitizeAccount({ ...account, ...(await metaService.getMessagingUsage(account)) });
 
 const verifyOrgAccess = async (userId: string, organizationId: string) => {
   const member = await prisma.organizationMember.findUnique({
@@ -508,7 +518,7 @@ class WhatsAppController {
       }
 
       return successResponse(res, {
-        data: sanitizeAccount(result.account),
+        data: await withUsage(result.account),
         message: 'Quality rating synced successfully',
       });
     } catch (e) {
@@ -549,7 +559,7 @@ class WhatsAppController {
 
       return successResponse(res, {
         data: {
-          accounts: accounts.map(sanitizeAccount),
+          accounts: await Promise.all(accounts.map(withUsage)),
           syncStats: result,
         },
         message: `Synced ${result.synced}/${result.total} accounts`,
