@@ -2162,3 +2162,43 @@ model PushSubscription {
 
   @@index([userId])
 }
+
+/// The outbox for what WabMeta pushes to TeamOS.
+///
+/// One row per thing that is mirrored over there - an onboarder, a client, a
+/// payment - not one row per change. The row carries the latest payload and a
+/// fingerprint of it, so the projector can tell "this changed, send it again"
+/// from "nothing happened, leave it alone" without keeping a history nobody
+/// reads. That also keeps the queue the size of the data rather than the size
+/// of all the edits ever made to it.
+///
+/// `externalId` is the key TeamOS deduplicates on, and it is built from our own
+/// row ids ("org:<id>", "payment:<id>"), never from a Razorpay id that may be
+/// null.
+model SyncEvent {
+  id   String @id @default(cuid())
+  /// member.upsert | client.upsert | ledger.upsert
+  kind String
+  /// The id this thing has on the receiving side.
+  externalId String
+  /// The event body, without its event id - that is added at delivery time so
+  /// a retry does not change the fingerprint.
+  payload    Json
+  /// sha256 of the payload, with object keys sorted. Equal fingerprint means
+  /// equal state, which means there is nothing to send.
+  fingerprint String
+  /// PENDING | DELIVERED | DEAD
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  /// Delivery waits until this moment. Moved forward on each failure.
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  deliveredAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  /// One row per mirrored thing. The projector upserts on this.
+  @@unique([kind, externalId])
+  /// What the worker claims each tick.
+  @@index([status, nextAttemptAt])
+}
