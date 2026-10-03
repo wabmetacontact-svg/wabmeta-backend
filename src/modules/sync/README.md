@@ -14,7 +14,7 @@ immediately, and nothing is queued or sent.
 | --- | --- | --- |
 | `TEAMOS_SYNC_URL` | yes | `https://team-os-coral.vercel.app/api/sync/wabmeta` |
 | `TEAMOS_SYNC_SECRET` | yes | Shared with TeamOS's `WABMETA_SYNC_SECRET`. Every request is signed with it |
-| `TEAMOS_SYNC_CLIENTS` | no | `owned` (default) mirrors only organizations an onboarder owns; `all` mirrors every one |
+| `TEAMOS_SYNC_CLIENTS` | no | `all` (default) mirrors every organization; `owned` narrows it to those a sales person is credited with |
 | `TEAMOS_SYNC_ENABLED` | no | Set to `false` to stop the sync without removing the credentials |
 
 TeamOS needs two of its own, set in Vercel: `WABMETA_SYNC_SECRET` (the same

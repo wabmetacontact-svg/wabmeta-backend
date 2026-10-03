@@ -31,6 +31,7 @@ import {
 import { istDate, projectClients, projectMembers, projectMoney, readCursor, writeCursor, CURSOR_KEY } from './sync.project';
 import { deliverBatch, deliverDue, signBody } from './sync.worker';
 import { withLease } from './sync.lease';
+import { teamosSyncController } from './sync.controller';
 import { clientExternalId, memberExternalId, offlineExternalId, planExternalId, refundExternalId } from './sync.types';
 
 const SUFFIX = `sync-${Date.now()}`;
@@ -114,7 +115,7 @@ describe('configuration', () => {
     expect(syncConfig({ TEAMOS_SYNC_SECRET: 's' } as any)).toBeNull();
     expect(syncConfig({ TEAMOS_SYNC_URL: 'https://x/y', TEAMOS_SYNC_SECRET: 's' } as any)).toMatchObject({
       url: 'https://x/y',
-      scope: 'owned',
+      scope: 'all',
     });
   });
 
@@ -123,10 +124,12 @@ describe('configuration', () => {
     expect(syncConfig(env)).toBeNull();
   });
 
-  it('mirrors only onboarder-owned clients unless told otherwise', () => {
+  it('mirrors every organization unless narrowed to the owned ones', () => {
     const base = { TEAMOS_SYNC_URL: 'https://x/y', TEAMOS_SYNC_SECRET: 's' };
-    expect(syncConfig(base as any)!.scope).toBe('owned');
-    expect(syncConfig({ ...base, TEAMOS_SYNC_CLIENTS: 'all' } as any)!.scope).toBe('all');
+    expect(syncConfig(base as any)!.scope).toBe('all');
+    expect(syncConfig({ ...base, TEAMOS_SYNC_CLIENTS: 'owned' } as any)!.scope).toBe('owned');
+    // Anything unrecognised means the default rather than a silent narrowing.
+    expect(syncConfig({ ...base, TEAMOS_SYNC_CLIENTS: 'typo' } as any)!.scope).toBe('all');
   });
 });
 
@@ -691,6 +694,50 @@ describe('the lease', () => {
     expect((row.value as any).holder).toBe('other');
 
     await prisma.systemSetting.delete({ where: { key: KEY } });
+  });
+});
+
+describe('what the admin panel is told', () => {
+  const call = async (handler: any) => {
+    const res: any = { body: null, json(b: any) { res.body = b; return res; } };
+    await new Promise<void>((resolve, reject) => {
+      handler({ admin: { id: 'a', email: 'a@t', role: 'super_admin' } } as any, res, (e: any) => reject(e));
+      setTimeout(resolve, 150);
+    });
+    return res.body;
+  };
+
+  it('gives the host it is sending to, never the secret', async () => {
+    process.env.TEAMOS_SYNC_URL = 'https://team-os-coral.vercel.app/api/sync/wabmeta';
+    process.env.TEAMOS_SYNC_SECRET = 'a-secret-that-must-not-appear';
+    try {
+      const body = await call(teamosSyncController.status);
+      expect(body.success).toBe(true);
+      expect(body.data.configured).toBe(true);
+      expect(body.data.target).toBe('team-os-coral.vercel.app');
+      // The card is read by support and finance admins too, and a shared
+      // secret in a JSON response is a shared secret in a browser's network
+      // tab, a screenshot and a bug report.
+      expect(JSON.stringify(body)).not.toContain('a-secret-that-must-not-appear');
+    } finally {
+      delete process.env.TEAMOS_SYNC_URL;
+      delete process.env.TEAMOS_SYNC_SECRET;
+    }
+  });
+
+  it('says plainly when the sync was never configured', async () => {
+    delete process.env.TEAMOS_SYNC_URL;
+    delete process.env.TEAMOS_SYNC_SECRET;
+    const body = await call(teamosSyncController.status);
+    expect(body.data.configured).toBe(false);
+    expect(body.data.target).toBeNull();
+  });
+
+  it('does not pretend to have run when nothing is configured', async () => {
+    delete process.env.TEAMOS_SYNC_URL;
+    const body = await call(teamosSyncController.run);
+    expect(body.data.ran).toBe(false);
+    expect(body.message).toContain('TEAMOS_SYNC_URL');
   });
 });
 

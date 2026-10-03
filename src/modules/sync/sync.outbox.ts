@@ -15,7 +15,10 @@ import { KIND_ORDER, type SyncKind, type SyncPayload } from './sync.types';
 export interface SyncConfig {
   url: string;
   secret: string;
-  /** Which organizations are mirrored: those an onboarder owns, or every one. */
+  /**
+   * Which organizations are mirrored. `all` (the default) is every one;
+   * `owned` narrows it to those a sales person is credited with.
+   */
   scope: 'owned' | 'all';
 }
 
@@ -33,7 +36,10 @@ export const syncConfig = (env: NodeJS.ProcessEnv = process.env): SyncConfig | n
   if (!url || !secret) return null;
   if (env.TEAMOS_SYNC_ENABLED === 'false') return null;
 
-  return { url, secret, scope: env.TEAMOS_SYNC_CLIENTS === 'all' ? 'all' : 'owned' };
+  // Every organization, unless somebody asks for only the ones a sales person
+  // owns. Sameer's call: TeamOS is meant to hold the whole customer list, not
+  // just the part that came through an onboarder.
+  return { url, secret, scope: env.TEAMOS_SYNC_CLIENTS === 'owned' ? 'owned' : 'all' };
 };
 
 /** How many events go in one request. TeamOS accepts up to 200. */
