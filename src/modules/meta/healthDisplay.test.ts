@@ -131,7 +131,7 @@ describe('the other states', () => {
   });
 });
 
-describe("Meta's display-name note on a LIMITED number", () => {
+describe('"Limited" means a real limit, not the display-name note', () => {
   // Meta's own example of a LIMITED phone number
   const nameNotApproved = {
     can_send_message: 'LIMITED',
@@ -147,35 +147,44 @@ describe("Meta's display-name note on a LIMITED number", () => {
     ],
   };
 
-  it('is shown while the name is not approved', () => {
-    for (const nameStatus of ['PENDING_REVIEW', 'AVAILABLE_WITHOUT_REVIEW', 'DECLINED', null]) {
-      const r = displayStateFor({ canSend: 'LIMITED', raw: nameNotApproved, nameStatus });
-      expect(r.state).toBe('LIMITED');
-      expect(r.issue?.action).toContain('display name has not been approved');
+  it('ignores the display-name note on its own, at any quality but low', () => {
+    for (const qualityRating of ['GREEN', 'YELLOW', 'HIGH', 'MEDIUM', null]) {
+      expect(displayStateFor({ canSend: 'LIMITED', raw: nameNotApproved, qualityRating })).toEqual({
+        state: 'CONNECTED',
+        issue: null,
+      });
     }
   });
 
-  it('is dropped once Meta reports the name APPROVED', () => {
-    const r = displayStateFor({ canSend: 'LIMITED', raw: nameNotApproved, nameStatus: 'APPROVED' });
-    expect(r).toEqual({ state: 'CONNECTED', issue: null });
+  it('shows Limited for low quality, whatever Meta says about sending', () => {
+    for (const canSend of ['AVAILABLE', 'LIMITED', null]) {
+      for (const qualityRating of ['RED', 'LOW']) {
+        const r = displayStateFor({ canSend, raw: canSend === 'LIMITED' ? nameNotApproved : undefined, qualityRating });
+        expect(r.state).toBe('LIMITED');
+        expect(r.issue?.title).toBe('Quality is low');
+      }
+    }
   });
 
-  it('does not hide any other limit on an approved name', () => {
+  it('keeps other limits, and anything worse than Limited', () => {
     const throttled = {
       ...nameNotApproved,
-      entities: [
-        {
-          ...nameNotApproved.entities[0],
-          errors: [{ error_code: 131049, error_description: 'Throttled' }],
-        },
-      ],
+      entities: [{ ...nameNotApproved.entities[0], errors: [{ error_code: 131049, error_description: 'Throttled' }] }],
     };
-    expect(displayStateFor({ canSend: 'LIMITED', raw: throttled, nameStatus: 'APPROVED' }).state).toBe('LIMITED');
+    expect(displayStateFor({ canSend: 'LIMITED', raw: throttled, qualityRating: 'GREEN' }).issue?.title).toBe(
+      'Throttled for quality'
+    );
 
     const otherNote = {
       ...nameNotApproved,
       entities: [{ ...nameNotApproved.entities[0], additional_info: ['Some other limit.'] }],
     };
-    expect(displayStateFor({ canSend: 'LIMITED', raw: otherNote, nameStatus: 'APPROVED' }).state).toBe('LIMITED');
+    expect(displayStateFor({ canSend: 'LIMITED', raw: otherNote }).state).toBe('LIMITED');
+
+    // A payment block or a ban is not downgraded to "low quality"
+    expect(displayStateFor({ canSend: 'BLOCKED', raw: wabaError(141006), qualityRating: 'RED' }).state).toBe('ACTION_NEEDED');
+    expect(displayStateFor({ canSend: 'BLOCKED', raw: wabaError(WABA_BANNED_CODE), qualityRating: 'RED' }).state).toBe('BANNED');
+    // An admin's CONNECTED override still wins
+    expect(displayStateFor({ override: 'CONNECTED', canSend: 'AVAILABLE', qualityRating: 'RED' }).state).toBe('CONNECTED');
   });
 });

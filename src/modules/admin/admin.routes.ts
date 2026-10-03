@@ -23,6 +23,7 @@ import {
   systemSettingsSchema,
 } from './admin.control.controller';
 import { rateLimit } from '../../middleware/rateLimit';
+import { teamosSyncController as teamos } from '../sync/sync.controller';
 import {
   adminOpsController as ops,
   announcementCreateSchema,
@@ -736,6 +737,13 @@ router.post('/manual-payments/:paymentId/review', can('payments.verify'), valida
 // Onboarders
 router.put('/organizations/:id/onboarder', can('orgs.write'), validate(assignOnboarderSchema), bill.assignOnboarder);
 router.get('/onboarders', can('billing.read'), bill.onboarders);
+
+// The TeamOS sync: what is queued, what was given up on, and the two buttons.
+// Reading it is part of seeing the platform's state; making it act is a
+// platform change, which is settings.write - super admins only.
+router.get('/teamos-sync', can('settings.read'), teamos.status);
+router.post('/teamos-sync/run', can('settings.write'), teamos.run);
+router.post('/teamos-sync/retry', can('settings.write'), teamos.retry);
 
 // The signed-in onboarder's own clients
 router.get('/my-clients', can('clients.own'), bill.myClients);

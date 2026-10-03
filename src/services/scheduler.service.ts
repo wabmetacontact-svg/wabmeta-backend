@@ -25,6 +25,7 @@ const state = {
   automationJobs: false,
   noReply: false,
   payments: false,
+  teamosSync: false,
   lastPoolError: 0,
 };
 
@@ -270,6 +271,33 @@ export function initializeScheduler() {
       }
     } finally {
       state.payments = false;
+    }
+  });
+
+  // ============================================
+  // 10. TEAMOS SYNC - Every minute
+  // Pushes clients, the admin team and money received to TeamOS. runSync takes
+  // its own advisory lock and returns at once when it is not configured, so an
+  // instance without TEAMOS_SYNC_URL just ticks over. The minute is a ceiling
+  // on how late a payment shows up over there, not a cost: a run where nothing
+  // changed is a fingerprint comparison per row and no request at all.
+  // ============================================
+  cron.schedule('* * * * *', async () => {
+    if (state.teamosSync) return;
+    if (shouldSkipDueToPoolPressure()) return;
+
+    state.teamosSync = true;
+    try {
+      const { runSync } = await import('../modules/sync/sync.service');
+      await runSync();
+    } catch (error: any) {
+      if (error?.code === 'P2024') {
+        markPoolError();
+      } else {
+        console.error('TeamOS sync error:', error.message);
+      }
+    } finally {
+      state.teamosSync = false;
     }
   });
 
