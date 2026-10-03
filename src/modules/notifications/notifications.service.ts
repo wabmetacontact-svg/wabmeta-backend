@@ -258,6 +258,31 @@ export const notificationsService = {
         channelId: 'default',
       }));
 
+    await this.deliverPush(messages);
+  },
+
+  /**
+   * A WhatsApp call push. Android apps get it data-only: the app shows the
+   * phone's own incoming-call notification (ringtone, Answer / Decline) itself,
+   * and a later `call_ended` push stops it. Other devices get `alert`, if given,
+   * as an ordinary notification. Pushes expire with Meta's ~60 s ring window.
+   */
+  async sendCallPush(userIds: string[], data: Record<string, any>, alert?: { title: string; body: string }) {
+    if (userIds.length === 0) return;
+    const tokens = await prisma.expoPushToken.findMany({ where: { userId: { in: userIds } } });
+
+    const messages: ExpoPushMessage[] = tokens
+      .filter((t) => Expo.isExpoPushToken(t.token))
+      .flatMap((t): ExpoPushMessage[] => {
+        if (t.platform === 'android') return [{ to: t.token, data, priority: 'high', ttl: 60 }];
+        if (!alert) return [];
+        return [{ to: t.token, sound: 'default', title: alert.title, body: alert.body, data, priority: 'high', channelId: 'default', ttl: 60 }];
+      });
+
+    await this.deliverPush(messages);
+  },
+
+  async deliverPush(messages: ExpoPushMessage[]) {
     if (messages.length === 0) return;
 
     const chunks = expo.chunkPushNotifications(messages);

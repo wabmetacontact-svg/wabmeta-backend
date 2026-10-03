@@ -256,8 +256,23 @@ class CallingController {
       const { organizationId } = this.ctx(req);
       const { to, conversationId } = req.body || {};
       if (!to) throw new AppError('Phone number required', 400);
-      await callingService.requestPermission({ organizationId, to: String(to), conversationId });
-      res.json({ success: true, message: 'Call permission request sent' });
+      const result = await callingService.requestPermission({ organizationId, to: String(to), conversationId });
+      res.json({ success: true, message: 'Call permission request sent', data: result });
+    } catch (error) { next(error); }
+  }
+
+  async getPermissionTemplate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = this.ctx(req);
+      res.json({ success: true, data: await callingService.getPermissionTemplate({ organizationId }) });
+    } catch (error) { next(error); }
+  }
+
+  async createPermissionTemplate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = this.ctx(req);
+      const data = await callingService.createPermissionTemplate({ organizationId });
+      res.json({ success: true, message: 'Call permission template sent to Meta for approval', data });
     } catch (error) { next(error); }
   }
 

@@ -21,6 +21,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { metaApi } from '../meta/meta.api';
 import { metaService } from '../meta/meta.service';
 import { tierDailyLimit } from '../meta/accountView';
+import { isWindowOpen } from '../automation/automation.timing';
 
 /** Meta: calling needs a daily messaging limit of at least 2,000 unique recipients. */
 export const CALLING_MIN_DAILY_LIMIT = 2000;
@@ -184,6 +185,23 @@ const tokenFor = async (accountId: string) => {
 
 const ACTIVE_STATUSES = ['RINGING', 'ANSWERING', 'ANSWERED', 'CALLING'];
 
+/**
+ * The template WabMeta submits to ask a customer for call permission outside
+ * the 24-hour window. Meta's template sync does not keep the
+ * call_permission_request component, so the name is how we recognise it.
+ */
+export const CALL_PERMISSION_TEMPLATE = 'wabmeta_call_permission';
+const CALL_PERMISSION_BODY =
+  'Hello! Our team would like to call you on WhatsApp about your enquiry. Tap Allow below so we can call you.';
+
+/** This number's call permission templates, newest first. */
+const permissionTemplates = (organizationId: string, whatsappAccountId: string) =>
+  prisma.template.findMany({
+    where: { organizationId, whatsappAccountId, name: { startsWith: CALL_PERMISSION_TEMPLATE } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, name: true, language: true, status: true, category: true, rejectionReason: true, bodyText: true },
+  });
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export const callingService = {
@@ -265,6 +283,48 @@ export const callingService = {
       startedAt: log.startedAt.toISOString(),
     });
     console.log(`📞 Incoming WhatsApp call ${ev.callId} from ${from.slice(0, 6)}…`);
+
+    // The socket only reaches open apps; a push wakes the mobile app so an
+    // agent can still answer within Meta's ~60 seconds.
+    void this.pushIncomingCall(
+      organizationId,
+      ev.callId,
+      contactName(contact) || (from ? `+${from}` : 'A customer'),
+      log.startedAt
+    );
+  },
+
+  /** Agents whose phones ring for a customer's call. */
+  async ringingMembers(organizationId: string) {
+    const members = await prisma.organizationMember.findMany({
+      where: { organizationId, role: { in: ['OWNER', 'ADMIN', 'MEMBER'] } },
+      select: { userId: true },
+    });
+    return members.map((m) => m.userId);
+  },
+
+  /** Rings every agent's phone: the Android app as a phone call, others as a notification. */
+  async pushIncomingCall(organizationId: string, callId: string, callerName: string, startedAt: Date) {
+    try {
+      const { notificationsService } = await import('../notifications/notifications.service');
+      await notificationsService.sendCallPush(
+        await this.ringingMembers(organizationId),
+        { type: 'incoming_call', callId, callerName, startedAt: startedAt.toISOString(), actionUrl: '/dashboard/inbox' },
+        { title: '📞 Incoming WhatsApp call', body: `${callerName} is calling. Tap to answer.` }
+      );
+    } catch (e: any) {
+      console.warn('[Calling] Incoming call push failed:', e?.message);
+    }
+  },
+
+  /** A customer's call stopped ringing (answered, declined, over): stop it on every phone. */
+  async pushCallEnded(organizationId: string, callId: string) {
+    try {
+      const { notificationsService } = await import('../notifications/notifications.service');
+      await notificationsService.sendCallPush(await this.ringingMembers(organizationId), { type: 'call_ended', callId });
+    } catch (e: any) {
+      console.warn('[Calling] Call ended push failed:', e?.message);
+    }
   },
 
   async onStatus(organizationId: string, callId: string, status: string) {
@@ -307,6 +367,7 @@ export const callingService = {
       data: { status, endedAt: log.endedAt ?? new Date(), duration: ev.duration ?? log.duration, offerSdp: null },
     });
     await emitToOrg(organizationId, 'call:ended', { callId: ev.callId, status, duration: ev.duration });
+    if (log.direction === 'INBOUND' && log.status === 'RINGING') void this.pushCallEnded(organizationId, ev.callId);
 
     if (status === 'MISSED') {
       const contact = log.contactId
@@ -344,6 +405,8 @@ export const callingService = {
         409
       );
     }
+    // Answered here: the other agents' phones stop ringing
+    void this.pushCallEnded(organizationId, callId);
 
     const log = await prisma.callLog.findUniqueOrThrow({ where: { callId } });
     try {
@@ -371,6 +434,7 @@ export const callingService = {
       data: { status: 'REJECTED', answeredById: userId, endedAt: new Date(), offerSdp: null },
     });
     if (claim.count !== 1) throw new AppError('This call is no longer ringing.', 409);
+    void this.pushCallEnded(organizationId, callId);
 
     const log = await prisma.callLog.findUniqueOrThrow({ where: { callId } });
     try {
@@ -415,30 +479,140 @@ export const callingService = {
   },
 
   /**
-   * Ask the customer to allow calls. Goes out as a normal chat message (so it
-   * shows in the conversation) and needs the 24-hour window to be open.
+   * Ask the customer to allow calls.
+   *
+   * Inside the 24-hour window it goes out as a free chat message. Outside it,
+   * Meta only accepts an approved template carrying the call_permission_request
+   * component - the one createPermissionTemplate submits. That one is charged
+   * like any template (from the wallet).
    */
   async requestPermission(params: { organizationId: string; to: string; conversationId?: string; whatsappAccountId?: string }) {
-    const account = await accountForOrg(params.organizationId, params.whatsappAccountId);
+    const { organizationId } = params;
+    const to = digitsOf(params.to);
+    if (!to) throw new AppError('Phone number required', 400);
+    const account = await accountForOrg(organizationId, params.whatsappAccountId);
     const { whatsappService } = await import('../whatsapp/whatsapp.service');
-    try {
-      return await whatsappService.sendMessage({
-        accountId: account.id,
-        to: digitsOf(params.to),
-        type: 'interactive',
-        content: {
-          interactive: {
-            type: 'call_permission_request',
-            action: { name: 'call_permission_request' },
-            body: { text: 'We would like to call you on WhatsApp. Tap Allow so our team can call you.' },
+
+    const windowFields = { id: true, isWindowOpen: true, windowExpiresAt: true, lastCustomerMessageAt: true } as const;
+    const conversation =
+      (params.conversationId &&
+        (await prisma.conversation.findFirst({ where: { id: params.conversationId, organizationId }, select: windowFields }))) ||
+      (await prisma.conversation.findFirst({
+        where: { organizationId, channel: 'WHATSAPP', contact: { phone: { in: [`+${to}`, to] } } },
+        orderBy: { lastMessageAt: 'desc' },
+        select: windowFields,
+      }));
+
+    if (isWindowOpen(conversation)) {
+      try {
+        await whatsappService.sendMessage({
+          accountId: account.id,
+          to,
+          type: 'interactive',
+          content: {
+            interactive: {
+              type: 'call_permission_request',
+              action: { name: 'call_permission_request' },
+              body: { text: 'We would like to call you on WhatsApp. Tap Allow so our team can call you.' },
+            },
           },
-        },
-        conversationId: params.conversationId,
-        organizationId: params.organizationId,
+          conversationId: conversation?.id,
+          organizationId,
+        });
+        return { via: 'message' as const };
+      } catch (err: any) {
+        throw toCallError(err, 'Could not send the call permission request');
+      }
+    }
+
+    const templates = await permissionTemplates(organizationId, account.id);
+    const approved = templates.find((t) => t.status === 'APPROVED');
+    if (!approved) {
+      const pending = templates.some((t) => t.status === 'PENDING');
+      throw new AppError(
+        pending
+          ? 'This customer has not messaged you in the last 24 hours, and your call permission template is still waiting for Meta’s approval. Try again once it is approved.'
+          : 'This customer has not messaged you in the last 24 hours. To ask them now, WhatsApp needs an approved call permission template — create it in Settings › Calling.',
+        409,
+        'CALL_PERMISSION_TEMPLATE_REQUIRED'
+      );
+    }
+
+    try {
+      await whatsappService.sendTemplateMessage({
+        accountId: account.id,
+        to,
+        templateName: approved.name,
+        templateLanguage: approved.language,
+        components: [],
+        conversationId: conversation?.id,
+        organizationId,
       });
+      return { via: 'template' as const };
     } catch (err: any) {
       throw toCallError(err, 'Could not send the call permission request');
     }
+  },
+
+  /** The call permission template on this number: its latest state, or null if there is none. */
+  async getPermissionTemplate(params: { organizationId: string; whatsappAccountId?: string }) {
+    const account = await accountForOrg(params.organizationId, params.whatsappAccountId);
+    const templates = await permissionTemplates(params.organizationId, account.id);
+    const best = templates.find((t) => t.status === 'APPROVED') || templates[0];
+    return best
+      ? { id: best.id, name: best.name, status: best.status, category: best.category, rejectionReason: best.rejectionReason, bodyText: best.bodyText }
+      : null;
+  },
+
+  /**
+   * Submit the call permission template to Meta for this number. A new name
+   * each time after a rejection: Meta does not let a deleted name be reused
+   * for a while.
+   */
+  async createPermissionTemplate(params: { organizationId: string; whatsappAccountId?: string }) {
+    const { organizationId } = params;
+    const account = await accountForOrg(organizationId, params.whatsappAccountId);
+    const templates = await permissionTemplates(organizationId, account.id);
+    const live = templates.find((t) => t.status === 'APPROVED' || t.status === 'PENDING');
+    if (live) return this.getPermissionTemplate({ organizationId, whatsappAccountId: account.id });
+
+    const name = templates.length ? `${CALL_PERMISSION_TEMPLATE}_${templates.length + 1}` : CALL_PERMISSION_TEMPLATE;
+    const payload = {
+      name,
+      language: 'en',
+      category: 'UTILITY',
+      components: [{ type: 'BODY', text: CALL_PERMISSION_BODY }, { type: 'call_permission_request' }],
+    };
+
+    const { whatsappApi } = await import('../whatsapp/whatsapp.api');
+    let metaTemplateId: string | null = null;
+    let metaStatus = 'PENDING';
+    try {
+      const res = await whatsappApi.createMessageTemplateByVersion(account.wabaId, await tokenFor(account.id), payload);
+      metaTemplateId = res?.id ? String(res.id) : null;
+      if (res?.status) metaStatus = String(res.status).toUpperCase();
+    } catch (err: any) {
+      const meta = err?.metaError || err?.response?.data?.error;
+      throw new AppError(
+        `Meta did not accept the call permission template: ${meta?.error_user_msg || meta?.message || err?.message || 'unknown error'}`,
+        400
+      );
+    }
+
+    await prisma.template.create({
+      data: {
+        organizationId,
+        whatsappAccountId: account.id,
+        wabaId: account.wabaId,
+        metaTemplateId,
+        name,
+        language: 'en',
+        category: 'UTILITY',
+        bodyText: CALL_PERMISSION_BODY,
+        status: metaStatus === 'APPROVED' ? 'APPROVED' : metaStatus === 'REJECTED' ? 'REJECTED' : 'PENDING',
+      },
+    });
+    return this.getPermissionTemplate({ organizationId, whatsappAccountId: account.id });
   },
 
   /** Call a customer. The browser has already made its WebRTC offer. */

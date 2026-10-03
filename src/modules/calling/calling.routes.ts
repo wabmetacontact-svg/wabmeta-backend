@@ -29,6 +29,10 @@ router.post('/:callId/terminate', requireRole(...OPERATOR_ROLES), c.terminateCal
 router.get('/permission', c.getPermission.bind(c));
 router.post('/permission-request', requireRole(...OPERATOR_ROLES), c.requestPermission.bind(c));
 
+// The approved template that asks for permission outside the 24-hour window
+router.get('/permission-template', c.getPermissionTemplate.bind(c));
+router.post('/permission-template', requireRole(...ADMIN_ROLES), c.createPermissionTemplate.bind(c));
+
 // Call history
 router.get('/logs', c.getCallLogs.bind(c));
 
