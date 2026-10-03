@@ -27,11 +27,16 @@ describe('toClientAccount', () => {
     expect(a.businessVerificationStatus).toBe('verified');
   });
 
-  it('is not "Limited" for the display-name note once the name is approved', () => {
-    const approved = toClientAccount({ id: 'a1', healthCanSend: 'LIMITED', healthStatus: limitedForName, nameStatus: 'APPROVED' })!;
-    expect(approved.displayState).toBe('CONNECTED');
+  it('is "Limited" for low quality, not for the display-name note', () => {
+    const nameOnly = toClientAccount({ id: 'a1', healthCanSend: 'LIMITED', healthStatus: limitedForName, nameStatus: 'PENDING_REVIEW', qualityRating: 'GREEN' })!;
+    expect(nameOnly.displayState).toBe('CONNECTED');
 
-    const pending = toClientAccount({ id: 'a1', healthCanSend: 'LIMITED', healthStatus: limitedForName, nameStatus: 'PENDING_REVIEW' })!;
-    expect(pending.displayState).toBe('LIMITED');
+    const low = toClientAccount({ id: 'a1', healthCanSend: 'AVAILABLE', qualityRating: 'RED' })!;
+    expect(low.displayState).toBe('LIMITED');
+    expect(low.displayIssue.title).toBe('Quality is low');
+
+    // The admin's quality override is what the card shows, so the pill follows it
+    const overridden = toClientAccount({ id: 'a1', healthCanSend: 'AVAILABLE', qualityRating: 'RED', qualityRatingOverride: 'GREEN' })!;
+    expect(overridden.displayState).toBe('CONNECTED');
   });
 });

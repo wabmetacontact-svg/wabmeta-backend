@@ -26,6 +26,22 @@ export function normalise(level: any): HealthLevel {
 /** Meta's note on a LIMITED number whose display name is not approved. */
 export const DISPLAY_NAME_NOTICE = /display name has not been approved/i;
 
+/** Meta's lowest quality rating, in either spelling it uses. */
+const LOW_QUALITY = new Set(['RED', 'LOW']);
+
+const LOW_QUALITY_ISSUE = {
+  badge: 'Low quality',
+  title: 'Quality is low',
+  action:
+    'Customers have been blocking or reporting messages from this number, and ' +
+    'Meta may lower its limit or pause templates. Send only to contacts who ' +
+    'opted in, send fewer marketing templates, and keep them relevant; the ' +
+    'rating recovers as feedback improves.',
+  metaSays: null,
+  code: null,
+  entity: 'PHONE_NUMBER',
+};
+
 /** Meta's code for "this WhatsApp Business Account is banned". */
 export const WABA_BANNED_CODE = 141014;
 
@@ -168,8 +184,8 @@ export function displayStateFor(input: {
   canSend?: string | null;
   /** healthStatus, Meta's raw response. */
   raw?: any;
-  /** The phone number's name_status from Meta (APPROVED, PENDING_REVIEW, ...). */
-  nameStatus?: string | null;
+  /** The number's quality rating as shown (GREEN / YELLOW / RED, or HIGH / MEDIUM / LOW). */
+  qualityRating?: string | null;
 }): { state: DisplayState; issue: DisplayIssue | null } {
   // An admin's display override is deliberate and wins.
   const override = String(input.override || '').toUpperCase();
@@ -246,27 +262,28 @@ export function displayStateFor(input: {
 
   if (level === 'LIMITED') {
     // Meta's example LIMITED number: no error, only "Your display name has
-    // not been approved yet...". When the same Meta sync reports the name as
-    // APPROVED, that reason no longer holds, and the card said "Sending is
-    // limited" to customers whose name was approved and quality High. The
-    // daily limit itself is on the tier card either way.
-    const notices = entities.flatMap((e) => e.info);
-    if (
-      errors.length === 0 &&
-      notices.length > 0 &&
-      notices.every((n) => DISPLAY_NAME_NOTICE.test(n)) &&
-      String(input.nameStatus || '').toUpperCase() === 'APPROVED'
-    ) {
-      return { state: 'CONNECTED', issue: null };
-    }
+    // not been approved yet...". That alone does not make the card say
+    // "Limited" - the name's status is shown next to the name, and the daily
+    // limit on the tier card. Any other reason still does.
+    const notices = entities
+      .flatMap((e) => e.info)
+      .filter((n) => !DISPLAY_NAME_NOTICE.test(n));
 
-    const found = errors.find((x) => x.err.known) || errors[0];
-    const info = notices[0] || null;
-    const issue = toIssue(found, 'Limited', 'Sending is limited');
-    return {
-      state: 'LIMITED',
-      issue: found ? issue : { ...issue, action: info, metaSays: info },
-    };
+    if (errors.length > 0 || notices.length > 0) {
+      const found = errors.find((x) => x.err.known) || errors[0];
+      const info = notices[0] || null;
+      const issue = toIssue(found, 'Limited', 'Sending is limited');
+      return {
+        state: 'LIMITED',
+        issue: found ? issue : { ...issue, action: info, metaSays: info },
+      };
+    }
+  }
+
+  // Low quality: customers are blocking or reporting this number's messages,
+  // and Meta acts on that - even while it still reports the number available.
+  if (LOW_QUALITY.has(String(input.qualityRating || '').toUpperCase())) {
+    return { state: 'LIMITED', issue: LOW_QUALITY_ISSUE };
   }
 
   // AVAILABLE, or never checked - nothing to warn about.

@@ -87,7 +87,8 @@ export function toClientAccount(account: any): SanitizedAccount | null {
     override: healthCanSendOverride,
     canSend: safe.healthCanSend,
     raw: healthStatus,
-    nameStatus: safe.nameStatus,
+    // After the admin's quality override, so the pill matches the Quality card
+    qualityRating: safe.qualityRating,
   });
   safe.displayState = display.state;
   safe.displayIssue = display.issue;
