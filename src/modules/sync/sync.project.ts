@@ -139,6 +139,14 @@ export async function projectClients(scope: 'owned' | 'all'): Promise<ClientPayl
         soldById: true,
         soldAt: true,
         owner: { select: { email: true, phone: true } },
+        businessType: true,
+        setupDoneAt: true,
+        // passwordEnc is read only to say whether a line has one; the value
+        // itself is never put in a payload.
+        setupItems: {
+          orderBy: { position: 'asc' },
+          select: { label: true, chargePaise: true, chargeNote: true, details: true, status: true, passwordEnc: true },
+        },
         subscription: {
           select: {
             status: true,
@@ -177,6 +185,18 @@ export async function projectClients(scope: 'owned' | 'all'): Promise<ClientPayl
         // The plan as a person reads it. An ended one is still named, with the
         // fact that it ended - "no plan" would hide which plan lapsed.
         plan: sub?.plan?.name ? (planLive ? sub.plan.name : `${sub.plan.name} (expired)`) : null,
+        setup: {
+          businessType: org.businessType ?? null,
+          doneOn: org.setupDoneAt ? istDate(org.setupDoneAt) : null,
+          items: org.setupItems.map((i) => ({
+            label: i.label,
+            chargePaise: i.chargePaise,
+            chargeNote: i.chargeNote,
+            details: i.details,
+            status: i.status,
+            hasPassword: i.passwordEnc !== null,
+          })),
+        },
         // When the client came to us: the sale if there was one, else when an
         // onboarder took it on, else when the account was made.
         since: istDate(org.soldAt ?? org.onboardedAt ?? org.createdAt),

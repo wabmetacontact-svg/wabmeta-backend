@@ -68,6 +68,8 @@ export interface ClientPayload {
   phone: string | null;
   /** The plan they are on, marked when it has run out. */
   plan: string | null;
+  /** The onboarder's setup sheet, without passwords. */
+  setup: SetupPayload;
   removed: boolean;
 }
 
@@ -86,6 +88,25 @@ export interface LedgerPayload {
   method: string | null;
   clientExternalId: string | null;
   note: string | null;
+}
+
+/**
+ * The setup sheet as TeamOS shows it. A line's password is never sent - only
+ * whether it has one. It stays encrypted in WabMeta, for the client's onboarder
+ * and super admins to read there.
+ */
+export interface SetupPayload {
+  businessType: string | null;
+  /** yyyy-MM-dd the setup was finished, or null. */
+  doneOn: string | null;
+  items: {
+    label: string;
+    chargePaise: number | null;
+    chargeNote: string;
+    details: string;
+    status: string;
+    hasPassword: boolean;
+  }[];
 }
 
 export type SyncPayload = MemberPayload | ClientPayload | LedgerPayload;

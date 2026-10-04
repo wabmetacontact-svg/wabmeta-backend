@@ -136,6 +136,11 @@ model Organization {
   // sharing one column would erase who made the sale the moment it was.
   soldById                String?
   soldAt                  DateTime?
+  // The onboarder's setup sheet for this client: what kind of business it is,
+  // each line of what was set up, and when the whole setup was finished.
+  businessType            String?
+  setupDoneAt             DateTime?
+  setupItems              ClientSetupItem[]
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
@@ -2207,4 +2212,35 @@ model SyncEvent {
   @@unique([kind, externalId])
   /// What the worker claims each tick.
   @@index([status, nextAttemptAt])
+}
+
+/// One line of a client's setup sheet - "Plan/Email", "Facebook", "Phone no."
+/// and so on: what it cost, the IDs that go with it, and where it stands.
+///
+/// The charge is a record of what the client was charged for that line, not
+/// revenue. Money counts once it is recorded as a payment; counting it here as
+/// well would count the same rupee twice.
+model ClientSetupItem {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  position       Int          @default(0)
+  label          String
+  /// Paise. Null is "NIL".
+  chargePaise    Int?
+  /// How the charge was made up, as written: "700+600", "899 (B)".
+  chargeNote     String       @default("")
+  /// IDs, emails, phone numbers - free text, as on the sheet.
+  details        String       @default("")
+  /// A password for this line, encrypted with ENCRYPTION_KEY (utils/encryption).
+  /// Never returned with the sheet; read one at a time, and only by the
+  /// client's onboarder or a super admin. Not sent to TeamOS.
+  passwordEnc    String?
+  /// Free text: Approved, Pending, Done...
+  status         String       @default("")
+  updatedById    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
 }
