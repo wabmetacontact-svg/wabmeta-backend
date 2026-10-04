@@ -7,6 +7,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { AppError } from '../../middleware/errorHandler';
 import { addClientAddOn, listAddOns, removeClientAddOn } from './addOns';
+import { getSetup, revealSetupPassword, saveSetup } from './clientSetup';
 import {
   addOnCatalog,
   assignOnboarder,
@@ -69,6 +70,29 @@ export const reviewPaymentSchema = z.object({
 
 export const assignOnboarderSchema = z.object({
   body: z.object({ onboarderId: z.string().min(1).nullable() }),
+});
+
+export const setupSchema = z.object({
+  params: z.object({ id: z.string().min(1) }),
+  body: z.object({
+    businessType: z.string().max(80).nullish(),
+    done: z.boolean().optional(),
+    items: z
+      .array(
+        z.object({
+          id: z.string().nullish(),
+          label: z.string().min(1).max(80),
+          chargePaise: z.number().int().min(0).nullish(),
+          chargeNote: z.string().max(120).optional(),
+          details: z.string().max(2000).optional(),
+          status: z.string().max(40).optional(),
+          // Named "password" on purpose: the audit middleware redacts any body
+          // field with that name, so the value never reaches the audit log.
+          password: z.string().max(200).nullish(),
+        })
+      )
+      .max(40),
+  }),
 });
 
 export const handOffSchema = z.object({
@@ -140,6 +164,17 @@ export const clientBillingController = {
         req.admin!.role === 'sales' ? { soldById: req.admin!.id } : { onboardedById: req.admin!.id }
       )
     )
+  ),
+
+  // ─── The onboarder's setup sheet ──────────────────────────
+  setup: handle(async (req, res) => ok(res, await getSetup(param(req, 'id'), actorOf(req)))),
+
+  saveSetup: handle(async (req, res) =>
+    ok(res, await saveSetup(param(req, 'id'), req.body, actorOf(req)), 'Setup sheet saved')
+  ),
+
+  revealSetupPassword: handle(async (req, res) =>
+    ok(res, await revealSetupPassword(param(req, 'id'), param(req, 'itemId'), actorOf(req)))
   ),
 
   // ─── Sales hands a client to an onboarder ─────────────────

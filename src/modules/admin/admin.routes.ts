@@ -12,6 +12,7 @@ import {
   createClientSchema,
   handOffSchema,
   manualPaymentSchema,
+  setupSchema,
   reviewPaymentSchema,
 } from './clientBilling.controller';
 import { auditAdminActions } from './admin.audit';
@@ -719,6 +720,15 @@ router.get('/addon-catalog', canAny('orgs.read', 'clients.own', 'clients.sell'),
 
 // A client's bill (plan + add-ons) and the money actually received
 router.get('/organizations/:id/billing', requireOrgAccess('billing.read'), bill.billing);
+
+// The onboarder's setup sheet. Reading and editing it follow the client's own
+// access (an onboarder's own clients, a seller's sold clients, admins). Its
+// passwords are narrower still - the client's onboarder or a super admin -
+// and that check is in clientSetup.ts. Reading one is a POST so the audit
+// middleware records every read.
+router.get('/organizations/:id/setup', requireOrgAccess('orgs.read'), bill.setup);
+router.put('/organizations/:id/setup', requireOrgAccess('orgs.write'), validate(setupSchema), bill.saveSetup);
+router.post('/organizations/:id/setup/:itemId/password', requireOrgAccess('orgs.read'), bill.revealSetupPassword);
 
 // Add-ons: raise the client's limit while active
 router.get('/organizations/:id/addons', requireOrgAccess('orgs.read'), bill.listAddOns);
