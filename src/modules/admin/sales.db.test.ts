@@ -246,6 +246,15 @@ describe('what TeamOS is told', () => {
     expect(c.onboarderExternalId).toBe(memberExternalId(secondOnboarderId));
   });
 
+  it("carries the client's login and plan, so TeamOS can show the account", async () => {
+    const clients = await projectClients('all');
+    const c = clients.find((x) => x.externalId === clientExternalId(orgId))!;
+    // The owner's email is what the client signs in with.
+    expect(c.loginId).toBe(`client-${SUFFIX}@t.local`);
+    // A new client starts on the free demo plan.
+    expect(c.plan).toBeTruthy();
+  });
+
   it('a sold client counts as owned even before anybody onboards it', async () => {
     const owned = await projectClients('owned');
     const other = owned.find((x) => x.externalId === clientExternalId(otherOrgId));

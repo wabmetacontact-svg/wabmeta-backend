@@ -63,6 +63,11 @@ export interface ClientPayload {
    * the same person as the owner, for a client an onboarder brought in alone.
    */
   onboarderExternalId: string | null;
+  /** What the client signs in with: the owner's email. */
+  loginId: string | null;
+  phone: string | null;
+  /** The plan they are on, marked when it has run out. */
+  plan: string | null;
   removed: boolean;
 }
 

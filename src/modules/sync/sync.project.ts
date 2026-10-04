@@ -144,7 +144,7 @@ export async function projectClients(scope: 'owned' | 'all'): Promise<ClientPayl
             status: true,
             billingCycle: true,
             currentPeriodEnd: true,
-            plan: { select: { type: true, monthlyPrice: true, yearlyPrice: true } },
+            plan: { select: { name: true, type: true, monthlyPrice: true, yearlyPrice: true } },
           },
         },
       },
@@ -172,6 +172,11 @@ export async function projectClients(scope: 'owned' | 'all'): Promise<ClientPayl
         name: org.name,
         company: null,
         contact: org.owner?.email ?? org.owner?.phone ?? null,
+        loginId: org.owner?.email ?? null,
+        phone: org.owner?.phone ?? null,
+        // The plan as a person reads it. An ended one is still named, with the
+        // fact that it ended - "no plan" would hide which plan lapsed.
+        plan: sub?.plan?.name ? (planLive ? sub.plan.name : `${sub.plan.name} (expired)`) : null,
         // When the client came to us: the sale if there was one, else when an
         // onboarder took it on, else when the account was made.
         since: istDate(org.soldAt ?? org.onboardedAt ?? org.createdAt),
