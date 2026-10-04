@@ -10,11 +10,13 @@ import { addClientAddOn, listAddOns, removeClientAddOn } from './addOns';
 import {
   addOnCatalog,
   assignOnboarder,
+  clientsSummary,
   createClient,
   getClientBilling,
+  handOffChoices,
+  handOffClient,
   listManualPayments,
   listMyClients,
-  onboarderSummary,
   onboardersReport,
   PAYMENT_METHODS,
   recordManualPayment,
@@ -69,6 +71,11 @@ export const assignOnboarderSchema = z.object({
   body: z.object({ onboarderId: z.string().min(1).nullable() }),
 });
 
+export const handOffSchema = z.object({
+  params: z.object({ id: z.string().min(1) }),
+  body: z.object({ onboarderId: z.string().min(1) }),
+});
+
 export const createClientSchema = z.object({
   body: z.object({
     firstName: z.string().min(1).max(60),
@@ -118,13 +125,34 @@ export const clientBillingController = {
   onboarders: handle(async (_req, res) => ok(res, await onboardersReport())),
 
   // ─── The onboarder's own view ───────────────────────────
+  // "My" means the clients this person sold if they are in sales, and the ones
+  // they onboard otherwise - see mineWhere.
   myClients: handle(async (req, res) =>
-    ok(res, await listMyClients(req.admin!.id, req.query.search ? String(req.query.search) : undefined))
+    ok(res, await listMyClients(actorOf(req), req.query.search ? String(req.query.search) : undefined))
   ),
 
-  mySummary: handle(async (req, res) => ok(res, await onboarderSummary(req.admin!.id))),
+  mySummary: handle(async (req, res) => ok(res, await clientsSummary(actorOf(req)))),
 
-  myPayments: handle(async (req, res) => ok(res, await listManualPayments({ onboardedById: req.admin!.id }))),
+  myPayments: handle(async (req, res) =>
+    ok(
+      res,
+      await listManualPayments(
+        req.admin!.role === 'sales' ? { soldById: req.admin!.id } : { onboardedById: req.admin!.id }
+      )
+    )
+  ),
+
+  // ─── Sales hands a client to an onboarder ─────────────────
+  handOffChoices: handle(async (_req, res) => ok(res, await handOffChoices())),
+
+  handOff: handle(async (req, res) => {
+    const result = await handOffClient(param(req, 'id'), req.body.onboarderId, actorOf(req));
+    return ok(
+      res,
+      result,
+      result.changed ? `Handed to ${result.onboarder.name}` : `${result.onboarder.name} already has this client`
+    );
+  }),
 
   createClient: handle(async (req, res) =>
     ok(res, await createClient(req.body, actorOf(req)), 'Client created - share the password with them')
