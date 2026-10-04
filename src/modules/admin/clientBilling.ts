@@ -175,12 +175,35 @@ export const recordManualPayment = async (
   });
 };
 
-export const listManualPayments = async (filter: { status?: string; organizationId?: string; onboardedById?: string }) => {
+/**
+ * Which column makes a client "mine". A sales person's clients are the ones
+ * they sold; everybody else's - an onboarder's - the ones they onboard. One
+ * place, so the list, the totals and the payments can never disagree about
+ * whose clients they are.
+ */
+export const mineWhere = (actor: { id: string; role?: string }) => {
+  // Prisma reads `{ soldById: undefined }` as no filter at all, so a missing id
+  // would turn "my clients" into every client on the platform. That class of
+  // mistake is what emptied the production database on 2026-09-07; refuse
+  // loudly instead.
+  if (!actor?.id) throw new AppError('No admin to scope the client list to.', 500);
+  return actor.role === 'sales' ? { soldById: actor.id } : { onboardedById: actor.id };
+};
+
+export const listManualPayments = async (filter: {
+  status?: string;
+  organizationId?: string;
+  onboardedById?: string;
+  soldById?: string;
+}) => {
   const where: any = {};
   if (filter.status) where.status = filter.status;
   if (filter.organizationId) where.organizationId = filter.organizationId;
-  if (filter.onboardedById) {
-    const orgs = await prisma.organization.findMany({ where: { onboardedById: filter.onboardedById }, select: { id: true } });
+  if (filter.onboardedById || filter.soldById) {
+    const orgs = await prisma.organization.findMany({
+      where: filter.soldById ? { soldById: filter.soldById } : { onboardedById: filter.onboardedById },
+      select: { id: true },
+    });
     where.organizationId = { in: orgs.map((o) => o.id) };
   }
 
@@ -263,11 +286,15 @@ export const createClient = async (
       },
     });
     const organization = await createOrgWithPlan(tx, user.id, input.organizationName.trim());
+    // An onboarder who creates a client onboards it. A sales person who creates
+    // one has sold it, and hands it to an onboarder later - see handOffClient.
     await tx.organization.update({
       where: { id: organization.id },
       data: {
         onboardedById: actor.role === 'onboarder' ? actor.id : null,
         onboardedAt: actor.role === 'onboarder' ? new Date() : null,
+        soldById: actor.role === 'sales' ? actor.id : null,
+        soldAt: actor.role === 'sales' ? new Date() : null,
       },
     });
     return { user, organization };
@@ -280,9 +307,15 @@ export const createClient = async (
 };
 
 /** Numbers for one onboarder's clients: what is billed and what was really paid. */
-export const onboarderSummary = async (onboarderId: string) => {
+export const onboarderSummary = async (onboarderId: string) => clientsSummary({ id: onboarderId, role: 'onboarder' });
+
+/**
+ * What is billed and what was really paid, for one person's clients - the ones
+ * they sold if they are in sales, the ones they onboard otherwise.
+ */
+export const clientsSummary = async (actor: { id: string; role?: string }) => {
   const orgs = await prisma.organization.findMany({
-    where: { onboardedById: onboarderId, deletedAt: null },
+    where: { ...mineWhere(actor), deletedAt: null },
     select: { id: true },
   });
   const ids = orgs.map((o) => o.id);
@@ -316,20 +349,89 @@ export const onboarderSummary = async (onboarderId: string) => {
   };
 };
 
-export const listMyClients = async (onboarderId: string, search?: string) => {
-  const where: any = { onboardedById: onboarderId, deletedAt: null };
+/**
+ * One person's clients. Each row names both people involved - who sold it and
+ * who is onboarding it - because each of them needs to see the other: sales to
+ * know their customer was picked up, the onboarder to know whom to ask.
+ */
+export const listMyClients = async (actor: { id: string; role?: string }, search?: string) => {
+  const where: any = { ...mineWhere(actor), deletedAt: null };
   if (search?.trim()) where.name = { contains: search.trim(), mode: 'insensitive' };
 
-  return prisma.organization.findMany({
+  const rows = await prisma.organization.findMany({
     where,
-    orderBy: { onboardedAt: 'desc' },
+    // Newest first in both cases: for sales the sale, for an onboarder the
+    // moment it reached them.
+    orderBy: actor.role === 'sales' ? { soldAt: 'desc' } : { onboardedAt: 'desc' },
     take: 500,
     select: {
-      id: true, name: true, status: true, planType: true, onboardedAt: true, createdAt: true,
+      id: true, name: true, status: true, planType: true, createdAt: true,
+      onboardedById: true, onboardedAt: true, soldById: true, soldAt: true,
       owner: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } },
       subscription: { select: { status: true, currentPeriodEnd: true, plan: { select: { name: true } } } },
     },
   });
+
+  // onboardedById and soldById are plain columns with no relation, so the
+  // names are looked up once for the whole page rather than per row.
+  const people = [...new Set(rows.flatMap((r) => [r.onboardedById, r.soldById]).filter((x): x is string => !!x))];
+  const admins = people.length
+    ? await prisma.adminUser.findMany({ where: { id: { in: people } }, select: { id: true, name: true } })
+    : [];
+  const nameOf = new Map(admins.map((a) => [a.id, a.name]));
+
+  return rows.map((r) => ({
+    ...r,
+    onboarder: r.onboardedById ? { id: r.onboardedById, name: nameOf.get(r.onboardedById) ?? 'Removed admin' } : null,
+    soldBy: r.soldById ? { id: r.soldById, name: nameOf.get(r.soldById) ?? 'Removed admin' } : null,
+  }));
+};
+
+/** The onboarders a sale can be handed to: active ones only, names and nothing else. */
+export const handOffChoices = () =>
+  prisma.adminUser.findMany({
+    where: { role: 'onboarder', isActive: true },
+    select: { id: true, name: true },
+    orderBy: { name: 'asc' },
+  });
+
+/**
+ * A sales person passes their client to an onboarder.
+ *
+ * Only for a client this person sold - a sales person cannot move somebody
+ * else's customer, and the route cannot be pointed at an arbitrary
+ * organization. The sale itself is untouched: soldById stays, so the seller
+ * keeps the credit and still sees the client in their list.
+ *
+ * Changing the onboarder later is allowed, for the case where the first one
+ * is away or the wrong fit; it is the seller's customer. Clearing it is not -
+ * a client nobody onboards is a client nobody will finish setting up.
+ */
+export const handOffClient = async (organizationId: string, onboarderId: string, actor: Actor) => {
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { id: true, name: true, soldById: true, onboardedById: true },
+  });
+  // 404 rather than 403: whether some other organization exists is not this
+  // person's business.
+  if (!org || org.soldById !== actor.id) throw new AppError('You can only hand over clients you sold.', 404);
+
+  const person = await prisma.adminUser.findUnique({
+    where: { id: onboarderId },
+    select: { id: true, name: true, role: true, isActive: true },
+  });
+  if (!person || person.role !== 'onboarder') throw new AppError('Pick an admin with the onboarder role.', 400);
+  if (!person.isActive) throw new AppError('That onboarder is switched off.', 400);
+
+  if (org.onboardedById === person.id) {
+    return { id: org.id, onboarder: { id: person.id, name: person.name }, changed: false };
+  }
+
+  await prisma.organization.update({
+    where: { id: org.id },
+    data: { onboardedById: person.id, onboardedAt: new Date() },
+  });
+  return { id: org.id, onboarder: { id: person.id, name: person.name }, changed: true };
 };
 
 /** Every onboarder and how their clients are doing, for super admins. */

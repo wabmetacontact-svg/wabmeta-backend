@@ -52,8 +52,17 @@ export interface ClientPayload {
   since: string | null;
   /** Plan plus active monthly add-ons, in paise. */
   retainerPaise: number;
-  /** The onboarder's externalId, or null when nobody is credited. */
+  /**
+   * Who brought the client in, or null when nobody is credited: the sales
+   * person who sold it, or - for clients an onboarder created themselves, which
+   * is every client from before the sales role existed - that onboarder.
+   */
   ownerExternalId: string | null;
+  /**
+   * Who is onboarding the client, or null before a sale is handed over. Often
+   * the same person as the owner, for a client an onboarder brought in alone.
+   */
+  onboarderExternalId: string | null;
   removed: boolean;
 }
 

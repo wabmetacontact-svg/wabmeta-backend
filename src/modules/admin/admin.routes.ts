@@ -10,6 +10,7 @@ import {
   assignOnboarderSchema,
   clientBillingController as bill,
   createClientSchema,
+  handOffSchema,
   manualPaymentSchema,
   reviewPaymentSchema,
 } from './clientBilling.controller';
@@ -745,10 +746,15 @@ router.get('/teamos-sync', can('settings.read'), teamos.status);
 router.post('/teamos-sync/run', can('settings.write'), teamos.run);
 router.post('/teamos-sync/retry', can('settings.write'), teamos.retry);
 
-// The signed-in onboarder's own clients
-router.get('/my-clients', can('clients.own'), bill.myClients);
-router.get('/my-clients/summary', can('clients.own'), bill.mySummary);
-router.get('/my-clients/payments', can('clients.own'), bill.myPayments);
-router.post('/my-clients', can('clients.own'), validate(createClientSchema), bill.createClient);
+// The signed-in onboarder's or sales person's own clients. Which ones count
+// as "own" depends on the role: onboarded for an onboarder, sold for sales.
+router.get('/my-clients', canAny('clients.own', 'clients.sell'), bill.myClients);
+router.get('/my-clients/summary', canAny('clients.own', 'clients.sell'), bill.mySummary);
+router.get('/my-clients/payments', canAny('clients.own', 'clients.sell'), bill.myPayments);
+router.post('/my-clients', canAny('clients.own', 'clients.sell'), validate(createClientSchema), bill.createClient);
+
+// Sales hands a client they sold to an onboarder, who takes it from there.
+router.get('/my-clients/onboarders', can('clients.sell'), bill.handOffChoices);
+router.put('/my-clients/:id/onboarder', can('clients.sell'), validate(handOffSchema), bill.handOff);
 
 export default router;

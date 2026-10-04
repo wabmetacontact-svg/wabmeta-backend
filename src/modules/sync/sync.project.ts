@@ -83,6 +83,7 @@ const TITLES: Record<string, string> = {
   support: 'Support',
   finance: 'Finance',
   onboarder: 'Onboarder',
+  sales: 'Sales',
 };
 
 /**
@@ -122,7 +123,9 @@ export async function projectClients(scope: 'owned' | 'all'): Promise<ClientPayl
 
   for (;;) {
     const page = await prisma.organization.findMany({
-      where: scope === 'owned' ? { onboardedById: { not: null } } : {},
+      // "Owned" means somebody on the team is attached to it: a seller, an
+      // onboarder or both.
+      where: scope === 'owned' ? { OR: [{ onboardedById: { not: null } }, { soldById: { not: null } }] } : {},
       orderBy: { id: 'asc' },
       take: PAGE,
       ...(cursor && { skip: 1, cursor: { id: cursor } }),
@@ -133,6 +136,8 @@ export async function projectClients(scope: 'owned' | 'all'): Promise<ClientPayl
         deletedAt: true,
         onboardedById: true,
         onboardedAt: true,
+        soldById: true,
+        soldAt: true,
         owner: { select: { email: true, phone: true } },
         subscription: {
           select: {
@@ -167,9 +172,14 @@ export async function projectClients(scope: 'owned' | 'all'): Promise<ClientPayl
         name: org.name,
         company: null,
         contact: org.owner?.email ?? org.owner?.phone ?? null,
-        since: istDate(org.onboardedAt ?? org.createdAt),
+        // When the client came to us: the sale if there was one, else when an
+        // onboarder took it on, else when the account was made.
+        since: istDate(org.soldAt ?? org.onboardedAt ?? org.createdAt),
         retainerPaise: planPaise + addOnPaise,
-        ownerExternalId: org.onboardedById ? memberExternalId(org.onboardedById) : null,
+        // Credit goes to whoever brought the client in. A handover to an
+        // onboarder must not move it - the sale is still the seller's.
+        ownerExternalId: (org.soldById ?? org.onboardedById) ? memberExternalId((org.soldById ?? org.onboardedById)!) : null,
+        onboarderExternalId: org.onboardedById ? memberExternalId(org.onboardedById) : null,
         removed: org.deletedAt !== null,
       });
     }

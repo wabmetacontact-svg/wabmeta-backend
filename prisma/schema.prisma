@@ -131,6 +131,11 @@ model Organization {
   // see and manage only their own clients.
   onboardedById           String?
   onboardedAt             DateTime?
+  // The sales person (an AdminUser) who created this client, if one did. Kept
+  // apart from onboardedById on purpose: a sale is handed to an onboarder, and
+  // sharing one column would erase who made the sale the moment it was.
+  soldById                String?
+  soldAt                  DateTime?
   customLabels            Json                  @default("[]")
   activityLogs            ActivityLog[]
   apiKeys                 ApiKey[]
@@ -172,6 +177,7 @@ model Organization {
   @@index([planType])
   @@index([status])
   @@index([onboardedById])
+  @@index([soldById])
 }
 
 model OrganizationMember {

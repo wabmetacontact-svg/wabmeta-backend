@@ -13,12 +13,16 @@
 //   onboarder    only their own clients (Organization.onboardedById): creates
 //                them, plans, features, add-ons, notes, offline payments,
 //                read-only view. See requireOrgAccess.
+//   sales        only the clients they sold (Organization.soldById): creates
+//                them, reads them, leaves notes, and hands each one to an
+//                onboarder. Plans, features, money and "view as user" stay
+//                with the onboarder who takes it from there.
 
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../../middleware/errorHandler';
 import prisma from '../../config/database';
 
-export const ADMIN_ROLES = ['super_admin', 'admin', 'support', 'finance', 'onboarder'] as const;
+export const ADMIN_ROLES = ['super_admin', 'admin', 'support', 'finance', 'onboarder', 'sales'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export const PERMISSIONS = [
@@ -54,6 +58,7 @@ export const PERMISSIONS = [
   'data.export',
   'payments.verify',
   'clients.own',
+  'clients.sell',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -91,6 +96,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
   support: [...READ_ALL, 'whatsapp.refresh', 'sessions.manage', 'security.read'],
   finance: [...READ_ALL, 'billing.write', 'wallet.review', 'wallet.money', 'coupons.write', 'data.export', 'payments.verify'],
   onboarder: ['clients.own'],
+  sales: ['clients.sell'],
 };
 
 export const isAdminRole = (role: unknown): role is AdminRole =>
@@ -124,6 +130,25 @@ export const requireAnyPermission =
     next(new AppError('Your admin role does not allow this action.', 403, 'ADMIN_FORBIDDEN'));
   };
 
+/** true when this organization was sold by this admin. */
+export const isSoldClient = async (adminId: string, organizationId: string | undefined): Promise<boolean> => {
+  if (!organizationId) return false;
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { soldById: true },
+  });
+  return !!org && org.soldById === adminId;
+};
+
+/**
+ * What a sales person may do on a client they sold: read it and leave notes
+ * for the onboarder. Deliberately not billing.write, orgs.features or
+ * impersonate - once a client is handed over, its plan, money and account are
+ * the onboarder's, and two people changing a plan is how a customer ends up
+ * billed twice.
+ */
+const SALES_ON_OWN: readonly Permission[] = ['orgs.read', 'billing.read', 'orgs.write'];
+
 /** true when this organization was onboarded by this admin. */
 export const isOwnClient = async (adminId: string, organizationId: string | undefined): Promise<boolean> => {
   if (!organizationId) return false;
@@ -150,7 +175,22 @@ export const requireOrgAccess =
       if (hasPermission(admin.role, 'clients.own') && (await isOwnClient(admin.id, orgIdOf(req)))) {
         return next();
       }
-      next(new AppError('You can only manage clients you onboarded.', 403, 'ADMIN_FORBIDDEN'));
+      if (
+        hasPermission(admin.role, 'clients.sell') &&
+        SALES_ON_OWN.includes(permission) &&
+        (await isSoldClient(admin.id, orgIdOf(req)))
+      ) {
+        return next();
+      }
+      next(
+        new AppError(
+          hasPermission(admin.role, 'clients.sell')
+            ? "Sales can read their own clients and leave notes. Plans, features and payments are the onboarder's."
+            : 'You can only manage clients you onboarded.',
+          403,
+          'ADMIN_FORBIDDEN'
+        )
+      );
     } catch (err) {
       next(err);
     }
