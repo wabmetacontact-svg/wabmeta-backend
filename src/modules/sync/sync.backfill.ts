@@ -6,14 +6,20 @@
  * instead: deliberately, a month at a time, with a range you choose and a dry
  * run you read first.
  *
+ * Run it on the server, in the Render Shell: that is where the production
+ * database is reachable. It lives in src/modules rather than src/scripts so
+ * the normal build compiles it to dist/ and it runs with plain node - the
+ * server has only production dependencies, so a script that needs tsx or
+ * ts-node cannot run where it has to.
+ *
  *   # see what would go, without sending anything
- *   npx tsx src/scripts/teamos-backfill.ts --from 2026-01-01
+ *   npm run teamos:backfill -- --from 2026-01-01
  *
  *   # actually send it
- *   npx tsx src/scripts/teamos-backfill.ts --from 2026-01-01 --apply
+ *   npm run teamos:backfill -- --from 2026-01-01 --apply
  *
  *   # one month, to try it on something small first
- *   npx tsx src/scripts/teamos-backfill.ts --from 2026-09-01 --to 2026-10-01 --apply
+ *   npm run teamos:backfill -- --from 2026-09-01 --to 2026-10-01 --apply
  *
  * Options
  *   --from YYYY-MM-DD   where to start. Required.
@@ -32,10 +38,10 @@
  * both upsert the same outbox rows, and the fingerprint makes the loser a
  * no-op.
  */
-import prisma from '../config/database';
-import { enqueue, syncConfig, stats } from '../modules/sync/sync.outbox';
-import { projectClients, projectMembers, projectMoney } from '../modules/sync/sync.project';
-import { deliverDue } from '../modules/sync/sync.worker';
+import prisma from '../../config/database';
+import { enqueue, syncConfig, stats } from './sync.outbox';
+import { projectClients, projectMembers, projectMoney } from './sync.project';
+import { deliverDue } from './sync.worker';
 
 // ─── arguments ─────────────────────────────────────────────────────────────
 
@@ -183,8 +189,13 @@ async function main() {
   await prisma.$disconnect();
 }
 
-main().catch(async (err) => {
-  console.error(`\n${err?.message ?? err}`);
-  await prisma.$disconnect().catch(() => {});
-  process.exit(1);
-});
+// Only when run directly. Nothing imports this file, but a module that starts
+// talking to production the moment it is required is one careless import away
+// from doing that inside the running server.
+if (require.main === module) {
+  main().catch(async (err) => {
+    console.error(`\n${err?.message ?? err}`);
+    await prisma.$disconnect().catch(() => {});
+    process.exit(1);
+  });
+}
