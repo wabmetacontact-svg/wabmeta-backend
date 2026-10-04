@@ -715,15 +715,15 @@ router.delete('/coupons/:id', can('coupons.write'), ops.deleteCoupon);
 // ============================================
 
 // What can be sold as an add-on, with default prices
-router.get('/addon-catalog', canAny('orgs.read', 'clients.own'), bill.catalog);
+router.get('/addon-catalog', canAny('orgs.read', 'clients.own', 'clients.sell'), bill.catalog);
 
 // A client's bill (plan + add-ons) and the money actually received
 router.get('/organizations/:id/billing', requireOrgAccess('billing.read'), bill.billing);
 
 // Add-ons: raise the client's limit while active
 router.get('/organizations/:id/addons', requireOrgAccess('orgs.read'), bill.listAddOns);
-router.post('/organizations/:id/addons', requireOrgAccess('billing.write'), validate(addOnSchema), bill.addAddOn);
-router.delete('/organizations/:id/addons/:addOnId', requireOrgAccess('billing.write'), bill.removeAddOn);
+router.post('/organizations/:id/addons', requireOrgAccess('addons.write'), validate(addOnSchema), bill.addAddOn);
+router.delete('/organizations/:id/addons/:addOnId', requireOrgAccess('addons.write'), bill.removeAddOn);
 
 // Offline payments: recorded as pending, counted once verified
 router.post(
