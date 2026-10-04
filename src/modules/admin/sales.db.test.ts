@@ -92,6 +92,15 @@ describe('the role', () => {
     expect(hasPermission('sales', 'billing.write')).toBe(false);
     expect(hasPermission('sales', 'orgs.features')).toBe(false);
     expect(hasPermission('sales', 'dashboard.read')).toBe(false);
+    // Only on clients they sold, through requireOrgAccess - not everywhere.
+    expect(hasPermission('sales', 'addons.write')).toBe(false);
+  });
+
+  it('nobody who could add add-ons before lost it when add-ons got their own permission', () => {
+    for (const role of ['super_admin', 'admin', 'finance']) {
+      expect(hasPermission(role, 'billing.write')).toBe(true);
+      expect(hasPermission(role, 'addons.write')).toBe(true);
+    }
   });
 });
 
@@ -142,13 +151,17 @@ describe('what a seller can open', () => {
   const req = (permission: any, id: string, adminId = salesId) =>
     runMiddleware(requireOrgAccess(permission), { admin: { id: adminId, role: 'sales' }, params: { id } });
 
-  it('reads their own client and leaves notes on it', async () => {
+  it('reads their own client, adds the add-ons they sold, and leaves notes on it', async () => {
     expect(await req('orgs.read', orgId)).toBeNull();
     expect(await req('billing.read', orgId)).toBeNull();
     expect(await req('orgs.write', orgId)).toBeNull();
+    expect(await req('addons.write', orgId)).toBeNull();
   });
 
-  it("does not change its plan, add-ons or features, or sign in as the customer", async () => {
+  it("does not change its plan, payments or features, or sign in as the customer", async () => {
+    // billing.write is what plan assignment and offline payments ask for. The
+    // add-on routes ask for addons.write instead, which is the whole reason the
+    // two were split.
     for (const p of ['billing.write', 'orgs.features', 'impersonate']) {
       const err = await req(p, orgId);
       expect(err?.statusCode).toBe(403);

@@ -14,9 +14,9 @@
 //                them, plans, features, add-ons, notes, offline payments,
 //                read-only view. See requireOrgAccess.
 //   sales        only the clients they sold (Organization.soldById): creates
-//                them, reads them, leaves notes, and hands each one to an
-//                onboarder. Plans, features, money and "view as user" stay
-//                with the onboarder who takes it from there.
+//                them, reads them, adds add-ons, leaves notes, and hands each
+//                one to an onboarder. Plans, features, payments and "view as
+//                user" stay with the onboarder who takes it from there.
 
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../../middleware/errorHandler';
@@ -41,6 +41,10 @@ export const PERMISSIONS = [
   'impersonate',
   'billing.read',
   'billing.write',
+  // Add-ons on a client's bill. Split from billing.write so a sales person can
+  // add the extras they sold without also being able to assign plans or
+  // record payments. Every role that had billing.write has this too.
+  'addons.write',
   'plans.write',
   'wallet.read',
   'wallet.review',
@@ -85,6 +89,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
     'orgs.features',
     'sessions.manage',
     'billing.write',
+    'addons.write',
     'wallet.review',
     'whatsapp.refresh',
     'whatsapp.write',
@@ -94,7 +99,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, readonly Permission[]> = {
     'data.export',
   ],
   support: [...READ_ALL, 'whatsapp.refresh', 'sessions.manage', 'security.read'],
-  finance: [...READ_ALL, 'billing.write', 'wallet.review', 'wallet.money', 'coupons.write', 'data.export', 'payments.verify'],
+  finance: [...READ_ALL, 'billing.write', 'addons.write', 'wallet.review', 'wallet.money', 'coupons.write', 'data.export', 'payments.verify'],
   onboarder: ['clients.own'],
   sales: ['clients.sell'],
 };
@@ -141,13 +146,13 @@ export const isSoldClient = async (adminId: string, organizationId: string | und
 };
 
 /**
- * What a sales person may do on a client they sold: read it and leave notes
- * for the onboarder. Deliberately not billing.write, orgs.features or
- * impersonate - once a client is handed over, its plan, money and account are
- * the onboarder's, and two people changing a plan is how a customer ends up
- * billed twice.
+ * What a sales person may do on a client they sold: read it, add or remove the
+ * add-ons they sold, and leave notes for the onboarder. Deliberately not
+ * billing.write, orgs.features or impersonate - the plan, payments and the
+ * account itself are the onboarder's, and two people changing a plan is how a
+ * customer ends up billed twice.
  */
-const SALES_ON_OWN: readonly Permission[] = ['orgs.read', 'billing.read', 'orgs.write'];
+const SALES_ON_OWN: readonly Permission[] = ['orgs.read', 'billing.read', 'orgs.write', 'addons.write'];
 
 /** true when this organization was onboarded by this admin. */
 export const isOwnClient = async (adminId: string, organizationId: string | undefined): Promise<boolean> => {
@@ -185,7 +190,7 @@ export const requireOrgAccess =
       next(
         new AppError(
           hasPermission(admin.role, 'clients.sell')
-            ? "Sales can read their own clients and leave notes. Plans, features and payments are the onboarder's."
+            ? "Sales can read their own clients, add add-ons and leave notes. Plans, features and payments are the onboarder's."
             : 'You can only manage clients you onboarded.',
           403,
           'ADMIN_FORBIDDEN'
