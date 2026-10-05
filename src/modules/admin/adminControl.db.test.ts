@@ -213,7 +213,7 @@ describe('sessions and view-as-user', () => {
     expect(after!.tokenVersion).toBe(before!.tokenVersion + 1);
   });
 
-  it('issues a read-only token scoped to the user and organization', async () => {
+  it('issues a 30-minute token scoped to the user and organization', async () => {
     await expect(impersonateUser(userId, undefined, '', actor)).rejects.toThrow(/reason/i);
     await expect(impersonateUser(userId, 'not-a-member-org', 'support ticket', actor)).rejects.toThrow(
       /not a member/
@@ -222,7 +222,8 @@ describe('sessions and view-as-user', () => {
     const view = await impersonateUser(userId, organizationId, 'support ticket #42', actor);
     const decoded = verifyAccessToken(view.accessToken);
 
-    expect(view.readOnly).toBe(true);
+    // Editable, apart from the inbox, the login and money (impersonation.ts).
+    expect(view.readOnly).toBe(false);
     expect(decoded.userId).toBe(userId);
     expect(decoded.organizationId).toBe(organizationId);
     expect(decoded.impersonatedBy).toBe(actor.id);
