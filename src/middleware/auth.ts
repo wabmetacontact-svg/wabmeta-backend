@@ -11,6 +11,8 @@ import { getRedis } from '../config/redis';
 import { authService } from '../modules/auth/auth.service';
 import { getCookieOptions } from '../utils/cookies';
 import { getOrgControl, orgBlockedError, readOnlyAllows } from '../modules/admin/orgControl';
+import { IMPERSONATION_BLOCKED_MESSAGE, impersonationBlocks } from '../modules/admin/impersonation';
+import { authLog } from '../utils/logger';
 
 const USER_CACHE_PREFIX = 'user:auth:';
 const CACHE_TTL = 300;
@@ -289,15 +291,18 @@ export const authenticate = async (
       }
     }
 
-    // An admin viewing the app as this user may look, never change anything.
+    // An admin viewing the app as this user may set things up for them, but
+    // the inbox, the login and money stay view-only. See admin/impersonation.ts.
     if (decoded.impersonatedBy) {
+      const path = (req.originalUrl || '').split('?')[0] || '';
+      const area = impersonationBlocks(req.method, path);
+      if (area) {
+        throw new AppError(IMPERSONATION_BLOCKED_MESSAGE[area] || 'Not allowed in the admin view.', 403, 'IMPERSONATION_READ_ONLY');
+      }
       const m = req.method.toUpperCase();
       if (m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS') {
-        throw new AppError(
-          'This is a read-only admin view. Changes are not allowed.',
-          403,
-          'IMPERSONATION_READ_ONLY'
-        );
+        // Who changed what in the client's account, in the server log.
+        authLog.info('Admin view change', { adminId: decoded.impersonatedBy, userId: decoded.userId, organizationId, method: m, path });
       }
     }
 
