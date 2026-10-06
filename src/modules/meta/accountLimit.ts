@@ -39,20 +39,18 @@ export const limitReachedMessage = (
   limit: number
 ): string =>
   limit === 1
-    ? 'Your plan includes one WhatsApp number. Disconnect the current one, or upgrade to connect another.'
-    : `Your plan includes ${limit} WhatsApp numbers and ${connectedCount} are already connected. Disconnect one, or upgrade to add more.`;
+    ? 'Your plan includes one WhatsApp number. Upgrade your plan to connect another, or disconnect the current one.'
+    : `Your plan includes ${limit} WhatsApp numbers and ${connectedCount} are already connected. Upgrade your plan to connect another, or disconnect one.`;
 
 /**
- * Naya number jodne se pehle rok.
- *
- * `tx` diya ja sakta hai taaki ye usi transaction me chale jisme account
- * banta hai - warna do parallel connects dono check paas kar ke limit se
- * upar chale jaate.
+ * Kitne numbers jud sakte hain (plan + admin ki chhoot + add-on) aur kitne
+ * abhi CONNECTED hain. Admin panel bhi yahi dikhata hai, taaki jo wahan likha
+ * hai wahi connect par lagu ho.
  */
-export const assertCanConnectAnother = async (
+export const getNumberAllowance = async (
   organizationId: string,
   tx: { whatsAppAccount: any; organization: any } = prisma as any
-): Promise<void> => {
+): Promise<{ limit: number; connected: number }> => {
   const org = await tx.organization.findUnique({
     where: { id: organizationId },
     select: {
@@ -76,11 +74,26 @@ export const assertCanConnectAnother = async (
       )
     ) + (boosts.whatsappNumbers ?? 0);
 
-  const connectedCount = await tx.whatsAppAccount.count({
+  const connected = await tx.whatsAppAccount.count({
     where: { organizationId, status: 'CONNECTED' },
   });
 
-  if (!canConnectAnother(connectedCount, limit)) {
-    throw new AppError(limitReachedMessage(connectedCount, limit), 400);
+  return { limit, connected };
+};
+
+/**
+ * Naya number jodne se pehle rok.
+ *
+ * `tx` diya ja sakta hai taaki ye usi transaction me chale jisme account
+ * banta hai - warna do parallel connects dono check paas kar ke limit se
+ * upar chale jaate.
+ */
+export const assertCanConnectAnother = async (
+  organizationId: string,
+  tx: { whatsAppAccount: any; organization: any } = prisma as any
+): Promise<void> => {
+  const { limit, connected } = await getNumberAllowance(organizationId, tx);
+  if (!canConnectAnother(connected, limit)) {
+    throw new AppError(limitReachedMessage(connected, limit), 400, 'WHATSAPP_NUMBER_LIMIT');
   }
 };

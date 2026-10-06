@@ -588,25 +588,24 @@ export class MetaService {
 
       // ✅ Atomic transaction to prevent race conditions with multiple connected accounts
       const savedAccount = await prisma.$transaction(async (tx) => {
-        const existingConnectedInOrg = await tx.whatsAppAccount.findFirst({
-          where: {
-            organizationId,
-            status: WhatsAppAccountStatus.CONNECTED,
-            phoneNumberId: { not: primaryPhone.id },
-          },
-        });
-
-        if (existingConnectedInOrg) {
-          throw new AppError(
-            `Organization already has a connected WhatsApp account (${existingConnectedInOrg.phoneNumber}). ` +
-            `Please disconnect it first before connecting a new one.`,
-            400
-          );
-        }
-
         const existingByPhone = await tx.whatsAppAccount.findUnique({
           where: { phoneNumberId: primaryPhone.id },
         });
+
+        // How many numbers may be connected comes from the plan (accountLimit.ts).
+        // There used to be a hardcoded "one only" check here, which stopped a
+        // two-number plan from connecting its second number. A number already
+        // connected to this organization is a reconnect and adds nothing; any
+        // other - new, disconnected, or coming from another organization -
+        // counts against the limit, inside this transaction so two parallel
+        // connects cannot both pass.
+        const alreadyConnectedHere =
+          !!existingByPhone &&
+          existingByPhone.organizationId === organizationId &&
+          existingByPhone.status === WhatsAppAccountStatus.CONNECTED;
+        if (!alreadyConnectedHere) {
+          await assertCanConnectAnother(organizationId, tx as any);
+        }
 
         if (existingByPhone) {
           const isSameOrg = existingByPhone.organizationId === organizationId;
@@ -649,10 +648,6 @@ export class MetaService {
           return updated;
         } else {
           metaLog.info('Creating new WhatsApp account', { organizationId });
-
-          // Asli rok yahin hai, transaction ke andar - do connects ek saath
-          // aayen to dono bahar wala check paas kar sakte the.
-          await assertCanConnectAnother(organizationId, tx as any);
 
           const accountCount = await tx.whatsAppAccount.count({ where: { organizationId } });
 
