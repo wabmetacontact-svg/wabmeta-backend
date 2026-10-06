@@ -633,10 +633,10 @@ router.get('/users/:id/sessions', can('users.read'), control.listSessions);
 router.delete('/users/:id/sessions/:sessionId', can('sessions.manage'), control.revokeSession);
 router.post('/users/:id/force-logout', can('sessions.manage'), control.forceLogoutUser);
 
-// Read-only, 30-minute view of the app as this user
+// 30-minute view of the app as this user (what it may change: impersonation.ts)
 router.post(
   '/users/:id/impersonate',
-  // An onboarder may view their own client's account; the organization in the
+  // An onboarder or a seller may open their own client's account; the organization in the
   // body must be theirs, and impersonateUser checks the user belongs to it.
   requireOrgAccess('impersonate', (req) => (typeof req.body?.organizationId === 'string' ? req.body.organizationId : undefined)),
   validate(impersonateSchema),

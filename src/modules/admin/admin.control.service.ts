@@ -262,7 +262,7 @@ export const impersonateUser = async (
   return {
     accessToken,
     expiresAt: new Date(Date.now() + IMPERSONATION_TTL_SECONDS * 1000).toISOString(),
-    // Changes are allowed except the inbox, the login and money - see impersonation.ts.
+    // Changes are allowed except the login and the plan - see impersonation.ts.
     readOnly: false,
     user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName },
     organization: { id: membership.organization.id, name: membership.organization.name },
