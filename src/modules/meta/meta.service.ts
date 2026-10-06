@@ -26,6 +26,7 @@ import { getRedis } from '../../config/redis';
 import { metaLog } from '../../utils/logger';
 import { toClientAccount, tierDailyLimit } from './accountView';
 import { assertCanConnectAnother } from './accountLimit';
+import { assertCoexistenceAllowed } from './coexistenceFreeDemo';
 import { notifyIfQualityDropped } from './qualityAlert';
 import { markCoexistenceOnboarded, runCoexistenceSync } from './coexistence';
 
@@ -443,6 +444,13 @@ export class MetaService {
       const finalConnectionType = coexistence
         ? 'WHATSAPP_BUSINESS_APP'
         : autoDetected !== 'CLOUD_API' ? autoDetected : connectionType;
+
+      // The free demo connects through the Cloud API only. Checked here too,
+      // not only on the route, because Meta can report a Business app number
+      // even when the app did not say coexistence. Nothing is saved yet.
+      if (finalConnectionType === 'WHATSAPP_BUSINESS_APP') {
+        await assertCoexistenceAllowed(organizationId);
+      }
 
       // STEP 4: Subscribe to Webhooks
       onProgress?.({
