@@ -11,6 +11,7 @@ import prisma from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { istDayStart } from './orgControl';
 import { computeMrr, receivedSummary } from './revenue';
+import { getNumberAllowance } from '../meta/accountLimit';
 
 const LIST_LIMIT = 20;
 
@@ -48,6 +49,7 @@ export const getOrganizationOverview = async (organizationId: string) => {
         select: {
           id: true, phoneNumber: true, displayName: true, status: true,
           qualityRating: true, messagingLimit: true, createdAt: true,
+          phoneNumberId: true, wabaId: true,
         },
       },
       wallet: {
@@ -125,6 +127,8 @@ export const getOrganizationOverview = async (organizationId: string) => {
     members: org.members.map((m) => ({ role: m.role, ...m.user })),
     subscription: org.subscription,
     whatsappAccounts: org.whatsappAccounts,
+    // What the plan (with overrides and add-ons) allows, and how many are connected.
+    numberAllowance: await getNumberAllowance(organizationId),
     wallet: org.wallet,
     counts: org._count,
     usage: {

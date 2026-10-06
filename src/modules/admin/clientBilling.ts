@@ -14,6 +14,7 @@ import { AppError } from '../../middleware/errorHandler';
 import { hashPassword } from '../../utils/password';
 import { ADDON_CATALOG, isAddOnActive, isAddOnType } from './addOns';
 import { istMonthStart, receivedSummary } from './revenue';
+import { getNumberAllowance } from '../meta/accountLimit';
 
 interface Actor {
   id: string;
@@ -54,7 +55,7 @@ export const getClientBilling = async (organizationId: string) => {
   });
   if (!org) throw new AppError('Organization not found', 404);
 
-  const [addOns, razorpay, manual, wallet, onboarder] = await Promise.all([
+  const [addOns, razorpay, manual, wallet, onboarder, whatsappNumbers, numberAllowance] = await Promise.all([
     prisma.clientAddOn.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' } }),
     prisma.payment.findMany({
       where: { organizationId, status: { in: ['SUCCESS', 'REFUNDED'] }, razorpayPaymentId: { not: null } },
@@ -69,6 +70,13 @@ export const getClientBilling = async (organizationId: string) => {
     org.onboardedById
       ? prisma.adminUser.findUnique({ where: { id: org.onboardedById }, select: { id: true, name: true, email: true } })
       : null,
+    // The numbers this client has connected, with the ids Meta knows them by.
+    prisma.whatsAppAccount.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, phoneNumber: true, displayName: true, status: true, phoneNumberId: true, wabaId: true, createdAt: true },
+    }),
+    getNumberAllowance(organizationId),
   ]);
 
   const topups = wallet
@@ -113,6 +121,8 @@ export const getClientBilling = async (organizationId: string) => {
   return {
     organization: org,
     onboarder,
+    whatsappNumbers,
+    numberAllowance,
     plan: plan
       ? {
           name: plan.name,

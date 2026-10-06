@@ -18,7 +18,7 @@ import { runCoexistenceSync } from './coexistence';
 import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
 import { resolveOrganizationId } from '../../utils/resolveOrgId';
-import { assertCanConnectAnother } from './accountLimit';
+import { assertCanConnectAnother, canConnectAnother, getNumberAllowance, limitReachedMessage } from './accountLimit';
 
 const router = Router();
 
@@ -351,6 +351,28 @@ router.use(authenticate);
 
 router.get('/config', metaController.getEmbeddedSignupConfig.bind(metaController));
 router.get('/integration-status', metaController.getIntegrationStatus.bind(metaController));
+
+// How many WhatsApp numbers this organization may connect, and how many are.
+// The app asks before opening Meta's signup, so a client at their limit is
+// told to upgrade instead of going through the whole signup to be refused.
+router.get('/number-allowance', async (req, res, next) => {
+  try {
+    const organizationId = req.user?.organizationId;
+    if (!organizationId) throw new AppError('No organization selected', 400);
+    const { limit, connected } = await getNumberAllowance(organizationId);
+    res.json({
+      success: true,
+      data: {
+        limit,
+        connected,
+        canConnect: canConnectAnother(connected, limit),
+        message: canConnectAnother(connected, limit) ? null : limitReachedMessage(connected, limit),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ============================================
 // ORGANIZATION-BASED ROUTES

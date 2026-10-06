@@ -57,12 +57,13 @@ describe('limitReachedMessage', () => {
   it('ek number wale plan par saaf bhasha', () => {
     const m = limitReachedMessage(1, 1);
     expect(m).toContain('one WhatsApp number');
-    expect(m).toContain('upgrade');
+    expect(m).toContain('Upgrade your plan');
   });
 
   it('zyada numbers wale plan par ginti dikhti hai', () => {
     const m = limitReachedMessage(2, 2);
     expect(m).toContain('2 WhatsApp numbers');
     expect(m).toContain('2 are already connected');
+    expect(m).toContain('Upgrade your plan');
   });
 });
