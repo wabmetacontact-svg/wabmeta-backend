@@ -29,7 +29,7 @@ const FREE_DEMO_LIMITS: Record<LimitType, number> = {
 // ============================================
 // ✅ CORE: Check subscription validity from DB
 // ============================================
-async function isSubscriptionActive(organizationId: string): Promise<{
+export async function isSubscriptionActive(organizationId: string): Promise<{
   active:        boolean;
   reason:        string;
   daysRemaining: number;

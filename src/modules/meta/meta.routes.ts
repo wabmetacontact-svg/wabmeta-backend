@@ -19,6 +19,7 @@ import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
 import { resolveOrganizationId } from '../../utils/resolveOrgId';
 import { assertCanConnectAnother, canConnectAnother, getNumberAllowance, limitReachedMessage } from './accountLimit';
+import { assertCoexistenceAllowed } from './coexistenceFreeDemo';
 
 const router = Router();
 
@@ -290,6 +291,9 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
     // wala check hai taaki poora OAuth chakkar chalne se pehle mana ho jaye;
     // asli rok account banate waqt transaction ke andar lagti hai.
     await assertCanConnectAnother(organizationId);
+
+    // Free demo: Cloud API only. Refused before the code is exchanged.
+    if (coexistence === true) await assertCoexistenceAllowed(organizationId);
 
     // ✅ Use metaService.completeConnection with embeddedSignup=true
     // Pass wabaId + phoneNumberId from session info (if captured by frontend)
