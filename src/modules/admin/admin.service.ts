@@ -460,6 +460,25 @@ export class AdminService {
                 select: {
                   id: true,
                   name: true,
+                  // The numbers connected in each of their organizations. The
+                  // user modal reads them from this list; without them it
+                  // said "0 connected" for everyone.
+                  whatsappAccounts: {
+                    orderBy: { createdAt: 'asc' },
+                    select: {
+                      id: true,
+                      phoneNumber: true,
+                      displayName: true,
+                      verifiedName: true,
+                      status: true,
+                      connectionType: true,
+                      isDefault: true,
+                      qualityRating: true,
+                      phoneNumberId: true,
+                      wabaId: true,
+                      createdAt: true,
+                    },
+                  },
                 },
               },
             },
@@ -470,15 +489,39 @@ export class AdminService {
     ]);
 
     // Transform memberships to organizations
-    const transformedUsers = users.map((user) => ({
-      ...user,
-      organizations: user.memberships?.map((m) => ({
-        id: m.organization.id,
-        name: m.organization.name,
-        role: m.role,
-      })) || [],
-      memberships: undefined,
-    }));
+    const transformedUsers = users.map((user) => {
+      const accounts = (user.memberships ?? []).flatMap((m) =>
+        (m.organization.whatsappAccounts ?? []).map((a) => ({
+          id: a.id,
+          verifiedName: a.verifiedName || a.displayName || null,
+          displayPhoneNumber: a.phoneNumber,
+          connectionType: a.connectionType,
+          status: a.status === 'CONNECTED' ? 'active' : 'inactive',
+          rawStatus: a.status,
+          isDefault: a.isDefault,
+          qualityRating: a.qualityRating,
+          phoneNumberId: a.phoneNumberId,
+          wabaId: a.wabaId,
+          organizationName: m.organization.name,
+          createdAt: a.createdAt,
+        }))
+      );
+      return {
+        ...user,
+        organizations: user.memberships?.map((m) => ({
+          id: m.organization.id,
+          name: m.organization.name,
+          role: m.role,
+        })) || [],
+        whatsappAccounts: accounts,
+        whatsappSummary: {
+          cloudApiAccounts: accounts.filter((a) => a.connectionType === 'CLOUD_API').length,
+          businessAppAccounts: accounts.filter((a) => a.connectionType !== 'CLOUD_API').length,
+          activeAccounts: accounts.filter((a) => a.status === 'active').length,
+        },
+        memberships: undefined,
+      };
+    });
 
     return { users: transformedUsers, total };
   }
