@@ -147,12 +147,13 @@ export const isSoldClient = async (adminId: string, organizationId: string | und
 
 /**
  * What a sales person may do on a client they sold: read it, add or remove the
- * add-ons they sold, and leave notes for the onboarder. Deliberately not
- * billing.write, orgs.features or impersonate - the plan, payments and the
- * account itself are the onboarder's, and two people changing a plan is how a
- * customer ends up billed twice.
+ * add-ons they sold, leave notes for the onboarder, and open the client's
+ * account for 30 minutes to help them in it (impersonate - what that view may
+ * change is in impersonation.ts). Deliberately not billing.write or
+ * orgs.features - the plan and payments are the onboarder's, and two people
+ * changing a plan is how a customer ends up billed twice.
  */
-const SALES_ON_OWN: readonly Permission[] = ['orgs.read', 'billing.read', 'orgs.write', 'addons.write'];
+const SALES_ON_OWN: readonly Permission[] = ['orgs.read', 'billing.read', 'orgs.write', 'addons.write', 'impersonate'];
 
 /** true when this organization was onboarded by this admin. */
 export const isOwnClient = async (adminId: string, organizationId: string | undefined): Promise<boolean> => {

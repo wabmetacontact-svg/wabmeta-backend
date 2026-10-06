@@ -291,8 +291,8 @@ export const authenticate = async (
       }
     }
 
-    // An admin viewing the app as this user may set things up for them, but
-    // the inbox, the login and money stay view-only. See admin/impersonation.ts.
+    // An admin viewing the app as this user may work in it for them, but the
+    // login and the plan stay view-only. See admin/impersonation.ts.
     if (decoded.impersonatedBy) {
       const path = (req.originalUrl || '').split('?')[0] || '';
       const area = impersonationBlocks(req.method, path);
