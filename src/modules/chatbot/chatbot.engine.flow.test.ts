@@ -85,7 +85,7 @@ describe('chatbot flow', () => {
     expect(texts()).toEqual(['Support team will call you']);
   });
 
-  it('does not restart a finished flow on the next message of the same chat', async () => {
+  it('after a flow ends, the next message starts the Default bot again, even in an old chat', async () => {
     const b = bot();
     db.chatbot.findMany.mockResolvedValue([b]);
     db.chatbot.findFirst.mockResolvedValue(b);
@@ -95,9 +95,8 @@ describe('chatbot flow', () => {
     await send(c, 'btn-price', false);
     sent.length = 0;
 
-    const handled = await send(c, 'ok thanks', false);
-    expect(handled).toBe(false);
-    expect(sent).toEqual([]);
+    expect(await send(c, 'hi', false)).toBe(true);
+    expect(texts()).toEqual(['Choose one']);
   });
 
   it('typing the bot keyword mid-flow restarts it', async () => {
