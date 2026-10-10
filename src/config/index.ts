@@ -83,6 +83,36 @@ export const config = {
     graphApiVersion: getEnv('META_GRAPH_API_VERSION', 'v22.0'),
   },
 
+  // Gupshup (Solution Partner - credit line). Docs:
+  // https://bizgate-docs.gupshup.io/docs/tech-partner-hosted-embed-sign-up-flow
+  // https://partner-docs.gupshup.io/reference/post_partner-account-login
+  // Credentials khaali = Gupshup band, har number pehle jaisa Meta direct.
+  gupshup: {
+    // Meta Partner Solution ID ("WABMeta Gupshup OD"). Frontend
+    // VITE_META_SOLUTION_ID se match hone par hi connect Gupshup par jaata hai.
+    solutionId: getEnv('GUPSHUP_SOLUTION_ID'),
+    // Paths /partner/... se shuru hote hain (/partner/account/login,
+    // /partner/tpp/app, /partner/bizgate/...), isliye base me /partner nahi.
+    baseUrl: getEnv('GUPSHUP_BASE_URL', 'https://partner.gupshup.io'),
+    // Tareeka 1 (default): partner portal ka login email + client secret
+    // (Settings > Security > API Client Details). Backend khud 24h wala
+    // partner token leta aur renew karta hai. Client secret ~3 mahine me
+    // expire hota hai - naya banao to yahan badlo.
+    partnerEmail: getEnv('GUPSHUP_PARTNER_EMAIL'),
+    clientSecret: getEnv('GUPSHUP_CLIENT_SECRET'),
+    // Tareeka 2: Universal Token (Gupshup provision kare to). Set ho to
+    // bizgate endpoints use hote hain. 24h-60 din - expire se pehle badlo.
+    universalToken: getEnv('GUPSHUP_UNIVERSAL_TOKEN'),
+    // Gupshup callbacks (live event, V3 statuses) isi URL par aate hain;
+    // ?key= isi secret se milta hai warna request reject.
+    callbackUrl: getEnv('GUPSHUP_CALLBACK_URL', 'https://api.wabmeta.com/api/webhooks/gupshup'),
+    callbackSecret: getEnv('GUPSHUP_CALLBACK_SECRET'),
+    subscriptionModes: getEnv(
+      'GUPSHUP_SUBSCRIPTION_MODES',
+      'MESSAGE,ENQUEUED,DISPATCHED,SENT,DELIVERED,READ,FAILED,OTHERS'
+    ),
+  },
+
   google: {
     clientId: getEnv('GOOGLE_CLIENT_ID'),
     clientSecret: getEnv('GOOGLE_CLIENT_SECRET'),

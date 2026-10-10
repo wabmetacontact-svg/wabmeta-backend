@@ -9,6 +9,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
 import { config } from '../../config';
+import { routeSend } from '../gupshup/gupshup.router';
 import { metaLog } from '../../utils/logger';
 import {
   TokenExchangeResponse,
@@ -1102,10 +1103,13 @@ class MetaApiClient {
 
     try {
       const response = await this.withRetry(
-        () => this.client.post(`${phoneNumberId}/messages`, payload, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: 15000,
-        }),
+        () =>
+          routeSend(phoneNumberId, payload, () =>
+            this.client.post(`${phoneNumberId}/messages`, payload, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              timeout: 15000,
+            })
+          ),
         { label: 'sendMessage' }
       );
 
@@ -1189,10 +1193,13 @@ class MetaApiClient {
 
     try {
       const response = await this.withRetry(
-        () => this.client.post(`/${phoneNumberId}/messages`, payload, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: 15000,
-        }),
+        () =>
+          routeSend(phoneNumberId, payload, () =>
+            this.client.post(`/${phoneNumberId}/messages`, payload, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              timeout: 15000,
+            })
+          ),
         { label: 'sendMessageWithContactInfo' }
       );
 

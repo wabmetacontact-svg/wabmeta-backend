@@ -318,6 +318,20 @@ model WhatsAppAccount {
   // jaata hai ki kya maanga ja chuka hai. Shape: src/modules/meta/coexistence.ts
   smbSyncState        Json?
 
+  // Gupshup (Solution Partner) ki credit line par chalne wale numbers.
+  // META = messages seedha Meta Cloud API se (purane / coexistence numbers).
+  // GUPSHUP = Partner Solution se onboard hua - messages Gupshup ki passthrough
+  // API se jaate hain (Meta "Only my partner" permission). Baaki Meta calls
+  // (templates, media, mark-as-read) seedhe Meta se hi. Dekho src/modules/gupshup.
+  sendProvider        String    @default("META")
+  gupshupAppId        String?   @unique
+  // LINKING (app ban raha / Gupshup register kar raha) | LIVE | ERROR
+  gupshupStatus       String?
+  gupshupError        String?
+  gupshupLinkedAt     DateTime?
+  gupshupLiveAt       DateTime?
+  gupshupSubscriptionId String?
+
   // Admin ke display overrides.
   //
   // Quality rating aur messaging tier dono Meta assign karta hai - koi API

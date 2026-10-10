@@ -1467,6 +1467,17 @@ export class WebhookService {
         waMessageId, newStatus, statusTime, failureReason
       );
 
+      // Gupshup number ka service message deliver nahi hua - Gupshup paisa
+      // nahi leta, to customer ka charge bhi wapas (gupshup.router). Baaki
+      // messages par koi charge hi nahi hota, tab ye kuch nahi karta.
+      if (newStatus === 'FAILED') {
+        import('../wallet/wallet.deduction.service')
+          .then(({ refundServiceCharge }) =>
+            refundServiceCharge(waMessageId, failureReason || 'delivery failed')
+          )
+          .catch(() => {});
+      }
+
       // ✅ FIX: Query with ALL possible field names
       const message = await prisma.message.findFirst({
         where: {

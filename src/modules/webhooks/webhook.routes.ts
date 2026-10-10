@@ -173,6 +173,43 @@ router.get('/verify', (req: Request, res: Response) => {
   return res.status(403).send('Forbidden');
 });
 
+// ============================================
+// POST /api/webhooks/gupshup - Gupshup callbacks
+// Gupshup app link ke waqt diya URL (live event) aur V3 subscription
+// (statuses me gs_id <-> wamid) dono yahin aate hain. Gupshup Meta jaisa
+// signature nahi bhejta, isliye URL me ?key=GUPSHUP_CALLBACK_SECRET.
+// Gupshup 10 sec me 2xx na mile to retry karta hai - turant ack, kaam baad me.
+// ============================================
+router.post('/gupshup', (req: Request, res: Response) => {
+  const secret = config.gupshup.callbackSecret;
+  const given = String(req.query.key || '');
+  const ok =
+    !!secret &&
+    given.length === secret.length &&
+    crypto.timingSafeEqual(Buffer.from(given), Buffer.from(secret));
+  if (!ok) {
+    console.error('🚨 Gupshup callback with a wrong or missing key - rejected');
+    return res.status(403).send('Forbidden');
+  }
+
+  res.status(200).end();
+
+  setImmediate(async () => {
+    try {
+      const { gupshupService } = await import('../gupshup/gupshup.service');
+      const outcome = await gupshupService.handleCallback(req.body);
+      webhookService
+        .logWebhook(req.body, 'processed', `gupshup:${outcome}`)
+        .catch((e: any) => console.error('Webhook log error:', e));
+    } catch (error: any) {
+      console.error('❌ Gupshup callback error:', error.message);
+      webhookService
+        .logWebhook(req.body, 'failed', `gupshup:${error.message}`)
+        .catch((e: any) => console.error('Webhook log error:', e));
+    }
+  });
+});
+
 router.get('/test', (_req: Request, res: Response) => {
   res.json({
     success: true,

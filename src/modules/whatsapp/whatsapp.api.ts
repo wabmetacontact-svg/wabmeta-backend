@@ -1,5 +1,6 @@
 // 📁 src/modules/whatsapp/whatsapp.api.ts - COMPLETE WHATSAPP API CLIENT
 
+import { routeSend } from '../gupshup/gupshup.router';
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import crypto from 'crypto';
 import { config } from '../../config';
@@ -346,7 +347,8 @@ class WhatsAppAPI {
         payload.template.components = this.buildTemplateComponents(components);
       }
 
-      const response = await this.client.post<SendMessageResponse>(
+      const response = await routeSend(phoneNumberId, payload, () =>
+        this.client.post<SendMessageResponse>(
         `${phoneNumberId}/messages`,
         payload,
         {
@@ -354,6 +356,7 @@ class WhatsAppAPI {
             Authorization: `Bearer ${accessToken}`,
           },
         }
+      )
       );
 
       const waMessageId = response.data.messages?.[0]?.id;
@@ -395,7 +398,8 @@ class WhatsAppAPI {
         },
       };
 
-      const response = await this.client.post<SendMessageResponse>(
+      const response = await routeSend(phoneNumberId, payload, () =>
+        this.client.post<SendMessageResponse>(
         `${phoneNumberId}/messages`,
         payload,
         {
@@ -403,6 +407,7 @@ class WhatsAppAPI {
             Authorization: `Bearer ${accessToken}`,
           },
         }
+      )
       );
 
       const waMessageId = response.data.messages?.[0]?.id;
@@ -458,7 +463,8 @@ class WhatsAppAPI {
         [media.type]: mediaPayload,
       };
 
-      const response = await this.client.post<SendMessageResponse>(
+      const response = await routeSend(phoneNumberId, payload, () =>
+        this.client.post<SendMessageResponse>(
         `${phoneNumberId}/messages`,
         payload,
         {
@@ -466,6 +472,7 @@ class WhatsAppAPI {
             Authorization: `Bearer ${accessToken}`,
           },
         }
+      )
       );
 
       const waMessageId = response.data.messages?.[0]?.id;
@@ -493,7 +500,8 @@ class WhatsAppAPI {
     payload:       any
   ): Promise<any> {
     try {
-      const response = await this.client.post(
+      const response = await routeSend(phoneNumberId, payload, () =>
+        this.client.post(
         `${phoneNumberId}/messages`,
         payload,
         {
@@ -503,6 +511,7 @@ class WhatsAppAPI {
           },
           timeout: 15000, // 15s timeout
         }
+      )
       );
 
       const messageId = response.data?.messages?.[0]?.id;
