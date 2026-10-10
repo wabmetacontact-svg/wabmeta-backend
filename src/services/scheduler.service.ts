@@ -4,7 +4,7 @@
 // ✅ Silent skips (no log spam)
 
 import cron from 'node-cron';
-import { withAdvisoryLock } from '../utils/withLock';
+import { withJobLock } from '../utils/withLock';
 import { automationEngine } from '../modules/automation/automation.engine';
 import prisma from '../config/database';
 import { SubscriptionStatus, PlanType } from '@prisma/client';
@@ -58,7 +58,7 @@ export function initializeScheduler() {
 
     state.automation = true;
     try {
-      await withAdvisoryLock('scheduler:automation', () => automationEngine.triggerScheduled());
+      await withJobLock('scheduler:automation', () => automationEngine.triggerScheduled());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();
@@ -80,7 +80,7 @@ export function initializeScheduler() {
     state.inactivity = true;
     try {
       console.log('💤 Running inactivity check...');
-      await withAdvisoryLock('scheduler:inactivity', () => automationEngine.triggerInactivity());
+      await withJobLock('scheduler:inactivity', () => automationEngine.triggerInactivity());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();
@@ -102,7 +102,7 @@ export function initializeScheduler() {
 
     state.subscriptionExpiry = true;
     try {
-      await withAdvisoryLock('scheduler:subExpiry', () => checkAndExpireSubscriptions());
+      await withJobLock('scheduler:subExpiry', () => checkAndExpireSubscriptions());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();
@@ -121,7 +121,7 @@ export function initializeScheduler() {
     if (state.expiryWarnings) return;
     state.expiryWarnings = true;
     try {
-      await withAdvisoryLock('scheduler:expiryWarnings', () => sendExpiryWarnings());
+      await withJobLock('scheduler:expiryWarnings', () => sendExpiryWarnings());
     } catch (error: any) {
       if (error?.code !== 'P2024') {
         console.error('Expiry warning error:', error.message);
@@ -142,7 +142,7 @@ export function initializeScheduler() {
     if (state.webhookLogCleanup) return;
     state.webhookLogCleanup = true;
     try {
-      await withAdvisoryLock('scheduler:webhookLogCleanup', () =>
+      await withJobLock('scheduler:webhookLogCleanup', () =>
         cleanupWebhookLogs()
       );
     } catch (error: any) {
@@ -162,7 +162,7 @@ export function initializeScheduler() {
     if (state.securityEventCleanup) return;
     state.securityEventCleanup = true;
     try {
-      await withAdvisoryLock('scheduler:securityEventCleanup', () =>
+      await withJobLock('scheduler:securityEventCleanup', () =>
         cleanupSecurityEvents()
       );
     } catch (error: any) {
@@ -191,7 +191,7 @@ export function initializeScheduler() {
     if (state.metaSync) return;
     state.metaSync = true;
     try {
-      await withAdvisoryLock('scheduler:metaSync', () => syncAllAccountsFromMeta());
+      await withJobLock('scheduler:metaSync', () => syncAllAccountsFromMeta());
     } catch (error: any) {
       if (error?.code !== 'P2024') {
         console.error('Meta sync error:', error.message);
@@ -213,7 +213,7 @@ export function initializeScheduler() {
 
     state.automationJobs = true;
     try {
-      await withAdvisoryLock('scheduler:automationJobs', async () => {
+      await withJobLock('scheduler:automationJobs', async () => {
         await automationEngine.runDueJobs();
         await automationEngine.triggerTasksDue();
       });
@@ -237,7 +237,7 @@ export function initializeScheduler() {
 
     state.noReply = true;
     try {
-      await withAdvisoryLock('scheduler:noReply', () => automationEngine.triggerNoReply());
+      await withJobLock('scheduler:noReply', () => automationEngine.triggerNoReply());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();
@@ -262,7 +262,7 @@ export function initializeScheduler() {
     state.payments = true;
     try {
       const { paymentsService } = await import('../modules/payments/payments.service');
-      await withAdvisoryLock('scheduler:payments', () => paymentsService.pollPendingPayments());
+      await withJobLock('scheduler:payments', () => paymentsService.pollPendingPayments());
     } catch (error: any) {
       if (error?.code === 'P2024') {
         markPoolError();

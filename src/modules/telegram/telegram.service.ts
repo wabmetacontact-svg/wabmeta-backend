@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import prisma from '../../config/database';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { webhookEvents } from '../webhooks/webhook.service';
-import { withAdvisoryLock } from '../../utils/withLock';
+import { withJobLock } from '../../utils/withLock';
 import { maybeCreateSocialLead } from '../crm/crm.social';
 import * as tg from './telegram.api';
 import { headerString } from '../../utils/httpHeaders';
@@ -984,7 +984,7 @@ export const processBroadcast = async (organizationId: string, broadcastId: stri
 
   // Only one instance drives a given broadcast at a time (multi-instance safety);
   // another instance simply skips this tick if it can't take the lock.
-  await withAdvisoryLock(`tg-broadcast:${broadcastId}`, async () => {
+  await withJobLock(`tg-broadcast:${broadcastId}`, async () => {
   const bots = await prisma.telegramBot.findMany({ where: { organizationId } });
   const tokenByBot: Record<string, string | null> = {};
   for (const b of bots) tokenByBot[b.id] = decrypt(b.botToken);

@@ -26,9 +26,8 @@
 // a deploy. That matters more here than anywhere else, because this job is the
 // only thing moving money into TeamOS.
 //
-// NOTE: the bug above is not caused by this module and is not fixed by it.
-// utils/withLock.ts is still used by the automation, payments and meta-sync
-// schedulers, which are vulnerable to the same stranding.
+// utils/withLock.ts (the schedulers' lock) has since been moved to the same
+// lease pattern, with a heartbeat for long jobs.
 
 import prisma from '../../config/database';
 import logger from '../../utils/logger';
