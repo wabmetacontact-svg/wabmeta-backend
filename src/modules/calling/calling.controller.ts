@@ -170,6 +170,8 @@ class CallingController {
           ? 'Calling enabled successfully'
           : 'Calling disabled successfully',
         data: result,
+        // Meta ne callback reject kiya tha aur humne use band karke save kiya
+        callbackUnsupported: result.callbackUnsupported === true,
       });
 
     } catch (error) {
