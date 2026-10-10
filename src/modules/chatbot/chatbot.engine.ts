@@ -7,6 +7,7 @@ import { aiService } from './ai.service';
 import { consumeAiQuota } from './ai.ratelimit';
 import { getRedis } from '../../config/redis';
 import { chatbotLog } from '../../utils/logger';
+import { inputPicksOption, keywordChatbot, pickChatbot, replyBelongsToNode } from './chatbot.match';
 
 // ============================================
 // TYPES
@@ -103,7 +104,6 @@ class RedisSessionManager {
 
   // ── Get Redis Instance ───────────────────────
   private getRedis() {
-    const { getRedis } = require('../../config/redis');
     return getRedis();
   }
 
@@ -263,34 +263,43 @@ export class ChatbotEngine {
         });
       }
 
-      const shouldReset = isNewConversation &&
-        !session?.aiNodeActive &&
-        !session?.waitingForInput;
+      const activeBots = await this.findActiveChatbots(organizationId);
 
-      let chatbot = await this.findMatchingChatbot(
-        organizationId,
-        cleanMessage,
-        isNewConversation || !session,
-        session?.chatbotId
-      );
-
-      if (!chatbot && session && !session.aiNodeActive) {
+      // Session ka bot ab active nahi (pause/delete) - purana session bekaar
+      const sessionBot = session
+        ? activeBots.find((b) => b.id === session!.chatbotId) || null
+        : null;
+      if (session && !sessionBot) {
         chatbotLog.debug('Clearing stale session', { sessionKey });
         await sessionManager.delete(sessionKey);
         session = null;
-        chatbot = await this.findMatchingChatbot(
-          organizationId, cleanMessage, true, undefined
-        );
       }
 
-      if (!chatbot && session?.aiNodeActive) {
-        chatbot = await prisma.chatbot.findFirst({
-          where: {
-            id: session.chatbotId,
-            organizationId,
-            status: 'ACTIVE',
-          },
-        });
+      let chatbot: any = null;
+      let fresh = false;
+
+      if (session && sessionBot) {
+        // Customer ne kisi bot ka keyword likha to wo flow shuru se - chahe
+        // beech me koi flow chal raha ho ya AI mode ho. Flow ke beech sirf
+        // poora (exact) keyword, aur wo bhi tab nahi jab wahi text is
+        // button/list ka option ho.
+        const midFlow = session.waitingForInput || session.aiNodeActive;
+        const currentNode = (sessionBot.flowData as unknown as FlowData)?.nodes
+          ?.find((n) => n.id === session!.currentNodeId);
+        const kwBot = keywordChatbot(activeBots, cleanMessage, { exactOnly: midFlow });
+
+        if (kwBot && !(session.waitingForInput && inputPicksOption(currentNode, cleanMessage))) {
+          chatbotLog.info('Keyword restarts chatbot', { chatbotName: kwBot.name });
+          chatbot = kwBot;
+          fresh = true;
+        } else {
+          chatbot = sessionBot;
+          // Nayi chat, aur pichla flow kisi jawab ka intezar nahi kar raha - shuru se
+          fresh = isNewConversation && !midFlow;
+        }
+      } else {
+        chatbot = pickChatbot(activeBots, cleanMessage, isNewConversation);
+        fresh = true;
       }
 
       if (!chatbot) {
@@ -315,7 +324,7 @@ export class ChatbotEngine {
       }
 
       // Create or continue session
-      if (!session || shouldReset) {
+      if (!session || fresh) {
         session = await this.createNewSession(
           chatbot, organizationId, conversationId,
           senderPhone, cleanMessage, flowData,
@@ -324,11 +333,23 @@ export class ChatbotEngine {
         );
         if (!session) return true;
       } else {
-        session = await this.handleExistingSession(
-          session, cleanMessage, flowData,
-          organizationId, conversationId,
-          senderPhone, account, sessionKey, chatbot
-        );
+        const waitingNode = session.waitingForInput
+          ? flowData.nodes.find((n) => n.id === session!.currentNodeId)
+          : undefined;
+        const nodeBefore = session.currentNodeId;
+
+        session = await this.handleExistingSession(session, cleanMessage, flowData);
+
+        // Button/list ka koi option nahi chuna - fallback bolo, phir wahi
+        // options dobara (executeFlow isi node ko phir bhejega)
+        if (
+          (waitingNode?.type === 'button' || waitingNode?.type === 'list') &&
+          session.currentNodeId === nodeBefore &&
+          chatbot.fallbackMessage
+        ) {
+          await this.sendText(account, senderPhone, chatbot.fallbackMessage, conversationId, organizationId);
+          await this.sleep(400);
+        }
       }
 
       // Interest detection
@@ -452,13 +473,7 @@ export class ChatbotEngine {
   private async handleExistingSession(
     session: ChatSession,
     input: string,
-    flowData: FlowData,
-    organizationId: string,
-    conversationId: string,
-    senderPhone: string,
-    account: any,
-    sessionKey: string,
-    chatbot: any
+    flowData: FlowData
   ): Promise<ChatSession> {
 
     chatbotLog.debug('Resuming session', {
@@ -489,28 +504,11 @@ export class ChatbotEngine {
       return session;
     }
 
-    // ✅ CASE 3: Not waiting, not AI - check for new keyword
-    const newChatbot = await this.findMatchingChatbot(
-      organizationId, input, false, undefined
-    );
+    // Doosre bot ka keyword processMessage pehle hi dekh leta hai. (Yahan se
+    // processMessage ko dobara bulana apna hi lock nahi le pata tha aur
+    // chup-chaap kuch nahi karta tha.)
 
-    if (newChatbot && newChatbot.id !== session.chatbotId) {
-      chatbotLog.info('New chatbot keyword matched', { newChatbotName: newChatbot.name });
-      await sessionManager.delete(sessionKey);
-      
-      // ✅ Recursive call - create new session
-      await this.processMessage(
-        conversationId, organizationId,
-        input, senderPhone, true
-      );
-      
-      // Stop current execution
-      session.waitingForInput = true;
-      session.aiNodeActive = false;
-      return session;
-    }
-
-    // ✅ CASE 4: Session active, no special state
+    // ✅ CASE 3: Session active, no special state
     // Continue flow from current node
     session.waitingForInput = false;
     return session;
@@ -1545,71 +1543,32 @@ export class ChatbotEngine {
   // ==========================================
   // FIND CHATBOT
   // ==========================================
-  private async findMatchingChatbot(
-    organizationId: string,
-    messageContent: string,
-    isNewConversation: boolean,
-    existingChatbotId?: string
-  ) {
-    // Use existing session's chatbot
-    if (existingChatbotId) {
-      const bot = await prisma.chatbot.findFirst({
-        where: {
-          id: existingChatbotId,
-          organizationId,
-          status: 'ACTIVE'
-        },
-      });
-      if (bot) {
-        console.log(`🔄 Using session chatbot: ${bot.name}`);
-        return bot;
-      }
-    }
-
-    const allActive = await prisma.chatbot.findMany({
-      where: { organizationId, status: 'ACTIVE' },
+  // Sirf WhatsApp ke bots. Telegram ke bots (channel TELEGRAM) bhi isi table
+  // me hain aur pehle WhatsApp par bhi jawab de dete the.
+  private findActiveChatbots(organizationId: string) {
+    return prisma.chatbot.findMany({
+      where: { organizationId, status: 'ACTIVE', channel: 'WHATSAPP' },
+      orderBy: { createdAt: 'asc' },
     });
+  }
 
-    if (!allActive.length) return null;
+  /**
+   * Ye button/list tap is chat me chal rahe chatbot ke us node ka hai jo
+   * jawab ka intezar kar raha hai? Tab ye message chatbot ka hai - keyword
+   * automation ise nahi pakadti.
+   */
+  async ownsReply(organizationId: string, conversationId: string, replyId: string): Promise<boolean> {
+    if (!replyId) return false;
+    const session = await sessionManager.get(`${organizationId}:${conversationId}`);
+    if (!session?.waitingForInput) return false;
 
-    const lowerMsg = messageContent.toLowerCase().trim();
-
-    // 1. Exact keyword match
-    for (const bot of allActive) {
-      const keywords = (bot.triggerKeywords as string[]) || [];
-      const match = keywords.find(
-        kw => kw.toLowerCase().trim() === lowerMsg
-      );
-      if (match) {
-        console.log(`🎯 Exact keyword: "${match}" → ${bot.name}`);
-        return bot;
-      }
-    }
-
-    // 2. Partial keyword match
-    for (const bot of allActive) {
-      const keywords = (bot.triggerKeywords as string[]) || [];
-      const match = keywords.find(kw => {
-        const kwLower = kw.toLowerCase().trim();
-        return lowerMsg.includes(kwLower) || kwLower.includes(lowerMsg);
-      });
-      if (match) {
-        console.log(`🎯 Partial keyword: "${match}" → ${bot.name}`);
-        return bot;
-      }
-    }
-
-    // 3. New conversation → default bot
-    if (isNewConversation) {
-      const defaultBot = allActive.find(b => b.isDefault);
-      if (defaultBot) {
-        console.log(`🏠 Default bot: ${defaultBot.name}`);
-        return defaultBot;
-      }
-      if (allActive.length === 1) return allActive[0];
-    }
-
-    return null;
+    const bot = await prisma.chatbot.findFirst({
+      where: { id: session.chatbotId, organizationId, status: 'ACTIVE', channel: 'WHATSAPP' },
+      select: { flowData: true },
+    });
+    const node = (bot?.flowData as unknown as FlowData)?.nodes
+      ?.find((n) => n.id === session.currentNodeId);
+    return replyBelongsToNode(node, replyId);
   }
 
   // ==========================================
