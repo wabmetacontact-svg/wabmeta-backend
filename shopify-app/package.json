@@ -1,0 +1,14 @@
+{
+  "name": "wabmeta-shopify-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shopify app config (scopes, redirect URLs, webhooks) for WabMeta. The app's code lives in src/modules/shopify.",
+  "scripts": {
+    "shopify": "shopify",
+    "link": "shopify app config link",
+    "deploy": "shopify app deploy"
+  },
+  "devDependencies": {
+    "@shopify/cli": "^3"
+  }
+}
