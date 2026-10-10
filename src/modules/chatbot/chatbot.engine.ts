@@ -298,7 +298,12 @@ export class ChatbotEngine {
           fresh = isNewConversation && !midFlow;
         }
       } else {
-        chatbot = pickChatbot(activeBots, cleanMessage, isNewConversation);
+        // Koi flow nahi chal raha: keyword wala bot, warna Default bot - har
+        // baar, chat nayi ho ya purani. (Sirf "24 ghante me pehla message" par
+        // Default bot chalane se aaj baat kar chuke number par "hi" ka koi
+        // jawab hi nahi aata tha.) Keyword automation wale message yahan tak
+        // aate hi nahi - webhook unhe pehle hi automation ko de deta hai.
+        chatbot = pickChatbot(activeBots, cleanMessage, true);
         fresh = true;
       }
 
