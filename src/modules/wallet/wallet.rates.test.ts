@@ -34,12 +34,35 @@ describe('India rates', () => {
   });
 });
 
+describe('India service and authentication', () => {
+  // Gupshup bills us Meta + 5%: Rs 0.1150 -> Rs 0.1208 for authentication and
+  // service messages (before GST, which is claimed back as input credit).
+  const GUPSHUP_COST = 0.1208;
+
+  it('keep at least 20% over what Gupshup charges us', () => {
+    const india = COUNTRY_RATES['91'];
+    expect(india.authentication).toBeGreaterThanOrEqual(GUPSHUP_COST * 1.2);
+    expect(india.service!).toBeGreaterThanOrEqual(GUPSHUP_COST * 1.2);
+  });
+
+  it('a service message to an Indian number is charged the service rate', () => {
+    expect(getRateForCategory('SERVICE', '+919812345678')).toBe(0.145);
+  });
+
+  it('a country without its own service rate falls back to utility', () => {
+    const uk = COUNTRY_RATES['44'];
+    expect(uk.service).toBeUndefined();
+    expect(getRateForCategory('SERVICE', '+447700900123')).toBe(uk.utility);
+  });
+});
+
 describe('DEFAULT_RATE', () => {
   it('is never below India - undercharging an unknown country is a straight loss', () => {
     const india = COUNTRY_RATES['91'];
     expect(DEFAULT_RATE.marketing).toBeGreaterThanOrEqual(india.marketing);
     expect(DEFAULT_RATE.utility).toBeGreaterThanOrEqual(india.utility);
     expect(DEFAULT_RATE.authentication).toBeGreaterThanOrEqual(india.authentication);
+    expect(DEFAULT_RATE.service!).toBeGreaterThanOrEqual(india.service!);
   });
 });
 
@@ -96,8 +119,11 @@ describe('rateCard', () => {
     expect(india.authentication).toBe(COUNTRY_RATES['91'].authentication);
   });
 
-  it('shows service conversations as free', () => {
-    expect(rateCard().every((c) => c.service === 0)).toBe(true);
+  it('quotes the service rate the wallet charges on WabMeta-billed numbers', () => {
+    for (const c of rateCard()) {
+      expect(c.service).toBe(getRateForCategory('SERVICE', `+${c.code}5550123456`));
+    }
+    expect(rateCard().find((c) => c.code === '91')!.service).toBe(0.145);
   });
 
   it('never lists a country it cannot price', () => {

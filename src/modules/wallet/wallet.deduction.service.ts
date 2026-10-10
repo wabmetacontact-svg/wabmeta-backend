@@ -12,6 +12,10 @@ export interface CountryRate {
   marketing: number;
   utility: number;
   authentication: number;
+  // Service = business ka bheja non-template message (24h window ke andar).
+  // Meta ab inpar bhi charge karta hai. Sirf Gupshup (credit line) numbers par
+  // katta hai - wahi jahan Meta ka bill hum bharte hain. Na diya ho to utility.
+  service?: number;
 }
 
 // Keyed by ITU dial prefix string (e.g. '91' for India, '49' for Germany)
@@ -113,7 +117,12 @@ export const COUNTRY_RATES: Record<string, CountryRate> = {
   // India (+91)
   // Utility AiSensy ke ₹0.145 se match karta hai - wahi category hai jahan
   // e-commerce ka sabse zyada volume jaata hai, aur pehle hum 31% mehenge the.
-  '91':  { marketing: 1.00,  utility: 0.145, authentication: 0.12 },
+  //
+  // Authentication aur service: Gupshup hamse Meta + 5% leta hai (Rs 0.1150 ->
+  // Rs 0.1208, GST alag - GSTIN hai to input credit milta hai). Rs 0.145 =
+  // cost + 20% (Rs 0.0242), aur AiSensy ke barabar - usse mehenge nahi.
+  // Pehle authentication Rs 0.12 tha, cost se bhi neeche.
+  '91':  { marketing: 1.00,  utility: 0.145, authentication: 0.145, service: 0.145 },
   // Indonesia (+62)
   '62':  { marketing: 4.45,  utility: 3.10, authentication: 3.10 },
   // Iraq (+964)
@@ -208,7 +217,8 @@ export const DEFAULT_RATE: CountryRate = {
   // sasta koi bada market nahi hai, aur kam charge karna seedha nuksan hai.
   marketing: 1.00,
   utility: 0.19,
-  authentication: 0.12,
+  authentication: 0.19,
+  service: 0.19,
 };
 
 // ─── Language to Country Prefix Mapping ──────────────────────────────────────
@@ -308,6 +318,7 @@ export function getRateForCategory(
   if (upper.includes('MARKETING')) return rates.marketing;
   if (upper.includes('AUTH'))      return rates.authentication;
   if (upper.includes('UTILITY'))   return rates.utility;
+  if (upper.includes('SERVICE'))   return rates.service ?? rates.utility;
 
   return rates.marketing; // Default fallback
 }
@@ -490,6 +501,153 @@ export async function deductWalletForTemplate(params: {
     console.error('❌ Wallet deduction error (non-blocking):', error.message);
     return { deducted: false, walletUsed: false, amount: 0,
              reason: `Error: ${error.message}` };
+  }
+}
+
+// ─── Service messages (Gupshup numbers) ───────────────────────────────────────
+// Gupshup par business ka har non-template message (Inbox reply, chatbot, AI
+// agent, automation ka text/media) Meta ke "service message" rate par bill hota
+// hai, aur wo bill hamare Gupshup wallet se katta hai. Isliye bhejne se PEHLE
+// customer ke wallet se katte hain (gupshup.router), send fail ho to turant
+// wapas, aur baad me delivery fail ho to bhi wapas (Gupshup sirf delivered ka
+// paisa leta hai). Template messages ka apna raasta pehle se hai.
+
+export async function deductWalletForService(params: {
+  organizationId: string;
+  recipientPhone: string;
+  /** Idempotency ref - send ke baad message id se badal diya jaata hai. */
+  ref: string;
+}): Promise<{ deducted: boolean; amountPaise: number; insufficient?: boolean; reason?: string }> {
+  const { organizationId, recipientPhone, ref } = params;
+  const rateRupees = getRateForCategory('SERVICE', recipientPhone);
+  const amountPaise = Math.round(rateRupees * 100);
+
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        const wallet = await tx.wallet.findUnique({ where: { organizationId } });
+        if (!wallet || wallet.flagged || !wallet.isActive) {
+          return { deducted: false, amountPaise, reason: !wallet ? 'No wallet' : 'Wallet unavailable' };
+        }
+
+        const creditHeadroom = wallet.creditEnabled
+          ? Math.max(0, wallet.creditLimitPaise - wallet.creditUsedPaise)
+          : 0;
+        if (wallet.balancePaise + creditHeadroom < amountPaise) {
+          await triggerLowBalanceAlert(wallet);
+          return {
+            deducted: false,
+            amountPaise,
+            insufficient: true,
+            reason: `Insufficient wallet balance (₹${((wallet.balancePaise + creditHeadroom) / 100).toFixed(2)} < ₹${rateRupees})`,
+          };
+        }
+
+        // Atomic: balance ki shart WHERE me - deductWalletForTemplate wali wajah.
+        const fromBalancePaise = Math.min(wallet.balancePaise, amountPaise);
+        const creditDeductedPaise = amountPaise - fromBalancePaise;
+        const applied = await tx.wallet.updateMany({
+          where: { id: wallet.id, balancePaise: { gte: fromBalancePaise } },
+          data: {
+            balancePaise: { decrement: fromBalancePaise },
+            creditUsedPaise: { increment: creditDeductedPaise },
+            totalDebitedPaise: { increment: amountPaise },
+            lastTransactionAt: new Date(),
+          },
+        });
+        if (applied.count === 0) {
+          return { deducted: false, amountPaise, insufficient: true, reason: 'Insufficient wallet balance' };
+        }
+
+        const after = await tx.wallet.findUniqueOrThrow({
+          where: { id: wallet.id },
+          select: { balancePaise: true, lowThresholdPaise: true },
+        });
+
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'debit',
+            amountPaise,
+            balanceBeforePaise: after.balancePaise + fromBalancePaise,
+            balanceAfterPaise: after.balancePaise,
+            description: `Service message [${getCountryName(recipientPhone)}] → ${recipientPhone}`,
+            status: 'completed',
+            metaChargeId: ref,
+            metaService: 'service_message',
+          },
+        });
+
+        if (after.balancePaise < after.lowThresholdPaise) {
+          await triggerLowBalanceAlert({ ...wallet, balancePaise: after.balancePaise } as any);
+        }
+        return { deducted: true, amountPaise };
+      },
+      { timeout: 10000 }
+    );
+  } catch (error: any) {
+    console.error('❌ Service message deduction error:', error.message);
+    return { deducted: false, amountPaise, reason: `Error: ${error.message}` };
+  }
+}
+
+/** Send ho gaya: charge ka ref asli message id par le aao (refund isi se dhoondhte hain). */
+export async function attachServiceChargeRef(ref: string, messageId: string): Promise<void> {
+  if (!ref || !messageId || ref === messageId) return;
+  await prisma.walletTransaction.updateMany({
+    where: { metaChargeId: ref, metaService: 'service_message' },
+    data: { metaChargeId: messageId },
+  });
+}
+
+/**
+ * Service message ka paisa wapas (send fail / delivery fail). Ek charge ka ek
+ * hi refund - (metaChargeId, metaService) par unique index guard hai.
+ */
+export async function refundServiceCharge(ref: string, reason: string): Promise<boolean> {
+  if (!ref) return false;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const charge = await tx.walletTransaction.findFirst({
+        where: { metaChargeId: ref, metaService: 'service_message', type: 'debit' },
+        select: { walletId: true, amountPaise: true },
+      });
+      if (!charge) return false;
+
+      const already = await tx.walletTransaction.findFirst({
+        where: { metaChargeId: ref, metaService: 'service_message_refund' },
+        select: { id: true },
+      });
+      if (already) return false;
+
+      const updated = await tx.wallet.update({
+        where: { id: charge.walletId },
+        data: {
+          balancePaise: { increment: charge.amountPaise },
+          totalCreditedPaise: { increment: charge.amountPaise },
+        },
+        select: { balancePaise: true },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          walletId: charge.walletId,
+          type: 'credit',
+          amountPaise: charge.amountPaise,
+          balanceBeforePaise: updated.balancePaise - charge.amountPaise,
+          balanceAfterPaise: updated.balancePaise,
+          description: `Refund: service message not delivered (${reason})`.slice(0, 250),
+          status: 'completed',
+          metaChargeId: ref,
+          metaService: 'service_message_refund',
+        },
+      });
+      return true;
+    });
+  } catch (err: any) {
+    if (err?.code === 'P2002') return false; // refund pehle hi ho chuka
+    console.error('❌ Service message refund error:', err.message);
+    return false;
   }
 }
 
@@ -708,8 +866,10 @@ export function rateCard(): Array<{
       marketing: COUNTRY_RATES[code].marketing,
       utility: COUNTRY_RATES[code].utility,
       authentication: COUNTRY_RATES[code].authentication,
-      // A service conversation - a reply inside the 24h window - is free.
-      service: 0,
+      // Reply inside the 24h window. Meta now bills these; we charge them only
+      // on numbers on WabMeta's billing (Gupshup credit line) - see
+      // deductWalletForService. Same fallback as getRateForCategory.
+      service: COUNTRY_RATES[code].service ?? COUNTRY_RATES[code].utility,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

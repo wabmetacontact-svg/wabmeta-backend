@@ -15,6 +15,7 @@ import prisma from '../../config/database';
 import { recordSignupSolution } from './partnerSolution';
 import { checkConnectionLock } from '../../middleware/connectionLock';
 import { runCoexistenceSync } from './coexistence';
+import { isGupshupSignup, gupshupService } from '../gupshup/gupshup.service';
 import { MessageStatus } from '@prisma/client';
 import { config } from '../../config';
 import { resolveOrganizationId } from '../../utils/resolveOrgId';
@@ -310,7 +311,11 @@ router.post('/connect', authenticate, checkConnectionLock, async (req, res, next
       wabaId || undefined,        // ✅ Session WABA ID from message event
       phoneNumberId || undefined, // ✅ Session Phone Number ID from message event
       undefined,                  // redirectUriOverride
-      coexistence === true
+      coexistence === true,
+      // Gupshup Partner Solution se signup (aur Gupshup configured) - tab
+      // credit line Gupshup ki, messages Gupshup se. Coexistence abhi Gupshup
+      // ke hosted flow me support nahi, isliye wo hamesha Meta direct.
+      isGupshupSignup(solutionId, coexistence === true)
     );
 
     if (result.success) {
@@ -880,6 +885,44 @@ router.post('/accounts/:id/coexistence-sync', async (req, res, next) => {
     const result = await runCoexistenceSync(accountId);
     if (result.error) throw new AppError(result.error, 400);
     return sendSuccess(res, { smbSyncState: result.state }, 'Chat import requested');
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ✅ Gupshup number: app link / live check dobara chalao (link fail hua ho,
+// ya live event nahi aaya). Sirf sendProvider=GUPSHUP accounts par.
+router.post('/accounts/:id/gupshup-link', async (req, res, next) => {
+  try {
+    const { id: accountId } = req.params;
+    const userId = (req as any).user?.id;
+    if (!userId) throw new AppError('Authentication required', 401);
+
+    const account = await prisma.whatsAppAccount.findUnique({
+      where: { id: accountId },
+      select: { organizationId: true, sendProvider: true, gupshupAppId: true, gupshupStatus: true },
+    });
+    if (!account) throw new AppError('Account not found', 404);
+    if (account.sendProvider !== 'GUPSHUP') throw new AppError('This number is not connected through Gupshup', 400);
+
+    const membership = await prisma.organizationMember.findFirst({
+      where: { organizationId: account.organizationId, userId, role: { in: ['OWNER', 'ADMIN'] } },
+    });
+    if (!membership) throw new AppError('You do not have permission to do this', 403);
+
+    // Live hai par subscription nahi bani thi - markLive use dobara banata hai
+    if (account.gupshupStatus === 'LIVE' && account.gupshupAppId) {
+      await gupshupService.markLive(account.gupshupAppId);
+    } else {
+      const result = await gupshupService.linkAccount(accountId);
+      if (result.error) throw new AppError(result.error, 400);
+    }
+
+    const fresh = await prisma.whatsAppAccount.findUnique({
+      where: { id: accountId },
+      select: { gupshupStatus: true, gupshupError: true, gupshupAppId: true },
+    });
+    return sendSuccess(res, fresh, 'Gupshup activation checked');
   } catch (error) {
     next(error);
   }

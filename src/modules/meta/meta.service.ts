@@ -29,6 +29,8 @@ import { assertCanConnectAnother } from './accountLimit';
 import { assertCoexistenceAllowed } from './coexistenceFreeDemo';
 import { notifyIfQualityDropped } from './qualityAlert';
 import { markCoexistenceOnboarded, runCoexistenceSync } from './coexistence';
+import { gupshupService } from '../gupshup/gupshup.service';
+import { invalidateSendRoute } from '../gupshup/gupshup.router';
 
 async function extractStoredPin(
   webhookSecretEncrypted: string | null
@@ -245,7 +247,12 @@ export class MetaService {
     // Number WhatsApp Business app se aaya (Embedded Signup ka coexistence
     // flow). Tab register nahi karte aur contacts/history sync maangte hain -
     // dekho coexistence.ts.
-    coexistence = false
+    coexistence = false,
+    // Signup Gupshup ke Partner Solution se hua (credit line). Tab register
+    // nahi karte - Gupshup ke docs: "should not register the WABA using the
+    // registration API", Gupshup app link ke andar khud karta hai - aur messages
+    // Gupshup se jaate hain. Dekho src/modules/gupshup.
+    viaGupshup = false
   ): Promise<{ success: boolean; account?: any; error?: string }> {
     try {
       metaLog.info('Meta connection start', {
@@ -508,6 +515,8 @@ export class MetaService {
         // registration se takra sakti hai.
         if (coexistence) {
           metaLog.info('Coexistence number - registration skipped', { phoneNumberId: primaryPhone.id });
+        } else if (viaGupshup) {
+          metaLog.info('Gupshup number - registration left to Gupshup', { phoneNumberId: primaryPhone.id });
         } else {
           // ✅ CRITICAL FIX: accessToken already DECRYPTED hai yahan
           // Kyunki abhi Meta se fresh aaya hai, encrypt nahi hua abhi
@@ -644,6 +653,7 @@ export class MetaService {
               qualityRating: primaryPhone.qualityRating,
               status: WhatsAppAccountStatus.CONNECTED,
               connectionType: finalConnectionType,
+              sendProvider: viaGupshup ? 'GUPSHUP' : 'META',
               isDefault: existingByPhone.isDefault || !hasDefault,
               codeVerificationStatus: primaryPhone.codeVerificationStatus,
               nameStatus: primaryPhone.nameStatus,
@@ -673,6 +683,7 @@ export class MetaService {
               webhookSecret: encryptedWebhookSecret,
               status: WhatsAppAccountStatus.CONNECTED,
               connectionType: finalConnectionType,
+              sendProvider: viaGupshup ? 'GUPSHUP' : 'META',
               isDefault: accountCount === 0,
               codeVerificationStatus: primaryPhone.codeVerificationStatus,
               nameStatus: primaryPhone.nameStatus,
@@ -756,6 +767,16 @@ export class MetaService {
       // turant maango. Fail ho to user Settings se "Import chats" dabakar
       // (POST /meta/accounts/:id/coexistence-sync) 24 ghante tak dobara
       // koshish kar sakta hai.
+      // Gupshup: app link karo (yahi number register karta hai) - live hone tak
+      // is number ke sends "activating" error dete hain. Fail ho to Settings
+      // se dobara (POST /meta/accounts/:id/gupshup-link).
+      if (viaGupshup) {
+        invalidateSendRoute(primaryPhone.id);
+        void gupshupService.linkAccount(savedAccount.id).catch((err) =>
+          metaLog.error('Gupshup link failed', err, { accountId: savedAccount.id })
+        );
+      }
+
       if (coexistence) {
         await markCoexistenceOnboarded(savedAccount.id);
         void runCoexistenceSync(savedAccount.id).catch((err) =>
