@@ -99,6 +99,36 @@ describe('email + client secret', () => {
     expect(authOf(request.mock.calls[1])).toBe('NEW');
   });
 
+  it('renews on 403 "Invalid Access Token" and sends the token header too', async () => {
+    const { gupshupApi } = await freshApi();
+    post
+      .mockResolvedValueOnce({ status: 200, data: { token: 'OLD' } })
+      .mockResolvedValueOnce({ status: 200, data: { token: 'NEW' } });
+    request
+      .mockRejectedValueOnce({ response: { status: 403, data: { status: 'error', message: 'Invalid Access Token' } } })
+      .mockResolvedValueOnce({ data: { status: 'success', token: { token: 'sk_app1', expiresOn: 0 } } })
+      .mockResolvedValueOnce({ data: { messages: [{ id: 'gs-1' }] } });
+
+    await gupshupApi.sendPassthrough('app1', { to: '91' });
+
+    const tokenCall = request.mock.calls[1][0];
+    expect(tokenCall.url).toBe('/partner/app/app1/token');
+    expect(tokenCall.headers).toMatchObject({ Authorization: 'NEW', token: 'NEW' });
+  });
+
+  it('does not retry a permissions 403', async () => {
+    const { gupshupApi } = await freshApi();
+    post.mockResolvedValue({ status: 200, data: { token: 'PT1' } });
+    request.mockRejectedValueOnce({
+      response: { status: 403, data: { status: 'error', message: 'You do not have the required permissions to access this API' } },
+    });
+
+    const err = await gupshupApi.getPipeline('app1').catch((e) => e);
+    expect(err.status).toBe(403);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it('subscribes with the app token on the partner endpoint', async () => {
     const { gupshupApi } = await freshApi();
     post.mockResolvedValue({ status: 200, data: { token: 'PT1' } });

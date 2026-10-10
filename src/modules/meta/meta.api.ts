@@ -1678,7 +1678,7 @@ class MetaApiClient {
         endTime: string;
       }>;
     } = { callingEnabled: true }
-  ): Promise<{ success: boolean; data?: any }> {
+  ): Promise<{ success: boolean; data?: any; callbackUnsupported?: boolean }> {
     try {
       console.log(`[Meta API] Enabling calling for ${phoneNumberId}...`);
 
@@ -1719,14 +1719,38 @@ class MetaApiClient {
         };
       }
 
-      const response = await this.client.post(
-        `/${phoneNumberId}/settings`,
-        { calling: callingSettings },
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
+      const post = () =>
+        this.client.post(
+          `/${phoneNumberId}/settings`,
+          { calling: callingSettings },
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
 
-      console.log('[Meta API] ✅ Calling settings updated');
-      return { success: true, data: response.data };
+      try {
+        const response = await post();
+        console.log('[Meta API] ✅ Calling settings updated');
+        return { success: true, data: response.data };
+      } catch (error: any) {
+        // Callback permission = business-initiated call (customer ke missed
+        // call par business wapas call karta hai). Kuch countries (jaise India
+        // +91) ke numbers par Meta business-initiated calls allow hi nahi
+        // karta aur poora save (#10) se reject kar deta hai - chahe user ne
+        // sirf calling ON ki ho. Aise mein callback band karke dobara bhejo,
+        // taaki user-initiated calling to chalu ho jaye.
+        const metaErr = error.response?.data?.error;
+        const callbackUnsupported =
+          metaErr?.code === 10 &&
+          /business initiated calls are not supported/i.test(metaErr?.message || '') &&
+          callingSettings.callback_permission_status === 'ENABLED';
+
+        if (!callbackUnsupported) throw error;
+
+        console.warn('[Meta API] Callback not supported for this number country - retrying with callback DISABLED');
+        callingSettings.callback_permission_status = 'DISABLED';
+        const response = await post();
+        console.log('[Meta API] ✅ Calling settings updated (callback disabled)');
+        return { success: true, data: response.data, callbackUnsupported: true };
+      }
 
     } catch (error: any) {
       console.error('[Meta API] ❌ Enable calling failed:', error.response?.data);
@@ -1766,10 +1790,11 @@ class MetaApiClient {
         // toggle hamesha ON dikhta tha chahe kuch bhi set ho.
         showCallButton: calling.call_icon_visibility !== 'DISABLE_ALL',
         restrictToCountries: calling.call_icons?.restrict_to_user_countries ?? [],
+        // Pehle yahan aakhir mein `|| true` tha - toggle hamesha ON dikhta tha,
+        // aur jin numbers par callback supported nahi, unka har save fail hota tha
         callbackEnabled:
           calling.callback_permission_status === 'ENABLED' ||
-          calling.callback_enabled === true ||
-          true,
+          calling.callback_enabled === true,
         callHoursEnabled:
           calling.call_hours?.status === 'ENABLED' ||
           calling.call_hours_enabled === true ||

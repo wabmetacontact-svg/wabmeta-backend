@@ -45,6 +45,18 @@ export interface PipelineStatus {
   whatsappVerificationStatus?: string;
 }
 
+/**
+ * Token galat / expire: 401, ya 403 "Invalid Access Token" (app token API ka
+ * documented jawab). "You do not have the required permissions" wala 403
+ * token badalne se theek nahi hota, isliye use retry nahi karte.
+ */
+function isAuthFailure(err: any): boolean {
+  const status = err?.response?.status;
+  if (status === 401) return true;
+  const msg = String(err?.response?.data?.message || '').toLowerCase();
+  return status === 403 && msg.includes('invalid access token');
+}
+
 class GupshupApi {
   private client: AxiosInstance;
   private utStyle: AuthStyle = 'bearer';
@@ -122,19 +134,24 @@ class GupshupApi {
       throw new GupshupApiError('Gupshup is not configured (set GUPSHUP_PARTNER_EMAIL + GUPSHUP_CLIENT_SECRET)');
     }
 
-    const attempt = async (style: AuthStyle, force = false) =>
-      this.client.request<T>({
+    const attempt = async (style: AuthStyle, force = false) => {
+      const value = await this.headerFor(auth, style, force);
+      // App token API ke OpenAPI me partner token "token" header me hai, jabki
+      // sample curl "Authorization" me - token mode me dono bhejte hain.
+      const tokenHeader = this.usesUniversalToken() ? {} : { token: value };
+      return this.client.request<T>({
         ...req,
-        headers: { ...(req.headers || {}), Authorization: await this.headerFor(auth, style, force) },
+        headers: { ...(req.headers || {}), Authorization: value, ...tokenHeader },
       });
+    };
 
     try {
       return (await attempt(this.utStyle)).data;
     } catch (err: any) {
       if (err instanceof GupshupApiError) throw err;
-      if (err?.response?.status !== 401) throw this.toError(err, label);
+      if (!isAuthFailure(err)) throw this.toError(err, label);
 
-      // 401: UT me doosra header format, token mode me naya token
+      // Token nahi chala: UT me doosra header format, token mode me naya token
       try {
         if (this.usesUniversalToken()) {
           const other: AuthStyle = this.utStyle === 'bearer' ? 'raw' : 'bearer';
