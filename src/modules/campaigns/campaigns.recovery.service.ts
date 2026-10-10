@@ -1,7 +1,7 @@
 // 📁 src/modules/campaigns/campaigns.recovery.service.ts
 
 import prisma from '../../config/database';
-import { withAdvisoryLock } from '../../utils/withLock';
+import { withJobLock } from '../../utils/withLock';
 import { campaignsService } from './campaigns.service';
 
 class CampaignRecoveryService {
@@ -58,7 +58,7 @@ class CampaignRecoveryService {
 
   async initialize(): Promise<void> {
     console.log('🚀 Campaign Recovery: Initializing...');
-    await withAdvisoryLock('campaign:recovery', async () => {
+    await withJobLock('campaign:recovery', async () => {
       await this.resetStuckContacts();
       await this.resumeStuckCampaigns();
     });
