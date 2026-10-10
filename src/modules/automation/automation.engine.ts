@@ -8,6 +8,7 @@ import { notificationsService } from '../notifications/notifications.service';
 import { orgCanSend } from '../admin/orgControl';
 import axios from 'axios';
 import { assertSafeWebhookUrl, buildButtonsPayload, mediaTriggerMatches } from './automation.media';
+import { keywordTriggerMatches } from './automation.keyword';
 import {
   ClaimedJob,
   cancelPendingJobs,
@@ -163,7 +164,17 @@ class AutomationEngine {
   // ✅ TRIGGER: KEYWORD (Enhanced with Groups)
   // ==========================================
   async triggerKeyword(context: TriggerContext): Promise<boolean> {
-    if (!context.message) return false;
+    const matches = await this.matchKeywordAutomations(context);
+    return this.runKeywordAutomations(matches, context);
+  }
+
+  /**
+   * Is message par kaun si KEYWORD automations lagengi - bina kuch bheje.
+   * Webhook ye chatbot se PEHLE poochta hai: keyword laga to message
+   * automation ka hai aur chatbot us message par chup rehta hai.
+   */
+  async matchKeywordAutomations(context: TriggerContext): Promise<any[]> {
+    if (!context.message?.trim()) return [];
 
     automationLog.debug('Checking KEYWORD triggers', {
       orgId: context.organizationId,
@@ -174,10 +185,11 @@ class AutomationEngine {
       const automations = await automationService.getActiveByTrigger(
         context.organizationId, 'KEYWORD'
       );
-
-      let triggered = false;
+      const matches: any[] = [];
 
       for (const automation of automations) {
+        if (!keywordTriggerMatches(automation.triggerConfig as any, context.message)) continue;
+
         if (context.contactId && automation.targetGroupIds?.length > 0) {
           const inGroup = await this.isContactInTargetGroups(
             context.contactId, automation.targetGroupIds
@@ -185,30 +197,30 @@ class AutomationEngine {
           if (!inGroup) continue;
         }
 
-        const keywords: string[] = (automation.triggerConfig as any)?.keywords || [];
-        const exactMatch = (automation.triggerConfig as any)?.exactMatch || false;
-        const messageL = context.message.toLowerCase().trim();
-
-        const matched = keywords.some((keyword) => {
-          const keywordL = keyword.toLowerCase().trim();
-          return exactMatch ? messageL === keywordL : messageL.includes(keywordL);
-        });
-
-        if (matched) {
-          automationLog.info('Keyword automation triggered', {
-            name: automation.name,
-            id: automation.id,
-          });
-          await this.executeSequence(automation.id, automation.actions as any, context);
-          triggered = true;
-        }
+        matches.push(automation);
       }
-
-      return triggered;
+      return matches;
     } catch (error: any) {
       automationLog.error('Keyword trigger error', error);
-      return false;
+      return [];
     }
+  }
+
+  async runKeywordAutomations(automations: any[], context: TriggerContext): Promise<boolean> {
+    let triggered = false;
+    for (const automation of automations) {
+      try {
+        automationLog.info('Keyword automation triggered', {
+          name: automation.name,
+          id: automation.id,
+        });
+        await this.executeSequence(automation.id, automation.actions as any, context);
+        triggered = true;
+      } catch (error: any) {
+        automationLog.error('Keyword automation failed', error, { automationId: automation.id });
+      }
+    }
+    return triggered;
   }
 
   // ==========================================
@@ -1326,12 +1338,16 @@ class AutomationEngine {
     phone?: string;
     message?: string;
     buttonId?: string;
+    /** false = ye reply chatbot ke button/list ka hai: follow-ups ruko, wait_for_response nahi. */
+    resume?: boolean;
   }): Promise<boolean> {
     try {
       await this.stopFollowUpsOnReply(context.contactId);
     } catch (error: any) {
       console.error('❌ stopOnReply error:', error.message);
     }
+
+    if (context.resume === false) return false;
 
     // true = kisi wait_for_response wale run ne is reply par aage chalna shuru kiya
     const response = context.buttonId || context.message || '';

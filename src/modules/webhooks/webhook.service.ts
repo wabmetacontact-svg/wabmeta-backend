@@ -1264,11 +1264,15 @@ export class WebhookService {
   }
 
   /**
-   * Inbound WhatsApp message kaun sambhale: automations aur chatbot saath
-   * chalte hain; dono me se kisi ne nahi pakda to AI agent (agar org ne on
-   * kiya ho). Inbox me agent ne chat le li ho (automationPaused) to chatbot
-   * aur AI chup - Instagram/Telegram pehle se ye maante the, WhatsApp chatbot
-   * nahi maanta tha.
+   * Inbound WhatsApp message kaun sambhale. Pehle faisla, phir kaam:
+   *  1. Chatbot ke button/list ka tap -> sirf chatbot (keyword automation nahi).
+   *  2. Kisi automation ka wait_for_response is reply se aage badha, ya kisi
+   *     KEYWORD automation ka keyword laga -> message automation ka, chatbot
+   *     chup. Pehle dono saath chalte the aur customer ko do jawab jaate the.
+   *  3. Baaki par chatbot.
+   * Unknown-message / new-contact / media triggers pehle jaise chalte hain.
+   * Kisi ne nahi pakda to AI agent (agar org ne on kiya ho). Inbox me agent ne
+   * chat le li ho (automationPaused) to chatbot aur AI chup.
    */
   private async routeInbound(p: {
     wasNewlyCreated: boolean;
@@ -1290,14 +1294,51 @@ export class WebhookService {
     if (!(await orgCanSend(organizationId))) return;
 
     const paused = !!conversation.automationPaused;
+    const replyId: string | undefined = msgType === 'INTERACTIVE'
+      ? message?.interactive?.button_reply?.id || message?.interactive?.list_reply?.id
+      : undefined;
+
+    const chatbotOwnsTap = !paused && !!replyId
+      && await chatbotEngine.ownsReply(organizationId, conversation.id, replyId)
+        .catch((): boolean => false);
+
+    const context = {
+      organizationId,
+      contactId: p.contact.id,
+      phone: p.waFrom,
+      message: content,
+      conversationId: conversation.id,
+    };
+
+    // ✅ 0. Pehle is reply ka asar: scheduled follow-ups rokna aur
+    // wait_for_response wale runs aage badhana. Naye triggers iske BAAD -
+    // warna isi message se shuru hua naya run turant "reply aa gaya" samajh
+    // kar ruk jata.
+    const resumed = await automationEngine.onInboundMessage({
+      ...context,
+      buttonId: replyId,
+      resume: !chatbotOwnsTap,
+    }).catch((err): boolean => {
+      console.error('❌ Inbound automation handling:', err.message);
+      return false;
+    });
+
+    const keywordAutomations = content && !chatbotOwnsTap
+      ? await automationEngine.matchKeywordAutomations(context)
+      : [];
+
+    const automationClaimed = resumed || keywordAutomations.length > 0;
 
     const automationPromise = this.runAutomations(
-      p.wasNewlyCreated, organizationId, p.contact,
-      content, p.waFrom, conversation, message, msgType
-    );
+      p.wasNewlyCreated, context, message, msgType, keywordAutomations
+    ).then((ran) => ran || resumed);
 
     let chatbotPromise: Promise<boolean> = Promise.resolve(false);
-    if (!paused && (msgType === 'TEXT' || msgType === 'INTERACTIVE')) {
+    if (
+      !paused &&
+      (msgType === 'TEXT' || msgType === 'INTERACTIVE') &&
+      (chatbotOwnsTap || !automationClaimed)
+    ) {
       let chatbotContent = content;
       if (msgType === 'INTERACTIVE') {
         const iType = message?.interactive?.type;
@@ -1308,7 +1349,9 @@ export class WebhookService {
             : content;
       }
 
-      const isNewConversation = p.wasNewlyCreated || conversation.unreadCount <= 1;
+      const isNewConversation = await this.isFreshChat(
+        conversation.id, p.savedMessageId, p.wasNewlyCreated
+      );
       chatbotPromise = chatbotEngine.processMessage(
         conversation.id,
         organizationId,
@@ -1341,42 +1384,51 @@ export class WebhookService {
     });
   }
 
+  /**
+   * "Nayi chat" = default chatbot shuru ho sakta hai: contact abhi bana, ya
+   * customer ka pichla message 24 ghante se purana / hai hi nahi.
+   * Pehle `unreadCount <= 1` dekhte the - par har outbound (bot ka apna
+   * jawab bhi) unreadCount 0 kar deta hai, to lagbhag har message "nayi chat"
+   * tha aur flow khatam hote hi agla message default bot ko shuru se chala
+   * deta tha: wahi welcome/menu baar-baar.
+   */
+  private async isFreshChat(
+    conversationId: string,
+    currentMessageId: string,
+    wasNewlyCreated: boolean
+  ): Promise<boolean> {
+    if (wasNewlyCreated) return true;
+    try {
+      const previous = await prisma.message.findFirst({
+        where: { conversationId, direction: 'INBOUND', id: { not: currentMessageId } },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      return !previous || Date.now() - previous.createdAt.getTime() > 24 * 60 * 60 * 1000;
+    } catch (e: any) {
+      console.error('isFreshChat error:', e?.message);
+      return false;
+    }
+  }
+
   /** true = kisi automation ne is message par kuch chalaya */
   private async runAutomations(
     wasNewlyCreated: boolean,
-    organizationId: string,
-    contact: any,
-    content: string,
-    waFrom: string,
-    conversation: any,
+    context: {
+      organizationId: string;
+      contactId: string;
+      phone: string;
+      message: string;
+      conversationId: string;
+    },
     message: any,
-    msgType: string
+    msgType: string,
+    keywordAutomations: any[]
   ): Promise<boolean> {
+    const { organizationId, contactId, phone } = context;
     try {
-      const context = {
-        organizationId,
-        contactId: contact.id,
-        phone: waFrom,
-        message: content,
-        conversationId: conversation.id,
-      };
-
-      // ✅ 0. Pehle is reply ka asar: scheduled follow-ups rokna aur
-      // wait_for_response wale runs aage badhana. Naye triggers iske BAAD -
-      // warna isi message se shuru hua naya run turant "reply aa gaya" samajh
-      // kar ruk jata.
-      const resumed = await automationEngine.onInboundMessage({
-        ...context,
-        buttonId: msgType === 'INTERACTIVE'
-          ? message?.interactive?.button_reply?.id || message?.interactive?.list_reply?.id
-          : undefined,
-      }).catch((err): boolean => {
-        console.error('❌ Inbound automation handling:', err.message);
-        return false;
-      });
-
-      // Teeno triggers saath (pehle bhi saath chalte the); ab result ka intezar
-      // taaki pata chale kisi ne message pakda ya nahi.
+      // Triggers saath (pehle bhi saath chalte the); result ka intezar taaki
+      // pata chale kisi ne message pakda ya nahi.
       const results = await Promise.all([
         // ✅ 1. Unknown message trigger (for new/unknown senders)
         // Fire regardless of contact existence - the trigger itself checks
@@ -1385,9 +1437,9 @@ export class WebhookService {
           return false;
         }),
 
-        // ✅ 2. Keyword trigger (for all messages)
-        content
-          ? automationEngine.triggerKeyword(context).catch((err): boolean => {
+        // ✅ 2. Keyword trigger - kaun si lagi, wo routeInbound pehle tay kar chuka
+        keywordAutomations.length
+          ? automationEngine.runKeywordAutomations(keywordAutomations, context).catch((err): boolean => {
               console.error('❌ Keyword trigger:', err.message);
               return false;
             })
@@ -1414,8 +1466,8 @@ export class WebhookService {
         wasNewlyCreated
           ? automationEngine.triggerNewContact({
               organizationId,
-              contactId: contact.id,
-              phone: waFrom,
+              contactId,
+              phone,
             }).catch((err): boolean => {
               console.error('❌ New contact trigger:', err.message);
               return false;
@@ -1423,7 +1475,7 @@ export class WebhookService {
           : Promise.resolve(false),
       ]);
 
-      return resumed || results.some(Boolean);
+      return results.some(Boolean);
     } catch (e) {
       console.error('runAutomations error:', e);
       return false;
